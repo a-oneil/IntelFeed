@@ -1877,6 +1877,7 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 - `timeline` dates as YYYY-MM-DD when stated; patch.status is available, workaround, none, or unknown.
 
 **Observables (the "iocs" list) — exact-match atoms a defender can search telemetry for:**
+- Every value must appear in the article text (defanged or not). Never build one: an organisation's name is not its domain ("Aave" is not aave.com), and a victim's or exchange's site is not attacker infrastructure.
 - NETWORK kinds (ipv4, ipv6, domain, url, uri_path, email, ja3, ja4, cert_fingerprint) and HASH kinds (md5, sha1, sha256): report a value ONLY when the article presents it as attacker infrastructure or attack material — C2 addresses, malicious domains/URLs, implant check-in or exploit URI paths, malware file hashes, phishing sender addresses, TLS client or certificate fingerprints. `uri_path` is the path (+ query template) without the host, when the author presents it as the implant's endpoint.
 - HOST kinds — the behavioral observables a write-up quotes from the intrusion:
 	- `cmdline`: the full command as executed, VERBATIM, only when it carries something the attacker chose (a path, host, filename, account, key, encoded blob, or a state-changing flag like /add, /create, -enc). Generic discovery/admin commands (whoami, systeminfo, ipconfig, nltest, net group ... /domain, tasklist, quser) are NOT observables — leave them to the technique's `observable_value`.
@@ -1898,6 +1899,8 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 
 **Relationships (the "relationships" list):**
 - Report a relationship ONLY when a sentence in the article explicitly asserts it — attribution, usage, targeting, exploitation, variant/succession, subgroup/overlap. Never infer one from co-mention: newsletters, roundups, lists, and link dumps name many entities without relating them — extract NO relationships from such listings.
+- Detection-rule metadata is a listing too: a rule's "analytic story", references, data sources and supported-platform lists relate nothing to each other.
+- `targets` a country means attacks on that country. An actor's home country or nationality is attributed_to, and where someone was arrested, extradited, sanctioned, charged or interviewed, or where a reporter is based, is no relationship at all.
 - `evidence` is the exact sentence making the assertion and must name both entities. Both endpoints must also appear in your extracted entity lists.
 - `source_type`/`target_type`: threat_actor, malware, tool, country, or observable. relationship_type: uses, targets, exploits, attributed_to, variant_of, successor_of, subgroup_of, overlaps_with, communicates_with, controls, or related_to.
 - observable endpoints are target-only and allowed ONLY for values you also reported in the iocs list, with `target_name` the value EXACTLY as the article prints it (keep defanging) and `target_kind` the same `kind` you gave it there. communicates_with for C2 traffic ("X beacons to Y"), uses for delivery/payload material and for host artifacts (the family's mutex, scheduled task, dropped path, command line), controls when the article attributes the infrastructure to an actor.
@@ -2224,17 +2227,34 @@ RETURN ONLY THE ITEMS YOU WOULD CHANGE. Every item_id you leave out of the verdi
 
 ONE EXCEPTION: every `edge:` item needs a verdict, keep or demote. A keep on an edge is a positive claim that this article asserts the relationship, and it is counted as corroboration — three of them promote the relationship to confirmed. So answer on every edge, and never keep one you have not checked against its evidence sentence; if you are unsure the article asserts it, demote it. There are at most ten edges in a list.
 
+WHAT A LINK MEANS
+  A link says only that this article is about, or meaningfully involves, the entity. It is NOT a claim that the entity is an adversary. The catalogue deliberately holds defenders and bystanders too:
+  - vendor / product: the company or software the article is about, patches, or reports as affected. A vendor is a company that makes products — never a catch-all for "not an adversary": a government body, alliance, person, criminal group or command-line tool is not a vendor.
+  - tool: software someone in the article operates, attacker or defender (Cobalt Strike, PowerShell abused by malware, Sysmon, VirusTotal, Microsoft Defender). Being legitimate or defensive is never a reason to remove a tool link. Commercial platforms and services (SharePoint, Slack, Microsoft Graph) are products; reclassify them to product.
+  - sector: the industry of the victims or targets. Sector links come from the analysis's judgment, so the article often never uses the word: a dental practice on a leak site is Healthcare, a rail operator is Transportation.
+  - country: a place the article's events involve (victim location, attribution, target).
+  - ttp: a technique the article describes or maps. A detection rule's ATT&CK tags are the rule's own mapping, not "metadata": keep them.
+  "Legitimate", "defensive", "a victim", "the publisher" and "just a sector" are never reasons to remove. Nor is the entity's type: when the article involves the entity but it is filed under the wrong type ("X is hardware, not a tool"), that is reclassify, never remove.
+  Researcher credits ("discovered by Claude Opus", "reported by OpenAI Codex Security") name a tool or vendor, never a threat actor.
+  A file name is a mention of its tool (certutil.exe is certutil, a LOLBin listed in a detection rule is that tool). A vendor's own breach or incident is about that vendor. A group's own leak-site post is about that group, not its victim.
+
 VERDICTS (keep is the default for anything you omit; state it explicitly only to overrule something the item line flags)
   keep        — the record is correct for this article.
-  remove      — (links only) the surrounding words use the name in an unrelated sense: a common English word, a different organisation or product sharing the name, a substring of an unrelated term, an acronym in a non-security sense, a victim or vendor filed as an adversary.
-  reclassify  — (links only) a real reference, but the entity sits under the wrong catalogue type; set suggested_type to one of threat_actor, malware, tool, vendor, product, country. Never use remove for type confusion.
+  remove      — (links only) the article does not actually involve the entity:
+                · the only mention is boilerplate: a "Related:" / "Read more" headline, an advert or webinar promo, an author bio or site footer, a CVSS-source or vendor list, a user-agent string, a sector or industry dropdown that lists every option;
+                · the name is used in an unrelated sense: a common English word, a different organisation or product sharing the name, a substring of an unrelated term (cmd in TX_CMD), an acronym in a non-security sense;
+                · a sector that fits neither the victims nor the targets (a construction firm filed under Healthcare).
+                When the link came through an alias (the item's "matched as:" line) and that alias is not a name for this entity anywhere — a common word, a label, another product's name ("crypto" on crypto24, "New Group", "EOS" meaning end of support, "ClickFix" on a different lure) — also set bad_alias to that alias exactly as printed. Leave bad_alias empty when the alias is fine and only this article's use of it is wrong.
+  reclassify  — (links only) a real reference, but the entity sits under the wrong catalogue type; set suggested_type to one of threat_actor, malware, tool, vendor, product, country. Never use remove for type confusion. A type change applies to the entity everywhere, so judge what the entity IS, not how this one article uses the name: a person nicknamed "Prometheus" does not make the Prometheus monitoring product a threat actor — that article's link is a remove.
   veto        — (links marked "NEW, created by this article" only) the entity should not exist at all: a description instead of a name ("Chinese espionage group"), a victim organisation, a vendor or researcher, a product that is not malware or a tool, a generic term.
   merge       — (links marked "NEW, created by this article" only) the entity duplicates one of the names printed after "nearest existing names:"; set merge_into to that name EXACTLY as printed. If the right match is not among those names you cannot merge; use keep or veto.
   demote      — (edges only) the entities co-occur but the article never asserts the claimed relationship: roundups, lists, generic defensive advice ("watch for Cobalt Strike beacons"), the wrong verb, or the wrong direction (an actor's origin country is attribution, not a target).
-  drop        — (ioc items only) the value is not an attacker indicator: the publisher's own site or links, researcher and sandbox hosts, documentation URLs, sample-page or tracking URLs, private or reserved addresses, defanged benign domains, analyst tooling.
+  drop        — (ioc items only) the value is not an attacker indicator: the publisher's own site or links, researcher and sandbox hosts, documentation URLs, sample-page or tracking URLs, private or reserved addresses, a benign domain the article happens to defang (google[.]com in an example), analyst tooling. Defanging by itself marks a value as malicious, never as benign: a defanged value in an indicator list stays. The article prints it defanged (example[.]com, hxxp://) — look for it in that form before calling it absent. A hash the article lists as an indicator stays, even when its file path is a system path: attackers replace and modify system files, and a vendor's IoC table says so.
 
 RULES
-  - Judge each record against the sentence where it appears, not the article's overall topic. Use the context line printed with the item.
+  - Judge each record against the sentence where it appears, not the article's overall topic. Use the context line printed with the item. The context line is the FIRST place the name occurs, which can be a boilerplate line even when the entity is the article's subject: before removing, check the title and body for the entity too.
+  - An item marked "inferred by the analysis" was linked on meaning, not on a name match; judge it against the article as a whole (who the victims are, who is targeted), not against the context line.
+  - Each reason must be about its own item and name that item's entity. Never copy one reason onto several items; if you cannot say what is wrong with a specific item, leave it out.
   - Leave the item out whenever you are uncertain. A wrong removal destroys real intelligence signal; a wrong keep is cheap to fix later.
   - "promoted from the pending tier" means the name is also an ordinary word and was linked only because the extraction named it; look hard at the context line for these.
   - A link marked "an analyst restored this link recently" is a strong keep; remove only on an unambiguous name collision.
@@ -2274,6 +2294,7 @@ Return strict JSON matching the provided schema: the verdicts list first, one ob
                             "reason": {"type": "string"},
                             "suggested_type": {"type": "string"},
                             "merge_into": {"type": "string"},
+                            "bad_alias": {"type": "string"},
                         },
                     },
                 },

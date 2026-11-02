@@ -69,12 +69,16 @@ async def _unlink_entries_for_removed_aliases(
     junction_table,
     entity_id_col,
     entity_id: uuid.UUID,
+    entity=None,
 ) -> int:
     """When aliases are removed from an entity, unlink entries that were linked only via those aliases.
 
     Compares old and new alias lists (case-insensitive). A junction row is deleted
     iff every value in its matched_names array is a removed alias — i.e. no remaining
-    matched form would still trigger the link.
+    matched form would still trigger the link. When anything was unlinked, the
+    entity's stored article_count is recounted from the junction (a junk alias can
+    be most of an entity's links; leaving the old count shows thousands of
+    articles that are no longer linked).
     """
     old_set = {a.lower() for a in (old_aliases or [])}
     new_set = {a.lower() for a in (new_aliases or [])}
@@ -99,6 +103,11 @@ async def _unlink_entries_for_removed_aliases(
             entity_id,
             removed,
         )
+        if entity is not None and hasattr(entity, "article_count"):
+            await db.flush()
+            entity.article_count = (
+                await db.scalar(select(func.count()).select_from(junction_table).where(entity_id_col == entity_id))
+            ) or 0
     return len(deleted_ids)
 
 
@@ -941,6 +950,7 @@ async def update_threat_actor(
             EntryThreatActor,
             EntryThreatActor.threat_actor_id,
             actor_id,
+            entity=actor,
         )
 
     await _apply_fields(
@@ -998,6 +1008,7 @@ async def update_malware_family(
             EntryMalware,
             EntryMalware.malware_family_id,
             malware_id,
+            entity=malware,
         )
 
     await _apply_fields(
@@ -1125,6 +1136,7 @@ async def update_country(
             EntryCountry,
             EntryCountry.country_id,
             country_id,
+            entity=country,
         )
 
     await _apply_fields(
@@ -1538,6 +1550,7 @@ async def update_tool(
             EntryTool,
             EntryTool.tool_id,
             tool_id,
+            entity=tool,
         )
 
     await _apply_fields(
@@ -1727,6 +1740,7 @@ async def update_vendor(
             EntryVendor,
             EntryVendor.vendor_id,
             vendor_id,
+            entity=vendor,
         )
 
     await _apply_fields(
@@ -1777,6 +1791,7 @@ async def update_product(
             EntryProduct,
             EntryProduct.product_id,
             product_id,
+            entity=product,
         )
 
     await _apply_fields(

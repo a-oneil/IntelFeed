@@ -118,6 +118,20 @@ async def log_shadow_removal(
     reason: str,
     ai_result_id: uuid.UUID | None,
 ) -> None:
+    # One pending proposal per link: a re-review of the same entry (a resweep,
+    # a re-analysis) must not file the same removal again.
+    pending = await db.scalar(
+        select(EntityLinkValidationLog.id)
+        .where(
+            EntityLinkValidationLog.entry_id == entry_id,
+            EntityLinkValidationLog.entity_type == link.entity_type,
+            EntityLinkValidationLog.entity_id == link.entity_id,
+            EntityLinkValidationLog.action == "shadow_remove",
+        )
+        .limit(1)
+    )
+    if pending is not None:
+        return
     db.add(
         EntityLinkValidationLog(
             entry_id=entry_id,

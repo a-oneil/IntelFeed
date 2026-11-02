@@ -13,9 +13,11 @@ from app.models.entity_link_validation_log import EntityLinkValidationLog
 from app.models.entity_maintenance import EntityMaintenanceLog
 from app.models.entity_relationship import EntityRelationship
 from app.models.entry import Entry
+from app.models.entry_sector import EntrySector
 from app.models.feed import Feed
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.pending_autolink import PendingAutolinkMatch
+from app.models.sector import Sector
 from app.models.system_setting import SystemSettings
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.models.tool import EntryTool, Tool
@@ -340,6 +342,24 @@ async def test_manifest_lists_links_with_provenance_and_candidates(db_session: A
 
 
 @pytest.mark.asyncio
+async def test_manifest_marks_inferred_sector_without_a_context_line(db_session: AsyncSession, feed):
+    # The analysis links sectors on meaning. The word's first literal
+    # occurrence (here, the title) says nothing about why it was linked.
+    entry = await _make_entry(db_session, feed)
+    energy = Sector(slug="energy-test", name="Energy Test", aliases=["energy"], article_count=40)
+    db_session.add(energy)
+    await db_session.flush()
+    db_session.add(
+        EntrySector(entry_id=entry.id, sector="energy-test", sector_id=energy.id, confidence="high", source="ai")
+    )
+    await db_session.flush()
+    items, _ = await build_manifest(db_session, entry, _payload())
+    s = next(it for it in items if it.entity_type == "sector")
+    assert "inferred by the analysis" in s.line
+    assert "context:" not in s.line
+
+
+@pytest.mark.asyncio
 async def test_manifest_edges_and_ai_iocs(db_session: AsyncSession, feed):
     entry = await _make_entry(db_session, feed)
     warlock = await _link_actor(db_session, entry, "Warlock", source="ai")
@@ -484,10 +504,173 @@ def test_validate_merge_to_unlisted_name_is_keep_and_duplicates_void_all():
     assert stats["duplicate"] and verdicts[0].verdict == "keep"
 
 
+def test_validate_voids_one_reason_copied_onto_several_links():
+    items = [_item(f"link:sector:{n}", entity_type="sector") for n in "abc"] + [
+        _item("link:vendor:d", entity_type="vendor")
+    ]
+    pasted = "The context line is a 'Related' link to an article about Tailscale patching."
+    verdicts, stats = _validate_verdicts(
+        {
+            "verdicts": [
+                *(
+                    {"item_id": f"link:sector:{n}", "verdict": "remove", "confidence": "high", "reason": pasted}
+                    for n in "abc"
+                ),
+                {"item_id": "link:vendor:d", "verdict": "remove", "confidence": "high", "reason": "Ad banner only."},
+            ]
+        },
+        items,
+    )
+    by = {v.item.item_id: v.verdict for v in verdicts}
+    assert [by[f"link:sector:{n}"] for n in "abc"] == ["keep"] * 3
+    assert by["link:vendor:d"] == "remove"  # its own reason stands
+    assert stats["copied_reason"] == 3
+
+
+def test_validate_bad_alias_only_for_a_matched_alias():
+    item = ReviewItem(
+        item_id="link:threat_actor:c24",
+        kind="link",
+        line="",
+        entity_type="threat_actor",
+        entity_id=uuid.uuid4(),
+        name="crypto24",
+        matched_names=["crypto"],
+    )
+
+    def bad_alias_for(value):
+        verdicts, _ = _validate_verdicts(
+            {
+                "verdicts": [
+                    {
+                        "item_id": item.item_id,
+                        "verdict": "remove",
+                        "confidence": "high",
+                        "reason": "'crypto' is the donation footer, not crypto24.",
+                        "bad_alias": value,
+                    }
+                ]
+            },
+            [item],
+        )
+        return verdicts[0].bad_alias
+
+    assert bad_alias_for("Crypto") == "crypto"  # the form as matched
+    assert bad_alias_for("crypto24") is None  # never the name itself
+    assert bad_alias_for("bitcoin") is None  # not a form this link matched on
+    assert bad_alias_for("") is None
+
+
+@pytest.mark.asyncio
+async def test_remove_with_bad_alias_files_an_alias_proposal_once(db_session: AsyncSession):
+    actor = ThreatActor(name="crypto24", aliases=["crypto"], article_count=50)
+    db_session.add(actor)
+    await db_session.flush()
+    item = ReviewItem(
+        item_id=f"link:threat_actor:{actor.id}",
+        kind="link",
+        line="",
+        entity_type="threat_actor",
+        entity_id=actor.id,
+        name="crypto24",
+        matched_names=["crypto"],
+    )
+    proposal = await adj._bad_alias_proposal(db_session, item, "crypto", "donation footer")
+    assert proposal is not None
+    before, after = proposal
+    assert after == {"kind": "adjudicator", "bad_alias": "crypto", "reason": "donation footer"}
+    db_session.add(
+        EntityMaintenanceLog(
+            entity_type="threat_actor",
+            entity_id=actor.id,
+            action=adj.ACTION_ALIAS,
+            mode="shadow",
+            before=before,
+            after=after,
+            applied=False,
+        )
+    )
+    await db_session.flush()
+    # A second article blaming the same alias adds nothing; an alias the
+    # entity does not carry is never proposed.
+    assert await adj._bad_alias_proposal(db_session, item, "crypto", "again") is None
+    assert await adj._bad_alias_proposal(db_session, item, "bitcoin", "r") is None
+
+
+def test_validate_voids_one_reason_copied_onto_several_ioc_drops_and_edges():
+    iocs = [_item(f"ioc:domain:{n}", kind="ioc") for n in "abc"]
+    edges = [_item(f"edge:{n}", kind="edge") for n in "abc"]
+    pasted = "This is an indicator of compromise printed defanged; use drop."
+    verdicts, _ = _validate_verdicts(
+        {
+            "verdicts": [
+                *({"item_id": i.item_id, "verdict": "drop", "confidence": "high", "reason": pasted} for i in iocs),
+                *({"item_id": e.item_id, "verdict": "demote", "confidence": "high", "reason": pasted} for e in edges),
+            ]
+        },
+        iocs + edges,
+    )
+    assert {v.verdict for v in verdicts} == {"keep"}
+    assert not any(v.explicit for v in verdicts)  # a voided demote is no corroborating keep
+
+
+def test_validate_reclassify_reason_must_name_the_item():
+    # The model paired a verdict about 'SHA-256' with the RHEL item; converting
+    # RHEL to a tool on that would be wrong everywhere it is linked.
+    rhel = ReviewItem(
+        item_id="link:product:rhel",
+        kind="link",
+        line="",
+        entity_type="product",
+        entity_id=uuid.uuid4(),
+        name="Red Hat Enterprise Linux",
+        matched_names=["RHEL"],
+    )
+    verdicts, _ = _validate_verdicts(
+        {
+            "verdicts": [
+                {
+                    "item_id": rhel.item_id,
+                    "verdict": "reclassify",
+                    "suggested_type": "tool",
+                    "confidence": "high",
+                    "reason": "The term 'SHA-256' refers to the cryptographic algorithm (tool), not a product.",
+                }
+            ]
+        },
+        [rhel],
+    )
+    assert verdicts[0].verdict == "keep"
+    verdicts, _ = _validate_verdicts(
+        {
+            "verdicts": [
+                {
+                    "item_id": rhel.item_id,
+                    "verdict": "reclassify",
+                    "suggested_type": "vendor",
+                    "reason": "RHEL is named here as the company.",
+                }
+            ]
+        },
+        [rhel],
+    )
+    assert verdicts[0].verdict == "reclassify"  # a matched form counts
+
+
 def test_validate_reclassify_needs_valid_type():
     item = _item("link:threat_actor:a")
     ok, _ = _validate_verdicts(
-        {"verdicts": [{"item_id": item.item_id, "verdict": "reclassify", "suggested_type": "malware"}]}, [item]
+        {
+            "verdicts": [
+                {
+                    "item_id": item.item_id,
+                    "verdict": "reclassify",
+                    "suggested_type": "malware",
+                    "reason": f"{item.name} is malware",
+                }
+            ]
+        },
+        [item],
     )
     bad, _ = _validate_verdicts(
         {"verdicts": [{"item_id": item.item_id, "verdict": "reclassify", "suggested_type": "planet"}]}, [item]
@@ -1671,7 +1854,7 @@ async def test_reclassify_waits_for_consensus_then_converts_in_apply_mode(
             "verdict": "reclassify",
             "suggested_type": "malware",
             "confidence": "high",
-            "reason": "it is a ransomware family",
+            "reason": "Warlock is a ransomware family",
         }
     ]
     _items, verdicts = await _verdicts_for(db_session, entry, raw)
@@ -1738,7 +1921,7 @@ async def test_reclassify_consensus_of_one_converts_on_the_first_verdict(db_sess
                 "verdict": "reclassify",
                 "suggested_type": "malware",
                 "confidence": "high",
-                "reason": "r",
+                "reason": "Warlock is a ransomware family",
             }
         ],
     )
@@ -1768,7 +1951,7 @@ async def test_reclassify_below_confidence_floor_is_only_a_vote(db_session: Asyn
                 "verdict": "reclassify",
                 "suggested_type": "malware",
                 "confidence": "medium",
-                "reason": "r",
+                "reason": "Warlock is a ransomware family",
             }
         ],
     )
@@ -1808,7 +1991,7 @@ async def test_reclassify_back_into_a_folded_type_is_dropped_unfiled(db_session:
                 "verdict": "reclassify",
                 "suggested_type": "malware",
                 "confidence": "high",
-                "reason": "r",
+                "reason": "Warlock is a ransomware family",
             }
         ],
     )
@@ -2539,7 +2722,7 @@ def test_a_title_cased_suggested_type_still_reclassifies():
                     "verdict": "reclassify",
                     "confidence": "high",
                     "suggested_type": "Malware",
-                    "reason": "it is a family",
+                    "reason": "Scattered Spider is a family",
                 }
             ]
         },
@@ -2758,3 +2941,26 @@ async def test_review_domain_facet_spans_both_logs(client, admin_headers, db_ses
     assert resp.json()["dismissed"] == 1
     assert await feed("relationships") == []
     assert len(await feed(None)) == 4
+
+
+@pytest.mark.asyncio
+async def test_a_second_review_does_not_file_the_same_edge_demote_again(db_session: AsyncSession, feed):
+    entry = await _make_entry(db_session, feed)
+    edge_id = uuid.uuid4()
+    assert not await adj._proposal_pending(db_session, ACTION_EDGE_DEMOTE, "relationship", edge_id, entry.id)
+    db_session.add(
+        EntityMaintenanceLog(
+            entity_type="relationship",
+            entity_id=edge_id,
+            action=ACTION_EDGE_DEMOTE,
+            mode="shadow",
+            before={"entry_id": str(entry.id), "claim": "ShinyHunters targets Jordan (country)"},
+            after={"reason": "arrest location", "confidence": "high"},
+            applied=False,
+        )
+    )
+    await db_session.flush()
+    assert await adj._proposal_pending(db_session, ACTION_EDGE_DEMOTE, "relationship", edge_id, entry.id)
+    # Another article's review of the same edge is its own proposal.
+    other = await _make_entry(db_session, feed)
+    assert not await adj._proposal_pending(db_session, ACTION_EDGE_DEMOTE, "relationship", edge_id, other.id)

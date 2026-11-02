@@ -472,12 +472,39 @@ _vocab_version: str = ""
 
 
 def _is_word_boundary(text: str, start: int, end: int) -> bool:
-    """Check that match has word boundaries on both sides."""
-    if start > 0 and text[start - 1].isalnum():
+    """Check that match has word boundaries on both sides. An underscore is part
+    of the word: "RTM" in RTM_NEWLINK is a code identifier, not a mention."""
+    if start > 0 and (text[start - 1].isalnum() or text[start - 1] == "_"):
         return False
-    if end < len(text) and text[end].isalnum():
+    if end < len(text) and (text[end].isalnum() or text[end] == "_"):
         return False
     return True
+
+
+def _case_fits(form: str, seen: str) -> bool:
+    """Case test for a short one-word form (see _is_ambiguous_surface_form).
+    An acronym must appear in capitals ("TRAP", not a kernel "trap"; "MMC",
+    not "mmc:"), a mixed-case brand exactly as written ("iOS", not Cisco
+    "IOS"). Other forms need a capital first letter, as a proper noun does."""
+    if form.isupper():
+        return seen.isupper()
+    if any(c.isupper() for c in form[1:]):
+        return seen == form
+    return seen[:1].isupper()
+
+
+def _starts_dotted_identifier(text: str, start: int, end: int) -> bool:
+    """True for an all-lowercase match that opens a dotted package or bundle id:
+    "the com" in "the com.apple.screensharing", "com" in "com.ahsay.c". A name
+    written as a name has capitals; a lowercase run followed by two more dotted
+    segments is code. One segment ("google.com", "certutil.exe") still matches."""
+    if text[start:end] != text[start:end].lower():
+        return False
+    rest = text[end:]
+    return rest.startswith(".") and _DOTTED_TAIL_RE.match(rest) is not None
+
+
+_DOTTED_TAIL_RE = re.compile(r"\.[a-z0-9_]+\.[a-z0-9_]")
 
 
 def scan_text(text_or_paragraphs: str | list[tuple[int, str]]) -> list[dict]:
@@ -520,19 +547,22 @@ def scan_text(text_or_paragraphs: str | list[tuple[int, str]]) -> list[dict]:
             continue
         para_lower = para_text.lower()
 
-        # Phase 1: Aho-Corasick scan for threat actors, malware, countries
+        # Phase 1: Aho-Corasick scan for threat actors, malware, countries.
+        # Collect the paragraph's accepted matches first, then drop any that
+        # sit inside a longer one ("Korea" in "North Korea").
+        candidates: list[tuple[int, int, VocabEntry]] = []
         for end_idx, entries in _vocabulary.automaton.iter(para_lower) if _vocabulary.entry_count > 0 else []:
             for vocab_entry in entries:
-                key = (vocab_entry.entity_type, str(vocab_entry.entity_id))
-
                 match_len = len(vocab_entry.surface_form)
                 start_idx = end_idx - match_len + 1
 
                 if not _is_word_boundary(para_lower, start_idx, end_idx + 1):
                     continue
+                if _starts_dotted_identifier(para_text, start_idx, end_idx + 1):
+                    continue
 
                 if vocab_entry.is_ambiguous:
-                    if not para_text[start_idx].isupper():
+                    if not _case_fits(vocab_entry.surface_form, para_text[start_idx : end_idx + 1]):
                         continue
                     # Frequency gate only applies to actor/malware-style codenames
                     # (e.g. "Storm", "Agent") — for vendor/product/tool proper
@@ -543,30 +573,35 @@ def scan_text(text_or_paragraphs: str | list[tuple[int, str]]) -> list[dict]:
                         term_lower = vocab_entry.surface_form.lower()
                         if combined_lower.count(term_lower) > max_occurrences:
                             continue
+                candidates.append((start_idx, end_idx + 1, vocab_entry))
 
-                if key in seen:
-                    # Entity already matched — record this paragraph + surface form
-                    if para_idx not in seen[key]["paragraph_indices"]:
-                        seen[key]["paragraph_indices"].append(para_idx)
-                    if vocab_entry.surface_form not in seen[key]["surface_forms"]:
-                        seen[key]["surface_forms"].append(vocab_entry.surface_form)
-                    # A single non-provisional form (multi-word, coined name)
-                    # rescues the whole match from the pending tier.
-                    if not vocab_entry.is_provisional:
-                        seen[key]["provisional"] = False
-                    continue
+        for start_idx, end, vocab_entry in candidates:
+            if any(s <= start_idx and end <= e and (e - s) > (end - start_idx) for s, e, _ in candidates):
+                continue
+            key = (vocab_entry.entity_type, str(vocab_entry.entity_id))
+            if key in seen:
+                # Entity already matched — record this paragraph + surface form
+                if para_idx not in seen[key]["paragraph_indices"]:
+                    seen[key]["paragraph_indices"].append(para_idx)
+                if vocab_entry.surface_form not in seen[key]["surface_forms"]:
+                    seen[key]["surface_forms"].append(vocab_entry.surface_form)
+                # A single non-provisional form (multi-word, coined name)
+                # rescues the whole match from the pending tier.
+                if not vocab_entry.is_provisional:
+                    seen[key]["provisional"] = False
+                continue
 
-                seen[key] = {
-                    "entity_type": vocab_entry.entity_type,
-                    "entity_id": str(vocab_entry.entity_id),
-                    "canonical_name": vocab_entry.canonical_name,
-                    "surface_form": vocab_entry.surface_form,
-                    "surface_forms": [vocab_entry.surface_form],
-                    "confidence": "medium" if vocab_entry.is_alias else "high",
-                    "source": "auto_link",
-                    "paragraph_indices": [para_idx],
-                    "provisional": pending_tier and vocab_entry.is_provisional,
-                }
+            seen[key] = {
+                "entity_type": vocab_entry.entity_type,
+                "entity_id": str(vocab_entry.entity_id),
+                "canonical_name": vocab_entry.canonical_name,
+                "surface_form": vocab_entry.surface_form,
+                "surface_forms": [vocab_entry.surface_form],
+                "confidence": "medium" if vocab_entry.is_alias else "high",
+                "source": "auto_link",
+                "paragraph_indices": [para_idx],
+                "provisional": pending_tier and vocab_entry.is_provisional,
+            }
 
         # Phase 2: Regex scan for structured identifiers
         for m in CVE_PATTERN.finditer(para_text):
@@ -1354,11 +1389,11 @@ def _accepted_mention(term: str, pattern: re.Pattern, text: str) -> bool:
     """Word-boundary match of ``term`` in ``text``, with ingest's capital-letter rule.
 
     An ambiguous form (a short single word like "Play" or "Hive") only counts
-    where the text spells it with a capital first letter, as scan_text requires.
+    where the text spells it the way scan_text requires (see _case_fits).
     """
     if not _is_ambiguous_surface_form(term):
         return pattern.search(text) is not None
-    return any(text[m.start()].isupper() for m in pattern.finditer(text))
+    return any(_case_fits(term, m.group()) for m in pattern.finditer(text))
 
 
 async def link_entity_to_existing_entries(

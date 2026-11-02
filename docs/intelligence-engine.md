@@ -82,7 +82,7 @@ The autolinker matches text against a dictionary of every known entity name and 
 
 **Keeping workers in sync.** Each worker process holds its own copy. The vocabulary's version is a hash of its contents, published to Redis under `intelfeed:autolinker:vocab_version`. Before a scan, `_ensure_vocabulary()` compares its local version with Redis and rebuilds on a mismatch. The `refresh-autolinker-vocabulary` job rebuilds every 30 minutes, and denying a name or curating extractions rebuilds at once. A brand-new entity therefore starts matching new articles within 30 minutes.
 
-**The scan** (`scan_text()`, `backend/app/intelligence/autolinker.py:483`), per paragraph:
+**The scan** (`scan_text()`, `backend/app/intelligence/autolinker.py:510`), per paragraph:
 
 1. Match the lowercased text against every name and alias.
 2. Drop matches that sit inside a longer word ("APT" inside "RAPT").
@@ -92,7 +92,7 @@ The autolinker matches text against a dictionary of every known entity name and 
 
 ### Phase 3: Junction Record Storage
 
-`store_autolink_matches()` (`backend/app/intelligence/autolinker.py:701`) writes one junction row per entity, with:
+`store_autolink_matches()` (`backend/app/intelligence/autolinker.py:736`) writes one junction row per entity, with:
 
 - `confidence` — the match's confidence scaled by the feed's reliability rating (see [Confidence weighting](#confidence-weighting-and-reliability-rating))
 - `source = "auto_link"` (TTP links store `source_text = "auto_link:T1234"` instead)
@@ -316,7 +316,7 @@ Adjustments:
 
 ### Typed relationships
 
-Co-occurrence also writes `entity_relationships` rows (actor *uses* malware, and so on) with a trust level. The weekly `relationship-confidence-decay` job moves stale co-occurrence rows from `probable` back to `possible`; rows an analyst touched are never demoted. Entry-to-entity link confidence does not decay. See [entity-profiles.md](entity-profiles.md) for how relationships appear on profiles.
+Co-occurrence also writes `entity_relationships` rows (actor *uses* malware, and so on) with a trust level, but only for a pair named in the same paragraph, where that paragraph is not boilerplate and names fewer than five entities (see [architecture.md](architecture.md#7-correlation-engine)). The weekly `relationship-confidence-decay` job moves stale co-occurrence rows from `probable` back to `possible`; rows an analyst touched are never demoted. Entry-to-entity link confidence does not decay. See [entity-profiles.md](entity-profiles.md) for how relationships appear on profiles.
 
 ---
 
@@ -602,7 +602,7 @@ Use for personal or non-security feeds, test feeds, or to quiet a feed while you
 
 ### Confidence weighting and reliability rating
 
-`_weighted_confidence()` (`backend/app/intelligence/autolinker.py:629`) scales each autolink's confidence by the feed's reliability rating. A canonical-name match starts at 0.9 and an alias at 0.5. The result is multiplied by the feed weight (`reliability_to_weight()`, `backend/app/intelligence/autolinker.py:235`):
+`_weighted_confidence()` (`backend/app/intelligence/autolinker.py:664`) scales each autolink's confidence by the feed's reliability rating. A canonical-name match starts at 0.9 and an alias at 0.5. The result is multiplied by the feed weight (`reliability_to_weight()`, `backend/app/intelligence/autolinker.py:235`):
 
 | Rating | A | B | C | D | E | F | unrated |
 |---|---|---|---|---|---|---|---|
@@ -625,8 +625,8 @@ Then it is bucketed: ≥ 0.7 high, ≥ 0.4 medium, else low. So "APT29" on an A-
 
 ### Operational notes
 
-- Changing a feed's mode only affects new entries. To re-process old ones, use the rescan endpoints or `autolink_batch()` (`backend/app/intelligence/autolinker.py:1110`), which commits every 100 entries.
-- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1373`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the capital-letter rule applied, and confidence scaled by feed reliability. The pending tier does not apply.
+- Changing a feed's mode only affects new entries. To re-process old ones, use the rescan endpoints or `autolink_batch()` (`backend/app/intelligence/autolinker.py:1136`), which commits every 100 entries.
+- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1399`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the capital-letter rule applied, and confidence scaled by feed reliability. The pending tier does not apply.
 
 ### None of this uses AI
 

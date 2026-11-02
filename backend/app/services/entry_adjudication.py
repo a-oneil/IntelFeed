@@ -91,6 +91,9 @@ _OVERRIDE_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
 # changes share the action code; `applied` tells them apart, like the merge
 # engine's rows). api/hygiene.py registers them as proposal kinds.
 ACTION_UNLINK = "adjudication_unlink"
+# A remove that blames one alias files the alias proposal the Review queue
+# already applies (the scan's row shape, kind="adjudicator").
+ACTION_ALIAS = "alias_collision"
 # Advisory: a link whose entity is filed under the wrong type. Applying it
 # converts the entity (the merge engine's reclassify), never unlinks it.
 ACTION_RECLASSIFY = "adjudication_reclassify"
@@ -150,6 +153,8 @@ REVIEWABLE_EDGE_SOURCES = ("auto_extracted", "co_occurrence")
 _MAX_CANDIDATES = 3
 _SNIPPET_WINDOW = 160
 _SNIPPET_MAX = 320
+# This many link changes sharing one reason are voided (see _validate_verdicts).
+_COPIED_REASON_MIN = 3
 
 # Skip statuses written to ai_analysis_requests.adjudication_status.
 SKIPPED_OFF = "skipped_off"
@@ -906,6 +911,12 @@ async def _link_items(
             bits.append("promoted from the pending tier (name is also a dictionary word)")
         if item.previously_restored:
             bits.append("an analyst restored this link recently — it will not be changed, flag it only")
+        # The analysis links sectors (and sometimes other types) on meaning:
+        # no surface form, so the first literal occurrence of the name is
+        # often a "Related:" headline that says nothing about the link.
+        inferred = item.source != "auto_link" and not item.matched_names
+        if inferred:
+            bits.append("inferred by the analysis (linked on meaning, not a name match)")
         line = f"{item.item_id}  " + " · ".join(bits)
         if item.minted_here:
             if item.candidates:
@@ -925,7 +936,14 @@ async def _link_items(
         aliases = list(getattr(entity, "aliases", None) or [])[:3]
         if aliases:
             line += f"\n    aliases: {', '.join(aliases)}"
-        snippet = _snippet(paragraph_map, item.matched_names or [item.name], item.paragraph_indices, text)
+        via = [f for f in dict.fromkeys(item.matched_names) if f and f.lower() != (item.name or "").lower()]
+        if via and item.source == "auto_link":
+            line += f"\n    matched as: {', '.join(via[:3])}"
+        snippet = (
+            ""
+            if inferred and item.entity_type == SECTOR
+            else _snippet(paragraph_map, item.matched_names or [item.name], item.paragraph_indices, text)
+        )
         if snippet:
             line += f'\n    context: "{snippet}"'
         for note in earlier.get(item.item_id, []):
@@ -1259,11 +1277,23 @@ class Verdict:
     reason: str
     suggested_type: str | None = None
     merge_target: dict | None = None
+    # A remove that blames one alias: that surface form is not a name for this
+    # entity at all ('crypto' on crypto24). Filed as an alias proposal.
+    bad_alias: str | None = None
     # True when the model named this item. The prompt asks for changes only, so
     # most keeps are the fill-in below — an item nobody spoke about. The two
     # read the same on every path except edge corroboration, where silence must
     # not count as agreement (see apply_verdicts).
     explicit: bool = False
+
+
+def _reason_names_item(reason: str, item: ReviewItem) -> bool:
+    """A reclassify changes the entity's type everywhere, so its reason has to
+    be about this entity. One that argues over another name ("The term
+    'SHA-256' …" filed against Red Hat Enterprise Linux) was paired with the
+    wrong item_id."""
+    lowered = reason.lower()
+    return any(form and form.lower() in lowered for form in [item.name, *item.matched_names])
 
 
 def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verdict], dict]:
@@ -1307,6 +1337,7 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
                 suggested not in RECLASSIFY_TYPES
                 or item.entity_type not in RECLASSIFY_TYPES
                 or suggested == item.entity_type
+                or not _reason_names_item(reason, item)
             ):
                 verdict = "keep"
             if verdict == "merge":
@@ -1320,9 +1351,34 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
                     verdict = "keep"  # never merge into a name it was not shown
             if verdict != asked and asked in VERDICTS:
                 stats["coerced"] += 1
-            verdicts[item_id] = Verdict(item, verdict, confidence, reason, suggested, merge_target, explicit=True)
+            bad_alias = None
+            if verdict == "remove":
+                wanted = str(entry.get("bad_alias") or "").strip().lower()
+                # Only a form this link actually matched on, and never the name itself.
+                if wanted and wanted != (item.name or "").lower():
+                    bad_alias = next((f for f in item.matched_names if f.lower() == wanted), None)
+            verdicts[item_id] = Verdict(
+                item, verdict, confidence, reason, suggested, merge_target, bad_alias=bad_alias, explicit=True
+            )
     if stats["duplicate"]:
         verdicts = {}
+    # One reason pasted onto several changes of one kind means the model lost
+    # track of which item it was judging (a "Related: Tailscale" reason filed
+    # against six sectors; one "indicator of compromise … use drop" reason on a
+    # C2 domain, a payload host and a hash). None of those verdicts is about its
+    # own item. Voided verdicts are not explicit: a voided edge demote must not
+    # count as a keep, which is corroboration.
+    by_reason: dict[tuple[str, str], list[str]] = {}
+    for item_id, v in verdicts.items():
+        if v.item.kind in ("link", "ioc", "edge") and v.verdict != "keep" and v.reason.strip():
+            by_reason.setdefault((v.item.kind, " ".join(v.reason.lower().split())), []).append(item_id)
+    stats["copied_reason"] = 0
+    for ids in by_reason.values():
+        if len(ids) >= _COPIED_REASON_MIN:
+            for item_id in ids:
+                verdicts[item_id].verdict = "keep"
+                verdicts[item_id].explicit = False
+            stats["copied_reason"] += len(ids)
     out = [verdicts.get(it.item_id) or Verdict(it, "keep", "low", "") for it in items]
     assessment = result.get("assessment")
     if isinstance(assessment, dict) and any(it.kind == "assessment" for it in items):
@@ -1797,6 +1853,60 @@ async def _reclassify_flips_back(db: AsyncSession, entity_type: str, entity_id: 
     return await find_reclassify_tombstone(db, target_type, obj.name, aliases) is not None
 
 
+async def _proposal_pending(
+    db: AsyncSession, action: str, entity_type: str, entity_id: uuid.UUID | None, entry_id: uuid.UUID
+) -> bool:
+    """True when this entry already has an unapplied proposal of this kind about
+    this subject. Re-reviewing an entry (a resweep, a re-analysis) filed every
+    edge demote twice; the second copy only doubles the queue."""
+    from app.models.entity_maintenance import EntityMaintenanceLog
+
+    if entity_id is None:
+        return False
+    found = await db.scalar(
+        select(EntityMaintenanceLog.id)
+        .where(
+            EntityMaintenanceLog.action == action,
+            EntityMaintenanceLog.applied.is_(False),
+            EntityMaintenanceLog.entity_type == entity_type,
+            EntityMaintenanceLog.entity_id == entity_id,
+            EntityMaintenanceLog.before["entry_id"].astext == str(entry_id),
+        )
+        .limit(1)
+    )
+    return found is not None
+
+
+async def _bad_alias_proposal(db: AsyncSession, item: ReviewItem, form: str, reason: str) -> tuple[dict, dict] | None:
+    """The (before, after) of an alias proposal for a remove that blamed one
+    alias, or None when the alias is not on the entity (any more) or already
+    proposed. Always a proposal: one alias drives every article the entity
+    matches, so a person applies it from the Review queue."""
+    from app.models.entity_maintenance import EntityMaintenanceLog
+
+    model = _model_for(item.entity_type or "")
+    entity = await db.get(model, item.entity_id) if model else None
+    aliases = list(getattr(entity, "aliases", None) or [])
+    alias = next((a for a in aliases if a.lower() == form.lower()), None)
+    if alias is None:
+        return None
+    pending = (
+        await db.execute(
+            select(EntityMaintenanceLog.id).where(
+                EntityMaintenanceLog.action == ACTION_ALIAS,
+                EntityMaintenanceLog.applied.is_(False),
+                EntityMaintenanceLog.entity_type == item.entity_type,
+                EntityMaintenanceLog.entity_id == item.entity_id,
+                EntityMaintenanceLog.after["bad_alias"].astext == alias,
+            )
+        )
+    ).first()
+    if pending is not None:
+        return None
+    before = {"entity": {"id": str(entity.id), "name": entity.name, "aliases": aliases}}
+    return before, {"kind": "adjudicator", "bad_alias": alias, "reason": reason}
+
+
 async def apply_verdicts(
     db: AsyncSession,
     entry,
@@ -1943,7 +2053,14 @@ async def apply_verdicts(
                         if real is not None:
                             applied_n += 1
                             snap = real
-                    _log(ACTION_UNLINK, item, {"junction": snap}, after_base, applied=do_apply)
+                    if do_apply or not await _proposal_pending(
+                        db, ACTION_UNLINK, item.entity_type or "", item.entity_id, entry.id
+                    ):
+                        _log(ACTION_UNLINK, item, {"junction": snap}, after_base, applied=do_apply)
+                if v.bad_alias:
+                    alias_row = await _bad_alias_proposal(db, item, v.bad_alias, reason)
+                    if alias_row is not None:
+                        _log(ACTION_ALIAS, item, alias_row[0], alias_row[1], applied=False)
             elif v.verdict == "reclassify" and v.suggested_type:
                 etype, eid, target = item.entity_type or "", item.entity_id, v.suggested_type
                 if await _reclassify_flips_back(db, etype, eid, target):  # type: ignore[arg-type]
@@ -2053,7 +2170,7 @@ async def apply_verdicts(
                         entity_type=LOG_TYPE_RELATIONSHIP,
                         entity_id=item.edge_id,
                     )
-            else:
+            elif not await _proposal_pending(db, ACTION_EDGE_DEMOTE, LOG_TYPE_RELATIONSHIP, item.edge_id, entry.id):
                 _log(
                     ACTION_EDGE_DEMOTE,
                     item,
@@ -2078,7 +2195,7 @@ async def apply_verdicts(
                         entity_type=OBSERVABLE,
                         entity_id=item.observable_id,
                     )
-            else:
+            elif not await _proposal_pending(db, ACTION_IOC_DROP, OBSERVABLE, item.observable_id, entry.id):
                 _log(
                     ACTION_IOC_DROP,
                     item,

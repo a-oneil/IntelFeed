@@ -2748,13 +2748,31 @@ COOCCURRENCE_RELATIONSHIP_MAP: dict[tuple[str, str], str] = {
 # Max entities per entry before we skip co-occurrence generation (avoid N^2 explosion)
 _MAX_ENTITIES_PER_ENTRY = 50
 
-# Speculative verbs that ride on the weakest evidence: a country or sector
-# "targets" edge or a generic "related_to" is asserted from a bare co-mention,
-# and countries and sectors in particular show up as bystanders (victims,
-# researcher locale, an actor's disguise, the industry a vendor sells to).
-# Hold these to the same strong-proximity bar as unmapped pairs so a loose
-# cross-paragraph co-mention can't manufacture them.
-_SOFT_COOCCURRENCE_VERBS = {"targets", "related_to"}
+# A co-occurrence edge carries a typed verb ("APT28 exploits CVE-…"), so the
+# co-mention behind it has to look like one sentence relating the two: both
+# names in the same paragraph, where that paragraph is neither boilerplate nor
+# a list. Cross-paragraph co-mentions, links with no recorded position (most
+# AI-sourced links), "Related:" headlines, reference footers and roundup or
+# analytic-story lines relate nothing — they were the bulk of the edges the
+# adjudicator had to demote.
+_BOILERPLATE_PARAGRAPH = re.compile(
+    r"^\s*(related|read more|see also|also read|more from|recommended|you may also like|"
+    r"sources?|references?|further reading|analytic stor(y|ies)|data sources?|acknowledg\w*)\b",
+    re.IGNORECASE,
+)
+# A paragraph naming this many distinct entities is a list, not a statement.
+_CROWDED_PARAGRAPH_ENTITIES = 5
+
+
+async def _boilerplate_paragraphs(db: AsyncSession, entry_id: uuid.UUID) -> set[int]:
+    """Indices (the autolinker's split) of the entry's boilerplate paragraphs."""
+    from app.intelligence.autolinker import split_into_paragraphs
+
+    entry = await db.get(Entry, entry_id)
+    if entry is None:
+        return set()
+    paragraphs = split_into_paragraphs(entry.title or "", entry.summary or "", entry.content_text or "")
+    return {idx for idx, text in paragraphs if _BOILERPLATE_PARAGRAPH.match(text or "")}
 
 
 def _canonical_pair(
@@ -2788,23 +2806,6 @@ def _directed_pair(
         return type_b, id_b, type_a, id_a, COOCCURRENCE_RELATIONSHIP_MAP[(type_b, type_a)], True
     src_type, src_id, tgt_type, tgt_id = _canonical_pair(type_a, id_a, type_b, id_b)
     return src_type, src_id, tgt_type, tgt_id, "related_to", False
-
-
-def _proximity_to_confidence(score: float) -> str | None:
-    """Map a proximity score to a confidence level, or None to skip.
-
-    Thresholds come from the same proximity settings the UI badges use, so
-    tuning them in Settings moves confidence assignment and display together.
-    """
-    from app.config import settings as env_settings
-
-    strong = float(env_settings.get("proximity_strong_threshold") or 0.7)
-    moderate = float(env_settings.get("proximity_moderate_threshold") or 0.3)
-    if score >= strong:
-        return "probable"
-    if score >= moderate:
-        return "possible"
-    return None  # too far apart — skip
 
 
 async def _passes_story_floor(db: AsyncSession, evidence_entry_ids: list[uuid.UUID]) -> bool:
@@ -2849,8 +2850,9 @@ async def create_cooccurrence_relationships(
 ) -> int:
     """Create EntityRelationship records for entity pairs co-occurring in an entry.
 
-    Queries all junction tables for the given entry, computes pairwise proximity
-    scores, and upserts EntityRelationship rows with source='co_occurrence'.
+    Queries all junction tables for the given entry and upserts an
+    EntityRelationship (source='co_occurrence') for each pair named in the same
+    paragraph, where that paragraph is neither boilerplate nor a list.
 
     Returns the count of new or updated relationships.
     """
@@ -2877,34 +2879,33 @@ async def create_cooccurrence_relationships(
         )
         return 0
 
-    # 2. Generate pairwise relationships
+    # 2. Where each entity is mentioned, minus boilerplate paragraphs; and
+    # which paragraphs are lists (too many entities to be one statement).
     from app.config import settings as env_settings
 
-    strong_threshold = float(env_settings.get("proximity_strong_threshold") or 0.7)
     promote_count = int(env_settings.get("relationship_evidence_promote_count") or 3)
+    boilerplate = await _boilerplate_paragraphs(db, entry_id)
+    placed: list[tuple[str, uuid.UUID, set[int]]] = []
+    for etype, eid, para_indices in entity_refs:
+        paras = set(para_indices or []) - boilerplate
+        if paras:
+            placed.append((etype, eid, paras))
+    per_paragraph: dict[int, int] = {}
+    for _etype, _eid, paras in placed:
+        for p in paras:
+            per_paragraph[p] = per_paragraph.get(p, 0) + 1
+    crowded = {p for p, n in per_paragraph.items() if n >= _CROWDED_PARAGRAPH_ENTITIES}
     upsert_count = 0
 
-    for (type_a, id_a, para_a), (type_b, id_b, para_b) in combinations(entity_refs, 2):
+    for (type_a, id_a, para_a), (type_b, id_b, para_b) in combinations(placed, 2):
         # Skip same-type pairs (e.g. two TTPs co-occurring isn't meaningful)
         if type_a == type_b:
             continue
-
-        score = _compute_proximity_score(para_a, para_b)
-        confidence = _proximity_to_confidence(score)
-        if confidence is None:
+        # Same paragraph, and that paragraph a statement rather than a list.
+        if not ((para_a & para_b) - crowded):
             continue
 
-        src_type, src_id, tgt_type, tgt_id, rel_type, mapped = _directed_pair(type_a, id_a, type_b, id_b)
-        # Unmapped pairs (e.g. cve+country) have no semantic verb; a generic
-        # related_to edge is only worth keeping when the co-mention is
-        # exceptionally close — otherwise it's noise.
-        if not mapped and score < strong_threshold:
-            continue
-        # Speculative mapped verbs (country "targets", "related_to") get the
-        # same strong-proximity bar — a moderate co-mention isn't enough
-        # evidence to assert the claim.
-        if rel_type in _SOFT_COOCCURRENCE_VERBS and score < strong_threshold:
-            continue
+        src_type, src_id, tgt_type, tgt_id, rel_type, _mapped = _directed_pair(type_a, id_a, type_b, id_b)
         # Pairs outside the semantic allowlist (country↔cve, country↔tool, …)
         # are never stored, no matter how close the co-mention.
         if not is_allowed_relationship(src_type, rel_type, tgt_type):
@@ -2931,8 +2932,9 @@ async def create_cooccurrence_relationships(
             if entry_id not in (rel.evidence_entry_ids or []):
                 rel.evidence_entry_ids = (rel.evidence_entry_ids or []) + [entry_id]
             # Upgrade confidence only for co_occurrence-sourced relationships:
-            # one exceptionally close co-mention or `promote_count` distinct
-            # evidence entries — AND corroboration across ≥2 distinct feeds, so
+            # `promote_count` distinct evidence entries (every co-mention is
+            # same-paragraph now, so closeness alone proves nothing) — AND
+            # corroboration across ≥2 distinct feeds, so
             # a single chatty source can't self-promote. Two narrative floors
             # then ask whether the evidence is really independent: one story
             # cluster (embeddings) and one day-briefing heading spread. Edges
@@ -2941,7 +2943,7 @@ async def create_cooccurrence_relationships(
                 rel.source == "co_occurrence"
                 and rel.confidence == "possible"
                 and rel.adjudication_verdict != "coincidental"
-                and (confidence == "probable" or len(rel.evidence_entry_ids or []) >= promote_count)
+                and len(rel.evidence_entry_ids or []) >= promote_count
             ):
                 feed_count = (
                     await db.execute(
