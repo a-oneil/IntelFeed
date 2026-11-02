@@ -45,6 +45,7 @@ router = APIRouter()
 @router.get("/templates")
 async def list_templates(
     category: str | None = Query(None, description="Filter by category"),
+    _user: User = Depends(get_current_user),
 ):
     """Return pre-built automation rule templates."""
     from app.automation.templates import AUTOMATION_TEMPLATES, TEMPLATE_CATEGORIES
@@ -57,7 +58,7 @@ async def list_templates(
 
 
 @router.get("/variable-contexts")
-async def get_variable_contexts():
+async def get_variable_contexts(_user: User = Depends(get_current_user)):
     """Template variables each action injects, so the builder can show accurate,
     context-aware hints. ``ai_prompt`` is keyed by execution mode (Run AI Task,
     Jinja {{ }}); ``notification_template`` is the single-brace ({ }) set."""

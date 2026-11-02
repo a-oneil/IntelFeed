@@ -382,6 +382,12 @@ async def _get_observable(db: AsyncSession, user_id: uuid.UUID, observable: str,
         "infra_tag": obs.infra_tag,
         "needs_review": obs.needs_review,
         "reputation": obs.reputation,
+        "asn": obs.asn,
+        "asn_org": obs.asn_org,
+        "geo_country": obs.geo_country,
+        "registered_at": str(obs.registered_at) if obs.registered_at else None,
+        "popularity_rank": obs.popularity_rank,
+        "noise_class": obs.noise_class,
         # Attribution edges onto this row — what the ledger exists to answer.
         "claimed_by": (await _observable_claims(db, obs.id)),
         "first_seen_at": str(obs.first_seen_at),
@@ -543,6 +549,7 @@ async def _search_observables(
 )
 async def _get_cwe(db: AsyncSession, user_id: uuid.UUID, cwe_id: str) -> dict:
     from app.api.intelligence import _cwe_rolled_counts
+    from app.enrichment.capec import capec_names
     from app.models.cwe import CWE, CVEWeakness
 
     try:
@@ -593,6 +600,7 @@ async def _get_cwe(db: AsyncSession, user_id: uuid.UUID, cwe_id: str) -> dict:
         "likelihood_of_exploit": cwe.likelihood_of_exploit,
         "alternate_terms": cwe.alternate_terms,
         "capec_ids": cwe.capec_ids,
+        "capec_patterns": await capec_names(db, cwe.capec_ids or []),
         "consequences": cwe.consequences,
         "mitigations": cwe.mitigations,
         "detection_methods": cwe.detection_methods,
@@ -641,6 +649,8 @@ async def _get_ttp(db: AsyncSession, user_id: uuid.UUID, ttp_id: str) -> dict:
         "mitre_url": ttp.mitre_url,
         "detection": ttp.detection,
         "is_subtechnique": ttp.is_subtechnique,
+        "nist_controls": ttp.nist_controls or [],
+        "cis_controls": ttp.cis_controls or [],
         "first_seen_at": str(ttp.first_seen_at),
         "last_seen_at": str(ttp.last_seen_at),
         "article_count": ttp.article_count,

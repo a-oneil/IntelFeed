@@ -57,11 +57,6 @@
       "count": 2
     }
   },
-  "src/components/EnrichmentStatusIndicator.module.css": {
-    "color-no-hex": {
-      "count": 3
-    }
-  },
   "src/components/EntryIntelBadges.module.css": {
     "color-no-hex": {
       "count": 6

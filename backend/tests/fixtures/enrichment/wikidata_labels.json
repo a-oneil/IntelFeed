@@ -1,0 +1,129 @@
+{
+ "entities": {
+  "Q30": {
+   "type": "item",
+   "id": "Q30",
+   "labels": {
+    "en": {
+     "language": "en",
+     "value": "United States"
+    }
+   },
+   "sitelinks": {
+    "enwiki": {
+     "site": "enwiki",
+     "title": "United States",
+     "badges": []
+    }
+   }
+  },
+  "Q223718": {
+   "type": "item",
+   "id": "Q223718",
+   "labels": {
+    "en": {
+     "language": "en",
+     "value": "Redmond"
+    }
+   },
+   "sitelinks": {
+    "enwiki": {
+     "site": "enwiki",
+     "title": "Redmond, Washington",
+     "badges": []
+    }
+   }
+  },
+  "Q21157865": {
+   "type": "item",
+   "id": "Q21157865",
+   "labels": {
+    "en": {
+     "language": "en",
+     "value": "technology industry"
+    }
+   },
+   "sitelinks": {}
+  },
+  "Q880371": {
+   "type": "item",
+   "id": "Q880371",
+   "labels": {
+    "en": {
+     "language": "en",
+     "value": "software industry"
+    }
+   },
+   "sitelinks": {
+    "enwiki": {
+     "site": "enwiki",
+     "title": "Software industry",
+     "badges": []
+    }
+   }
+  },
+  "Q638608": {
+   "type": "item",
+   "id": "Q638608",
+   "labels": {
+    "en": {
+     "language": "en",
+     "value": "software development"
+    }
+   },
+   "sitelinks": {
+    "enwiki": {
+     "site": "enwiki",
+     "title": "Software development",
+     "badges": []
+    }
+   }
+  },
+  "Q1666934": {
+   "type": "item",
+   "id": "Q1666934",
+   "labels": {
+    "en": {
+     "language": "en",
+     "value": "International Standard Industrial Classification"
+    }
+   },
+   "sitelinks": {
+    "enwiki": {
+     "site": "enwiki",
+     "title": "International Standard Industrial Classification",
+     "badges": []
+    }
+   }
+  },
+  "Q73768396": {
+   "type": "item",
+   "id": "Q73768396",
+   "labels": {
+    "en": {
+     "language": "en",
+     "value": "consumer electronics industry"
+    }
+   },
+   "sitelinks": {}
+  },
+  "Q2283": {
+   "type": "item",
+   "id": "Q2283",
+   "labels": {
+    "en": {
+     "language": "en",
+     "value": "Microsoft"
+    }
+   },
+   "sitelinks": {
+    "enwiki": {
+     "site": "enwiki",
+     "title": "Microsoft",
+     "badges": []
+    }
+   }
+  }
+ },
+ "success": 1
+}

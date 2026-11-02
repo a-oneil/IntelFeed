@@ -84,6 +84,9 @@ class TTPResponse(BaseModel):
     is_deprecated: bool = False
     superseded_by: str | None = None
     matrix_domain: str | None = None
+    #: Controls that mitigate the technique, from CTID's mappings.
+    nist_controls: list[str] = []
+    cis_controls: list[str] = []
     first_seen_at: datetime
     last_seen_at: datetime
     article_count: int
@@ -223,6 +226,13 @@ class CVEAffectedEntityRow(BaseModel):
     product_name: str | None = None
     version_start: str | None = None
     version_end: str | None = None
+    # The resolved product's support lifecycle (endoflife.date): maintained,
+    # security_only, eol or unknown, and its soonest end of security support.
+    product_support_status: str | None = None
+    product_next_eol: date | None = None
+    # End-of-life releases of the product this row's version range covers:
+    # no fix will ship for them, even while the product itself is maintained.
+    eol_releases: list[str] = []
 
 
 # --- Threat Actor Schemas ---
@@ -671,9 +681,17 @@ class ObservableResponse(BaseModel):
     #: eighteen CSV variants is report_count=0, feed_source_count=1.
     report_count: int = 0
     feed_source_count: int = 0
-    #: Compact reputation summary from enrichment (Shodan / GreyNoise / VT):
-    #: asn, country, ports, tags, vt_ratio, gn_classification, gn_riot, enriched_at.
+    #: Compact reputation summary from enrichment (Shodan ports/hostnames/tags,
+    #: VirusTotal vt_*, GreyNoise gn_noise/gn_riot/gn_name, enriched_at).
     reputation: dict | None = None
+    #: Network context: origin AS and its name, allocation country (Team Cymru,
+    #: VirusTotal), registration date (RDAP), Tranco rank, GreyNoise class.
+    asn: int | None = None
+    asn_org: str | None = None
+    geo_country: str | None = None
+    registered_at: datetime | None = None
+    popularity_rank: int | None = None
+    noise_class: str | None = None
     first_seen_at: datetime
     last_seen_at: datetime
     #: Decay projection: half-life for the kind (None = never decays) and the
@@ -750,6 +768,11 @@ class ObservableUpdateRequest(BaseModel):
     is_denied: bool | None = None
 
 
+class CAPECRef(BaseModel):
+    capec_id: str
+    name: str | None = None
+
+
 class CWEResponse(BaseModel):
     id: uuid.UUID
     cwe_id: str
@@ -764,6 +787,9 @@ class CWEResponse(BaseModel):
     likelihood_of_exploit: str | None = None
     alternate_terms: list[str] = []
     capec_ids: list[str] = []
+    #: ``capec_ids`` with their names from the CAPEC catalog (single-weakness
+    #: endpoint only); a name is null until the catalog has the pattern.
+    capec_patterns: list[CAPECRef] = []
     consequences: list[dict] = []
     mitigations: list[dict] = []
     detection_methods: list[dict] = []
@@ -898,6 +924,8 @@ class VendorResponse(BaseModel):
     description: str | None = None
     website: str | None = None
     vendor_type: str | None = None
+    # The country the company is from (Wikidata P17), a link to a country row.
+    country_id: uuid.UUID | None = None
     article_count: int = 0
     first_seen_at: datetime | None = None
     last_seen_at: datetime | None = None
@@ -922,6 +950,8 @@ class ProductResponse(BaseModel):
     description: str | None = None
     product_type: str | None = None
     website: str | None = None
+    support_status: str | None = None  # maintained | security_only | eol | unknown (endoflife.date)
+    next_eol: date | None = None
     article_count: int = 0
     first_seen_at: datetime | None = None
     last_seen_at: datetime | None = None

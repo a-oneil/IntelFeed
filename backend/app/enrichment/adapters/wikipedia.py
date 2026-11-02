@@ -5,33 +5,61 @@ from __future__ import annotations
 import logging
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.gateway import GatewayError
+from app.enrichment.manifest import Column, Egress, Job, License, Policy, Quota
 from app.enrichment.wikipedia_helper import extract_first_paragraph, fetch_wikipedia
 
 logger = logging.getLogger(__name__)
+
+_TYPES = ("threat_actor", "malware", "tool", "country", "vendor", "product", "ttp", "mitigation", "cve", "cwe")
+
+
+def _article_columns(entity_type: str) -> tuple[Column, ...]:
+    """The article's URL, text and image move together: a new URL replaces all
+    three, so the old article's image never stays behind."""
+    url = f"{entity_type}.wikipedia_url"
+    return (
+        Column("wikipedia_url", url, Policy.NEWER_WINS),
+        Column("wikipedia_content", f"{entity_type}.wikipedia_content", Policy.NEWER_WINS, follows=url),
+        Column("wikipedia_image_url", f"{entity_type}.wikipedia_image_url", Policy.NEWER_WINS, follows=url),
+        # Human-curated prose, so it ranks ahead of the security catalogs;
+        # a CVE's own record (NVD) is the exception.
+        Column("first_paragraph", f"{entity_type}.description", Policy.RANK, rank=2 if entity_type == "cve" else 1),
+    )
 
 
 class WikipediaAdapter(EnrichmentAdapter):
     source_type = "wikipedia"
     display_name = "Wikipedia"
-    supported_entity_types = [
-        "threat_actor",
-        "malware",
-        "tool",
-        "country",
-        "vendor",
-        "product",
-        "ttp",
-        "mitigation",
-        "cve",
-        "cwe",
-    ]
-    requires_api_key = False
+    about = "The opening paragraph of an entity's Wikipedia article."
+    # Wikimedia asks for a contact in every User-Agent (gateway.user_agent).
+    settings_keys = ("wikimedia_contact_email",)
+    applies_to = dict.fromkeys(_TYPES)
+    # MediaWiki sets no fixed limit on reads but asks clients to send them one
+    # at a time and back off when told (mediawiki.org/wiki/API:Etiquette), so
+    # concurrency is 1. An entity costs three to five requests. 20 a minute
+    # keeps the weekly sync (about 1,100 requests in its hour) and a day's
+    # lookups inside the budget.
+    quota = Quota(20, 60, daily_budget=2000, concurrency=1)
+    egress = Egress.LOW
+    license = License("CC BY-SA 4.0", attribution="Wikipedia")
     default_trigger_mode = "auto"
+    jobs = (
+        Job(
+            "wikipedia-bulk-sync",
+            "app.workers.enrichment_tasks.run_wikipedia_bulk_sync",
+            {"type": "crontab", "minute": "0", "hour": "4", "day_of_week": "3"},
+            "Enrich entities missing Wikipedia content",
+        ),
+    )
+    outputs = tuple(column for t in _TYPES for column in _article_columns(t))
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
         """Fetch Wikipedia content for an entity."""
         try:
-            result = await fetch_wikipedia(entity_value, entity_type)
+            result = await fetch_wikipedia(entity_value, entity_type, transport=self.http_transport())
+        except GatewayError:
+            raise
         except Exception as e:
             logger.warning("Wikipedia fetch failed for %s/%s: %s", entity_type, entity_value, e)
             return EnrichmentData(
@@ -85,8 +113,5 @@ class WikipediaAdapter(EnrichmentAdapter):
 
     async def check_health(self) -> bool:
         """Verify Wikipedia API is reachable."""
-        try:
-            result = await fetch_wikipedia("Computer security", "ttp")
-            return result is not None
-        except Exception:
-            return False
+        # fetch_wikipedia answers None for anything but a gateway refusal.
+        return await fetch_wikipedia("Computer security", "ttp", transport=self.http_transport()) is not None

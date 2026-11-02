@@ -22,6 +22,18 @@ from app.services.system_settings import (
 router = APIRouter()
 
 
+async def _sync_enrichment_pause(db: AsyncSession, keys) -> None:
+    """The gateways read the pause from Redis: copy a change there now rather
+    than at the dispatcher's next tick, once the change is committed."""
+    from app.enrichment.pause import SETTING, sync_pause
+    from app.services.engine_switch import SETTING as ENGINE_SETTING
+
+    # A stopped engine pauses enrichment too.
+    if SETTING in keys or ENGINE_SETTING in keys:
+        await db.commit()
+        await sync_pause(db)
+
+
 class SystemSettingsUpdate(BaseModel):
     settings: dict[str, Any]
 
@@ -42,17 +54,34 @@ async def get_system_settings_endpoint(
     return {"settings": settings, "groups": GROUP_LABELS}
 
 
+def _refuse_key_settings(keys) -> None:
+    """Enrichment's Keys view is the one place its keys are set."""
+    from app.enrichment.keys import credentials
+
+    owned = sorted({c.setting for c in credentials().values() if c.setting} & set(keys))
+    if owned:
+        raise AppError(
+            code="set_in_enrichment_keys",
+            message=f"{', '.join(owned)}: set it under Settings → Engine → Enrichment → Keys",
+            status_code=400,
+        )
+
+
 @router.patch("")
 async def update_system_settings_endpoint(
     body: SystemSettingsUpdate,
     user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update system settings. Set a value to null to reset to default."""
+    """Update system settings. Set a value to null to reset to default. The API
+    keys enrichment reads (``nvd_api_key``, ``github_token``) are set under
+    ``/enrichment/keys`` instead."""
+    _refuse_key_settings(body.settings)
     try:
         settings = await update_settings(db, body.settings)
     except ValueError as e:
         raise AppError(code="invalid_setting", message=str(e), status_code=400)
+    await _sync_enrichment_pause(db, body.settings)
     return {"settings": settings, "groups": GROUP_LABELS}
 
 
@@ -63,10 +92,12 @@ async def reset_setting_endpoint(
     db: AsyncSession = Depends(get_db),
 ):
     """Reset a single setting back to its env/default value."""
+    _refuse_key_settings({key})
     try:
         settings = await reset_setting(db, key)
     except ValueError as e:
         raise AppError(code="invalid_setting", message=str(e), status_code=400)
+    await _sync_enrichment_pause(db, {key})
     return {"settings": settings, "groups": GROUP_LABELS}
 
 

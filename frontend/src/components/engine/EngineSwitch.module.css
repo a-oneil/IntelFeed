@@ -1,0 +1,44 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  appearance: none;
+  border: 1px solid var(--danger);
+  background: var(--danger);
+  color: var(--danger-fg);
+  border-radius: var(--r-md);
+  padding: 3px 10px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:hover {
+  background: color-mix(in srgb, var(--danger) 85%, var(--text-primary));
+  border-color: color-mix(in srgb, var(--danger) 85%, var(--text-primary));
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.icon {
+  font-size: 0.8em;
+}
+.stopped {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 50%, var(--border));
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+.stopped:hover {
+  color: var(--success);
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+}
+.banner {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+}

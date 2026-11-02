@@ -87,7 +87,6 @@ const STAGE_LABEL: Record<string, string> = {
   correlation: "Correlation stage",
   observables: "Observables stage",
   adjudicate: "Adjudicate stage",
-  enrich: "Enrichment stage",
   translate: "Translate stage",
 };
 
@@ -141,8 +140,8 @@ const PANELS: { label: string; hint: string; terms: string; dest: EngineDest }[]
   },
   {
     label: "Enrichment sources",
-    hint: "Per-source enable, order and rate limits for entity enrichment",
-    terms: "enrichment sources rate limit order adapters otx virustotal",
+    hint: "Sources, limits, queue, coverage and jobs for entity enrichment",
+    terms: "enrichment sources rate limit daily cap budget api key queue backfill coverage pause adapters nvd otx virustotal",
     dest: { kind: "browse", browse: "enrichment" },
   },
   {

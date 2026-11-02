@@ -27,6 +27,7 @@ from app.core.pagination import PaginatedResponse
 from app.core.public_access import viewer_is_anonymous
 from app.core.security import get_admin_user, get_current_user, get_entry_viewer, get_viewer
 from app.database import get_db
+from app.enrichment.capec import capec_names
 from app.intelligence.cve import extract_and_store_cves
 from app.intelligence.detection import (
     ENTITY_RULE_TYPES,
@@ -75,6 +76,7 @@ from app.schemas.intelligence import (
     BulkRuleDeleteRequest,
     BulkRuleUpdateRequest,
     BulkTranslateRequest,
+    CAPECRef,
     CountryResponse,
     CVEAffectedEntityRow,
     CVEResponse,
@@ -4790,6 +4792,8 @@ def _ttp_to_response(ttp: TTP) -> TTPResponse:
         is_deprecated=ttp.is_deprecated or False,
         superseded_by=ttp.superseded_by,
         matrix_domain=ttp.matrix_domain,
+        nist_controls=ttp.nist_controls or [],
+        cis_controls=ttp.cis_controls or [],
         first_seen_at=ttp.first_seen_at,
         last_seen_at=ttp.last_seen_at,
         article_count=ttp.article_count,
@@ -4969,6 +4973,12 @@ def _observable_to_response(obs: Observable, entry_link: EntryObservable | None 
         report_count=obs.report_count or 0,
         feed_source_count=obs.feed_source_count or 0,
         reputation=obs.reputation,
+        asn=obs.asn,
+        asn_org=obs.asn_org,
+        geo_country=obs.geo_country,
+        registered_at=obs.registered_at,
+        popularity_rank=obs.popularity_rank,
+        noise_class=obs.noise_class,
         first_seen_at=obs.first_seen_at,
         last_seen_at=obs.last_seen_at,
         link_source=entry_link.source if entry_link else None,
@@ -5888,13 +5898,15 @@ async def get_cwe(
         )
     ).one()
     rolled = await _cwe_rolled_counts(db)
-    return _cwe_to_response(
+    response = _cwe_to_response(
         cwe,
         cve_count=int(counts[0] or 0),
         kev_count=int(counts[1] or 0),
         cve_count_rolled=rolled.get(cwe.id, (0, 0))[0],
         kev_count_rolled=rolled.get(cwe.id, (0, 0))[1],
     )
+    response.capec_patterns = [CAPECRef(**p) for p in await capec_names(db, cwe.capec_ids or [])]
+    return response
 
 
 @router.get("/cwes/{cwe_id}/family", response_model=CWEFamilyResponse)
@@ -6248,6 +6260,7 @@ def _vendor_to_response(v: Vendor, entry_link: EntryVendor | None = None) -> Ven
         description=v.description,
         website=v.website,
         vendor_type=v.vendor_type,
+        country_id=getattr(v, "country_id", None),
         article_count=v.article_count,
         first_seen_at=v.first_seen_at,
         last_seen_at=v.last_seen_at,
@@ -6366,6 +6379,8 @@ def _product_to_response(p: Product, entry_link: EntryProduct | None = None) -> 
         description=p.description,
         product_type=p.product_type,
         website=p.website,
+        support_status=p.support_status,
+        next_eol=p.next_eol,
         article_count=p.article_count,
         first_seen_at=p.first_seen_at,
         last_seen_at=p.last_seen_at,
@@ -6788,13 +6803,33 @@ async def get_cve_affected(
 
     rows = (
         await db.execute(
-            select(CVEAffected, Vendor.name, Product.name)
+            select(CVEAffected, Vendor.name, Product.name, Product.support_status, Product.next_eol)
             .outerjoin(Vendor, Vendor.id == CVEAffected.vendor_id)
             .outerjoin(Product, Product.id == CVEAffected.product_id)
             .where(CVEAffected.cve_id == cve.id)
             .order_by(CVEAffected.cpe_vendor, CVEAffected.cpe_product)
         )
     ).all()
+    from app.enrichment.endoflife import EndOfLifeSource, eol_releases
+    from app.models.enrichment import EntityContext
+
+    product_ids = {link.product_id for link, *_ in rows if link.product_id}
+    releases = (
+        dict(
+            (
+                await db.execute(
+                    select(EntityContext.entity_id, EntityContext.value).where(
+                        EntityContext.entity_type == "product",
+                        EntityContext.entity_id.in_(product_ids),
+                        EntityContext.source_type == EndOfLifeSource.source_type,
+                        EntityContext.key == "releases",
+                    )
+                )
+            ).all()
+        )
+        if product_ids
+        else {}
+    )
     return [
         CVEAffectedEntityRow(
             cpe_vendor=link.cpe_vendor,
@@ -6805,8 +6840,11 @@ async def get_cve_affected(
             product_name=product_name,
             version_start=link.version_start,
             version_end=link.version_end,
+            product_support_status=support_status,
+            product_next_eol=next_eol,
+            eol_releases=eol_releases(releases.get(link.product_id), link.version_start, link.version_end),
         )
-        for link, vendor_name, product_name in rows
+        for link, vendor_name, product_name, support_status, next_eol in rows
     ]
 
 

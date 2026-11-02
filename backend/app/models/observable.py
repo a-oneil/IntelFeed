@@ -25,7 +25,19 @@ normalized snippet and ``content`` holds the code itself.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, SmallInteger, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -131,12 +143,27 @@ class Observable(Base):
     #: rows stay in the ledger — an attack from a VPN exit is context worth
     #: keeping — but never publish to blocklists/TAXII.
     infra_tag: Mapped[str | None] = mapped_column(String(20), index=True)
-    #: Compact reputation summary written by the enrichment updater
-    #: (``asn``, ``country``, ``ports``, ``tags``, ``vt_ratio``,
-    #: ``gn_classification``, ``gn_riot``, ``enriched_at``). Read-only context;
-    #: the updater also fills ``infra_tag`` from it (Shodan vpn/proxy/tor tags,
-    #: GreyNoise RIOT → ``benign_service``).
+    #: Compact reputation summary written by the enrichment updater (Shodan
+    #: ``ports``/``hostnames``/``shodan_tags``/``vulns``, VirusTotal ``vt_*``,
+    #: GreyNoise ``gn_noise``/``gn_riot``/``gn_name``, ``enriched_at``).
+    #: Read-only context; the updater also fills ``infra_tag`` from it (Shodan
+    #: vpn/proxy/tor tags, GreyNoise RIOT → ``benign_service``).
     reputation: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # --- network context, written by enrichment (newest answer wins) ---
+    #: Origin AS of the announcing prefix (Team Cymru). bigint: 32-bit AS
+    #: numbers run to 4,294,967,295.
+    asn: Mapped[int | None] = mapped_column(BigInteger)
+    asn_org: Mapped[str | None] = mapped_column(Text)
+    #: ISO 3166 alpha-2 country of the IP's allocation.
+    geo_country: Mapped[str | None] = mapped_column(String(2))
+    #: Domain registration date at its registry (RDAP), of the registrable domain.
+    registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: Rank in the Tranco top-1M list; None when the domain isn't in it.
+    popularity_rank: Mapped[int | None] = mapped_column(Integer, index=True)
+    #: GreyNoise: malicious / benign / unknown when seen mass-scanning; None
+    #: when GreyNoise hasn't seen the IP scanning (or hasn't been asked).
+    noise_class: Mapped[str | None] = mapped_column(String(16))
 
     # --- AI-extraction provenance (shared extraction-management column quad) ---
     created_via: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)

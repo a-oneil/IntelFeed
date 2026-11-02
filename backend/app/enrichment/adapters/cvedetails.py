@@ -10,6 +10,7 @@ API docs: https://www.cvedetails.com/documentation/apis
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.manifest import Context, Display, Egress, Key, License, Quota
 
 API_BASE = "https://www.cvedetails.com/api/v1"
 
@@ -17,9 +18,25 @@ API_BASE = "https://www.cvedetails.com/api/v1"
 class CVEDetailsAdapter(EnrichmentAdapter):
     source_type = "cvedetails"
     display_name = "CVEDetails"
-    supported_entity_types = ["cve"]
-    requires_api_key = True
+    about = "A second view of a CVE's exploit and scoring data."
+    applies_to = {"cve": None}
+    requires = (Key(),)
+    quota = Quota(60, 60, daily_budget=1000)
+    egress = Egress.LOW
+    # The site's terms bar using it or its information "for any commercial
+    # purposes": https://www.cvedetails.com/terms-and-conditions.php
+    license = License("CVEDetails API subscription", attribution="CVEdetails.com", commercial_ok=False)
     default_trigger_mode = "auto"
+    outputs = (
+        Context(
+            "exploits",
+            "Exploits",
+            Display.TABLE,
+            item={"Source": "source", "Link": "url", "Description": "description"},
+        ),
+        Context("advisories", "Advisories", Display.TABLE, item={"Source": "source", "Title": "title", "Link": "url"}),
+        Context("cvedetails_url", "CVEdetails", Display.LINK),
+    )
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
         headers = {
@@ -27,7 +44,7 @@ class CVEDetailsAdapter(EnrichmentAdapter):
             "Accept": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=15, headers=headers) as client:
+        async with self.http(timeout=15, headers=headers) as client:
             resp = await client.get(
                 f"{API_BASE}/vulnerability/search",
                 params={"cveId": entity_value},
@@ -38,13 +55,6 @@ class CVEDetailsAdapter(EnrichmentAdapter):
                     raw_response={"status": "not_found"},
                     parsed_data={"found": False},
                     ttl_hours=168,
-                )
-
-            if resp.status_code == 429:
-                return EnrichmentData(
-                    raw_response={"status": "rate_limited"},
-                    parsed_data={"found": False, "rate_limited": True},
-                    ttl_hours=0,
                 )
 
             resp.raise_for_status()
@@ -131,11 +141,11 @@ class CVEDetailsAdapter(EnrichmentAdapter):
                 "Authorization": f"Bearer {self.api_key}",
                 "Accept": "application/json",
             }
-            async with httpx.AsyncClient(timeout=5, headers=headers) as client:
+            async with self.http(timeout=5, headers=headers) as client:
                 resp = await client.get(
                     f"{API_BASE}/vulnerability/search",
                     params={"cveId": "CVE-2021-44228"},
                 )
                 return resp.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False

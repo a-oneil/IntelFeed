@@ -16,6 +16,7 @@ AI_TASKS = [
     "app.workers.entity_maintenance_tasks.refresh_actor_profile",
     "app.workers.entity_maintenance_tasks.process_name_normalization_batch",
     "app.workers.entity_maintenance_tasks.ai_enrich_gap_batch",
+    "app.workers.entity_maintenance_tasks.review_duplicate_entities",
     "app.workers.thread_tasks.narrate_story_threads",
     "app.workers.copilot_tasks.run_copilot_stream",
     "app.workers.maintenance.generate_threat_briefs",

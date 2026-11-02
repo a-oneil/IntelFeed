@@ -12,6 +12,8 @@ setup_logging()
 
 celery_app = Celery(
     "intelfeed",
+    # Every task honours the engine switch (app/workers/engine_gate.py).
+    task_cls="app.workers.engine_gate:GatedTask",
     broker=settings.redis_url,
     backend=settings.redis_url,
     include=[
@@ -21,6 +23,7 @@ celery_app = Celery(
         "app.workers.intel_feed_tasks",
         "app.workers.saved_search_tasks",
         "app.workers.enrichment_tasks",
+        "app.workers.enrichment_dispatch_tasks",
         "app.workers.report_tasks",
         "app.workers.reddit_digest_tasks",
         "app.workers.telegram_link_tasks",
@@ -52,6 +55,7 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     beat_schedule=build_beat_schedule(),
+    beat_scheduler="app.workers.engine_gate:EngineScheduler",
     # Prevent Celery from replacing the root logger we just configured.
     worker_hijack_root_logger=False,
     task_default_queue="celery",
@@ -73,6 +77,7 @@ celery_app.conf.update(
         "app.workers.entity_maintenance_tasks.refresh_actor_profile": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.process_name_normalization_batch": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.ai_enrich_gap_batch": {"queue": "ai"},
+        "app.workers.entity_maintenance_tasks.review_duplicate_entities": {"queue": "ai"},
         # Thread spines are generative; the sweeper that builds the threads
         # themselves is pure SQL and stays on the default queue.
         "app.workers.thread_tasks.narrate_story_threads": {"queue": "ai"},
@@ -89,8 +94,18 @@ celery_app.conf.update(
         # volume, which only celery-worker-ai mounts.
         "app.workers.copilot_auth_tasks.run_claude_auth": {"queue": "ai"},
         "app.workers.copilot_auth_tasks.refresh_claude_auth_status": {"queue": "ai"},
+        # The enrichment dispatcher has its own small worker
+        # (celery-worker-enrichment, concurrency 1): a tick waiting on a slow
+        # or throttled source never holds a default-worker slot, and ticks
+        # never overlap.
+        "app.workers.enrichment_dispatch_tasks.dispatch_enrichment_jobs": {"queue": "enrichment"},
     },
 )
+
+
+from app.workers.engine_gate import EngineSwitchStep  # noqa: E402
+
+celery_app.steps["consumer"].add(EngineSwitchStep)
 
 
 @after_setup_task_logger.connect

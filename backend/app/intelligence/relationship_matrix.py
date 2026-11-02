@@ -4,7 +4,8 @@ Every path that writes EntityRelationship rows (co-occurrence, AI extraction,
 copilot tools, the REST API) must validate against this matrix. Types absent
 as a source (country, sector, ttp, vendor/product except catalog edges) are
 target-only: countries are targeted or attribution anchors, sectors are
-targeted, TTPs are used, vendors/products are targeted. CVE↔vendor/product affects-links live in
+targeted (and a vendor operates in one), TTPs are used, vendors/products are
+targeted. CVE↔vendor/product affects-links live in
 cve_affected, not here.
 
 Symmetric ``related_to`` pairs store one canonical direction (the one listed
@@ -68,7 +69,9 @@ ALLOWED_RELATIONSHIPS: frozenset[tuple[str, str, str]] = frozenset(
         ("vendor", "related_to", "vendor"),
         ("vendor", "related_to", "product"),
         ("product", "related_to", "product"),
-        # observable as target only — attribution claims onto the IOC ledger.
+        # A vendor's industry (Wikidata P452, mapped onto the sector vocabulary).
+        ("vendor", "operates_in", "sector"),
+        # observable as target — attribution claims onto the IOC ledger.
         # Deliberately NOT reachable from co-occurrence (observables are absent
         # from COOCCURRENCE_RELATIONSHIP_MAP): these edges enter only through
         # evidence-bearing paths (AI extraction with a sentence, the REST API,
@@ -81,6 +84,10 @@ ALLOWED_RELATIONSHIPS: frozenset[tuple[str, str, str]] = frozenset(
         ("malware", "communicates_with", "observable"),
         ("tool", "communicates_with", "observable"),
         ("campaign", "uses", "observable"),
+        # The one edge an observable is the source of: a host whose software
+        # an internet scanner (Shodan InternetDB) matched to a CVE. Enrichment
+        # writes it; co-occurrence can't (observables aren't in its map).
+        ("observable", "exposes", "cve"),
     }
 )
 

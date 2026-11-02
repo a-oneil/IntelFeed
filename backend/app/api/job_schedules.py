@@ -68,13 +68,39 @@ class JobScheduleUpdate(BaseModel):
     )
 
 
-def _job_response(name: str, override: dict, job: dict) -> dict:
+def _source_label(source_type: str | None) -> str | None:
+    if not source_type:
+        return None
+    from app.enrichment.registry import SOURCE_REGISTRY
+
+    cls = SOURCE_REGISTRY.get(source_type)
+    return cls.display_name if cls else source_type
+
+
+def _run_summary(runs: dict | None) -> dict:
+    """The job's last 30 days from job_runs: runs, successes and how its last
+    run ended."""
+    runs = runs or {}
+    last = runs.get("last")
+    return {
+        "runs_30d": runs.get("runs", 0),
+        "ok_30d": runs.get("ok", 0),
+        "last_status": last.status if last else None,
+        "last_error": last.error if last else None,
+        "last_run_at": last.finished_at.isoformat() if last and last.finished_at else None,
+    }
+
+
+def _job_response(name: str, override: dict, job: dict, runs: dict | None = None) -> dict:
     effective_schedule = override.get("schedule") or job["default_schedule"]
     return {
         "name": name,
         "task": job["task"],
         "description": job["description"],
         "category": job["category"],
+        # The enrichment source whose manifest declares the job, if any.
+        "source": job.get("source"),
+        "source_label": _source_label(job.get("source")),
         "uses_ai": job.get("uses_ai", False),
         "settings_keys": job.get("settings_keys", []),
         "enabled": override.get("enabled", job.get("enabled_by_default", True)),
@@ -83,6 +109,7 @@ def _job_response(name: str, override: dict, job: dict) -> dict:
         "is_customized": bool(override),
         "human_schedule": schedule_to_human(effective_schedule),
         "human_default_schedule": schedule_to_human(job["default_schedule"]),
+        **_run_summary(runs),
     }
 
 
@@ -91,13 +118,19 @@ async def list_job_schedules(
     user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all scheduled jobs with their current configuration."""
+    """List all scheduled jobs with their current configuration, and each one's
+    last 30 days from ``job_runs`` (``runs_30d``, ``ok_30d``) with how its last
+    run ended (``last_status``, ``last_error``, ``last_run_at``). Jobs an
+    enrichment source owns carry ``source`` and its ``source_label``."""
+    from app.enrichment.console import job_runs
+
     overrides = await _load_overrides(db)
+    runs = await job_runs(db, list(JOB_REGISTRY))
 
     jobs = []
     for name, job in JOB_REGISTRY.items():
         override = overrides.get(name, {})
-        jobs.append(_job_response(name, override, job))
+        jobs.append(_job_response(name, override, job, runs.get(name)))
 
     return {
         "jobs": jobs,
@@ -173,10 +206,17 @@ async def reset_job_schedule(
 async def run_job_now(
     job_name: str = Path(..., description="Job name from the scheduled-job registry"),
     user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Manually trigger a job to run immediately."""
+    """Manually trigger a job to run immediately. Refused while the engine is
+    stopped: a worker would drop the job unrun."""
+    from app.services import engine_switch
+    from app.services.system_settings import get_setting
+
     if job_name not in JOB_REGISTRY:
         raise AppError(code="unknown_job", message=f"Unknown job: {job_name}", status_code=404)
+    if await get_setting(engine_switch.SETTING, db):
+        raise AppError(code="engine_stopped", message="The engine is stopped; start it to run a job", status_code=409)
 
     task_name = JOB_REGISTRY[job_name]["task"]
     result = celery_app.send_task(task_name)

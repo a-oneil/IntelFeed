@@ -72,6 +72,8 @@ DEFAULT_MODEL_ASSIGNMENTS: dict[str, str] = {
     # job than extraction: a short article window, a short list, a verdict
     # list back — the cheap model is right, and it runs on Ollama in prod.
     "entry_adjudication": "claude-haiku-4-5-20251001",
+    # Same shape as the adjudication: short profiles in, a verdict list out.
+    "entity_merge_review": "claude-haiku-4-5-20251001",
 }
 
 # Tasks that must be assigned to a specific provider type (rather than the
@@ -103,6 +105,8 @@ DEFAULT_ASSIGNMENT_CONFIGS: dict[str, dict] = {
     # A verdict list is a few hundred tokens; 4096 leaves room for a long
     # manifest's worth of one-sentence reasons without inviting rambling.
     "entry_adjudication": {"max_tokens": 4096},
+    # One decision object per pair, eight pairs a call: a few hundred tokens.
+    "entity_merge_review": {"max_tokens": 2048},
     # 2000 is a ceiling, not a target: a well-behaved spine is ~300 tokens, and
     # anything approaching this is a model that has stopped closing its JSON.
     # keep_alive matters more than the model choice on a single-GPU host — see
@@ -2279,6 +2283,60 @@ Return strict JSON matching the provided schema: the verdicts list first, one ob
                     "properties": {
                         "verdict": {"type": "string", "enum": ["ok", "overstated", "understated"]},
                         "reason": {"type": "string"},
+                    },
+                },
+            },
+        },
+    },
+    {
+        "name": "entity_merge_review",
+        "display_name": "Duplicate Entity Review (merge candidates)",
+        "description": (
+            "The daily duplicate review: pairs of existing threat actors, malware families or tools "
+            "that look like the same thing (similar names or a shared alias) are put "
+            "side by side and the model says whether they are one entity. A 'same' verdict becomes a "
+            "Merge proposal on the Engine Review tab for a person to apply."
+        ),
+        "category": "extraction",
+        "variables": ["pairs_block", "pair_count"],
+        "default_system_template": """You are a senior cyber-threat-intelligence analyst curating a catalogue of threat actors, malware families and tools. You are shown pairs of catalogue entries that an automated check flagged as possible duplicates. For each pair decide whether the two entries describe the SAME real-world thing under two names, or two DIFFERENT things.
+
+Use what you know about the threat landscape: vendor naming schemes (APT29 = Cozy Bear = The Dukes = Midnight Blizzard = NOBELIUM), version and variant names that are still the same family or operation (Qakbot = QBot = Pinkslipbot, LockBit 2.0 = LockBit 3.0), and the many names that only look alike but are not (APT28 vs APT29, Emotet vs Dridex, Cobalt Strike vs Cobalt Group, Conti vs Ryuk).
+
+VERDICTS
+  same       — the two entries are one thing. Also say which side to KEEP as the canonical record: prefer the entry with the name the community actually uses, the fuller profile, more articles, and a catalogue origin over an AI-created one. The other side is merged into it (its name becomes an alias, its articles move).
+  different  — two distinct things, even if related (a tool and the group that uses it; a loader and the payload it drops; a successor family with its own codebase; a product and the vendor).
+  unsure     — the evidence shown does not settle it. Prefer unsure over a guess: a wrong merge destroys a profile, a missed one just waits.
+
+RULES
+  - A shared alias is strong evidence of same unless the alias is a generic word or a known collision.
+  - Shared articles alone are weak evidence: reports name several actors and families together.
+  - A name that differs only by spacing, case, punctuation or a version suffix is usually the same family; a different number in an APT/TA/UNC/G-style designation is a different group.
+  - confidence: high when you are certain from your own knowledge or the aliases make it unambiguous, medium when the profiles line up but you are inferring, low when you are guessing (a low 'same' is never applied).
+  - reason: one short factual sentence naming the deciding fact.
+""",
+        "default_prompt_template": """PAIRS UNDER REVIEW ({{ pair_count }})
+
+{{ pairs_block }}
+
+Return strict JSON matching the provided schema: one decision per pair_id, in order, with verdict, keep ("a" or "b", only meaningful for same), confidence and reason.
+""",
+        "output_schema": {
+            "type": "object",
+            "required": ["decisions"],
+            "properties": {
+                "decisions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["pair_id", "verdict", "keep", "confidence", "reason"],
+                        "properties": {
+                            "pair_id": {"type": "string"},
+                            "verdict": {"type": "string", "enum": ["same", "different", "unsure"]},
+                            "keep": {"type": "string", "enum": ["a", "b", ""]},
+                            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                            "reason": {"type": "string"},
+                        },
                     },
                 },
             },

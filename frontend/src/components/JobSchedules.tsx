@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { toast } from "sonner";
 import {
   useJobSchedules,
   useUpdateJobSchedule,
@@ -11,7 +12,13 @@ import { Chip } from "./primitives";
 import styles from "./JobSchedules.module.css";
 import { AsyncStateLoading } from "@/components/AsyncState";
 
-export default function JobSchedules() {
+export default function JobSchedules({
+  onOpenEnrichment,
+}: {
+  /** Enrichment jobs belong to their source: their rows here are read-only
+   *  and open the Enrichment console with that source expanded. */
+  onOpenEnrichment: (source: string) => void;
+}) {
   const { data, isLoading } = useJobSchedules();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
     new Set()
@@ -39,9 +46,8 @@ export default function JobSchedules() {
     (grouped[job.category] = grouped[job.category] || []).push(job);
   }
 
-  // Default: all expanded
-  const isExpanded = (cat: string) =>
-    expandedCategories.size === 0 || expandedCategories.has(cat);
+  // Default: all collapsed
+  const isExpanded = (cat: string) => expandedCategories.has(cat);
 
   return (
     <div className={styles.container}>
@@ -98,7 +104,15 @@ export default function JobSchedules() {
             </div>
             {expanded && (
               <div className={styles.groupBody}>
-                {catJobs.map((job) => (
+                {catJobs.map((job) =>
+                  job.source ? (
+                    <SourceJobRow
+                      key={job.name}
+                      job={job}
+                      source={job.source}
+                      onOpen={onOpenEnrichment}
+                    />
+                  ) : (
                   <JobRow
                     key={job.name}
                     job={job}
@@ -111,12 +125,66 @@ export default function JobSchedules() {
                     onCancelEdit={() => setEditingJob(null)}
                     onChanged={() => setHasChanges(true)}
                   />
-                ))}
+                  )
+                )}
               </div>
             )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** A job owned by an enrichment source: shown for the full picture, edited
+ *  from the source's row in Engine → Enrichment. */
+function SourceJobRow({
+  job,
+  source,
+  onOpen,
+}: {
+  job: JobSchedule;
+  source: string;
+  onOpen: (source: string) => void;
+}) {
+  const runs = job.runs_30d ?? 0;
+  const ok = job.ok_30d ?? 0;
+  const failed = job.last_status === "error";
+  return (
+    <div className={`${styles.jobRow} ${!job.enabled ? styles.jobDisabled : ""}`}>
+      <div className={styles.jobInfo}>
+        <p className={styles.jobName}>
+          <span>{formatJobName(job.name)}</span>
+          <Chip
+            tone="toned"
+            tint="var(--accent)"
+            className={styles.ownerTag}
+            title="Owned by this enrichment source; edit it there"
+          >
+            source · {job.source_label ?? source}
+          </Chip>
+        </p>
+        <p className={styles.jobDesc}>{job.description}</p>
+        <div className={styles.jobSchedule}>
+          <span>{job.human_schedule}</span>
+          <span
+            className={failed ? styles.runsBad : styles.runs}
+            title="Successful runs of all runs in the last 30 days"
+          >
+            {runs === 0 ? "no runs in 30 days" : `${ok}/${runs} ok in 30 days`}
+          </span>
+        </div>
+        {failed && job.last_error && (
+          <p className={styles.lastError} title={job.last_error}>
+            Last run: {job.last_error}
+          </p>
+        )}
+      </div>
+      <div className={styles.jobControls}>
+        <button type="button" className={styles.settingsToggle} onClick={() => onOpen(source)}>
+          Open in Enrichment
+        </button>
+      </div>
     </div>
   );
 }
@@ -141,10 +209,14 @@ function JobRow({
   const [showSettings, setShowSettings] = useState(false);
   const settingsKeys = job.settings_keys ?? [];
 
-  const handleToggle = async (enabled: boolean) => {
-    await updateJob.mutateAsync({ name: job.name, enabled });
-    onChanged();
-  };
+  const handleToggle = (enabled: boolean) =>
+    updateJob.mutate(
+      { name: job.name, enabled },
+      {
+        onSuccess: onChanged,
+        onError: (e) => toast.error(`Couldn't ${enabled ? "enable" : "disable"} ${job.name}: ${(e as Error).message}`),
+      },
+    );
 
   const handleRun = async () => {
     setRunMsg(null);
@@ -158,11 +230,14 @@ function JobRow({
     }
   };
 
-  const handleReset = async () => {
-    await resetJob.mutateAsync(job.name);
-    onChanged();
-    onCancelEdit();
-  };
+  const handleReset = () =>
+    resetJob.mutate(job.name, {
+      onSuccess: () => {
+        onChanged();
+        onCancelEdit();
+      },
+      onError: (e) => toast.error(`Couldn't reset ${job.name}: ${(e as Error).message}`),
+    });
 
   return (
     <div
@@ -244,6 +319,7 @@ function JobRow({
                     onChanged();
                     onCancelEdit();
                   },
+                  onError: (e) => toast.error(`Couldn't save the schedule: ${(e as Error).message}`),
                 }
               );
             }}
@@ -304,7 +380,7 @@ function JobRow({
   );
 }
 
-function ScheduleEditor({
+export function ScheduleEditor({
   job,
   onSave,
   onCancel,

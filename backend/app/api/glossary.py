@@ -75,6 +75,23 @@ async def list_glossary_terms(
     return [_term_response(t) for t in result.scalars().all()]
 
 
+_COUNTS_CACHE_PREFIX = "intelfeed:glossary:counts:"
+_COUNTS_CACHE_TTL = 600
+
+
+async def _drop_counts_cache() -> None:
+    """Forget cached counts once a term's names change."""
+    from app.services.redis_client import get_redis
+
+    try:
+        redis = await get_redis()
+        keys = [k async for k in redis.scan_iter(match=_COUNTS_CACHE_PREFIX + "*")]
+        if keys:
+            await redis.delete(*keys)
+    except Exception:
+        pass
+
+
 @router.post("", response_model=GlossaryTermResponse, status_code=201)
 async def create_glossary_term(
     body: GlossaryTermCreate,
@@ -103,6 +120,7 @@ async def create_glossary_term(
     )
     db.add(term)
     await db.flush()
+    await _drop_counts_cache()
     await db.refresh(term)
     return _term_response(term)
 
@@ -145,6 +163,7 @@ async def update_glossary_term(
 
     db.add(term)
     await db.flush()
+    await _drop_counts_cache()
     await db.refresh(term)
     return _term_response(term)
 
@@ -166,6 +185,7 @@ async def delete_glossary_term(
 
     await db.delete(term)
     await db.flush()
+    await _drop_counts_cache()
 
 
 @router.get("/categories", response_model=list[GlossaryCategoryResponse])
@@ -216,6 +236,21 @@ async def get_glossary_counts(
     if feed_filter := meili_feed_filter(await visitor_feed_ids(db)):
         params["filter"] = feed_filter
 
+    # One search per name per term (~2,000 on the seeded glossary): cache the
+    # answer per feed filter so neither a visitor loop nor a busy UI repeats it.
+    import hashlib
+    import json
+
+    from app.services.redis_client import get_redis
+
+    cache_key = _COUNTS_CACHE_PREFIX + hashlib.sha256((params.get("filter") or "").encode()).hexdigest()[:16]
+    try:
+        redis = await get_redis()
+        if cached := await redis.get(cache_key):
+            return {"counts": json.loads(cached)}
+    except Exception:
+        redis = None
+
     def _search_count(names: list[str]) -> int:
         total = 0
         for name in names:
@@ -239,6 +274,11 @@ async def get_glossary_counts(
         for term_id, count in zip(futures.keys(), results):
             counts[term_id] = count
 
+    if redis is not None:
+        try:
+            await redis.set(cache_key, json.dumps(counts), ex=_COUNTS_CACHE_TTL)
+        except Exception:
+            pass
     return {"counts": counts}
 
 

@@ -124,11 +124,14 @@ export interface FeedRow {
   payload: Record<string, unknown>;
   actions: string[];
   links: FeedLink[];
-  /** Who proposed it: the post-analysis adjudicate stage, or the legacy jobs/scans. */
-  origin: "adjudicator" | "legacy" | null;
+  /** Who proposed it: the post-analysis adjudicate stage (article in hand), the
+   *  catalogue-wide duplicate review (two profiles side by side), or a scan / an analyst. */
+  origin: ProposalOrigin | null;
   /** What applying it changes (the Review tab's Domain facet). */
   domain: ProposalDomain;
 }
+
+export type ProposalOrigin = "adjudicator" | "merge_review" | "scan";
 
 /** Observables are an entity type, so dropping one is an "entities" proposal. */
 export type ProposalDomain = "links" | "entities" | "relationships";
@@ -148,10 +151,13 @@ export interface FeedFilters {
   mode?: "shadow" | "apply";
   /** Only unapplied proposals (review-queue mode) — skips applied history. */
   pending?: boolean;
-  origin?: "adjudicator" | "legacy";
-  /** Pending legacy proposals no entry can carry to the adjudicate stage —
+  origin?: ProposalOrigin;
+  /** Pending scan proposals no entry can carry to the adjudicate stage —
    *  listed for manual disposition; nothing automatic touches them. */
   orphaned?: boolean;
+  /** One entity's rows (the Review queue's expand). */
+  entity_type?: string;
+  entity_id?: string;
   limit?: number;
   offset?: number;
 }
@@ -175,13 +181,6 @@ export interface OrphanListResponse {
   total: number;
   items: OrphanRow[];
   by_type: Record<string, number>;
-}
-
-export interface GapBucket {
-  entity_type: string;
-  field: string;
-  missing: number;
-  sample: Array<{ id: string; name: string; article_count: number | null }>;
 }
 
 export interface ApplyAdvisoriesResult {
@@ -227,8 +226,9 @@ export function useHygieneStats() {
   });
 }
 
-export function useHygieneFeed(filters: FeedFilters) {
+export function useHygieneFeed(filters: FeedFilters, opts: { enabled?: boolean } = {}) {
   return useQuery({
+    enabled: opts.enabled ?? true,
     queryKey: [...HYGIENE_KEYS, "feed", filters],
     queryFn: async () => {
       const params: Record<string, string | number> = {
@@ -242,6 +242,8 @@ export function useHygieneFeed(filters: FeedFilters) {
       if (filters.pending) params.pending = "true";
       if (filters.origin) params.origin = filters.origin;
       if (filters.orphaned) params.orphaned = "true";
+      if (filters.entity_type) params.entity_type = filters.entity_type;
+      if (filters.entity_id) params.entity_id = filters.entity_id;
       const { data } = await api.get<FeedResponse>("/admin/hygiene/feed", { params });
       return data;
     },
@@ -256,19 +258,6 @@ export function useOrphans(entityType?: string) {
       const { data } = await api.get<OrphanListResponse>("/admin/hygiene/orphans", {
         params: entityType ? { entity_type: entityType } : undefined,
       });
-      return data;
-    },
-    staleTime: 60 * 1000,
-  });
-}
-
-export function useEnrichmentGaps() {
-  return useQuery({
-    queryKey: [...HYGIENE_KEYS, "enrichment-gaps"],
-    queryFn: async () => {
-      const { data } = await api.get<{ buckets: GapBucket[] }>(
-        "/admin/hygiene/enrichment-gaps",
-      );
       return data;
     },
     staleTime: 60 * 1000,
@@ -316,39 +305,11 @@ export function useApplyAdvisories() {
   });
 }
 
-export interface ReclassifyGroup {
-  entity_type: string;
-  entity_id: string;
-  name: string;
-  /** False when the entity is already gone — applying just clears the proposals. */
-  exists: boolean;
-  /** Most-proposed target type first. */
-  suggestions: { type: string; count: number }[];
-  proposals: number;
-  latest_at: string;
-  reason: string | null;
-  sample_entry_id: string | null;
-}
-
 export interface ReclassifyGroupsActionResult {
   entities: number;
   cleared_rows: number;
   failed: number;
   errors: { entity_id: string; error: string }[];
-}
-
-/** Pending reclassify proposals from both logs, one row per entity. */
-export function useReclassifyGroups(params: { q?: string; entity_type?: string; limit?: number; offset?: number }) {
-  return useQuery({
-    queryKey: ["hygiene", "reclassify-groups", params],
-    queryFn: async () => {
-      const { data } = await api.get<{ groups: ReclassifyGroup[]; total: number }>("/admin/hygiene/reclassify-groups", {
-        params,
-      });
-      return data;
-    },
-    placeholderData: keepPreviousData,
-  });
 }
 
 type ReclassifyItem = { entity_type: string; entity_id: string; target_type?: string };
@@ -377,61 +338,11 @@ export const useApplyReclassifyGroups = () => useReclassifyGroupsAction("apply")
 /** Clear every proposal about each entity and stop new ones being filed. */
 export const useDismissReclassifyGroups = () => useReclassifyGroupsAction("dismiss");
 
-export interface UnlinkGroup {
-  entity_type: string;
-  entity_id: string;
-  name: string;
-  exists: boolean;
-  /** Articles the review wants this entity unlinked from. */
-  proposals: number;
-  /** Articles it is linked to now (null where the type keeps no count). */
-  linked: number | null;
-  matched_names: string[];
-  reason: string | null;
-  latest_at: string;
-}
-
-export interface UnlinkRow {
-  id: string;
-  entry_id: string | null;
-  entry_title: string | null;
-  reason: string | null;
-  matched_names: string[];
-  created_at: string;
-}
-
 export interface UnlinkActionResult {
   done: number;
   failed: number;
   remaining: number;
   errors: { id: string; error: string }[];
-}
-
-/** Pending remove-link proposals from both logs, one row per entity. */
-export function useUnlinkGroups(params: { q?: string; entity_type?: string; limit?: number; offset?: number }) {
-  return useQuery({
-    queryKey: ["hygiene", "unlink-groups", params],
-    queryFn: async () => {
-      const { data } = await api.get<{ groups: UnlinkGroup[]; total: number; proposals: number }>(
-        "/admin/hygiene/unlink-groups",
-        { params },
-      );
-      return data;
-    },
-    placeholderData: keepPreviousData,
-  });
-}
-
-/** The articles behind one entity's remove-link proposals. */
-export function useUnlinkRows(group: { entity_type: string; entity_id: string } | null) {
-  return useQuery({
-    queryKey: ["hygiene", "unlink-rows", group?.entity_type, group?.entity_id],
-    queryFn: async () => {
-      const { data } = await api.get<UnlinkRow[]>("/admin/hygiene/unlink-groups/rows", { params: group! });
-      return data;
-    },
-    enabled: !!group,
-  });
 }
 
 type UnlinkTarget = { items?: { entity_type: string; entity_id: string }[]; row_ids?: string[] };
@@ -459,6 +370,93 @@ export function useUnlinkAction() {
   });
 }
 
+/** One row of the Review queue: every pending proposal about one entity,
+ *  from both logs, with what each kind wants done. A row about something
+ *  that is not a catalogue entity (an edge, an article's assessment) has
+ *  entity_id null and carries its own row_ids. */
+export interface ReviewGroup {
+  key: string;
+  entity_type: string;
+  entity_id: string | null;
+  name: string;
+  exists: boolean;
+  linked: number | null;
+  proposals: number;
+  kinds: { action: string; count: number }[];
+  reclassify_to: { type: string; count: number }[];
+  merge_into: { target_type: string; target_id: string; name: string | null; count: number }[];
+  domains: ProposalDomain[];
+  origin: ProposalOrigin | "mixed";
+  subject: string | null;
+  reason: string | null;
+  links: FeedLink[];
+  latest_at: string;
+  sample_entry_id: string | null;
+  matched_names: string[];
+  row_ids: string[];
+}
+
+export interface ReviewGroupsFilters {
+  q?: string;
+  entity_type?: string;
+  action?: string;
+  domain?: ProposalDomain;
+  origin?: ProposalOrigin;
+  limit?: number;
+  offset?: number;
+}
+
+export function useReviewGroups(params: ReviewGroupsFilters) {
+  return useQuery({
+    queryKey: [...HYGIENE_KEYS, "review-groups", params],
+    queryFn: async () => {
+      const { data } = await api.get<{ groups: ReviewGroup[]; total: number; proposals: number }>(
+        "/admin/hygiene/review-groups",
+        { params },
+      );
+      return data;
+    },
+    placeholderData: keepPreviousData,
+    staleTime: 15 * 1000,
+  });
+}
+
+export type ReviewGroupRef = { entity_type: string; entity_id: string | null; row_ids?: string[] };
+
+/** Settle rows the "leave it alone" way: keep links and type (and stop
+ *  proposing the change), remember a duplicate-review pair as two things,
+ *  drop every other pending proposal about the entity. */
+export function useDismissReviewGroups() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (items: ReviewGroupRef[]) => {
+      const { data } = await api.post<{ entities: number; cleared_rows: number }>("/admin/hygiene/review-groups/dismiss", {
+        items,
+      });
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
+    },
+  });
+}
+
+/** Run the duplicate review now: likely-duplicate pairs go to the model on
+ *  the AI worker and come back as Merge proposals. Only dispatches; a run
+ *  already in progress is reported, not doubled. */
+export function useScanDuplicates() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post<{ dispatched: boolean; already_running: boolean }>("/admin/hygiene/scan-duplicates");
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
+    },
+  });
+}
+
 export function useDismissFeedRow() {
   const qc = useQueryClient();
   return useMutation({
@@ -479,7 +477,7 @@ export function useDismissProposals() {
     mutationFn: async (body: {
       action?: string;
       source?: string;
-      origin?: "adjudicator" | "legacy";
+      origin?: ProposalOrigin;
       domain?: ProposalDomain;
     }) => {
       const { data } = await api.post<{ dismissed: number }>("/admin/hygiene/dismiss-proposals", body);

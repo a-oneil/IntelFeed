@@ -1,11 +1,12 @@
 /**
- * SourcesCard — the rail's single home for outbound links: the config's
+ * SourcesCard — the Overview's single home for outbound links: the config's
  * external pivot links (moved out of the header meta row), per-type reference
  * links (Malpedia, GitHub, Wikipedia), and for CVEs the NVD reference set
  * grouped into Advisories / Patches / Analysis / Other, capped with an
  * "all N references" expansion. When no Wikipedia article is attached, the
- * find-article flow starts from here, and the enrichment controls close the
- * card out — machine-fetched sources belong with the ones an analyst clicks.
+ * find-article flow starts from here. Machine-fetched context (and the
+ * enrichment controls) live in the ContextPanel, which shares the Context
+ * section with this card.
  *
  * Website is deliberately NOT a chip here — it stays an editable identity
  * field in the header (vendor/product), and two homes for one URL was the
@@ -13,8 +14,6 @@
  */
 import { useState } from "react";
 import type { EntitySearchResult } from "@/api/types";
-import type { EntityType } from "@/stores/intelStore";
-import { EnrichmentSection, useEnrichmentSupported } from "./EnrichmentSection";
 import type { EntityProfileConfig } from "./entityProfileConfig";
 import { groupReferences, refDomain, type RefLink } from "./cveRefs";
 import styles from "./entityProfile.module.css";
@@ -24,15 +23,11 @@ import { useIsVisitor } from "@/stores/authStore";
 const REFS_CAP = 12;
 
 export function SourcesCard({
-  entityType,
-  entityId,
   entity,
   config,
   cveReferences,
   onFindWikipedia,
 }: {
-  entityType: EntityType;
-  entityId: string;
   entity: EntitySearchResult;
   config: EntityProfileConfig;
   /** CVE only: raw reference links (structured references_ or the NVD blob). */
@@ -42,7 +37,6 @@ export function SourcesCard({
 }) {
   const isVisitor = useIsVisitor();
   const [refsExpanded, setRefsExpanded] = useState(false);
-  const enrichable = useEnrichmentSupported(entityType);
   const chips: Array<{ label: string; url: string }> = [];
   const seen = new Set<string>();
   const add = (label: string, url: string | null | undefined) => {
@@ -59,7 +53,7 @@ export function SourcesCard({
   const refGroups = cveReferences ? groupReferences(cveReferences) : [];
   const refTotal = refGroups.reduce((n, g) => n + g.links.length, 0);
   const refShown = refGroups.reduce((n, g) => n + Math.min(g.links.length, REFS_CAP), 0);
-  if (chips.length === 0 && refGroups.length === 0 && !onFindWikipedia && !enrichable) return null;
+  if (chips.length === 0 && refGroups.length === 0 && !onFindWikipedia) return null;
 
   return (
     <div className={styles.panel}>
@@ -100,8 +94,6 @@ export function SourcesCard({
           Find Wikipedia article…
         </button>
       )}
-      {/* Enrichment runs outside lookups; the Wikipedia search is one too. */}
-      {!isVisitor && <EnrichmentSection entityType={entityType} entityId={entityId} />}
     </div>
   );
 }

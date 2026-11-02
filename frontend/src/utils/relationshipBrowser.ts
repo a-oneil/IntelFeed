@@ -73,11 +73,15 @@ const ALLOWED_MATRIX: Record<string, readonly string[]> = {
   "campaign>product": ["targets"],
   "vendor>vendor": ["related_to"],
   "vendor>product": ["related_to"],
+  // Wikidata's industry (P452) for a vendor.
+  "vendor>sector": ["operates_in"],
   "product>product": ["related_to"],
   // Observables are target-only: attribution claims onto the IOC ledger, each
   // born from an evidence sentence (never from co-occurrence).
   "threat_actor>observable": ["uses", "communicates_with", "controls"],
   "malware>observable": ["uses", "communicates_with"],
+  // A host's exposure (Shodan InternetDB's CVE list): the one observable-first triple.
+  "observable>cve": ["exposes"],
   "tool>observable": ["communicates_with"],
   "campaign>observable": ["uses"],
 };
@@ -162,6 +166,8 @@ const VERB_CHIP: Record<string, { active: string; passive: string }> = {
   mitigated_by: { active: "mitigated by", passive: "mitigates" },
   mitigates: { active: "mitigates", passive: "mitigated by" },
   operates_from: { active: "operates from", passive: "origin of" },
+  operates_in: { active: "operates in", passive: "sector of" },
+  exposes: { active: "exposes", passive: "exposed on" },
   infrastructure: { active: "infrastructure in", passive: "infrastructure for" },
   co_mentioned: { active: "co-mentioned", passive: "co-mentioned" },
 };
@@ -539,6 +545,8 @@ const VERB_ORDER = [
   "communicates_with",
   "controls",
   "hosts",
+  "exposes",
+  "operates_in",
   "related_to",
   "mitigates",
   "mitigated_by",

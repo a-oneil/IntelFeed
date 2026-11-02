@@ -26,7 +26,7 @@ Special cases:
   rows go with them.
 
 The caller commits, then removes the deleted ids from Meilisearch and re-pushes
-the keepers' tag fields (see scripts/maintenance/merge_same_url_entries.py).
+the keepers' tag fields.
 """
 
 import uuid

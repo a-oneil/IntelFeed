@@ -1,13 +1,12 @@
-"""Helpers for writing enrichment results without accumulating duplicates.
+"""Overwriting a source's one result row for an entity.
 
-Bulk-sync sources that refresh the same entities on every run (EPSS, GitHub PoC)
-must overwrite their previous result row instead of appending a new one — the
-append pattern grew enrichment_results to ~40 rows per CVE before the
-m2a2b3c4d5g9 prune migration.
+Scheduled jobs store answers through ``app.enrichment.pipeline.apply_source_result``,
+which adds a row only when the answer changed and otherwise re-dates the
+latest one; the EPSS sync does the same set-based. This helper is for a writer
+that wants exactly one row per (entity, source) whatever the answer.
 
-Deliberately NOT used for the wikipedia writer or the generic pipeline write
-path: wikipedia stores long-lived ``user_cleared`` marker rows whose semantics
-an upsert would clobber, and pipeline writes are already gated by cache TTL.
+Not for the wikipedia writer: it stores long-lived ``user_cleared`` marker rows
+whose semantics an upsert would clobber.
 """
 
 import uuid

@@ -46,9 +46,12 @@ export function RelationshipRow({
   onConfirm,
   onReject,
   onUnlink,
+  claimSources,
 }: {
   row: RelRow;
   viewedLabel: string;
+  /** The enrichment sources that claim this connection, as labels. */
+  claimSources?: (row: RelRow) => string[];
   onOpen: (type: EntityType, id: string, label: string) => void;
   onOpenArticle?: (entryId: string) => void;
   onConfirm?: (relationshipId: string) => void;
@@ -58,6 +61,7 @@ export function RelationshipRow({
   const [expanded, setExpanded] = useState(false);
   const [expandedStories, setExpandedStories] = useState<Set<number>>(new Set());
   const { type, item, label, meta } = row;
+  const viaSources = claimSources?.(row) ?? [];
   const s = item.strength;
   const trust = trustOf(item);
   const evidence = item.proximity_entries ?? [];
@@ -123,6 +127,11 @@ export function RelationshipRow({
             >
               {trust.tier}
               {trust.provenance ? ` · ${trust.provenance}` : ""}
+            </span>
+          )}
+          {viaSources.length > 0 && (
+            <span className={styles.relSourceTag} title={`Claimed by ${viaSources.join(", ")}`}>
+              {viaSources.join(" · ")}
             </span>
           )}
         </button>

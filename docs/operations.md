@@ -30,6 +30,7 @@ Dev mounts code for live edits; prod builds it into images and adds memory limit
 | API server | `uvicorn --reload` | Gunicorn, 3 Uvicorn workers, 180 s timeout, recycled after 800–1,000 requests |
 | Default worker | `--concurrency=4`, `celery` queue | `--concurrency=2`, `celery` queue, child restart after 50 tasks or 300 MB |
 | AI worker | `celery-worker-ai`, one task at a time | Same, plus child restart after 20 tasks |
+| Enrichment worker | `celery-worker-enrichment`, one task at a time, child restart after 200 tasks | Same, plus child restart at 250 MB |
 | Redis | 512 MB cap, `allkeys-lru`, no password | 1 GB cap, `volatile-lru`, password, append-only file |
 | Health checks | db, redis, meilisearch, libretranslate, piper | Same, plus api and frontend |
 | Host ports | 8000, 3001, 5433, 6380, 7700, 5050, 5060 | 80 and 443 only (Caddy) |
@@ -37,6 +38,7 @@ Dev mounts code for live edits; prod builds it into images and adds memory limit
 | Restart policy | `unless-stopped` | Same |
 
 - **The AI worker** (`celery-worker-ai`) drains the `ai` queue and the older `claude_code` queue, one task at a time (`CLAUDE_CODE_CONCURRENCY`, default 1) so AI calls never overlap. Only it holds the Claude CLI login (`claude_cli` volume).
+- **The enrichment worker** (`celery-worker-enrichment`) drains the `enrichment` queue, one task at a time: the enrichment dispatcher, which beat queues every 30 seconds to run due lookups from `enrichment_jobs`. If it is down, lookups wait in that table and nothing is lost; ticks queued meanwhile expire after 30 seconds.
 - **LibreTranslate** is off by default, behind the `translate` profile, since its models hold about 740 MB. Start: `docker compose -f docker-compose.prod.yml --profile translate up -d libretranslate`. While off, auto-translate skips; `retry-untranslated-entries` (every 30 minutes) catches up later.
 - **Startup seeders** (AI tasks, enrichment sources) take a Postgres advisory lock so the three API workers don't collide.
 - **OOM order.** `oom_score_adj` sets what the kernel kills first: workers (+600) and piper (+300); db (−900), redis (−800), api (−700) and caddy (−500) are protected. Add host swap so spikes slow rather than kill.
@@ -54,6 +56,7 @@ Dev mounts code for live edits; prod builds it into images and adds memory limit
 | api | 1500M |
 | celery-worker | 2G |
 | celery-worker-ai | 1G |
+| celery-worker-enrichment | 384M |
 | celery-beat | 256M |
 | telegram-listener | 512M |
 | frontend | 128M |
@@ -81,6 +84,7 @@ See [diagrams/operations-service-topology.md](./diagrams/operations-service-topo
 | `api` | 8000 | internal 8000 | backend, frontend | FastAPI app |
 | `celery-worker` | — | — | backend | Background jobs (`celery` queue) |
 | `celery-worker-ai` | — | — | backend | AI tasks and copilot turns (`ai` queue), serially |
+| `celery-worker-enrichment` | — | — | backend | Enrichment dispatcher (`enrichment` queue), serially |
 | `celery-beat` | — | — | backend | Scheduler |
 | `telegram-listener` | — | — | backend | Telegram channel watcher |
 | `frontend` | 3001 | internal 80 | frontend | Web app (Vite in dev; nginx in prod, forwarding `/api/*` to `api`) |
@@ -295,7 +299,7 @@ Back up `ENCRYPTION_KEY`: without it these are unreadable, even from a good back
 | `app.log` | App INFO and above, excluding workers |
 | `error.log` | ERROR and above |
 | `http.log` | One line per request: method, path, status, `duration_ms`, client |
-| `tasks.log` | Celery worker and beat |
+| `jobs.log` | Celery worker and beat |
 | `audit.log` | Create, update and delete actions via the API |
 | `update.log` | `update.sh` output |
 
@@ -305,7 +309,7 @@ Admins read them in **Settings → Logs** or via the API:
 
 ### Prometheus Metrics
 
-`/metrics` answers only loopback and private (RFC 1918) addresses (`backend/app/api/metrics.py`). In prod the frontend nginx always returns **404** for it, since behind the proxy every request looks private. Scrape `http://api:8000/metrics` from Prometheus on the compose `backend` network; in dev, use `http://localhost:8000/metrics`.
+`/metrics` answers only a direct peer on loopback or a private (RFC 1918) address (`backend/app/api/metrics.py`); it ignores `X-Real-IP` and other forwarding headers. In prod the frontend nginx always returns **404** for it, since behind the proxy every request looks private. Scrape `http://api:8000/metrics` from Prometheus on the compose `backend` network; in dev, use `http://localhost:8000/metrics`.
 
 ```yaml
 scrape_configs:
@@ -345,7 +349,7 @@ Metrics (`backend/app/core/metrics.py`):
 
 ### Health Endpoints
 
-`GET /api/health` (no login) pings PostgreSQL, Redis and Meilisearch with latencies:
+`GET /api/health` (no login) pings PostgreSQL, Redis and Meilisearch. A caller on the api host itself (the container health check, `docker compose exec api curl …`) also gets each component's latency and error text:
 
 ```json
 {
@@ -360,6 +364,8 @@ Metrics (`backend/app/core/metrics.py`):
   }
 }
 ```
+
+Anyone else, including every request through the proxy, gets each component's `status` only (`{"database": {"status": "ok"}, …}`).
 
 `healthy` = all up; `degraded` = database up, Redis or Meilisearch down; `unhealthy` = database down.
 
@@ -478,6 +484,8 @@ Host folders (relative to the repo):
 | `./tts_media` | api, celery-worker | Read-aloud MP3s; must be owned by uid 1000 (`update.sh` fixes this) |
 | `./ingest_files` | api, celery-worker | Uploaded originals, deleted after `ingest_files_ttl_days` (default 180); must be owned by uid 1000 (`update.sh` fixes this) |
 
+The `cvelist-backfill` job downloads the cvelistV5 baseline zip (about 650 MB; a zip over 2 GB is refused) into `/tmp` inside the celery-worker container and keeps it there between runs, so that container's writable layer needs about 2 GB free.
+
 ---
 
 ## Performance & Scaling
@@ -495,7 +503,7 @@ Host folders (relative to the repo):
 
 **One bigger server.** Add CPU and RAM, then raise `memory` limits in `docker-compose.prod.yml` and worker `--concurrency`. Keep Gunicorn's worker count (`-w 3`) small enough to fit under the api memory limit; a swapping worker is worse than one fewer.
 
-**Queues.** `celery` (everything but AI work) is served by `celery-worker`; `ai` (every task calling an AI provider) only by `celery-worker-ai`. New AI-calling tasks must be routed to `ai` in `task_routes` in `backend/app/workers/celery_app.py`.
+**Queues.** `celery` (everything else) is served by `celery-worker`; `ai` (every task calling an AI provider) only by `celery-worker-ai`; `enrichment` (the enrichment dispatcher) only by `celery-worker-enrichment`. New AI-calling tasks must be routed to `ai` in `task_routes` in `backend/app/workers/celery_app.py`. A second `celery-worker-enrichment` is safe (claims use `SKIP LOCKED`, and each source's allowance lives in Redis) but buys little: the sources' rate limits set the pace, not the worker.
 
 **Postgres tuning.** Prod `db` settings are command-line flags (`shared_buffers=320MB`, `work_mem=24MB`, `maintenance_work_mem=96MB`, `effective_cache_size=2GB`, `random_page_cost=1.1`). They override `ALTER SYSTEM`; edit the compose file and recreate:
 
@@ -587,12 +595,6 @@ docker compose -f docker-compose.prod.yml exec redis redis-cli -a "$REDIS_PASSWO
 `$REDIS_PASSWORD` isn't in your shell by default; paste it from `.env` or run `set -a; . ./.env; set +a`.
 
 ### Useful Commands
-
-**After the per-user tags migration** (`y6q8s0u2w4y6`), run once so tag search hides other users' tags (re-runnable; `--dry-run` only counts):
-
-```bash
-docker compose -f docker-compose.prod.yml exec api python scripts/maintenance/reindex_entry_tags.py --all
-```
 
 **Containers:**
 

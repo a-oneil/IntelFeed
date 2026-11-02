@@ -281,9 +281,10 @@ async def _seed_enrichment_sources() -> None:
                     EnrichmentSource(
                         source_type=src["source_type"],
                         display_name=src["display_name"],
-                        is_enabled=False,
-                        trigger_mode=src.get("default_trigger_mode", "manual"),
-                        rate_limit_config=src.get("default_rate_limit", {}),
+                        is_enabled=src["default_enabled"],
+                        trigger_mode=src["default_trigger_mode"],
+                        rate_limit_config=src["default_rate_limit"],
+                        daily_budget=src["default_daily_budget"],
                         health_status="unknown",
                         config={},
                     )
@@ -762,6 +763,7 @@ from app.api.dashboards import router as dashboards_router
 from app.api.documentation import router as documentation_router
 from app.api.engine import router as engine_router
 from app.api.enrichment_api import router as enrichment_router
+from app.api.entity_context import router as entity_context_router
 from app.api.entity_links import router as entity_links_router
 from app.api.entity_merge import router as entity_merge_router
 from app.api.entity_notes import router as entity_notes_router
@@ -875,6 +877,7 @@ app.include_router(comments_router, prefix="/api/comments", tags=["comments"])
 app.include_router(entity_notes_router, prefix="/api/entity-notes", tags=["entity-notes"])
 app.include_router(campaigns_router, prefix="/api/campaigns", tags=["campaigns"])
 app.include_router(entity_profiles_router, prefix="/api/entities", tags=["entity-profiles"])
+app.include_router(entity_context_router, prefix="/api/entities", tags=["entity-profiles"])
 app.include_router(entity_relationships_router, prefix="/api/entity-relationships", tags=["entity-relationships"])
 app.include_router(entity_links_router, prefix="/api/entity-links", tags=["entity-links"])
 app.include_router(telemetry_sources_router, prefix="/api/telemetry-sources", tags=["telemetry-sources"])

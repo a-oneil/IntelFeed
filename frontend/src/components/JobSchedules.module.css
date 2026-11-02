@@ -138,6 +138,33 @@
   margin-left: var(--sp-2);
 }
 
+/* Enrichment jobs: which source owns them, in its own words. */
+.ownerTag {
+  margin-left: var(--sp-2);
+}
+
+/* 30-day success count; red only when the last run failed. */
+.runs,
+.runsBad {
+  margin-left: var(--sp-2);
+  color: var(--text-muted);
+}
+
+.runsBad {
+  color: var(--danger);
+}
+
+.lastError {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--danger);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .aiTag {
   letter-spacing: 0.04em;
   margin-left: 6px;
@@ -366,14 +393,6 @@
   font-size: var(--fs-base);
   color: var(--success);
   margin-left: 6px;
-}
-
-/* ─── Loading ────────────────────────────────────────── */
-
-.loading {
-  font-size: var(--fs-md);
-  color: var(--text-muted);
-  padding: 2rem 0;
 }
 
 /* ─── Mobile ─────────────────────────────────────────── */

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import EnrichmentSettings from "@/components/EnrichmentSettings";
 import JobSchedules from "@/components/JobSchedules";
 import SystemSettings, { SettingsHighlightContext } from "@/components/SystemSettings";
 
 import { type BrowseView, EngineMatrix, type MatrixView } from "./EngineMatrix";
-import { EnrichmentGaps } from "./EnrichmentGaps";
+import { EngineStoppedBanner } from "./EngineSwitch";
+import { EnrichmentConsole } from "./EnrichmentConsole";
 import { MaintenancePanel } from "./MaintenancePanel";
 import { PipelinePlans } from "./PipelinePlans";
 import { PublishingPanel } from "./PublishingPanel";
@@ -26,6 +26,10 @@ interface ConsoleState {
   stage?: string;
   status?: string;
   browse?: BrowseView;
+  /** Enrichment source to open on its Jobs tab (`?section=enrichment&source=nvd`). */
+  source?: string;
+  /** Source whose key to open in Keys (`?section=enrichment&key_for=virustotal`). */
+  keyFor?: string;
 }
 
 // Legacy deep links from the old six-tab layout (?tab=) and the even older
@@ -37,6 +41,8 @@ function legacyState(params: URLSearchParams): ConsoleState {
     return { stage: stage ?? undefined, status: params.get("status") ?? undefined };
   if (tab === "pipeline") {
     if (stage === "feeds") return { view: "feeds" };
+    // The enrich stage's settings are the Enrichment page itself.
+    if (stage === "enrich") return { browse: "enrichment" };
     if (stage) return { openStage: stage };
     return {};
   }
@@ -48,7 +54,11 @@ function legacyState(params: URLSearchParams): ConsoleState {
     case "schedules":
       return { browse: "jobs" };
     case "enrichment":
-      return { browse: "enrichment" };
+      return {
+        browse: "enrichment",
+        source: params.get("source") ?? undefined,
+        keyFor: params.get("key_for") ?? undefined,
+      };
     case "feed-health":
       return { view: "feeds" };
     case "workbench":
@@ -64,6 +74,8 @@ function legacyState(params: URLSearchParams): ConsoleState {
 export function EngineSection() {
   const [searchParams] = useSearchParams();
   const [browse, setBrowse] = useState<BrowseView | null>(null);
+  const [enrichSource, setEnrichSource] = useState<string | null>(null);
+  const [enrichKeyFor, setEnrichKeyFor] = useState<string | null>(null);
   const [initial, setInitial] = useState<ConsoleState>({});
   const [nonce, setNonce] = useState(0);
   // Setting the console's search jumped to — flashed wherever it renders, then
@@ -84,6 +96,8 @@ export function EngineSection() {
     if (Object.keys(s).length === 0) return;
     if (s.browse) {
       setBrowse(s.browse);
+      setEnrichSource(s.source ?? null);
+      setEnrichKeyFor(s.keyFor ?? null);
       return;
     }
     setInitial(s);
@@ -95,12 +109,29 @@ export function EngineSection() {
       <SettingsHighlightContext.Provider value={highlight}>
         <div className={styles.wrap}>
           <div className={styles.viewHead}>
-            <button type="button" className={styles.backBtn} onClick={() => setBrowse(null)}>
+            <button
+              type="button"
+              className={styles.backBtn}
+              onClick={() => {
+                setBrowse(null);
+                setEnrichSource(null);
+                setEnrichKeyFor(null);
+              }}
+            >
               ← Engine
             </button>
             <h2 className={styles.viewTitle}>{BROWSE_TITLES[browse]}</h2>
           </div>
-          {browse === "jobs" && <JobSchedules />}
+          <EngineStoppedBanner />
+          {browse === "jobs" && (
+            <JobSchedules
+              onOpenEnrichment={(source) => {
+                setEnrichSource(source);
+                setEnrichKeyFor(null);
+                setBrowse("enrichment");
+              }}
+            />
+          )}
           {browse === "plans" && (
             <>
               <PipelinePlans />
@@ -109,15 +140,11 @@ export function EngineSection() {
             </>
           )}
           {browse === "enrichment" && (
-            <>
-              <div className={styles.browseCard}>
-                <EnrichmentSettings />
-                {/* Entities missing key fields — one-click AI enrichment, next to
-                    the sources that fill them in. */}
-                <EnrichmentGaps />
-              </div>
-              <SystemSettings filterGroups={["enrichment", "api_keys"]} />
-            </>
+            <EnrichmentConsole
+              key={`${enrichSource ?? ""}|${enrichKeyFor ?? ""}`}
+              initialSource={enrichSource}
+              initialKeyFor={enrichKeyFor}
+            />
           )}
           {browse === "publishing" && <PublishingPanel />}
           {browse === "maintenance" && (
@@ -142,6 +169,7 @@ export function EngineSection() {
   return (
     <SettingsHighlightContext.Provider value={highlight}>
       <div className={styles.wrap}>
+        <EngineStoppedBanner />
         <EngineMatrix
           key={nonce}
           initialView={initial.view}

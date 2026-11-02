@@ -291,12 +291,15 @@ def parse_attack_bundle(bundle: dict, domain: str) -> ParsedBundle:
     return parsed
 
 
-async def fetch_attack_bundles(domains: list[str] | None = None) -> dict[str, dict]:
-    """Download the official STIX bundles for the given domains."""
-    import httpx
+async def fetch_attack_bundles(db: AsyncSession, domains: list[str] | None = None) -> dict[str, dict]:
+    """Download the official STIX bundles for the given domains through the
+    mitre_attack source's gateway."""
+    from app.enrichment.gateway import JOB_TOKEN_WAIT
+    from app.enrichment.pipeline import gateway_for
 
+    gateway, _ = await gateway_for(db, "mitre_attack", max_wait=JOB_TOKEN_WAIT)
     bundles: dict[str, dict] = {}
-    async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
+    async with gateway.client(timeout=180.0, follow_redirects=True) as client:
         for domain in domains or list(ATTACK_STIX_URLS):
             resp = await client.get(ATTACK_STIX_URLS[domain])
             resp.raise_for_status()
@@ -570,7 +573,7 @@ async def sync_attack_relationships(db: AsyncSession, parsed_bundles: list[Parse
 
 async def refresh_attack_catalog(db: AsyncSession, domains: list[str] | None = None) -> dict:
     """Download all ATT&CK domain bundles and hydrate the catalog. Commits."""
-    bundles = await fetch_attack_bundles(domains)
+    bundles = await fetch_attack_bundles(db, domains)
     parsed = [parse_attack_bundle(bundle, domain) for domain, bundle in bundles.items()]
     stats = await hydrate_attack_catalog(db, parsed)
     stats["entity_attributes"] = await hydrate_attack_entity_attributes(db, parsed)

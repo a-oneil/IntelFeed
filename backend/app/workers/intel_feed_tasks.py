@@ -9,7 +9,7 @@ from app.ai.caller import Caller
 from app.config import settings
 from app.core.metrics import CELERY_TASK_DURATION_SECONDS, CELERY_TASKS_TOTAL
 from app.workers.celery_app import celery_app
-from app.workers.db import run_async, worker_session
+from app.workers.db import run_async, source_job, worker_session
 from app.workers.pipeline_logging import pipeline_stage
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ def sync_kev_feed():
         stats = run_async(_sync_kev_feed())
         logger.info("KEV sync stats: %s", stats)
         CELERY_TASKS_TOTAL.labels(task_name="sync_kev_feed", status="success").inc()
+        return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="sync_kev_feed", status="error").inc()
         logger.exception("KEV sync failed")
@@ -35,6 +36,7 @@ def sync_kev_feed():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="sync_kev_feed").observe(time.monotonic() - start)
 
 
+@source_job("cisa_kev")
 async def _sync_kev_feed():
     from app.intelligence.external_feeds import sync_kev_feed
 
@@ -56,6 +58,7 @@ def refresh_cwe_catalog():
         stats = run_async(_refresh_cwe_catalog())
         logger.info("CWE catalog refresh stats: %s", stats)
         CELERY_TASKS_TOTAL.labels(task_name="refresh_cwe_catalog", status="success").inc()
+        return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="refresh_cwe_catalog", status="error").inc()
         logger.exception("CWE catalog refresh failed")
@@ -64,6 +67,7 @@ def refresh_cwe_catalog():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="refresh_cwe_catalog").observe(time.monotonic() - start)
 
 
+@source_job("mitre_cwe")
 async def _refresh_cwe_catalog():
     from app.intelligence.cwe_catalog import refresh_cwe_catalog as _refresh
 
@@ -79,6 +83,7 @@ def sync_cybergeist_feeds():
         stats = run_async(_sync_cybergeist_feeds())
         logger.info("Cybergeist sync stats: %s", stats)
         CELERY_TASKS_TOTAL.labels(task_name="sync_cybergeist_feeds", status="success").inc()
+        return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="sync_cybergeist_feeds", status="error").inc()
         logger.exception("Cybergeist sync failed")
@@ -87,6 +92,7 @@ def sync_cybergeist_feeds():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="sync_cybergeist_feeds").observe(time.monotonic() - start)
 
 
+@source_job("cybergeist")
 async def _sync_cybergeist_feeds():
     from app.intelligence.external_feeds import sync_cybergeist_malware, sync_cybergeist_threat_actors
 
@@ -106,7 +112,14 @@ async def _sync_cybergeist_feeds():
         refresh_autolinker_vocabulary.delay()
         rescan_recent_entries.apply_async(kwargs={"days": 7}, countdown=30)
 
-    return {"actors": actor_stats, "malware": malware_stats}
+    both = (actor_stats, malware_stats)
+    return {
+        "fetched": sum(s.get(k, 0) for s in both for k in ("new", "updated", "skipped", "errors")),
+        "changed": sum(s.get("new", 0) + s.get("updated", 0) for s in both),
+        "written": sum(s.get("new", 0) + s.get("updated", 0) for s in both),
+        "actors": actor_stats,
+        "malware": malware_stats,
+    }
 
 
 @celery_app.task(name="app.workers.intel_feed_tasks.sync_ransomware_victims", soft_time_limit=300, time_limit=360)
@@ -126,6 +139,7 @@ def sync_ransomware_victims():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="sync_ransomware_victims").observe(time.monotonic() - start)
 
 
+@source_job("ransomware_live")
 async def _sync_ransomware_victims():
     from app.intelligence.ransomware_sync import sync_ransomware_victims as _run_sync
 

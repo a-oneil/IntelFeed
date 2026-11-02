@@ -133,6 +133,11 @@ export interface CVEAffectedEntityRow {
   product_name: string | null;
   version_start: string | null;
   version_end: string | null;
+  /** The resolved product's lifecycle (endoflife.date), when known. */
+  product_support_status?: string | null;
+  product_next_eol?: string | null;
+  /** End-of-life releases of the product this row's version range covers. */
+  eol_releases?: string[];
 }
 
 /** Parsed CPE pairs for a CVE with entity resolution — the profile's Affected panel. */

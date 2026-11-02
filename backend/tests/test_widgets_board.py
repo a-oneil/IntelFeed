@@ -6,7 +6,7 @@ counts something rather than only surviving on an empty database.
 """
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -124,7 +124,9 @@ async def test_targeting_grid(client: AsyncClient, auth_headers: dict):
 
 @pytest.mark.asyncio
 async def test_kev_deadlines(client: AsyncClient, auth_headers: dict, db_session):
-    due = (datetime.now(UTC) + timedelta(days=5)).date()
+    # The widget counts days from the server's local date (``date.today()``),
+    # so the due date is built from the same calendar, not from UTC.
+    due = date.today() + timedelta(days=5)
     db_session.add(
         CVE(
             cve_id="CVE-2026-90001",

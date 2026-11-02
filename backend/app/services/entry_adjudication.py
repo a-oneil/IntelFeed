@@ -192,6 +192,9 @@ async def _settings(db: AsyncSession) -> dict:
         "min_score": _num(await get_setting("adjudication_min_priority_score", db), 0.0),
         "min_conf": min_conf if min_conf in CONFIDENCES else "high",
         "breaker_pct": _num(await get_setting("adjudication_circuit_breaker_pct", db), 0.5),
+        # Distinct articles whose reviews must agree on the same target type
+        # before a reclassify is applied in apply mode (1 = the first one).
+        "reclassify_consensus": max(1, _num(await get_setting("adjudication_reclassify_consensus", db), 2, int)),
         "max_chars": _num(await get_setting("adjudication_content_max_chars", db), 8000, int),
         "scope": {s.strip() for s in scope_raw.split(",") if s.strip()}
         or {"links", "entities", "relationships", "observables"},
@@ -1694,6 +1697,13 @@ async def _drop_ioc(db: AsyncSession, entry, kind: str, value: str, observable_i
     return snap or None
 
 
+def _json_safe(resp) -> dict | str:
+    """A merge-engine response as plain JSON (UUIDs as strings), fit for a
+    JSONB audit column."""
+    dump = getattr(resp, "model_dump", None)
+    return dump(mode="json") if dump else str(resp)
+
+
 async def _merge_entity(
     db: AsyncSession, entity_type: str, entity_id: uuid.UUID, target: dict, reason: str
 ) -> dict | None:
@@ -1722,7 +1732,7 @@ async def _merge_entity(
                 reasoning=reason or None,
             ),
         )
-        return {"via": "reclassify", "response": getattr(resp, "model_dump", lambda: str(resp))()}
+        return {"via": "reclassify", "response": _json_safe(resp)}
     if entity_type == THREAT_ACTOR:
         resp = await perform_actor_merge(db, target_id, MergeRequest(source_id=entity_id, reasoning=reason or None))
     elif entity_type == MALWARE:
@@ -1731,7 +1741,60 @@ async def _merge_entity(
         resp = await perform_same_type_merge(
             db, entity_type, target_id, entity_id, mode="apply", reasoning=reason or None
         )
-    return {"via": "merge", "response": getattr(resp, "model_dump", lambda: str(resp))()}
+    return {"via": "merge", "response": _json_safe(resp)}
+
+
+async def _reclassify_agreement(
+    db: AsyncSession, entity_type: str, entity_id: uuid.UUID, target_type: str, exclude_entry_id: uuid.UUID
+) -> int:
+    """How many other articles already have a pending proposal to move this
+    entity to ``target_type`` — one vote per article, across both logs."""
+    from app.models.entity_link_validation_log import EntityLinkValidationLog
+    from app.models.entity_maintenance import EntityMaintenanceLog
+
+    link_entries = (
+        await db.execute(
+            select(EntityLinkValidationLog.entry_id)
+            .where(
+                EntityLinkValidationLog.action == "needs_reclassification",
+                EntityLinkValidationLog.entity_type == entity_type,
+                EntityLinkValidationLog.entity_id == entity_id,
+                EntityLinkValidationLog.suggested_entity_type == target_type,
+                EntityLinkValidationLog.entry_id != exclude_entry_id,
+            )
+            .distinct()
+        )
+    ).scalars()
+    maint_entries = (
+        await db.execute(
+            select(EntityMaintenanceLog.before["entry_id"].astext)
+            .where(
+                EntityMaintenanceLog.action == ACTION_RECLASSIFY,
+                EntityMaintenanceLog.applied.is_(False),
+                EntityMaintenanceLog.entity_type == entity_type,
+                EntityMaintenanceLog.entity_id == entity_id,
+                EntityMaintenanceLog.after["suggested_type"].astext == target_type,
+            )
+            .distinct()
+        )
+    ).scalars()
+    votes = {str(e) for e in link_entries if e} | {e for e in maint_entries if e}
+    votes.discard(str(exclude_entry_id))
+    return len(votes)
+
+
+async def _reclassify_flips_back(db: AsyncSession, entity_type: str, entity_id: uuid.UUID, target_type: str) -> bool:
+    """True when the name was deliberately folded OUT of ``target_type`` before
+    (a reclassify tombstone exists for it there). Proposing to move it back
+    is the start of a type ping-pong, so the verdict is dropped unfiled."""
+    from app.intelligence.entity_dedup import find_reclassify_tombstone
+
+    model = _model_for(entity_type)
+    obj = await db.get(model, entity_id) if model else None
+    if obj is None:
+        return False
+    aliases = list(getattr(obj, "aliases", None) or [])
+    return await find_reclassify_tombstone(db, target_type, obj.name, aliases) is not None
 
 
 async def apply_verdicts(
@@ -1753,12 +1816,15 @@ async def apply_verdicts(
         log_shadow_removal,
     )
     from app.models.entity_maintenance import EntityMaintenanceLog
-    from app.services.proposal_dismissals import reclassify_dismissed
+    from app.services.proposal_dismissals import clear_reclassify_proposals, reclassify_dismissed
 
     mode = cfg["mode"]
     ai_result_id = await _adjudication_result_id(db, entry.id)
     counts: dict[str, int] = {}
     overridden = 0
+    # Reclassify verdicts that would move a name back into a type an analyst
+    # (or an earlier apply) folded it out of — dropped, never filed.
+    flip_guarded = 0
     # Changes that actually ran, vs edges a keep promoted. Promotions are not
     # changes the analyst can undo from the queue, so they are counted apart —
     # folding them into `applied` made `shadowed` under-report.
@@ -1878,19 +1944,55 @@ async def apply_verdicts(
                             applied_n += 1
                             snap = real
                     _log(ACTION_UNLINK, item, {"junction": snap}, after_base, applied=do_apply)
-            elif v.verdict == "reclassify":
-                # Advisory in both modes, like everywhere else. Applying it
-                # (from the queue) converts the entity, never unlinks it.
-                if item.entity_type in ENTITY_TYPES:
-                    await log_reclassification(db, entry.id, link_row, reason, v.suggested_type, ai_result_id)
-                elif not await reclassify_dismissed(db, item.entity_type or "", item.entity_id):  # type: ignore[arg-type]
-                    _log(
-                        ACTION_RECLASSIFY,
-                        item,
-                        {"entity": {"name": item.name}},
-                        {**after_base, "suggested_type": v.suggested_type},
-                        applied=False,
-                    )
+            elif v.verdict == "reclassify" and v.suggested_type:
+                etype, eid, target = item.entity_type or "", item.entity_id, v.suggested_type
+                if await _reclassify_flips_back(db, etype, eid, target):  # type: ignore[arg-type]
+                    flip_guarded += 1
+                    continue
+                if await reclassify_dismissed(db, etype, eid):  # type: ignore[arg-type]
+                    continue
+                # A type change is catalogue-wide, so one article's say-so is
+                # not enough: it is applied once `reclassify_consensus`
+                # distinct articles agree on the target (this one included),
+                # at or above the confidence floor. Until then it is filed
+                # as a proposal, which is also the vote the next article
+                # counts. Applying converts the entity; the link follows it.
+                agreement = 1 + await _reclassify_agreement(db, etype, eid, target, entry.id)  # type: ignore[arg-type]
+                converted = False
+                if do_apply and agreement >= cfg["reclassify_consensus"]:
+                    try:
+                        async with db.begin_nested():
+                            outcome = await _reclassify_entity(db, etype, eid, target, reason)  # type: ignore[arg-type]
+                        converted = bool(outcome.get("applied"))
+                    except Exception as exc:
+                        logger.warning("adjudication reclassify failed for %s: %s", item.item_id, exc)
+                        outcome = {"applied": False, "error": str(exc)[:300]}
+                    if converted:
+                        applied_n += 1
+                        await clear_reclassify_proposals(db, etype, eid)  # type: ignore[arg-type]
+                        _log(
+                            ACTION_RECLASSIFY,
+                            item,
+                            {"entity": {"name": item.name}},
+                            {
+                                **after_base,
+                                "suggested_type": target,
+                                "agreement": agreement,
+                                "outcome": {k: val for k, val in outcome.items() if k != "applied"},
+                            },
+                            applied=True,
+                        )
+                if not converted:
+                    if etype in ENTITY_TYPES:
+                        await log_reclassification(db, entry.id, link_row, reason, target, ai_result_id)
+                    else:
+                        _log(
+                            ACTION_RECLASSIFY,
+                            item,
+                            {"entity": {"name": item.name}},
+                            {**after_base, "suggested_type": target, "agreement": agreement},
+                            applied=False,
+                        )
             elif v.verdict == "veto":
                 snapshot = await _entity_snapshot(db, item.entity_type or "", item.entity_id)  # type: ignore[arg-type]
                 junction_snap = _junction_snapshot_from_item(item)
@@ -2004,10 +2106,11 @@ async def apply_verdicts(
         "verdicts": counts,
         "applied": applied_n,
         "promoted": promoted_n,
-        "shadowed": max(0, len(changes) - applied_n),
+        "shadowed": max(0, len(changes) - applied_n - flip_guarded),
         "breaker": breaker,
         "rolling_breaker": rolling,
         "keep_overridden": overridden,
+        "reclassify_flip_guarded": flip_guarded,
     }
 
 
@@ -2063,7 +2166,7 @@ async def _reclassify_entity(
         "applied": True,
         "target_type": target_type,
         "merged_into_existing": existing is not None,
-        "response": getattr(resp, "model_dump", lambda: str(resp))(),
+        "response": _json_safe(resp),
     }
 
 
@@ -2077,7 +2180,10 @@ async def apply_adjudication_row(db: AsyncSession, row) -> dict:
     before = row.before or {}
     after = row.after or {}
     entry = await db.get(Entry, uuid.UUID(before["entry_id"])) if before.get("entry_id") else None
-    if entry is None:
+    # A merge or a type change is about the entity, not the article: the
+    # duplicate review files merges with no entry at all, and an article being
+    # gone does not make either moot.
+    if entry is None and row.action not in (ACTION_MERGE, ACTION_RECLASSIFY):
         return {"applied": False, "reason": "entry gone"}
     reason = after.get("reason") or ""
     outcome: dict = {"applied": True}
@@ -2143,6 +2249,12 @@ async def apply_adjudication_row(db: AsyncSession, row) -> dict:
         from app.services.proposal_dismissals import clear_reclassify_proposals
 
         await clear_reclassify_proposals(db, row.entity_type, row.entity_id)
+    elif row.action == ACTION_MERGE and row.entity_id:
+        # The loser is gone: a second merge target, an unlink, a veto about it
+        # have nothing left to act on. This applied row stays as the undo record.
+        from app.services.proposal_dismissals import clear_entity_proposals
+
+        await clear_entity_proposals(db, row.entity_type, row.entity_id)
     return outcome
 
 

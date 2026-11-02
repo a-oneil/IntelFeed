@@ -175,6 +175,30 @@ services:
         condition: service_healthy
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4 --queues=celery
 
+  # Enrichment dispatcher: one tick at a time on the "enrichment" queue, so a
+  # tick waiting on a throttled source never holds a default-worker slot.
+  celery-worker-enrichment:
+    restart: unless-stopped
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    volumes:
+      - ./backend:/app
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      api:
+        condition: service_started
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=200 --queues=enrichment
+
   # Serialized AI worker: one task at a time on the "ai" queue, whatever the
   # assigned provider (paces a single Ollama GPU; also the only service
   # mounting the claude_code CLI credentials volume for CLI-provider tasks).

@@ -48,12 +48,17 @@ UTC defaults from `backend/app/workers/job_registry.py`; admins can override.
 | `github-poc-scan` | daily 05:00 | public exploit code on GitHub |
 | `sync-cybergeist-feeds` | daily 02:30 | CyberGeist entity attributes |
 | `mitre-attack-sync` | weekly Sun 03:00 | ATT&CK techniques, groups, mitigations, aliases |
-| `misp-galaxy-sync` / `malpedia-sync` | weekly Sun 03:30 | MISP Galaxy actor aliases; Malpedia descriptions and aliases |
+| `misp-galaxy-sync` | weekly Sun 03:30 | MISP Galaxy actor aliases |
+| `malpedia-sync` | weekly Sat 01:00 | Malpedia descriptions and aliases |
 | `metasploit-sync` | weekly Sun 03:45 | links CVEs to Metasploit modules, raises them to `weaponized` |
 | `refresh-cwe-catalog` | weekly Mon 03:45 | MITRE CWE catalog |
 | `rollup-targeted-sectors` | daily 04:20 | turns `entry_sectors` into `threat_actor_target_sectors` / `malware_target_sectors` claims with evidence, then rebuilds `targeted_sectors` |
 | `backfill-rule-data-sources` | weekly Sun 04:50 | fills rule `data_sources` from log sources, for telemetry coverage |
 | `backfill-rule-attack-mappings` | weekly Sun 05:30 | re-fetches GitHub rules for ATT&CK ids; derives tactics from techniques |
 | `wikipedia-bulk-sync` | weekly Wed 04:00 | Wikipedia summaries |
+| `wikidata-sync` | weekly Thu 04:30 | vendor websites, product vendors, country regions from Wikidata |
+| `endoflife-sync` | daily 05:15 | product support status from endoflife.date |
+| `ctid-mappings-sync` | weekly Sun 04:15 | NIST 800-53 and CIS controls on techniques (CTID) |
+| `d3fend-sync` | weekly Sun 04:30 | D3FEND countermeasures on techniques |
+| `capec-sync` | weekly Mon 04:00 | CAPEC attack patterns for weaknesses and techniques |
 | `build-telegram-forward-relationships` | every 4h | Telegram `forwarded_from` → `communicates_with` links |
-| `scheduled-enrichment-check` | every 15 min | runs sources in `scheduled` trigger mode |

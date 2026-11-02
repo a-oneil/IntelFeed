@@ -40,6 +40,8 @@ _NOT_A_SLUG = {
     '"threat_actor": "actor"': "display label map — the UI says 'actor', the slug is threat_actor",
     '"actor": handle': "Bluesky API request parameter",
     '{"actor": row.name': "threat_timeline chart row field, not a type discriminator",
+    'card.get("actor")': "ETDA Threat Group Card payload key (the card's title)",
+    "_VENDOR_LABEL_KEYS = (": "MalwareBazaar vendor_intel payload keys (Triage's family label)",
     '"campaign", "vulnerability", "malware", "actor"': (
         "detection-summary `focus` angle, not an entity_type — note 'vulnerability', "
         "which is not one of our types either (see the focus pattern in schemas/intelligence.py)"
@@ -193,17 +195,12 @@ def test_tables_resolve_to_real_model_tables():
 
 def test_standalone_scripts_use_the_canonical_vocabulary():
     """scripts/ writes the same columns as app/ and must not drift from it."""
-    # import_profiles maps external profile formats (apt_group, attack_technique)
-    # onto our slugs, so retired names legitimately appear on its input side.
-    external_input_mappers = {"import_profiles.py"}
     hits = []
     scanned = 0
     for root in SCRIPT_ROOTS:
         if not root.exists():
             continue
         for path in root.rglob("*.py"):
-            if path.name in external_input_mappers:
-                continue
             text = path.read_text()
             scanned += 1
             skip = _docstring_lines(ast.parse(text))

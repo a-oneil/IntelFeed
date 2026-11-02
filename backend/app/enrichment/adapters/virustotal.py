@@ -11,17 +11,49 @@ import re
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.manifest import Column, Context, Display, Egress, Key, License, Policy, Quota
 
 _HASH_RE = re.compile(r"^[a-f0-9]{32}$|^[a-f0-9]{40}$|^[a-f0-9]{64}$", re.IGNORECASE)
 _IPV4_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
+
+#: parsed_data key → key in Observable.reputation.
+_REPUTATION = {
+    "detection_ratio": "vt_ratio",
+    "malicious_votes": "vt_malicious",
+    "threat_label": "vt_threat_label",
+    "tags": "vt_tags",
+}
 
 
 class VirusTotalAdapter(EnrichmentAdapter):
     source_type = "virustotal"
     display_name = "VirusTotal v3"
-    supported_entity_types = ["observable"]
-    requires_api_key = True
-    default_trigger_mode = "manual"
+    about = "Antivirus verdicts for a file, URL, domain or IP."
+    applies_to = {"observable": ("ipv4", "domain", "md5", "sha1", "sha256")}
+    requires = (Key(),)
+    # The public API allows 4 lookups a minute and 500 a day
+    # (docs.virustotal.com, "Public vs Premium API"). Premium keys are sized
+    # per contract, so there is no ceiling.
+    quota = Quota(4, 60, daily_budget=500)
+    egress = Egress.SHARES_IOC
+    # The public API may not be used in commercial products or services.
+    license = License("VirusTotal public API terms", attribution="VirusTotal", commercial_ok=False)
+    # Context only: the network columns (asn, asn_org, geo_country) are Team
+    # Cymru's, so a manual VirusTotal lookup never overwrites them. The
+    # reputation summary keeps VT's verdict for the ledger's list rows.
+    outputs = (
+        *(Column(key, f"observable.reputation.{rep}", Policy.NEWER_WINS) for key, rep in _REPUTATION.items()),
+        Context("detection_ratio", "Detections", Display.FACT),
+        Context("threat_label", "Threat label", Display.FACT),
+        Context("tags", "Tags", Display.CHIPS),
+        Context("meaningful_name", "File name", Display.FACT),
+        Context("type_description", "File type", Display.FACT),
+        Context("asn", "ASN", Display.FACT),
+        Context("as_owner", "AS owner", Display.FACT),
+        Context("country", "Country", Display.FACT),
+        Context("network", "Network", Display.FACT),
+        Context("registrar", "Registrar", Display.FACT),
+    )
 
     _api_base = "https://www.virustotal.com/api/v3/"
 
@@ -52,7 +84,7 @@ class VirusTotalAdapter(EnrichmentAdapter):
             )
 
         headers = {"x-apikey": self.api_key}
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with self.http(timeout=15) as client:
             resp = await client.get(endpoint, headers=headers)
             if resp.status_code == 404:
                 return EnrichmentData(raw_response={"status": "not_found"}, parsed_data={"found": False}, ttl_hours=72)
@@ -103,8 +135,8 @@ class VirusTotalAdapter(EnrichmentAdapter):
         if not self.api_key:
             return False
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with self.http(timeout=5) as client:
                 resp = await client.get(f"{self._api_base}ip_addresses/8.8.8.8", headers={"x-apikey": self.api_key})
                 return resp.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False

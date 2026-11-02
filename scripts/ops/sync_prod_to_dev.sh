@@ -25,7 +25,7 @@ DEV_COMPOSE="docker-compose.dev.yml"
 BACKUP_DIR="./backups"
 KEEP_SYNC_DUMPS=3
 # Dev services that hold DB connections — stopped during restore
-DB_SERVICES=(api celery-worker celery-worker-ai celery-beat telegram-listener)
+DB_SERVICES=(api celery-worker celery-worker-ai celery-worker-enrichment celery-beat telegram-listener)
 
 ASSUME_YES=false
 SKIP_REINDEX=false

@@ -1,7 +1,19 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,12 +25,11 @@ class EnrichmentSource(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     source_type: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
-    # vulncheck, osv, nvd, epss, malpedia, github_poc,
-    # cisa_kev, mitre_attack, cvedetails, wikipedia
+    # a key of app.enrichment.registry.SOURCE_REGISTRY
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     trigger_mode: Mapped[str] = mapped_column(String(20), default="manual")
-    # auto, scheduled, manual
+    # auto (looked up when a new entity appears), manual
     api_key_encrypted: Mapped[str | None] = mapped_column(Text)
     rate_limit_config: Mapped[dict] = mapped_column(JSONB, default=dict)
     # {"requests_per_period": 50, "period_seconds": 604800}
@@ -29,13 +40,7 @@ class EnrichmentSource(Base):
     min_confidence_threshold: Mapped[str] = mapped_column(String(10), default="low")
     # high, medium, low — minimum IOC confidence required for auto-enrichment
     daily_budget: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Maximum enrichment requests per day; None = unlimited
-    daily_budget_used: Mapped[int] = mapped_column(Integer, default=0)
-    # Fallback counter synced from Redis for API reads
-    schedule_interval_hours: Mapped[int] = mapped_column(Integer, default=24)
-    # How often to run when trigger_mode is "scheduled" (in hours)
-    next_scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # When this source should next be enriched (set after each scheduled run)
+    # Maximum requests per UTC day; None = unlimited. The gateway counts usage.
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -84,4 +89,99 @@ class EnrichmentResult(Base):
     __table_args__ = (
         Index("ix_enrichment_entity", "entity_type", "entity_id"),
         Index("ix_enrichment_source_entity", "source_type", "entity_type", "entity_id"),
+    )
+
+
+class EntityContext(Base):
+    """What one source says about one entity, one row per declared ``Context``
+    output (``app/enrichment/manifest.py``): the value shaped for its display.
+    Written with each lookup's result; served to the profile by
+    GET /api/entities/{entity_type}/{entity_id}/context."""
+
+    __tablename__ = "entity_context"
+
+    entity_type: Mapped[str] = mapped_column(String(20), primary_key=True)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    source_type: Mapped[str] = mapped_column(String(30), primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict | list | str | int | float | bool] = mapped_column(JSONB, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class EntityRelationClaim(Base):
+    """One source's claim that an entity is connected to another, one row per
+    target the source names (a declared ``Relation`` output,
+    ``app/enrichment/relations.py``). ``target_id`` is the existing entity the
+    name resolved to; it is null while the claim is held — the name matches
+    nothing, or more than one entity — and ``held_reason`` says which.
+
+    The connection itself lives where IntelFeed keeps that kind of fact
+    (``entity_relationships``, or the target-sector junction); these rows are
+    what lets a source's claim be withdrawn without touching another's."""
+
+    __tablename__ = "entity_relation_claims"
+
+    entity_type: Mapped[str] = mapped_column(String(20), primary_key=True)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    source_type: Mapped[str] = mapped_column(String(30), primary_key=True)
+    # The Relation output's key (its parsed_data list).
+    output: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # The target name folded (case and spacing): one claim per name.
+    target_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    relation: Mapped[str] = mapped_column(String(30), nullable=False)
+    target_name: Mapped[str] = mapped_column(Text, nullable=False)
+    target_type: Mapped[str | None] = mapped_column(String(20))
+    target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # unknown (no entity has the name) | ambiguous (more than one does)
+    held_reason: Mapped[str | None] = mapped_column(String(20))
+    evidence: Mapped[str | None] = mapped_column(Text)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index("ix_entity_relation_claims_target", "target_type", "target_id"),
+        Index("ix_entity_relation_claims_source", "source_type", "output"),
+    )
+
+
+class EnrichmentJob(Base):
+    """One entity's pending lookup at one source. Waiting work lives here until
+    the dispatcher runs it, so a lookup a source refuses is deferred, never
+    dropped. See app/enrichment/queue.py."""
+
+    __tablename__ = "enrichment_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    entity_value: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    lane: Mapped[str] = mapped_column(String(10), nullable=False)
+    # manual, new, refresh, backfill
+    priority: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    # The lane's rank: lower runs first
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="queued", server_default="queued")
+    # queued, running, failed
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    last_status: Mapped[str | None] = mapped_column(String(30))
+    # The pipeline status of the last run (rate_limited, error, ...)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    # Whose override key a manual job runs with
+    entity_confidence: Mapped[str | None] = mapped_column(String(10))
+    entity_base_confidence: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("entity_type", "entity_id", "source_type", name="uq_enrichment_jobs_entity_source"),
+        # The dispatcher's claim: due work by lane, then age.
+        Index("ix_enrichment_jobs_claim", "status", "priority", "due_at"),
     )

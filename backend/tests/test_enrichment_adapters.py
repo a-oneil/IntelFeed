@@ -18,7 +18,7 @@ class TestEnrichmentBase:
 
 class TestAdapterRegistry:
     def test_registry_has_all_adapters(self):
-        assert len(ADAPTER_REGISTRY) == 13
+        assert len(ADAPTER_REGISTRY) == 19
 
     def test_registry_contains_expected_sources(self):
         expected = {
@@ -31,11 +31,19 @@ class TestAdapterRegistry:
             "malpedia",
             "github_poc",
             "cvedetails",
+            "cvelist",
             "wikipedia",
             # Observable (IOC ledger) reputation adapters, restored from v1.
             "virustotal",
             "greynoise",
             "shodan",
+            # Observable network context.
+            "cymru",
+            "rdap",
+            # abuse.ch, on one shared key.
+            "threatfox",
+            "urlhaus",
+            "malwarebazaar",
         }
         assert set(ADAPTER_REGISTRY.keys()) == expected
 
@@ -57,9 +65,23 @@ class TestAdapterRegistry:
         assert adapter.config["ttl_hours"] == 48
 
     def test_default_sources_defined(self):
-        assert len(DEFAULT_SOURCES) == 13
+        assert len(DEFAULT_SOURCES) == 32
         source_types = {s["source_type"] for s in DEFAULT_SOURCES}
-        assert source_types == set(ADAPTER_REGISTRY.keys())
+        assert source_types == set(ADAPTER_REGISTRY) | {
+            "misp_galaxy",
+            "metasploit",
+            "mitre_cwe",
+            "ransomware_live",
+            "cybergeist",
+            "wikidata",
+            "endoflife",
+            "tranco",
+            "capec",
+            "ctid",
+            "d3fend",
+            "etda",
+            "github_repo",
+        }
 
     def test_all_adapters_have_required_attributes(self):
         for source_type, adapter_cls in ADAPTER_REGISTRY.items():
@@ -105,7 +127,7 @@ class TestVulnCheckAdapter:
         adapter = get_adapter("vulncheck")
         assert adapter.supports_entity("cve")
         assert not adapter.supports_entity("ioc_ipv4")
-        assert adapter.default_trigger_mode == "scheduled"
+        assert adapter.default_trigger_mode == "manual"
 
 
 class TestOSVAdapter:
@@ -122,7 +144,7 @@ class TestMalpediaAdapter:
         assert adapter.supports_entity("malware")
         assert adapter.supports_entity("threat_actor")
         assert not adapter.supports_entity("cve")
-        assert adapter.default_trigger_mode == "scheduled"
+        assert adapter.default_trigger_mode == "manual"
 
 
 class TestGitHubPoCAdapter:
@@ -131,7 +153,7 @@ class TestGitHubPoCAdapter:
         assert adapter.supports_entity("cve")
         assert not adapter.supports_entity("ioc_ipv4")
         assert adapter.requires_api_key is False
-        assert adapter.default_trigger_mode == "scheduled"
+        assert adapter.default_trigger_mode == "manual"
 
 
 class TestWikipediaAdapter:
@@ -320,6 +342,13 @@ class _FakeAsyncPage:
         return _get()
 
 
+def _wiki_transport():
+    """A gateway transport; the fake wikipediaapi below never sends through it."""
+    from app.enrichment.gateway import SourceGateway
+
+    return SourceGateway("wikipedia").transport()
+
+
 class TestFetchWikipediaGuardrail:
     def _install_fake_wiki(self, monkeypatch, resolver):
         import sys as _sys
@@ -335,7 +364,7 @@ class TestFetchWikipediaGuardrail:
         fake_module = types.SimpleNamespace(AsyncWikipedia=FakeAsyncWikipedia)
         monkeypatch.setitem(_sys.modules, "wikipediaapi", fake_module)
 
-        async def _no_image(title, thumb_size=300):
+        async def _no_image(title, thumb_size=300, transport=None):
             return None
 
         monkeypatch.setattr("app.enrichment.wikipedia_helper._fetch_page_image_async", _no_image)
@@ -345,14 +374,14 @@ class TestFetchWikipediaGuardrail:
 
         # Every query resolves to the ISBN article (the historic auto-suggest bug)
         self._install_fake_wiki(monkeypatch, lambda q: _FakeAsyncPage("International Standard Book Number"))
-        result = await fetch_wikipedia("Iran", "country")
+        result = await fetch_wikipedia("Iran", "country", transport=_wiki_transport())
         assert result is None
 
     async def test_accepts_matching_resolution(self, monkeypatch):
         from app.enrichment.wikipedia_helper import fetch_wikipedia
 
         self._install_fake_wiki(monkeypatch, lambda q: _FakeAsyncPage("Iran"))
-        result = await fetch_wikipedia("Iran", "country")
+        result = await fetch_wikipedia("Iran", "country", transport=_wiki_transport())
         assert result is not None
         assert result["title"] == "Iran"
         assert result["url"] == "https://en.wikipedia.org/wiki/Iran"
@@ -361,7 +390,7 @@ class TestFetchWikipediaGuardrail:
         from app.enrichment.wikipedia_helper import fetch_wikipedia
 
         self._install_fake_wiki(monkeypatch, lambda q: _FakeAsyncPage("Cozy Bear"))
-        result = await fetch_wikipedia("APT29", "threat_actor", aliases=["Cozy Bear"])
+        result = await fetch_wikipedia("APT29", "threat_actor", aliases=["Cozy Bear"], transport=_wiki_transport())
         assert result is not None
         assert result["title"] == "Cozy Bear"
 
@@ -370,7 +399,7 @@ class TestFetchWikipediaGuardrail:
 
         # CVE-id pages exist only as redirects to the vuln's common name
         self._install_fake_wiki(monkeypatch, lambda q: _FakeAsyncPage("Log4Shell"))
-        result = await fetch_wikipedia("CVE-2021-44228", "cve")
+        result = await fetch_wikipedia("CVE-2021-44228", "cve", transport=_wiki_transport())
         assert result is not None
         assert result["title"] == "Log4Shell"
 
@@ -378,7 +407,7 @@ class TestFetchWikipediaGuardrail:
         from app.enrichment.wikipedia_helper import fetch_wikipedia_by_title
 
         self._install_fake_wiki(monkeypatch, lambda q: _FakeAsyncPage(q))
-        result = await fetch_wikipedia_by_title("Iran")
+        result = await fetch_wikipedia_by_title("Iran", transport=_wiki_transport())
         assert result is not None
         assert result["title"] == "Iran"
 

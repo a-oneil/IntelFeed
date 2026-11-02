@@ -1,0 +1,142 @@
+{
+ "schema_version": "1.2.1",
+ "generated_at": "2026-10-28T02:11:39+00:00",
+ "total": 10,
+ "result": [
+  {
+   "name": "chrome",
+   "aliases": [
+    "google-chrome"
+   ],
+   "label": "Google Chrome",
+   "category": "app",
+   "tags": [
+    "app",
+    "google",
+    "web-browser"
+   ],
+   "uri": "https://endoflife.date/api/v1/products/chrome"
+  },
+  {
+   "name": "msexchange",
+   "aliases": [],
+   "label": "Microsoft Exchange",
+   "category": "server-app",
+   "tags": [
+    "microsoft",
+    "server-app"
+   ],
+   "uri": "https://endoflife.date/api/v1/products/msexchange"
+  },
+  {
+   "name": "cortex-xdr",
+   "aliases": [
+    "pan-xdr",
+    "cortexxdr",
+    "xdr",
+    "pan-cortex-xdr"
+   ],
+   "label": "Palo Alto Networks Cortex XDR agent",
+   "category": "app",
+   "tags": [
+    "app",
+    "palo-alto-networks"
+   ],
+   "uri": "https://endoflife.date/api/v1/products/cortex-xdr"
+  },
+  {
+   "name": "panos",
+   "aliases": [
+    "pan-os"
+   ],
+   "label": "Palo Alto Networks PAN-OS",
+   "category": "os",
+   "tags": [
+    "os",
+    "palo-alto-networks"
+   ],
+   "uri": "https://endoflife.date/api/v1/products/panos"
+  },
+  {
+   "name": "sles",
+   "aliases": [
+    "suseenterpriseserver",
+    "suseserver",
+    "suselinuxenterpriseserver"
+   ],
+   "label": "SUSE Linux Enterprise Server",
+   "category": "os",
+   "tags": [
+    "linux-distribution",
+    "os",
+    "suse"
+   ],
+   "uri": "https://endoflife.date/api/v1/products/sles"
+  },
+  {
+   "name": "splunk",
+   "aliases": [],
+   "label": "Splunk",
+   "category": "server-app",
+   "tags": [
+    "cisco",
+    "server-app"
+   ],
+   "uri": "https://endoflife.date/api/v1/products/splunk"
+  },
+  {
+   "name": "tomcat",
+   "aliases": [],
+   "label": "Apache Tomcat",
+   "category": "server-app",
+   "tags": [
+    "apache",
+    "server-app",
+    "web-server"
+   ],
+   "uri": "https://endoflife.date/api/v1/products/tomcat"
+  },
+  {
+   "name": "esxi",
+   "aliases": [
+    "esx",
+    "vmwareesxi",
+    "vmesxi",
+    "vmware-esxi"
+   ],
+   "label": "VMware ESXi",
+   "category": "os",
+   "tags": [
+    "os",
+    "vmware"
+   ],
+   "uri": "https://endoflife.date/api/v1/products/esxi"
+  },
+  {
+   "name": "windows-server",
+   "aliases": [
+    "windowsserver"
+   ],
+   "label": "Microsoft Windows Server",
+   "category": "os",
+   "tags": [
+    "microsoft",
+    "os",
+    "windows"
+   ],
+   "uri": "https://endoflife.date/api/v1/products/windows-server"
+  },
+  {
+   "name": "windows",
+   "aliases": [],
+   "label": "Microsoft Windows",
+   "category": "os",
+   "tags": [
+    "microsoft",
+    "os",
+    "windows"
+   ],
+   "uri": "https://endoflife.date/api/v1/products/windows"
+  }
+ ]
+}

@@ -1537,10 +1537,10 @@ const OBSERVABLE_COLUMNS: ColumnDef<ObservableResponse>[] = [
   },
   {
     key: "reputation", label: "Reputation", width: 180, minWidth: 120, hideable: true, defaultHidden: true,
-    sortValue: (o) => (o.reputation ? 1 : 0),
+    sortValue: (o) => (reputationLabel(o) ? 1 : 0),
     render: (o) =>
-      o.reputation ? (
-        <span title={`Enriched ${o.reputation.enriched_at ?? ""}`}>{reputationLabel(o.reputation)}</span>
+      reputationLabel(o) ? (
+        <span title={o.reputation?.enriched_at ? `Enriched ${o.reputation.enriched_at}` : undefined}>{reputationLabel(o)}</span>
       ) : (
         <span className={styles.muted}>—</span>
       ),
@@ -1957,7 +1957,7 @@ function ObservablesSection() {
         emptyDesc={
           linkedEntity
             ? "Nothing is attributed to it or reported alongside it. IPs, domains and hashes found in articles about it will show here."
-            : "Ledger rows come from judgment: the one-pass analysis, curated ioc_list feeds, TTP observables, or promoting a candidate from an article's intel panel. Run scripts/maintenance/backfill_observables.py to fill from existing extractions."
+            : "Ledger rows come from judgment: the one-pass analysis, curated ioc_list feeds, TTP observables, or promoting a candidate from an article's intel panel."
         }
         getId={(o) => o.id}
         getLabel={(o) => o.label || o.value}

@@ -118,10 +118,16 @@ copy until it expires.
 
 ## Enrichment says rate limited
 
-Each enrichment source has a limit on how many requests it accepts. Requests
-over the limit wait and are retried, not dropped. NVD's public API is the usual
-cause. If it happens all the time, an admin can add an **NVD API Key** under
-**Settings → Engine** to raise the limit.
+Each enrichment source has a limit on how many requests it accepts, and some
+have a daily budget. A request over the limit waits a moment for room; if
+there is none, that source is skipped this time and nothing is saved, so the
+next enrichment tries again. A source that answers "too many requests", or
+keeps failing, is paused for a while (its own Retry-After time, or a minute
+and growing). Scheduled jobs wait longer for room; when a source refuses
+them they stop, keep what they did, and continue on their next run (the run's
+details in the Jobs view say `stopped`). NVD's public API is the usual cause. If it happens all the time,
+an admin can add an **NVD API Key** under **Settings → Engine** to raise the
+limit.
 
 ## Still stuck
 

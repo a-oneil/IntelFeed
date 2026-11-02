@@ -763,30 +763,28 @@ def status_for(confidence: float) -> str:
 # ---------------------------------------------------------------------------
 
 
-#: Kinds and doors that trigger a reputation lookup on creation (sources with
-#: trigger_mode=auto — Shodan InternetDB is keyless; VirusTotal / GreyNoise
-#: once their keys are configured).
-AUTO_ENRICH_KINDS = frozenset({"ipv4", "domain", "sha256", "md5", "sha1"})
+#: Kinds and doors that queue lookups on creation, at every enabled source
+#: with trigger_mode=auto that takes the kind (Shodan InternetDB, Team Cymru
+#: and RDAP are keyless; VirusTotal once its key is configured).
+AUTO_ENRICH_KINDS = frozenset({"ipv4", "ipv6", "domain", "sha256", "md5", "sha1"})
 AUTO_ENRICH_DOORS = frozenset({"ai_extraction", "manual", "publisher_ioc"})
 #: A publisher's indicator file can carry hundreds of fresh rows for one
 #: article; only this many of them queue a reputation lookup (the rest stay
 #: available to the manual enrich button). Shodan InternetDB allows ~30/min.
 AUTO_ENRICH_PER_ENTRY_CAP = 25
-_auto_enrich_dispatched: dict[str, int] = {}
+_auto_enrich_queued: dict[str, int] = {}
 
 
-def _dispatch_auto_enrich(obs: Observable) -> None:
-    try:
-        from app.workers.enrichment_tasks import auto_enrich_entity
+async def _enqueue_auto_enrich(session: AsyncSession, obs: Observable) -> None:
+    from app.enrichment.queue import enqueue
 
-        auto_enrich_entity.delay(
-            entity_type="observable",
-            entity_id=str(obs.id),
-            entity_value=obs.value,
-            base_confidence=float(obs.base_confidence or 0.8),
-        )
-    except Exception:  # a broker hiccup must never fail the capture
-        pass
+    await enqueue(
+        session,
+        "observable",
+        obs.id,
+        obs.value,
+        entity_base_confidence=float(obs.base_confidence or 0.8),
+    )
 
 
 async def get_or_create_observable(
@@ -854,15 +852,15 @@ async def get_or_create_observable(
         # Reputation lookups for freshly judged infrastructure — never for the
         # bulk feed door (16k rows of blocklist would burn every budget), and
         # at most AUTO_ENRICH_PER_ENTRY_CAP per capturing entry so a publisher
-        # file's 400 hashes don't fan out into 400 tasks.
+        # file's 400 hashes don't queue 400 lookups.
         key = str(entry_id) if entry_id else ""
-        n = _auto_enrich_dispatched.get(key, 0)
+        n = _auto_enrich_queued.get(key, 0)
         if not key or n < AUTO_ENRICH_PER_ENTRY_CAP:
             if key:
-                if len(_auto_enrich_dispatched) > 2048:
-                    _auto_enrich_dispatched.clear()
-                _auto_enrich_dispatched[key] = n + 1
-            _dispatch_auto_enrich(obs)
+                if len(_auto_enrich_queued) > 2048:
+                    _auto_enrich_queued.clear()
+                _auto_enrich_queued[key] = n + 1
+            await _enqueue_auto_enrich(session, obs)
     # A later door can enrich what an earlier one left blank. infra_tag is
     # fill-only too: "this IP is a VPN exit" stays true even after an AI door
     # later confirms it as C2 — the dual signal is the point.

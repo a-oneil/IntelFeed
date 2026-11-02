@@ -7,22 +7,59 @@ Uses the MITRE ATT&CK STIX data from GitHub.
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.manifest import Column, Egress, Job, License, Policy, Quota
 
 ATTACK_URL = (
     "https://raw.githubusercontent.com/mitre-attack/attack-stix-data"
     "/refs/heads/master/enterprise-attack/enterprise-attack.json"
 )
 
+_TYPES = ("ttp", "threat_actor", "malware", "tool", "mitigation")
+
 
 class MITREAttackAdapter(EnrichmentAdapter):
     source_type = "mitre_attack"
     display_name = "MITRE ATT&CK"
-    supported_entity_types = ["ttp", "threat_actor", "malware", "tool", "mitigation"]
-    requires_api_key = False
-    default_trigger_mode = "scheduled"
+    about = "The ATT&CK catalog: techniques, mitigations, and the groups and software that use them."
+    applies_to = dict.fromkeys(_TYPES)
+    # A lookup downloads the whole Enterprise bundle; the weekly job pulls three.
+    quota = Quota(10, 3600, daily_budget=100)
+    egress = Egress.NONE
+    license = License(
+        "ATT&CK terms of use",
+        attribution="© The MITRE Corporation. Reproduced and distributed with the permission of The MITRE Corporation.",
+    )
+    jobs = (
+        Job(
+            "mitre-attack-sync",
+            "app.workers.enrichment_tasks.run_mitre_attack_sync",
+            {"type": "crontab", "minute": "0", "hour": "3", "day_of_week": "0"},
+            "Download and sync MITRE ATT&CK techniques, groups, and mitigations",
+            counts=False,
+        ),
+    )
+    outputs = (
+        *(Column("description", f"{t}.description", Policy.RANK, rank=2) for t in _TYPES),
+        # Groups and mitigations report mitre_id; external_id is the other spelling
+        # older stored results may carry.
+        *(
+            column
+            for t in ("threat_actor", "malware", "tool", "mitigation")
+            for column in (
+                Column("mitre_id", f"{t}.mitre_id", Policy.RANK, rank=1),
+                Column("external_id", f"{t}.mitre_id", Policy.RANK, rank=2),
+            )
+        ),
+        # Curated per group/software, so ahead of Malpedia's synonyms.
+        *(
+            Column("aliases", f"{t}.aliases", Policy.UNION, rank=1, filter="aliases")
+            for t in ("threat_actor", "malware", "tool")
+        ),
+        *(Column("platforms", f"{t}.platforms") for t in ("ttp", "tool")),
+    )
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with self.http(timeout=60) as client:
             resp = await client.get(ATTACK_URL)
             resp.raise_for_status()
             bundle = resp.json()
@@ -248,8 +285,8 @@ class MITREAttackAdapter(EnrichmentAdapter):
 
     async def check_health(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with self.http(timeout=10) as client:
                 resp = await client.head(ATTACK_URL)
                 return resp.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False

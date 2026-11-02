@@ -294,8 +294,6 @@ setting (default `en`).
    it is thrown away and the entry keeps the feed's own text
    (`app/services/js_wall.py`). Single-page sites such as NCSC, Europol and
    MSRC only show that notice to non-browsers.
-   `scripts/maintenance/repair_js_wall_entries.py` fixes entries that saved
-   one.
 
 ### API feeds: `_fetch_extended_feed()`
 
@@ -332,8 +330,7 @@ Checks run in this order. An item that matches any of them is not saved.
    (`utm_*`, `mc_*`, `fbclid`, `gclid` and similar); other parameters such as
    `?p=123` still count. If the new copy has a real body (500+ characters,
    not a teaser) that differs from the saved one, the saved entry is updated
-   and re-indexed. `scripts/maintenance/merge_same_url_entries.py` merges
-   copies saved before this check existed.
+   and re-indexed.
 4. **Content hash** (across all feeds). A SHA-256 of the cleaned-up title
    plus the first 500 characters of the text. Catches the same article
    republished under a different GUID or in another feed.
@@ -551,7 +548,7 @@ file changes.
 | `last_commit_sha` | (kept by the adapter) | Where the last fetch stopped. |
 
 The GitHub token is **not** a feed setting. One token serves every repo
-feed: the `github_token` setting (Settings), or the `GITHUB_TOKEN` env var.
+feed: the `github_token` setting (Settings → Engine → Enrichment → Keys), or the `GITHUB_TOKEN` env var.
 
 **Watch modes:**
 
@@ -573,10 +570,6 @@ feed: the `github_token` setting (Settings), or the `GITHUB_TOKEN` env var.
    an Anvilogic Armory detection, or an Elastic TOML rule. The rule's query
    must pass the rule validator (`rule_validation.py`), or the file stays
    generic.
-
-`scripts/maintenance/reprocess_github_repo_types.py` re-runs this on saved
-entries still typed `yaml_file`, `toml_file` or `unknown`, and imports the
-rules it finds.
 
 The title comes from the file where it can (a Sigma `title`, an Elastic
 `rule.name`), else the filename. The body is rendered for reading: rules with

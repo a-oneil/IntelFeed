@@ -2,9 +2,9 @@
 
 This is the list of every IntelFeed setting: what it does, its default, and where you change it. It is for admins tuning an instance and for developers adding a setting. [engine.md](engine.md) explains the systems these settings control.
 
-IntelFeed has **208 settings**:
+IntelFeed has **217 settings**:
 
-- **157** can be changed in the web UI. They are listed in `CONFIGURABLE_KEYS` (`backend/app/services/system_settings.py:26`). One of them, `registration_invite_code`, lives only in the database.
+- **166** can be changed in the web UI. They are listed in `CONFIGURABLE_KEYS` (`backend/app/services/system_settings.py:26`). One of them, `registration_invite_code`, lives only in the database.
 - **51** come only from the environment (`.env`). See [Env-only settings](#env-only-settings).
 - Six are **secrets**. They are encrypted in the database and never sent back to the browser: `github_token`, `nvd_api_key`, `observables_publish_token`, `registration_invite_code`, `sentry_dsn`, `smtp_password` (`SECRET_KEYS`, `system_settings.py:14`).
 
@@ -33,8 +33,8 @@ A database value that equals the default does nothing useful, and it stops you g
 | Structure | File | Role |
 |---|---|---|
 | `CONFIGURABLE_KEYS` | `backend/app/services/system_settings.py:26` | Which keys the UI can edit, and each value's type |
-| `SETTING_METADATA` | `backend/app/services/system_settings.py:208` | Label, description and group shown in the UI |
-| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1319` | Moves engine keys into the group of the Engine panel that owns them |
+| `SETTING_METADATA` | `backend/app/services/system_settings.py:216` | Label, description and group shown in the UI |
+| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1393` | Moves engine keys into the group of the Engine panel that owns them |
 | `SECRET_KEYS` | `system_settings.py:14` | Encrypted in the database, hidden on read |
 | `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Which Engine screen shows each group; drives the Engine settings search |
 | `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:67` | Single keys that live somewhere other than their group's screen |
@@ -247,15 +247,17 @@ How close two entity mentions are, by paragraph. Formula: `1 / (1 + decay_rate �
 
 ## Enrich stage
 
-Settings → Engine → *enrich* stage panel, and the **Enrichment** browse screen (groups `enrichment` and `api_keys`). Enrichment adds facts from outside sources (NVD, GitHub and others) to entities. See [automation-ai-enrichment.md](automation-ai-enrichment.md).
+Settings → Engine → **Enrichment**: the keys under **Keys**, each job's settings on its source's **Jobs** tab, and a source's own settings on its **Limits** tab (groups `enrichment` and `api_keys`); the *enrich* stage opens the same page. The page lists every source with its status (`key rejected` when the source turned its key down) and what it fills, and tags a source added in the last two weeks as new; expanding a row shows its limits (rate, refresh interval, requests at once), queue, outputs (fill rates, backfill) and jobs. Enrichment adds facts from outside sources (NVD, GitHub and others) to entities. See [automation-ai-enrichment.md](automation-ai-enrichment.md).
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `nvd_api_key` | secret, empty | NIST NVD API key. Raises the limit from 5 to 50 requests per 30 seconds, so a CVE backfill takes hours, not days. |
-| `github_token` | secret, empty | GitHub token for repo feeds and exploit (PoC) search. No scopes needed for public repos. |
+| `nvd_api_key` | secret, empty | NIST NVD API key. Raises the limit from 5 to 50 requests per 30 seconds, so a CVE backfill takes hours, not days. Set under Engine → Enrichment → Keys. |
+| `github_token` | secret, empty | GitHub token for repo feeds, exploit (PoC) search and the `github-repo-sync` job. No scopes needed for public repos. Set under Engine → Enrichment → Keys. |
+| `wikimedia_contact_email` | empty | Email added to the User-Agent of Wikipedia and Wikidata requests, as Wikimedia's User-Agent policy asks. Set on the Wikipedia or Wikidata source's Limits tab under Engine → Enrichment. |
 | `cve_reenrich_batch_size` | int, `150` | CVEs re-fetched from NVD per `reenrich-cve-nvd` run. |
 | `github_poc_batch_limit` | int, `0` | CVEs searched per `github-poc-scan` run. `0` means 300 with a token, 40 without (GitHub blocks unauthenticated search quickly). |
 | `github_poc_rescan_days` | int, `30` | Days before a CVE is searched again. |
+| `enrichment_paused` | bool, `false` | Refuses every request to outside sources; queued lookups wait and scheduled jobs stop. The console's **Pause all sources** button sets it (it reads **Resume all sources** while paused). The `enrichment-pause-sync` job copies it onto Redis every minute. |
 
 ---
 
@@ -318,6 +320,10 @@ Settings → Engine → **Plans**. A pipeline plan turns processing stages on or
 
 Settings → Engine → **Maintenance** (groups `maintenance` and `retention`). This holds the AI cleanup jobs and the clean-up sweeps.
 
+| Setting | Type / default | What it does |
+|---|---|---|
+| `engine_stopped` | bool, `false` | Stops all background work: feed polling, AI analysis, enrichment, automations and scheduled jobs. Queued work waits. The **Stop engine** button in the Engine top bar sets it. See [Stopping the engine](engine.md#stopping-the-engine). |
+
 ### Adjudicate stage (post-analysis AI review)
 
 After an article's AI analysis is saved, a second, smaller AI call reviews it. It re-reads the article next to a list of everything the analysis wrote: entity links, new entities (with similar existing names), held matches, relationships and observables. For each item it wants to change, it returns a verdict: remove, reclassify, veto, merge, demote or drop. Items it leaves out are kept, so a clean review returns an empty list.
@@ -333,6 +339,7 @@ Code: `backend/app/services/entry_adjudication.py` and `backend/app/workers/adju
 | `adjudication_max_per_hour` | int, `0` | Most reviews started per hour. `0` means no limit; the single AI worker is then the only pacing. Set a limit to cap spend on a paid provider, or to stop reviews delaying article analysis on the same worker. With a limit, the backfill gets at most half of each hour's budget. |
 | `adjudication_min_priority_score` | float, `0` | Skip articles below this priority score (0–10). Keep it at 0: low-scoring CVE articles are the main source of junk tool entities. |
 | `adjudication_apply_min_confidence` | `high` \| `medium` \| `low`, default `high` | In apply mode, verdicts below this are filed as proposals instead. |
+| `adjudication_reclassify_consensus` | int, `2` | A type change affects the whole catalogue, so in apply mode a `reclassify` verdict is applied only once this many distinct articles' reviews agree on the same target type. Each earlier review's pending proposal is a vote; the review that reaches the count converts the entity and clears the proposals. `1` applies the first verdict at the confidence floor. A name an analyst or an earlier apply folded out of a type (a reclassify tombstone) is never proposed back into it, so types cannot ping-pong. |
 | `adjudication_circuit_breaker_pct` | float, `0.5` | If more than this share of one article's items get a destructive verdict, the whole run becomes proposals. If the average over the last 50 apply runs goes above it (with at least 10 runs), reviews pause for an hour and a warning chip shows in the Engine console. |
 | `adjudication_content_max_chars` | int, `8000` | Article characters in the review prompt. |
 | `adjudication_scope` | csv, `links,entities,relationships,observables` | Which sections the reviewer sees. `entities` adds the lookup of existing names needed for `veto` and `merge`. `assessment` can be added but is only logged. |
@@ -364,6 +371,20 @@ celery -A app.workers.celery_app call app.workers.adjudication_tasks.backfill_en
 ```
 
 It takes `limit` and `since_days` kwargs, passes rows through the same checks, and the resweep drains them.
+
+### Duplicate review
+
+Puts the catalogue's most likely duplicate pairs of threat actors, malware families and tools in front of the model and files a Merge proposal on the Review tab for each pair it calls the same thing. Nothing is merged until a person applies it. Code: `backend/app/services/entity_merge_review.py` and `backend/app/workers/entity_maintenance_tasks.py`. Job `review-duplicate-entities`, daily 06:30 UTC, on the `ai` queue; the Review tab's **Review duplicates (AI)** button runs it now (`POST /api/admin/hygiene/scan-duplicates`). Its AI task is `entity_merge_review` (Settings → AI Configuration → Prompts).
+
+A pair is a candidate when the names are trigram-similar or when one side's name or alias equals the other's; the two signals run as two index-backed queries, and the pair's shared-article count is shown to the model and breaks ties, but never makes a pair on its own (two famous things reported together is the normal case, not a duplicate). Pairs an analyst marked not-duplicate, pairs with a pending Merge proposal and pairs judged within the retry window are skipped. The model sees both profiles (name, aliases, description, article count, origin) and the signals, and answers `same` (with which side to keep), `different` or `unsure`. A `same` at or above the floor becomes an `adjudication_merge` row (`after.origin = merge_review`) that applies through the merge engine; `different` and `unsure` are logged as `merge_review_distinct` (visible in History as "Not duplicates") so the pair is not asked again for the retry window. Dismissing a filed merge records the pair as not-duplicate for good.
+
+| Setting | Type / default | What it does |
+|---|---|---|
+| `merge_review_batch_size` | int, `40` | Pairs per run, most likely first. `0` turns the review off. |
+| `merge_review_pairs_per_call` | int, `8` | Pairs per model call. |
+| `merge_review_min_similarity` | float, `0.55` | Trigram similarity two names need to be a candidate on name alone. |
+| `merge_review_min_confidence` | `high` / `medium` / `low`, `medium` | A `same` verdict below this is remembered as unsure instead of proposed. |
+| `merge_review_retry_days` | int, `30` | A pair judged different or unsure is not asked again for this long. |
 
 ### Entity assessments
 
@@ -494,6 +515,7 @@ Each job in `JOB_REGISTRY` (`backend/app/workers/job_registry.py`) lists the set
 | `signal-rescore-recent` | every 6 h at :35 | `signal_engine_shadow`, `signal_engine_surface` |
 | `signal-rescore-all` | Sun 03:00 | `signal_engine_shadow`, `signal_engine_surface` |
 | `backfill-entity-assessments` | 05:45 | every `assessment_*` |
+| `review-duplicate-entities` | 06:30 | every `merge_review_*` |
 | `actor-profile-refresh` | Mon 03:00 | every `actor_refresh_*` |
 | `relationship-confidence-decay` | Sun 03:45 | `relationship_recency_half_life_days` |
 | `generate-daily-summaries` | 06:00 | `narrative_themes_enabled` |
@@ -514,7 +536,7 @@ Each job in `JOB_REGISTRY` (`backend/app/workers/job_registry.py`) lists the set
 
 `entity_maintenance_mode` is read by `actor-profile-refresh` but is not in its `settings_keys`, so the Jobs screen doesn't show it there. Edit it on the Maintenance screen.
 
-All 66 jobs, including those with no settings, are in [workers-search-dashboards.md](workers-search-dashboards.md).
+All 67 jobs, including those with no settings, are in [workers-search-dashboards.md](workers-search-dashboards.md).
 
 ---
 
@@ -543,7 +565,7 @@ Three networking keys need a word:
 - `webhook_allow_private_networks` (default `true`): the same rule for automation webhooks.
 - `trusted_client_ip_header` (default empty): the header your edge proxy uses for the visitor's real IP, such as `CF-Connecting-IP` behind Cloudflare. Set it only when the server accepts traffic from that proxy alone. Empty uses the first `X-Forwarded-For` address.
 
-`postgres_password`, `meili_master_key`, `secret_key` and `encryption_key` are checked at startup. The value `changeme` gives a warning in development and **stops startup** in production (`_reject_insecure_defaults`, `backend/app/config.py:480`). `encryption_key` must also be a valid Fernet key (32 bytes, URL-safe base64).
+`postgres_password`, `meili_master_key`, `secret_key` and `encryption_key` are checked at startup. The value `changeme` gives a warning in development and **stops startup** in production (`_reject_insecure_defaults`, `backend/app/config.py:496`). `encryption_key` must also be a valid Fernet key (32 bytes, URL-safe base64).
 
 ---
 

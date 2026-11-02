@@ -32,7 +32,7 @@ flowchart TD
     end
 
     FINAL -. "analysis lands later (ai queue)" .-> ADJ["kind=post_analysis:<br/>adjudicate_entry_task<br/>(dispatched by enqueue_adjudication)"]
-    FETCH -. "independent of chord (kind=side)" .-> SIDE["automate: run_entry_automations (from the fetch task)<br/>enrich: auto_enrich_entity (when a new entity is created)"]
+    FETCH -. "independent of chord (kind=side)" .-> SIDE["automate: run_entry_automations (from the fetch task)<br/>enrich: a new entity queues enrichment_jobs rows; dispatch_enrichment_jobs runs them (enrichment queue)"]
 
     subgraph OBS["Run logging (workers/pipeline_logging.py)"]
         LOG["@pipeline_stage decorator on every<br/>Celery stage task (incl. translate, automate, adjudicate):<br/>one entry_pipeline_runs INSERT per<br/>stage completion (success/error/retry)<br/>gated by pipeline_run_logging_enabled"]

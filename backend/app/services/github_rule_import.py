@@ -641,19 +641,12 @@ async def link_entry_ttps(
 
     await db.flush()
 
-    # Dispatch auto-enrichment for newly created TTPs
-    try:
-        from app.workers.enrichment_tasks import auto_enrich_entity
+    # Queue enrichment for newly created TTPs
+    from app.enrichment.queue import enqueue
 
-        for ttp in linked:
-            if (datetime.now(UTC) - ttp.first_seen_at).total_seconds() < 5:
-                auto_enrich_entity.delay(
-                    entity_type="ttp",
-                    entity_id=str(ttp.id),
-                    entity_value=ttp.technique_id,
-                )
-    except Exception:
-        pass  # Don't fail import if enrichment dispatch fails
+    for ttp in linked:
+        if ttp.first_seen_at and (datetime.now(UTC) - ttp.first_seen_at).total_seconds() < 5:
+            await enqueue(db, "ttp", ttp.id, ttp.technique_id)
 
     return linked
 
@@ -700,19 +693,12 @@ async def link_entry_cves(
 
     await db.flush()
 
-    # Dispatch NVD enrichment for newly created CVEs
-    try:
-        from app.workers.enrichment_tasks import auto_enrich_entity
+    # Queue enrichment for newly created CVEs
+    from app.enrichment.queue import enqueue
 
-        for cve in linked:
-            if (datetime.now(UTC) - cve.first_seen_at).total_seconds() < 5:
-                auto_enrich_entity.delay(
-                    entity_type="cve",
-                    entity_id=str(cve.id),
-                    entity_value=cve.cve_id,
-                )
-    except Exception:
-        pass
+    for cve in linked:
+        if cve.first_seen_at and (datetime.now(UTC) - cve.first_seen_at).total_seconds() < 5:
+            await enqueue(db, "cve", cve.id, cve.cve_id)
 
     return linked
 

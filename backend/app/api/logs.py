@@ -18,7 +18,7 @@ ALLOWED_LOG_FILES = {
     "app.log",
     "error.log",
     "http.log",
-    "tasks.log",
+    "jobs.log",
     "audit.log",
     "update.log",
 }
@@ -45,7 +45,7 @@ async def list_logs(_user: User = Depends(get_admin_user)):
 @router.get("/logs/{filename}")
 async def read_log(
     filename: str = Path(
-        ..., description="Log file name; one of app.log, error.log, http.log, tasks.log, audit.log, update.log"
+        ..., description="Log file name; one of app.log, error.log, http.log, jobs.log, audit.log, update.log"
     ),
     lines: int = Query(default=500, ge=1, le=10000, description="Number of trailing lines to return"),
     _user: User = Depends(get_admin_user),

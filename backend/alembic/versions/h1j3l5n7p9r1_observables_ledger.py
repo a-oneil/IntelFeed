@@ -1,9 +1,8 @@
 """observables ledger: observables + entry_observables + candidate staging
 
 The IOC ledger, second attempt (v1 was dropped in 060_remove_ioc_tables).
-Nothing is backfilled inline; scripts/maintenance/backfill_observables.py
-upserts the pre-curated EntryTTP.observable_value rows and parses ioc_list
-feed bodies after deploy.
+Nothing is backfilled inline: rows come from the capture doors in
+app/intelligence/observables.py as entries are analysed.
 
 Revision ID: h1j3l5n7p9r1
 Revises: g8i0k2m4o6q8

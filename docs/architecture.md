@@ -50,9 +50,10 @@ Ports are the dev stack (`docker-compose.dev.yml`). Production (`docker-compose.
 | db (PostgreSQL 16 + pgvector) | 5433 | Main database |
 | redis | 6380 | Task queue, caches, locks, autolinker word-list version |
 | api (FastAPI) | 8000 | REST API. Runs database migrations on start |
-| celery-worker | — | Background tasks on the default queue (fetching, linking, enrichment) |
+| celery-worker | — | Background tasks on the default queue (fetching, linking, scheduled enrichment syncs) |
 | celery-worker-ai | — | The `ai` queue, one task at a time. Every AI call runs here |
-| celery-beat | — | Scheduler for the 66 jobs in `JOB_REGISTRY` (`backend/app/workers/job_registry.py`) |
+| celery-worker-enrichment | — | The `enrichment` queue, one task at a time: the enrichment dispatcher |
+| celery-beat | — | Scheduler for the 67 jobs in `JOB_REGISTRY` (`backend/app/workers/job_registry.py`) |
 | telegram-listener | — | Long-running Telegram client |
 | meilisearch | 7700 | Full-text search |
 | libretranslate | 5050 | Article translation |
@@ -304,9 +305,9 @@ Enrichment adds facts from outside sources to an entity.
 
 ### Automatic Enrichment
 
-When a **new** entity is created, `auto_enrich_entity(entity_type, entity_id, entity_value)` runs. It finds the `EnrichmentSource` rows for that entity type set to `auto`, runs each adapter, and saves the results on the entity. For CVEs it also updates exploit status, KEV status and EPSS scores.
+When a **new** entity is created, `enqueue()` (`backend/app/enrichment/queue.py`) adds an `enrichment_jobs` row for each enabled `EnrichmentSource` set to `auto` that handles the entity type. Every 30 seconds `dispatch_enrichment_jobs`, on its own `enrichment` queue and worker, runs the due rows: each one through its source's adapter, with the results saved on the entity. A source that says "not now" (rate limit, open breaker, budget used up) gets the row back with a later `due_at`, so the lookup waits instead of being lost. See [automation-ai-enrichment.md](automation-ai-enrichment.md#enrichment-job-queue).
 
-Adapters (`backend/app/enrichment/adapters/`): NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia, CVEDetails, OSV, VulnCheck, and for observables VirusTotal, GreyNoise and Shodan InternetDB.
+The 19 lookup adapters (`backend/app/enrichment/adapters/`) and 13 catalog sources are listed in the [Source Registry](automation-ai-enrichment.md#source-registry). Each adapter, and each scheduled enrichment job, makes its HTTP requests through a `SourceGateway` (`backend/app/enrichment/gateway.py`), which applies the source's rate limit, cap on requests at once, daily budget and circuit breaker to every request, stops sending with a key the source rejected, and refuses to send when Redis is down. See [automation-ai-enrichment.md](automation-ai-enrichment.md#source-gateway).
 
 ### Scheduled Enrichment
 
@@ -318,14 +319,14 @@ Some of the beat jobs that keep entities current (times UTC):
 | Daily 06:30 | `epss-bulk-sync` | EPSS scores for all CVEs |
 | Daily 05:00 | `github-poc-scan` | Public exploit code on GitHub |
 | Sundays 03:00 | `mitre-attack-sync` | Full ATT&CK import |
-| Sundays 03:30 | `malpedia-sync` | Malware names, aliases, descriptions |
 | Sundays 03:30 | `misp-galaxy-sync` | Reference aliases for threat actors |
+| Saturdays 01:00 | `malpedia-sync` | Malware names, aliases, descriptions |
 
 The full list is in [workers-search-dashboards.md](workers-search-dashboards.md).
 
 ### Enrichment Sources
 
-Each `EnrichmentSource` row has an `entity_type`, a `trigger_mode` (`auto`, `scheduled` or `manual`), adapter settings such as API keys and rate limits, and health fields (`last_success_at`, `last_error`, `error_count`). Manage them on Settings → Engine → Enrichment.
+Each `EnrichmentSource` row is one source's settings: on or off, a `trigger_mode` (`auto` or `manual`), an API key, a rate limit and a daily budget, and health fields (`health_status`, `last_synced_at`). What a source applies to, needs, may send and writes, and its scheduled jobs, are declared on its class (`backend/app/enrichment/manifest.py`). Manage them on Settings → Engine → Enrichment.
 
 ---
 
@@ -513,7 +514,7 @@ Tool pages (Workbench, Settings, Search, Automation) use `SidebarLayout` instead
 
 ### Inline Entity Highlighting
 
-`InlineEntityHighlighter` marks known entities in the article. Hovering shows a quick profile (`EntityPopover`); clicking opens the profile. You can also select text to create or link an entity.
+`InlineEntityHighlighter` marks known entities in the article. Hovering shows a quick profile (`EntityPopover`), with a few words from enrichment when there are any ([Highlight Popover](automation-ai-enrichment.md#highlight-popover)); clicking opens the profile. You can also select text to create or link an entity.
 
 ### AI Copilot Dock
 

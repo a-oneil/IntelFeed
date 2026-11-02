@@ -191,7 +191,7 @@ async def store_ai_relationships(
     (co-mention in a list or roundup produces no evidence sentence containing
     both), and when the full payload is provided both endpoints must appear in
     the extracted entity lists. An assertion matching an existing
-    co_occurrence edge upgrades it (source, confidence, evidence) instead of
+    co_occurrence or enrichment edge upgrades it (source, confidence, evidence) instead of
     being silently dropped; analyst_rejected edges are never resurrected.
 
     Returns count of relationships stored or merged.
@@ -286,7 +286,9 @@ async def store_ai_relationships(
             if existing.adjudication_verdict == "coincidental":
                 stored += 1
                 continue
-            if existing.source == "co_occurrence":
+            # The AI asserted it: the edge is its own now, so an enrichment
+            # source's withdrawal (app/enrichment/relations.py) leaves it.
+            if existing.source in ("co_occurrence", "enrichment"):
                 existing.source = "auto_extracted"
             if _CONFIDENCE_RANK.get(confidence, 0) > _CONFIDENCE_RANK.get(existing.confidence or "possible", 0):
                 existing.confidence = confidence

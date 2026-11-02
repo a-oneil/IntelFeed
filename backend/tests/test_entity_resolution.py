@@ -132,6 +132,18 @@ F5_ACTOR_JUNK = [
     "Nation-state actors",
     "unnamed global secret group",
     "state-sponsored hackers",
+    # A leading article is not part of a name: "the threat actor" is the
+    # head-noun phrase with a determiner in front.
+    "the threat actor",
+    "The Threat Actors",
+    "an attacker",
+    "the Chinese hackers",
+    # Continents, regions and blocs name places, never adversaries.
+    "North America",
+    "the Middle East",
+    "Europe",
+    "Southeast Asia",
+    "NATO",
 ]
 
 
@@ -140,9 +152,17 @@ def test_f5_generic_actor_names_rejected(name):
     assert generic_name_reason("threat_actor", name) is not None
 
 
-@pytest.mark.parametrize("name", ["Scattered Spider", "Lazarus Group", "Silent Ransom Group", "Cyber Av3ngers"])
+@pytest.mark.parametrize(
+    "name", ["Scattered Spider", "Lazarus Group", "Silent Ransom Group", "Cyber Av3ngers", "The Dukes", "The Com"]
+)
 def test_f5_real_actor_names_pass(name):
     assert generic_name_reason("threat_actor", name) is None
+
+
+@pytest.mark.parametrize("entity_type", ["malware", "tool", "vendor", "product"])
+def test_region_names_are_junk_for_every_catalogue_but_countries(entity_type):
+    assert generic_name_reason(entity_type, "North America") == "region_name"
+    assert generic_name_reason("country", "North America") is None
 
 
 F9_MALWARE_JUNK = [
@@ -503,6 +523,22 @@ async def test_f5_generic_names_blocked_when_gates_on(db_session, gates_on, test
         [{"name": "Iranian hackers"}, {"name": "Unknown APT"}, {"name": "attackers"}],
     )
     assert stored == []
+    assert await _actor_count(db_session) == 0
+
+
+async def test_country_names_never_become_actors_malware_or_tools(db_session, gates_on, test_entry):
+    """An article attributes to a country; it does not name one as the
+    adversary. The catalogue country (name, alias or demonym, any casing,
+    with or without a leading article) is held off every creator type."""
+    db_session.add(Country(name="North Korea", aliases=["DPRK", "North Korean"]))
+    await db_session.flush()
+    for name in ("North Korea", "north korea", "DPRK", "the North Korean"):
+        decision = await resolve_entity_creation(db_session, "threat_actor", name)
+        assert decision.action == "blocked", name
+        assert decision.reason == "country_name", name
+    assert (await resolve_entity_creation(db_session, "malware", "DPRK")).reason == "country_name"
+    assert (await resolve_entity_creation(db_session, "tool", "North Korea")).reason == "country_name"
+    assert (await resolve_entity_creation(db_session, "threat_actor", "Lazarus")).action == "create"
     assert await _actor_count(db_session) == 0
 
 

@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useAuthStore } from "@/stores/authStore";
 import { useUIStore, type ReaderFontSize, type ReaderLineHeight, type ReaderMaxWidth, type ReadAloudEngine } from "@/stores/uiStore";
 import { useAppSidebarAutoCollapse } from "@/hooks/useAppSidebarAutoCollapse";
@@ -15,6 +15,7 @@ import { formatDate } from "@/utils/formatDate";
 import { toast } from "sonner";
 import api from "@/api/client";
 import AISettings from "@/components/AISettings";
+import { ENGINE_ICON_PATH, ENGINE_ICON_VIEWBOX } from "@/components/EngineStatusButton";
 import { TagManager } from "@/components/TagManager";
 import SystemSettings from "@/components/SystemSettings";
 import { TestEmailRow } from "@/components/TestEmailRow";
@@ -52,7 +53,7 @@ type SettingsSection =
   | "tags"
   | "skill";
 
-type NavItem = { key: SettingsSection; label: string; icon: string; adminOnly?: boolean; keywords?: string[] };
+type NavItem = { key: SettingsSection; label: string; icon: string; iconViewBox?: string; adminOnly?: boolean; keywords?: string[] };
 
 // Grouped rather than flat: seven of the twelve sections are admin-only, so a
 // flat list showed non-admins five items with unexplained gaps in the order.
@@ -83,7 +84,7 @@ const NAV_GROUPS: { group: string; items: NavItem[] }[] = [
     group: "Administration",
     items: [
       { key: "ai", keywords: ["provider", "ollama", "openai", "model", "prompts", "tasks", "copilot", "cost", "budget"],  label: "AI Configuration", icon: "M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1.07A7 7 0 0 1 14 23h-4a7 7 0 0 1-6.93-4H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2zM9 17a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm6 0a1 1 0 1 0 0-2 1 1 0 0 0 0 2z", adminOnly: true },
-      { key: "engine", keywords: ["pipeline", "ingest", "stages", "autolinking", "extraction", "enrichment", "feed health", "jobs", "schedules", "plans", "maintenance", "console", "thresholds", "api keys", "rate limit", "signal engine", "embeddings", "ranking"],  label: "Engine", icon: "M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41", adminOnly: true },
+      { key: "engine", keywords: ["pipeline", "ingest", "stages", "autolinking", "extraction", "enrichment", "feed health", "jobs", "schedules", "plans", "maintenance", "console", "thresholds", "api keys", "rate limit", "signal engine", "embeddings", "ranking"],  label: "Engine", icon: ENGINE_ICON_PATH, iconViewBox: ENGINE_ICON_VIEWBOX, adminOnly: true },
       { key: "logs", keywords: ["audit", "errors", "activity", "history"],  label: "Logs", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8", adminOnly: true },
       { key: "system", keywords: ["email", "smtp", "mail", "monitoring", "sentry", "backup", "retention", "maintenance", "search index", "reindex"],  label: "System", icon: "M5 12h14M12 5l7 7-7 7", adminOnly: true },
       { key: "users", keywords: ["accounts", "admin", "roles", "invite", "registration", "permissions"],  label: "Users", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75", adminOnly: true },
@@ -106,8 +107,16 @@ export function SettingsPage() {
   useAppSidebarAutoCollapse();
   const isMobile = useIsMobile();
 
+  // location.key changes on every navigation, even to the same URL, so the
+  // header gear re-runs this while already on /settings.
+  const locationKey = useLocation().key;
   useEffect(() => {
     let section = searchParams.get("section");
+    // A bare /settings (the header gear) lands on the first section.
+    if (!section) {
+      setActiveSection("account");
+      return;
+    }
     // Legacy deep links: these sections were absorbed into Engine — the
     // EngineSection maps the old section id onto the matching console state,
     // so the query string is left untouched here.
@@ -125,7 +134,7 @@ export function SettingsPage() {
     if (item && (!item.adminOnly || isAdmin)) {
       setActiveSection(item.key);
     }
-  }, [searchParams, isAdmin]);
+  }, [searchParams, isAdmin, locationKey]);
 
   // Drop admin-only items, then drop any group left empty by that filter.
   const visibleGroups = NAV_GROUPS
@@ -193,7 +202,7 @@ export function SettingsPage() {
                   className={`${styles.navItem} ${activeSection === item.key ? styles.navItemActive : ""}`}
                   onClick={() => setActiveSection(item.key)}
                 >
-                  <svg className={styles.navIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <svg className={styles.navIcon} viewBox={item.iconViewBox ?? "0 0 24 24"} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                     <path d={item.icon} />
                   </svg>
                   <span>{item.label}</span>
@@ -264,7 +273,7 @@ export function SettingsPage() {
                     className={`${styles.navItem} ${activeSection === item.key ? styles.navItemActive : ""}`}
                     onClick={() => setActiveSection(item.key)}
                   >
-                    <svg className={styles.navIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <svg className={styles.navIcon} viewBox={item.iconViewBox ?? "0 0 24 24"} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                       <path d={item.icon} />
                     </svg>
                     <span>{item.label}</span>
@@ -1010,10 +1019,10 @@ interface LogFileMeta {
 }
 
 const LOG_FILE_LABELS: Record<string, { label: string; description: string }> = {
-  "app.log": { label: "Application", description: "Application logs (worker/task logs live under Tasks)" },
+  "app.log": { label: "Application", description: "Application logs (worker logs live under Jobs)" },
   "error.log": { label: "Errors", description: "Errors and exceptions" },
   "http.log": { label: "HTTP", description: "API request logs" },
-  "tasks.log": { label: "Tasks", description: "Scheduled job run history + raw Celery worker/beat logs" },
+  "jobs.log": { label: "Jobs", description: "Scheduled job run history + raw Celery worker/beat logs" },
   "audit.log": { label: "Audit", description: "Mutating API action trail" },
   "update.log": { label: "Updates", description: "Deployment update history" },
 };
@@ -1097,7 +1106,7 @@ function parseLogLine(raw: string): ParsedLogLine | null {
 
     // Celery lifecycle boilerplate: success/received/dispatch chatter is fully
     // covered by the structured views (job_runs rows in this tab, per-entry
-    // stage runs in the reader popover). Failures and task log output stay.
+    // stage runs in the reader popover). Failures and job log output stay.
     const ev = typeof obj.event === "string" ? obj.event : "";
     if (
       (obj.logger === "celery.app.trace" && ev.includes("succeeded in")) ||
@@ -1197,7 +1206,7 @@ function summarizeRunDetail(detail: JobRunRow["detail"]): string {
 }
 
 /** A scheduled-job run (job_runs table) rendered as a log line — same shape as
- *  the parsed tasks.log lines so it flows through the level/search filters. */
+ *  the parsed jobs.log lines so it flows through the level/search filters. */
 function jobRunToLogLine(run: JobRunRow): ParsedLogLine {
   const dur = run.duration_ms != null ? ` (${run.duration_ms}ms)` : "";
   const details: string[] = [];
@@ -1467,9 +1476,9 @@ function LogsSection() {
     } finally {
       setLoading(false);
     }
-    // The Tasks view interleaves the structured job_runs rows (status,
+    // The Jobs view interleaves the structured job_runs rows (status,
     // duration, what-it-did) with the raw worker log lines.
-    if (filename === "tasks.log") {
+    if (filename === "jobs.log") {
       try {
         const res = await api.get<{ runs: JobRunRow[] }>("/engine/job-runs");
         setJobRunLines(res.data.runs.map(jobRunToLogLine));
@@ -1499,7 +1508,7 @@ function LogsSection() {
 
   const parsedLines = useMemo(() => {
     const lines = parseLogContent(content);
-    if (activeFile !== "tasks.log" || !jobRunLines.length) return lines;
+    if (activeFile !== "jobs.log" || !jobRunLines.length) return lines;
     // Interleave job-run rows chronologically; cap to the window covered by
     // the loaded file lines so old DB rows don't pad the top of the view.
     const firstEpoch = lines.find((l) => l.epoch != null)?.epoch ?? 0;

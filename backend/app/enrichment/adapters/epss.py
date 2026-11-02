@@ -6,18 +6,39 @@ Provides exploitation probability scores for CVEs.
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.manifest import Column, Context, Display, Egress, Job, License, Policy, Quota
 
 
 class EPSSAdapter(EnrichmentAdapter):
     source_type = "epss"
     display_name = "FIRST EPSS"
-    supported_entity_types = ["cve"]
-    requires_api_key = False
-    default_trigger_mode = "scheduled"
+    about = "FIRST's daily estimate of how likely each CVE is to be exploited in the next 30 days."
+    applies_to = {"cve": None}
+    # The job downloads one CSV a day; api.first.org publishes no request limit.
+    quota = Quota(100, 60, daily_budget=500)
+    egress = Egress.LOW
+    license = License("FIRST EPSS", attribution="EPSS scores by FIRST.org")
+    jobs = (
+        Job(
+            "epss-bulk-sync",
+            "app.workers.enrichment_tasks.run_epss_bulk_sync",
+            {"type": "crontab", "minute": "30", "hour": "6"},
+            "Update all CVEs with EPSS scores from epss.empiricalsecurity.com",
+        ),
+    )
+    # A lookup's answer writes both columns through the field map; the daily
+    # job writes the same two set-based (``_run_epss_bulk_sync``).
+    outputs = (
+        Column("epss", "cve.epss_score", Policy.NEWER_WINS),
+        Column("percentile", "cve.epss_percentile", Policy.NEWER_WINS),
+        Context("epss", "EPSS score", Display.FACT),
+        Context("percentile", "EPSS percentile", Display.FACT),
+        Context("date", "Scored on", Display.FACT),
+    )
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
         """Enrich a single CVE with EPSS score."""
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with self.http(timeout=10) as client:
             resp = await client.get(
                 "https://api.first.org/data/v1/epss",
                 params={"cve": entity_value},
@@ -47,11 +68,11 @@ class EPSSAdapter(EnrichmentAdapter):
 
     async def check_health(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with self.http(timeout=5) as client:
                 resp = await client.get(
                     "https://api.first.org/data/v1/epss",
                     params={"cve": "CVE-2021-44228"},
                 )
                 return resp.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False

@@ -1,15 +1,33 @@
-"""Enrichment pipeline — orchestrates enrichment with caching, rate limiting, and key resolution."""
+"""Enrichment pipeline — orchestrates enrichment with caching, key resolution and the source gateways."""
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import decrypt_value
-from app.enrichment.rate_limiter import RedisBudgetTracker, RedisRateLimiter
-from app.enrichment.registry import ADAPTER_REGISTRY, SHARED_KEY_GROUPS, get_adapter
+from app.enrichment.base import EnrichmentData
+from app.enrichment.context import store_context
+from app.enrichment.entity_updater import apply_enrichment_results_to_entity
+from app.enrichment.gateway import (
+    MAX_TOKEN_WAIT,
+    BreakerOpen,
+    GatewayError,
+    RateLimited,
+    SourceGateway,
+    record_ioc_sent,
+)
+from app.enrichment.manifest import Egress
+from app.enrichment.registry import (
+    ADAPTER_REGISTRY,
+    SHARED_KEY_GROUPS,
+    SOURCE_REGISTRY,
+    adapter_for_source,
+    source_gateway,
+)
 from app.models.enrichment import EnrichmentResult, EnrichmentSource, UserEnrichmentOverride
 
 logger = logging.getLogger(__name__)
@@ -56,7 +74,8 @@ async def resolve_api_key(
     user_id: uuid.UUID | None,
     db: AsyncSession,
 ) -> str | None:
-    """Resolve API key: user override > global default > shared key group sibling."""
+    """Resolve API key: user override > the source's key > a shared key group
+    sibling > the source's ``key_setting`` instance setting."""
     # 1. User override for this specific source
     if user_id:
         result = await db.execute(
@@ -73,8 +92,8 @@ async def resolve_api_key(
         return decrypt_value(source.api_key_encrypted)
 
     # 3. Shared key group fallback — check sibling sources for a key
-    adapter_cls = ADAPTER_REGISTRY.get(source.source_type)
-    shared_group = getattr(adapter_cls, "shared_key_group", None) if adapter_cls else None
+    source_cls = SOURCE_REGISTRY.get(source.source_type)
+    shared_group = source_cls.shared_key_group if source_cls else None
     if shared_group:
         sibling_types = [st for st in SHARED_KEY_GROUPS.get(shared_group, []) if st != source.source_type]
         if sibling_types:
@@ -107,7 +126,42 @@ async def resolve_api_key(
             if sib_source and sib_source.api_key_encrypted:
                 return decrypt_value(sib_source.api_key_encrypted)
 
-    return None
+    # 4. The instance-wide setting the source names (nvd_api_key, github_token)
+    return await _key_from_setting(source.source_type, db)
+
+
+async def _key_from_setting(source_type: str, db: AsyncSession) -> str | None:
+    source_cls = SOURCE_REGISTRY.get(source_type)
+    if not (source_cls and source_cls.key_setting):
+        return None
+    from app.services.system_settings import get_setting
+
+    return await get_setting(source_cls.key_setting, db) or None
+
+
+async def gateway_for(
+    db: AsyncSession,
+    source_type: str,
+    max_wait: float = MAX_TOKEN_WAIT,
+) -> tuple[SourceGateway, str | None]:
+    """The gateway and key for calls made outside ``enrich_entity`` (scheduled
+    jobs, bulk syncs): the source row's rate limit, budget and key, resolved
+    exactly as per-entity lookups resolve it, so both draw on one allowance.
+    Without a row the manifest's quota applies."""
+    source = (
+        await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == source_type))
+    ).scalar_one_or_none()
+    if source is None:
+        quota = SOURCE_REGISTRY[source_type].quota
+        source = EnrichmentSource(
+            source_type=source_type,
+            rate_limit_config=quota.rate_limit_config,
+            daily_budget=quota.daily_budget,
+        )
+        api_key = await _key_from_setting(source_type, db)
+    else:
+        api_key = await resolve_api_key(source, None, db)
+    return source_gateway(source, api_key, max_wait=max_wait), api_key
 
 
 async def get_cached_result(
@@ -131,6 +185,100 @@ async def get_cached_result(
     return result.scalar_one_or_none()
 
 
+async def store_result(
+    db: AsyncSession,
+    entity_type: str,
+    entity_id: uuid.UUID,
+    source_type: str,
+    data: EnrichmentData,
+    existing: EnrichmentResult | None,
+) -> bool:
+    """Keep a source's fresh result for an entity and its context. A new
+    enrichment_results row is written only when parsed_data changed from
+    ``existing`` (the latest one); otherwise that row stands, as of now, with
+    this answer's raw_response (which says whether a lookup or a job gave it).
+    Returns True when the answer differs from ``existing``."""
+    now = datetime.now(UTC)
+    expires_at = now + timedelta(hours=data.ttl_hours)
+    changed = not (existing and existing.parsed_data == data.parsed_data)
+    if not changed:
+        existing.enriched_at, existing.expires_at = now, expires_at
+        existing.raw_response = data.raw_response
+    else:
+        db.add(
+            EnrichmentResult(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                source_type=source_type,
+                raw_response=data.raw_response,
+                parsed_data=data.parsed_data,
+                enriched_at=now,
+                expires_at=expires_at,
+                status="success",
+            )
+        )
+    await store_context(
+        db, entity_type, entity_id, source_type, data.parsed_data, observed_at=now, expires_at=expires_at
+    )
+    return changed
+
+
+async def apply_record(
+    db: AsyncSession, entity_type: str, entity_id: uuid.UUID, source_type: str, data: EnrichmentData, cache: dict
+) -> None:
+    """The writes a source makes beyond its manifest outputs (NVD's affected
+    products and weaknesses, a CVE record's affected versions): its class's
+    ``apply_record`` hook, when it has one. ``cache`` carries lookup indexes
+    across the entities of one job run."""
+    hook = getattr(SOURCE_REGISTRY.get(source_type), "apply_record", None)
+    if hook is None:
+        return
+    try:
+        async with db.begin_nested():
+            await hook(db, entity_type, entity_id, data, cache)
+    except Exception:
+        # The answer and its columns still land without the extras.
+        logger.exception("%s extra writes failed for %s %s", source_type, entity_type, entity_id)
+
+
+@dataclass(frozen=True)
+class Applied:
+    """What applying one answer did: ``changed`` when it differed from the
+    stored one, ``written`` when it changed the entity's columns or links."""
+
+    changed: bool
+    written: bool
+
+
+async def apply_source_result(
+    db: AsyncSession,
+    entity_type: str,
+    entity_id: uuid.UUID,
+    source_type: str,
+    data: EnrichmentData,
+    cache: dict | None = None,
+) -> Applied:
+    """A scheduled job's answer for one entity, handled as a lookup's is:
+    stored (a new row only when it changed), its Context written, its Column
+    outputs applied through the field map (ranks, claims, losing claims), its
+    Relation outputs and the source's own extra writes made."""
+    existing = await get_cached_result(db, entity_type, entity_id, source_type)
+    changed = await store_result(db, entity_type, entity_id, source_type, data, existing)
+    await apply_record(db, entity_type, entity_id, source_type, data, {} if cache is None else cache)
+    written = await apply_enrichment_results_to_entity(
+        db, entity_type, entity_id, [{"source_type": source_type, "status": "success", "parsed_data": data.parsed_data}]
+    )
+    return Applied(changed, written)
+
+
+async def apply_catalog_result(
+    db: AsyncSession, entity_type: str, entity_id: uuid.UUID, source_type: str, data: EnrichmentData
+) -> bool:
+    """``apply_source_result`` for callers that only ask whether the entity's
+    columns changed."""
+    return (await apply_source_result(db, entity_type, entity_id, source_type, data)).written
+
+
 async def enrich_entity(
     entity_type: str,
     entity_id: uuid.UUID,
@@ -141,6 +289,7 @@ async def enrich_entity(
     source_types: list[str] | None = None,
     entity_confidence: str | None = None,
     entity_base_confidence: float | None = None,
+    refresh: bool = False,
 ) -> list[dict]:
     """Enrich an entity from all applicable enabled sources.
 
@@ -152,10 +301,12 @@ async def enrich_entity(
         entity_value: The entity value to look up (IP, CVE ID, name, etc.).
         db: Database session.
         user_id: Optional user ID for API key resolution.
-        trigger: Trigger mode filter (auto, scheduled, manual).
+        trigger: Trigger mode filter (auto, manual).
         source_types: Optional list of specific source types to use.
         entity_confidence: IOC confidence level (high/medium/low) for filtering.
         entity_base_confidence: IOC numeric confidence for filtering.
+        refresh: ask each source again even when its stored result is still
+            fresh (a person pressing Refresh); the gateway still limits it.
     """
     results = []
 
@@ -168,11 +319,13 @@ async def enrich_entity(
     for source in sources_result.scalars():
         if source_types and source.source_type not in source_types:
             continue
+        if source.source_type not in ADAPTER_REGISTRY:
+            continue  # a catalog source: jobs only, no per-entity lookup
 
         # Resolve API key (user override > global)
         api_key = await resolve_api_key(source, user_id, db)
 
-        adapter = get_adapter(source.source_type, api_key=api_key, config=source.config)
+        adapter = adapter_for_source(source, api_key)
 
         # Map base entity type to adapter entity type
         adapter_entity_type = entity_type
@@ -191,7 +344,16 @@ async def enrich_entity(
 
         # Check cache — skip if fresh result exists (no budget consumed)
         existing = await get_cached_result(db, entity_type, entity_id, source.source_type)
-        if existing and existing.expires_at and existing.expires_at > datetime.now(UTC):
+        if not refresh and existing and existing.expires_at and existing.expires_at > datetime.now(UTC):
+            await store_context(
+                db,
+                entity_type,
+                entity_id,
+                source.source_type,
+                existing.parsed_data,
+                observed_at=existing.enriched_at,
+                expires_at=existing.expires_at,
+            )
             results.append(
                 {
                     "source_type": source.source_type,
@@ -201,57 +363,15 @@ async def enrich_entity(
             )
             continue
 
-        # Check daily budget (only for actual API calls, after cache check)
-        if source.daily_budget is not None:
-            try:
-                budget_tracker = RedisBudgetTracker(source.source_type)
-                within_budget = await budget_tracker.check_and_increment(source.daily_budget)
-            except Exception:
-                logger.warning("Budget tracker unavailable for %s, proceeding", source.source_type)
-                within_budget = True
-            if not within_budget:
-                results.append(
-                    {
-                        "source_type": source.source_type,
-                        "status": "budget_exhausted",
-                    }
-                )
-                continue
-
-        # Check rate limit
-        limiter = RedisRateLimiter(source.source_type, source.rate_limit_config)
-        try:
-            allowed = await limiter.check()
-        except Exception:
-            logger.warning("Rate limiter unavailable for %s, proceeding", source.source_type)
-            allowed = True
-
-        if not allowed:
-            logger.info("Rate limited for source %s, skipping", source.source_type)
-            results.append(
-                {
-                    "source_type": source.source_type,
-                    "status": "rate_limited",
-                }
-            )
-            continue
-
-        # Call adapter
+        # Call adapter. Its gateway enforces the rate limit, daily budget and
+        # circuit breaker on each HTTP request it makes.
         try:
             enrichment_data = await adapter.enrich(adapter_entity_type, entity_value)
-
-            now = datetime.now(UTC)
-            er = EnrichmentResult(
-                entity_type=entity_type,
-                entity_id=entity_id,
-                source_type=source.source_type,
-                raw_response=enrichment_data.raw_response,
-                parsed_data=enrichment_data.parsed_data,
-                enriched_at=now,
-                expires_at=now + timedelta(hours=enrichment_data.ttl_hours),
-                status="success",
-            )
-            db.add(er)
+            if ADAPTER_REGISTRY[source.source_type].egress == Egress.SHARES_IOC:
+                # The gateway let the request out: the indicator left the box.
+                await record_ioc_sent(entity_value)
+            await store_result(db, entity_type, entity_id, source.source_type, enrichment_data, existing)
+            await apply_record(db, entity_type, entity_id, source.source_type, enrichment_data, {})
 
             results.append(
                 {
@@ -260,6 +380,15 @@ async def enrich_entity(
                     "parsed_data": enrichment_data.parsed_data,
                 }
             )
+
+        except GatewayError as e:
+            # Refused or told to back off: not a result, so nothing is stored
+            # and the next attempt isn't blocked by a cached error.
+            logger.info("Enrichment skipped for %s/%s: %s", source.source_type, entity_value, e)
+            outcome = {"source_type": source.source_type, "status": e.status}
+            if isinstance(e, RateLimited | BreakerOpen):
+                outcome["retry_after"] = round(e.retry_after)
+            results.append(outcome)
 
         except Exception as e:
             logger.warning("Enrichment failed for %s/%s: %s", source.source_type, entity_value, e)
@@ -287,28 +416,3 @@ async def enrich_entity(
     await db.flush()
 
     return results
-
-
-async def enrich_entity_auto(
-    entity_type: str,
-    entity_id: uuid.UUID,
-    entity_value: str,
-    db: AsyncSession,
-    adapter_entity_type: str | None = None,
-    entity_confidence: str | None = None,
-    entity_base_confidence: float | None = None,
-) -> list[dict]:
-    """Auto-enrich an entity using sources with trigger_mode='auto'.
-
-    Called automatically after entity extraction. Uses the base entity type
-    for storage but the adapter_entity_type for adapter matching.
-    """
-    return await enrich_entity(
-        entity_type=adapter_entity_type or entity_type,
-        entity_id=entity_id,
-        entity_value=entity_value,
-        db=db,
-        trigger="auto",
-        entity_confidence=entity_confidence,
-        entity_base_confidence=entity_base_confidence,
-    )

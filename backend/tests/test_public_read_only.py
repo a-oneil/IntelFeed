@@ -51,9 +51,10 @@ VISITOR_ROUTES = frozenset(
     GET /api/documentation
     GET /api/documentation/{slug:path}
     GET /api/engine/entities/{entity_type}/{entity_id}/whats-new
-    GET /api/enrichment/results
     GET /api/entities/{entity_type}/{entity_id}/attack-layer
     GET /api/entities/{entity_type}/{entity_id}/attack-techniques
+    GET /api/entities/{entity_type}/{entity_id}/context
+    GET /api/entities/{entity_type}/{entity_id}/glance
     GET /api/entities/{entity_type}/{entity_id}/entries-window
     GET /api/entities/{entity_type}/{entity_id}/mentions-timeseries
     GET /api/entities/{entity_type}/{entity_id}/provenance
@@ -176,8 +177,6 @@ OWN_AUTH_ROUTES = frozenset(
         "POST /api/auth/logout",
         "POST /api/auth/refresh",
         "POST /api/auth/register",
-        "GET /api/automation/templates",
-        "GET /api/automation/variable-contexts",
         "GET /api/documentation/assets/{path:path}",
         "GET /api/events",
         "GET /api/health",
@@ -850,11 +849,17 @@ async def canary(db_session: AsyncSession):
 
     shared = ThreatActor(name="Shared Actor", first_seen_at=now, last_seen_at=now)
     ghost = ThreatActor(name=f"{_CANARY} Ghost", first_seen_at=now, last_seen_at=now)
-    db_session.add_all([shared, ghost])
+    # Two actors a visitor sees (on the visible article): the relationships
+    # between them and Shared Actor below carry what a visitor must not get.
+    partner = ThreatActor(name="Partner Actor", first_seen_at=now, last_seen_at=now)
+    rumoured = ThreatActor(name="Rumoured Actor", first_seen_at=now, last_seen_at=now)
+    db_session.add_all([shared, ghost, partner, rumoured])
     await db_session.flush()
     db_session.add_all(
         [
             EntryThreatActor(entry_id=shown.id, threat_actor_id=shared.id, matched_names=["Shared Actor"]),
+            EntryThreatActor(entry_id=shown.id, threat_actor_id=partner.id, matched_names=["Partner Actor"]),
+            EntryThreatActor(entry_id=shown.id, threat_actor_id=rumoured.id, matched_names=["Rumoured Actor"]),
             EntryThreatActor(entry_id=hidden.id, threat_actor_id=shared.id, matched_names=[f"{_CANARY} alias"]),
             EntryThreatActor(entry_id=hidden.id, threat_actor_id=ghost.id, matched_names=[f"{_CANARY} Ghost"]),
         ]
@@ -896,6 +901,18 @@ async def canary(db_session: AsyncSession):
     db_session.add(mixed)
     db_session.add(thread)
     await db_session.flush()
+    # Visible ends, but the only evidence is the hidden article: the edge itself goes.
+    hidden_edge = EntityRelationship(
+        id=uuid.uuid4(),
+        source_type="threat_actor",
+        source_id=shared.id,
+        target_type="threat_actor",
+        target_id=rumoured.id,
+        relationship_type="related-to",
+        confidence="likely",
+        source="ai_extracted",
+        evidence_entry_ids=[hidden.id],
+    )
     db_session.add_all(
         [
             StoryThreadEntry(thread_id=thread.id, entry_id=hidden.id, role="origin"),
@@ -919,6 +936,19 @@ async def canary(db_session: AsyncSession):
                 description=f"{_CANARY} relationship",
                 evidence_entry_ids=[hidden.id],
             ),
+            # Visible ends and visible evidence, but the description is an analyst's.
+            EntityRelationship(
+                source_type="threat_actor",
+                source_id=shared.id,
+                target_type="threat_actor",
+                target_id=partner.id,
+                relationship_type="related-to",
+                confidence="likely",
+                source="analyst_created",
+                description=f"{_CANARY} analyst note",
+                evidence_entry_ids=[shown.id],
+            ),
+            hidden_edge,
             CorrelationEventRecord(
                 event_type="co_occurrence",
                 entry_id=hidden.id,
@@ -969,6 +999,7 @@ async def canary(db_session: AsyncSession):
         "ghost_product": ghost_product.id,
         "shown_product": shown_product.id,
         "slug": mixed.slug,
+        "hidden_edge": hidden_edge.id,
     }
 
 
@@ -981,6 +1012,7 @@ _CANARY_IDS = (
     "ghost_tool",
     "ghost_vendor",
     "ghost_product",
+    "hidden_edge",
 )
 
 
@@ -1264,3 +1296,17 @@ def test_visitor_pages_are_capped():
     assert capped("/api/feeds/abc/entries", "limit=999") == f"limit={VISITOR_PAGE_CAP}"
     # The sidebar's feed list is names only and keeps its page.
     assert capped("/api/feeds", "limit=1000") == "limit=1000"
+
+
+@pytest.mark.asyncio
+async def test_timeline_relationships_follow_the_visitor_rule(
+    client: AsyncClient, public_mode, canary, auth_headers, no_rate_limit
+):
+    """Rumoured Actor is visible, but its edge to Shared Actor rests on the hidden article alone."""
+    url = f"/api/intelligence/timeline/threat_actor/{canary['shared']}"
+    analyst = await client.get(url, headers=auth_headers)
+    assert "Rumoured Actor" in analyst.text  # the event exists
+    visitor = await client.get(url)
+    assert visitor.status_code == 200, visitor.text
+    assert "Rumoured Actor" not in visitor.text
+    assert "Partner Actor" in visitor.text  # an edge with visible evidence stays

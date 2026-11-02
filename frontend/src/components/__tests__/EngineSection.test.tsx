@@ -35,11 +35,18 @@ vi.mock("../engine/EngineMatrix", () => ({
     </div>
   ),
 }));
+vi.mock("../engine/EngineSwitch", () => ({
+  EngineStoppedBanner: () => null,
+}));
 vi.mock("../engine/PipelinePlans", () => ({
   PipelinePlans: () => <div data-testid="pipeline-plans" />,
 }));
 vi.mock("@/components/JobSchedules", () => ({
-  default: () => <div data-testid="job-schedules" />,
+  default: ({ onOpenEnrichment }: { onOpenEnrichment: (source: string) => void }) => (
+    <div data-testid="job-schedules">
+      <button onClick={() => onOpenEnrichment("nvd")}>open-nvd</button>
+    </div>
+  ),
 }));
 vi.mock("@/components/SystemSettings", async () => {
   const { createContext } = await import("react");
@@ -51,11 +58,10 @@ vi.mock("@/components/SystemSettings", async () => {
 vi.mock("../engine/MaintenancePanel", () => ({
   MaintenancePanel: () => <div data-testid="maintenance-panel" />,
 }));
-vi.mock("@/components/EnrichmentSettings", () => ({
-  default: () => <div data-testid="enrichment-settings" />,
-}));
-vi.mock("../engine/EnrichmentGaps", () => ({
-  EnrichmentGaps: () => <div data-testid="enrichment-gaps" />,
+vi.mock("../engine/EnrichmentConsole", () => ({
+  EnrichmentConsole: ({ initialSource }: { initialSource?: string | null }) => (
+    <div data-testid="enrichment-console" data-source={initialSource ?? ""} />
+  ),
 }));
 
 function renderSection(search = "") {
@@ -138,8 +144,23 @@ describe("EngineSection", () => {
 
   it("maps legacy ?section=enrichment to the enrichment browse view", () => {
     renderSection("?section=enrichment");
-    expect(screen.getByTestId("enrichment-settings")).toBeInTheDocument();
-    expect(screen.getByTestId("enrichment-gaps")).toBeInTheDocument();
+    expect(screen.getByTestId("enrichment-console")).toHaveAttribute("data-source", "");
     expect(screen.queryByTestId("engine-matrix")).not.toBeInTheDocument();
+  });
+
+  it("opens the enrichment console with a source expanded from ?source=", () => {
+    renderSection("?section=enrichment&source=epss");
+    expect(screen.getByTestId("enrichment-console")).toHaveAttribute("data-source", "epss");
+  });
+
+  it("maps the legacy enrich stage deep link to the enrichment page", () => {
+    renderSection("?tab=pipeline&stage=enrich");
+    expect(screen.getByTestId("enrichment-console")).toBeInTheDocument();
+  });
+
+  it("opens an enrichment job's source from the jobs view", () => {
+    renderSection("?tab=jobs");
+    fireEvent.click(screen.getByText("open-nvd"));
+    expect(screen.getByTestId("enrichment-console")).toHaveAttribute("data-source", "nvd");
   });
 });

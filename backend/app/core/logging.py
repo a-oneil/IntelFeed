@@ -48,16 +48,16 @@ def _make_file_handler(filename: str, level: int = logging.INFO) -> RotatingFile
     return handler
 
 
-class _TaskLogFilter(logging.Filter):
+class _JobLogFilter(logging.Filter):
     """Accept only records from celery and app.workers loggers."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         return record.name.startswith(("celery", "app.workers"))
 
 
-class _NotTaskLogFilter(logging.Filter):
-    """Exclude celery/worker records — they belong to tasks.log, and keeping
-    them out of app.log makes 'Application' vs 'Tasks' a real distinction."""
+class _NotJobLogFilter(logging.Filter):
+    """Exclude celery/worker records — they belong to jobs.log, and keeping
+    them out of app.log makes 'Application' vs 'Jobs' a real distinction."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         return not record.name.startswith(("celery", "app.workers"))
@@ -73,7 +73,7 @@ def setup_logging() -> None:
         app.log    — all INFO+ logs (catch-all)
         error.log  — ERROR+ only
         http.log   — HTTP request logs (app.request logger)
-        tasks.log  — Celery worker/beat logs (app.workers.* and celery.* loggers)
+        jobs.log   — Celery worker/beat logs (app.workers.* and celery.* loggers)
         audit.log  — Mutating API action audit trail (app.audit logger)
     """
     global _logging_configured
@@ -130,9 +130,9 @@ def setup_logging() -> None:
         os.makedirs(LOG_DIR, exist_ok=True)
 
         # Application log — everything except celery/worker records (those go
-        # to tasks.log below; error.log still catches errors from both).
+        # to jobs.log below; error.log still catches errors from both).
         app_handler = _make_file_handler("app.log")
-        app_handler.addFilter(_NotTaskLogFilter())
+        app_handler.addFilter(_NotJobLogFilter())
         root.addHandler(app_handler)
 
         # Errors only
@@ -143,12 +143,12 @@ def setup_logging() -> None:
         http_logger = logging.getLogger("app.request")
         http_logger.addHandler(_make_file_handler("http.log"))
 
-        # Celery / worker task log — uses a filter on root so records from
-        # celery.* and app.workers.* loggers go to tasks.log regardless of
+        # Celery worker / beat job log — uses a filter on root so records from
+        # celery.* and app.workers.* loggers go to jobs.log regardless of
         # whether Celery clears named-logger handlers during its own setup.
-        task_handler = _make_file_handler("tasks.log")
-        task_handler.addFilter(_TaskLogFilter())
-        root.addHandler(task_handler)
+        job_handler = _make_file_handler("jobs.log")
+        job_handler.addFilter(_JobLogFilter())
+        root.addHandler(job_handler)
 
         # Audit log
         audit_logger = logging.getLogger("app.audit")

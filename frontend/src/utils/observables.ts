@@ -107,31 +107,51 @@ export function observableSourcesLabel(o: {
   return parts.join(" · ");
 }
 
-/** One-line reputation summary for a table cell or a profile row. */
-export function reputationLabel(r: ObservableResponseLike["reputation"] | undefined): string {
-  if (!r) return "";
+/** One-line enrichment summary for a table cell: reputation plus the network columns. */
+export function reputationLabel(o: ObservableResponseLike): string {
+  const r = o.reputation ?? {};
   const bits: string[] = [];
   if (r.gn_riot) bits.push("RIOT");
-  if (r.gn_classification) bits.push(`GN ${r.gn_classification}`);
+  if (o.noise_class && o.noise_class !== "not_seen") bits.push(`GN ${o.noise_class}`);
   if (r.vt_ratio) bits.push(`VT ${r.vt_ratio}`);
-  if (r.asn) bits.push(`AS${String(r.asn).replace(/^AS/i, "")}`);
-  if (r.country) bits.push(String(r.country));
+  if (o.asn != null) bits.push(`AS${o.asn}`);
+  if (o.geo_country) bits.push(o.geo_country);
+  if (o.popularity_rank != null) bits.push(`Tranco #${o.popularity_rank}`);
   if (r.ports) bits.push(`ports ${r.ports}`);
   if (r.tags) bits.push(String(r.tags));
   return bits.join(" · ");
 }
 
+/** "AS10439 · CARINET - CariNet, Inc., US · US" for a profile row. */
+export function networkLabel(o: ObservableResponseLike): string {
+  return [o.asn != null ? `AS${o.asn}` : null, o.asn_org, o.geo_country].filter(Boolean).join(" · ");
+}
+
+/** "Oct 29, 1996 — 30 years ago": a registration date with its age. */
+export function registeredLabel(iso: string, now: Date = new Date()): string {
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return iso;
+  const days = Math.floor((now.getTime() - date.getTime()) / 86_400_000);
+  const years = Math.floor(days / 365.25);
+  const age =
+    days < 1 ? "today" : years >= 1 ? `${years} year${years === 1 ? "" : "s"} ago` : `${days} day${days === 1 ? "" : "s"} ago`;
+  const shown = date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+  return `${shown} — ${age}`;
+}
+
 interface ObservableResponseLike {
   reputation?: {
-    asn?: number | string | null;
-    country?: string | null;
     ports?: string | null;
     tags?: string | null;
     vt_ratio?: string | null;
-    gn_classification?: string | null;
     gn_riot?: boolean | null;
     enriched_at?: string | null;
   } | null;
+  asn?: number | null;
+  asn_org?: string | null;
+  geo_country?: string | null;
+  popularity_rank?: number | null;
+  noise_class?: string | null;
 }
 
 /** Human labels for the ledger's capture doors (`Observable.created_via`). */

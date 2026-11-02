@@ -163,6 +163,13 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.1
     sentry_profiles_sample_rate: float = 0.1
 
+    # Enrichment: the global pause (app/enrichment/pause.py). On, no request
+    # leaves for an outside source; queued lookups wait.
+    enrichment_paused: bool = False
+    # The engine switch (app/services/engine_switch.py). On, every worker,
+    # beat and the Telegram listener stand still; queued work waits.
+    engine_stopped: bool = False
+
     # NVD API
     nvd_api_key: str = ""  # Get from https://nvd.nist.gov/developers/request-an-api-key
     cve_reenrich_batch_size: int = 150  # CVEs re-fetched from NVD per maintenance run
@@ -174,6 +181,9 @@ class Settings(BaseSettings):
     # because unauthenticated search 403s after ~10 requests/minute.
     github_poc_batch_limit: int = 0  # 0 = auto (300 with a token, 40 without)
     github_poc_rescan_days: int = 30
+    # Contact email in the User-Agent of Wikipedia and Wikidata requests
+    # (Wikimedia's User-Agent policy asks for a way to reach the operator).
+    wikimedia_contact_email: str = ""
     github_repo_max_file_size_kb: int = 5120  # 5MB
     github_repo_default_interval_minutes: int = 1440
 
@@ -290,7 +300,18 @@ class Settings(BaseSettings):
     adjudication_max_per_hour: int = 0  # 0 = no ceiling; set one to cap spend or protect the ai queue
     adjudication_min_priority_score: float = 0.0  # 0 = no floor (keep it: junk comes from low-score CVE entries)
     adjudication_apply_min_confidence: str = "high"  # high | medium | low
+    # Distinct articles whose reviews must agree before a type change is applied
+    # in apply mode (1 = the first high-confidence verdict converts the entity).
+    adjudication_reclassify_consensus: int = 2
     adjudication_circuit_breaker_pct: float = 0.5
+    # Daily duplicate review (services/entity_merge_review.py): likely-duplicate
+    # pairs of existing actors / malware / tools judged by the model; "same"
+    # becomes a Merge proposal on the Review tab. 0 pairs = off.
+    merge_review_batch_size: int = 40
+    merge_review_pairs_per_call: int = 8
+    merge_review_min_similarity: float = 0.55
+    merge_review_min_confidence: str = "medium"  # high | medium | low
+    merge_review_retry_days: int = 30
     adjudication_content_max_chars: int = 8000
     adjudication_scope: str = "links,entities,relationships,observables"
     # ICS/OT context keywords — ICS-matrix (T0xxx) ATT&CK techniques are only

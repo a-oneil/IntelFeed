@@ -144,7 +144,7 @@ Files, pasted text and URLs an analyst uploads. Each item that parses becomes an
 
 ### 3. Intelligence Entities
 
-**Tables:** `ttps`, `cves`, `cve_affected`, `cve_weaknesses`, `cwes`, `observables`, `threat_actors`, `malware_families`, `countries`, `sectors`, `vendors`, `products`, `mitigations`, `tools`, `ransomware_victims`, `victim_disclosures`
+**Tables:** `ttps`, `cves`, `cve_affected`, `cve_weaknesses`, `cwes`, `capec_patterns`, `observables`, `threat_actors`, `malware_families`, `countries`, `sectors`, `vendors`, `products`, `mitigations`, `tools`, `ransomware_victims`, `victim_disclosures`
 
 **Maintenance and audit tables:** `entity_maintenance_log`, `actor_description_history`, `entity_link_validation_log`, `entity_merge_suggestion_dismissals`, `entity_reclassify_tombstones`, `proposal_dismissals`
 
@@ -172,10 +172,12 @@ Table `ttps`: one MITRE ATT&CK technique or sub-technique.
 - `is_subtechnique`, `parent_technique_id` (indexed)
 - `is_deprecated`, `superseded_by`
 - `matrix_domain` (indexed) — `enterprise`, `mobile` or `ics`
+- `nist_controls`, `cis_controls` (Text[]) — the NIST 800-53 and CIS controls that mitigate the technique (`AC-06`, `CIS-13.7`), from CTID's Mappings Explorer ([rules](automation-ai-enrichment.md#ctid-control-mappings))
 
 #### CVE
 Table `cves`: one published vulnerability.
 - `cve_id` (String 20, unique) — for example `CVE-2021-44228`
+- `aliases` (Text[]) — other ids for the same vulnerability (`GHSA-…`, a distro's advisory id), added by the OSV source
 - `description`, `cvss_score` (Numeric 3,1), `severity` (indexed)
 - `affected_products`, `references_`, `nvd_data`, `timeline` (all JSONB)
 - EPSS (the Exploit Prediction Scoring System, a daily probability that a CVE will be exploited): `epss_score` (indexed), `epss_percentile`, `epss_updated_at`, `epss_previous_score`, `epss_changed_at`. The `epss_jump` signal reads the last two.
@@ -184,14 +186,16 @@ Table `cves`: one published vulnerability.
   - `exploit_availability` — `none`, `poc`, `weaponized` or `active_exploitation`
   - `exploit_status_source` — `manual` when an analyst set it; enrichment never overwrites a manual value
 - KEV (CISA's Known Exploited Vulnerabilities list): `is_kev` (indexed), `kev_date_added`, `kev_due_date`
+- SSVC (CISA's Stakeholder-Specific Vulnerability Categorization, from the CISA-ADP container of the CVE record): `ssvc_exploitation` (`none`, `poc`, `active`), `ssvc_automatable` (`yes`, `no`), `ssvc_technical_impact` (`partial`, `total`). The cvelist enrichment source writes them.
 - Public exploits: `github_poc_count`, `github_poc_urls` (Text[]), `metasploit_module`
 
 #### CVEAffected
-Table `cve_affected`: which vendors and products a CVE affects, read from NVD CPE data (CPE is NVD's naming scheme for software). These links live here, not in `entity_relationships`. The raw CPE strings are always kept. `vendor_id` and `product_id` are filled in when the strings match a known entity, so an unmatched pair can still match later.
+Table `cve_affected`: which vendors and products a CVE affects, read from NVD CPE data, the CNA's `affected` list in the CVE record and CISA-ADP's CPEs (CPE is NVD's naming scheme for software). These links live here, not in `entity_relationships`. The raw CPE strings are always kept. `vendor_id` and `product_id` are filled in when the strings match a known entity, so an unmatched pair can still match later.
 - `cve_id` (FK, CASCADE)
 - `cpe_vendor`, `cpe_product` — raw lowercase CPE 2.3 parts
 - `vendor_id`, `product_id` (FK, SET NULL)
-- `version_start`, `version_end`, `source` (default `nvd`), `resolved_at`
+- `version_start`, `version_end`, `resolved_at`
+- `source` (default `nvd`) — `nvd`, `cna` (the CVE record's `affected` list) or `cisa_adp` (CISA's CPEs, which carry no version range)
 
 Unique on `(cve_id, cpe_vendor, cpe_product)`.
 
@@ -231,7 +235,9 @@ Entries link to sectors through `entry_sectors`, which only the one-pass AI anal
 Tables `vendors` and `products`.
 - Both: `name` (String 255, unique), `aliases`, `normalized_name`, `description`, `website`, `metadata_`
 - `vendors.vendor_type` (indexed) — see [Enums & Constants](#enums--constants)
+- `vendors.country_id` (FK → `countries`, SET NULL, indexed) — the company's country, from Wikidata (P17), when IntelFeed tracks that country
 - `products.vendor_id` (FK → `vendors`, SET NULL), `products.product_type` (indexed)
+- `products.support_status` (String 20) — `maintained`, `security_only`, `eol` or `unknown`; `products.next_eol` (Date) — the soonest end of security support among maintained releases. Both come from endoflife.date and stay empty for products it doesn't list ([rules](automation-ai-enrichment.md#endoflifedate))
 
 #### Mitigation
 Table `mitigations`: MITRE ATT&CK mitigations.
@@ -273,7 +279,7 @@ These tables stop duplicate and junk entities from being created.
 - **`known_alias_map`** — alias lists from MISP Galaxy and MITRE ATT&CK intrusion sets, refreshed weekly by `misp-galaxy-sync` and `mitre-attack-sync` (each sync replaces its own source's rows). It lets the resolver map "Secret Blizzard" to Turla without asking the AI. Unique on `(source, normalized_canonical, normalized_alias)`.
 - **`entity_name_denylist`** — names that may not be created as a given entity type. Columns: `display_name`, `reason`, `source`, `active`. Unique on `(entity_type, normalized_name)`.
 - **`proposal_dismissals`** — analyst decisions that stop a cleanup proposal from coming back. `kind='reclassify'` stops reclassify proposals for `(entity_type, entity_id)`. `kind='not_duplicate'` drops the pair `(entity_id, other_key)` from the likely-duplicate check. Unique on `(kind, entity_type, entity_id, other_key)`.
-- **`pending_autolink_matches`** — autolinker matches on dictionary words ("Royal", "Hive", "Turkey") that wait for the one-pass AI to confirm them, instead of becoming links straight away. `resolution` records the outcome: `promoted`, `rejected`, or `dropped_ai_off` (written by `scripts/maintenance/resolve_pending_ai_off.py`). `prune_engine_tables` deletes old rows. Unique on `(entry_id, entity_type, entity_id)`.
+- **`pending_autolink_matches`** — autolinker matches on dictionary words ("Royal", "Hive", "Turkey") that wait for the one-pass AI to confirm them, instead of becoming links straight away. `resolution` records the outcome: `promoted`, `rejected`, or `dropped_ai_off`. `prune_engine_tables` deletes old rows. Unique on `(entry_id, entity_type, entity_id)`.
 
 #### EntityMaintenanceLog & ActorDescriptionHistory
 
@@ -322,7 +328,7 @@ Table `observables`: the indicator ledger. An IOC (indicator of compromise) is a
 
 **The rule the schema is built around: regex never creates a row.** Pattern scanning only stages candidates on `entries.observable_candidates`. Rows come from judgment steps ("capture doors"), and once a value is known, later articles containing it are recorded as sightings by exact match.
 
-- `kind` (indexed) — one of `ALL_KINDS` (`backend/app/models/observable.py:55`), in four families:
+- `kind` (indexed) — one of `ALL_KINDS` (`backend/app/models/observable.py:67`), in four families:
   - **network** — `ipv4`, `ipv6`, `domain`, `url`, `uri_path`, `ja3`, `ja4`, `cert_fingerprint`, `email`
   - **hash** — `md5`, `sha1`, `sha256`
   - **host** — `cmdline`, `registry`, `path`, `mutex`, `named_pipe`, `service_name`, `scheduled_task`, `user_agent`, `http_header`
@@ -338,7 +344,11 @@ Table `observables`: the indicator ledger. An IOC (indicator of compromise) is a
 - `status` (indexed, default `active`) — set from current confidence: `active` at 0.5 or above, `aging` below 0.5, `expired` below 0.15
 - `is_denied` — analyst denial, separate from status
 - `infra_tag` (indexed) — marks shared infrastructure (shared hosting, CDN, URL shortener) so publishing can leave it out without deleting it
-- `reputation` (JSONB)
+- `reputation` (JSONB) — the reputation summary enrichment writes (Shodan ports, hostnames, tags and vulns; VirusTotal `vt_*`; GreyNoise `gn_noise`, `gn_riot`, `gn_name`; `enriched_at`)
+- `asn` (BigInteger, since 32-bit AS numbers run to 4,294,967,295), `asn_org`, `geo_country` (2 letters) — the IP's origin AS, its name and the allocation's country (Team Cymru)
+- `registered_at` — when the registrable domain was registered (RDAP)
+- `popularity_rank` (indexed) — the domain's rank in the daily Tranco top-1M list; null when it isn't in it
+- `noise_class` — GreyNoise: `malicious`, `benign` or `unknown` when seen mass-scanning; empty when GreyNoise hasn't seen the IP scanning or hasn't been asked
 - `created_via` (indexed) — which judgment step created the row, with its base confidence:
 
   | `created_via` | Source | Base confidence |
@@ -356,7 +366,7 @@ Table `observables`: the indicator ledger. An IOC (indicator of compromise) is a
 
 Unique on `(kind, value)` (`uq_observable_kind_value`), because the same string is a different observable as a domain than as a URL path.
 
-**Confidence decay.** `decay-observable-confidence` runs daily at 02:20 UTC when `observables_decay_enabled` is on. Half-lives are per kind (`DECAY_HALF_LIFE_DAYS`, `observable.py:59`):
+**Confidence decay.** `decay-observable-confidence` runs daily at 02:20 UTC when `observables_decay_enabled` is on. Half-lives are per kind (`DECAY_HALF_LIFE_DAYS`, `backend/app/models/observable.py:71`):
 
 | Kind | Half-life |
 |---|---|
@@ -382,8 +392,15 @@ Table `cwes`: the MITRE CWE catalog (Common Weakness Enumeration, the list of so
 - `status`, `mapping_usage` (indexed) — MITRE's advice on whether the id should be used for mapping
 - `description`, `extended_description`, `likelihood_of_exploit`
 - `parent_cwe_id` (indexed) — the parent chain is walked in SQL
-- `alternate_terms`, `capec_ids` (Text[]); `consequences`, `mitigations`, `detection_methods` (JSONB)
+- `alternate_terms`, `capec_ids` (Text[]); `consequences`, `mitigations`, `detection_methods` (JSONB). `capec_ids` resolve to names against `capec_patterns`
 - `cwe_url`, `is_deprecated`, `superseded_by`
+
+#### CAPECPattern
+Table `capec_patterns`: MITRE's CAPEC catalog of attack patterns, replaced weekly by `capec-sync` ([rules](automation-ai-enrichment.md#capec)). A lookup table: nothing references it by key.
+- `capec_id` (String 20, primary key) — for example `CAPEC-248`, the form `cwes.capec_ids` holds
+- `name`, `abstraction` (`Meta`, `Standard` or `Detailed`), `status`, `description`
+- `cwe_ids` (Text[]) — related weaknesses (`CWE-77`); `technique_ids` (Text[]) — ATT&CK taxonomy mappings (`T1574.010`)
+- `updated_at`
 
 #### EntryCWE
 Table `entry_cwes`: primary key `(entry_id, cwe_id)`, with `confidence`, `source`, `extracted_at`, `paragraph_indices`.
@@ -391,9 +408,10 @@ Table `entry_cwes`: primary key `(entry_id, cwe_id)`, with `confidence`, `source
 #### CVEWeakness
 Table `cve_weaknesses`: which CWE a CVE is classed under. It is separate from `entry_cwes` because it describes the vulnerability, not an article.
 - `cve_id` (FK, CASCADE)
-- `cwe_ref` (String 40) — the reference exactly as NVD gave it, including placeholders like `NVD-CWE-noinfo`
+- `cwe_ref` (String 40) — the reference exactly as NVD or the CNA gave it, including placeholders like `NVD-CWE-noinfo`
 - `cwe_id` (FK → `cwes`, SET NULL) — NULL until the reference matches a catalog row
-- `is_primary`, `assigner`, `source` (default `nvd`), `resolved_at`
+- `is_primary`, `assigner`, `resolved_at`
+- `source` — `nvd` (default) or `cvelist` (the CNA's CWE ids in its CVE record); a pair keeps the source that recorded it first
 
 Unique on `(cve_id, cwe_ref)`. Keeping unmatched references is deliberate: a CVE can cite a CWE the catalog lacks, and dropping it would lose the assignment.
 
@@ -579,19 +597,18 @@ Bookkeeping for the one-pass `entry_analysis` (one AI call that reads an article
 
 ### 6. Enrichment & External Data
 
-**Tables:** `enrichment_sources`, `user_enrichment_overrides`, `enrichment_results`, `entity_notes`, `entity_field_claims`, `entity_relationships`
+**Tables:** `enrichment_sources`, `user_enrichment_overrides`, `enrichment_results`, `entity_context`, `entity_relation_claims`, `entity_notes`, `entity_field_claims`, `entity_relationships`
 
 #### EnrichmentSource
 Table `enrichment_sources`: one external data source.
-- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `wikipedia`, `greynoise`, `shodan`, `virustotal`
-- `display_name`, `is_enabled` (default false)
-- `trigger_mode` (default `manual`) — `auto`, `scheduled` or `manual`
+- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `cvelist`, `wikipedia`, `virustotal`, `greynoise`, `shodan`, `cymru`, `rdap`, `threatfox`, `urlhaus`, `malwarebazaar` (the 19 lookup sources in `ADAPTER_REGISTRY`), and the 13 catalog sources `misp_galaxy`, `metasploit`, `mitre_cwe`, `ransomware_live`, `cybergeist`, `wikidata`, `endoflife`, `tranco`, `capec`, `ctid`, `d3fend`, `etda`, `github_repo`
+- `display_name`, `is_enabled` (seeded on for a source with scheduled jobs; a disabled source's jobs skip and its queued lookups wait)
+- `trigger_mode` (default `manual`) — `auto` or `manual`. A source that sends an observable to a third party (`shares_ioc`) is seeded `manual`
 - `api_key_encrypted`, `config` (JSONB)
 - `rate_limit_config` (JSONB) — for example `{"requests_per_period": 50, "period_seconds": 604800}`
 - `health_status` (default `unknown`) — `healthy`, `degraded`, `down` or `unknown`
 - `min_confidence_threshold` (default `low`)
-- `daily_budget`, `daily_budget_used` (synced from Redis)
-- `schedule_interval_hours` (default 24), `next_scheduled_at`, `last_synced_at`
+- `daily_budget` (requests per UTC day; the gateway counts usage in Redis), `last_synced_at`
 
 #### UserEnrichmentOverride
 Table `user_enrichment_overrides`: a person's own API key for a source. Unique on (`created_by`, `source_id`): each user has at most one override per source.
@@ -603,6 +620,19 @@ Table `enrichment_results`: a cached answer from a source.
 - `raw_response`, `parsed_data` (JSONB)
 - `status` (default `success`) — for example `success`, `error`, `rate_limited`, `not_found`, `budget_exhausted`, `skipped_low_confidence`
 - `enriched_at`, `expires_at` (when the cache entry runs out)
+- A lookup adds a row only when `parsed_data` changed; otherwise it re-dates the latest one
+
+#### EntityContext
+Table `entity_context`: what one enrichment source says about one entity, for the profile's Context panel. One row per declared `Context` output. See [automation-ai-enrichment.md](automation-ai-enrichment.md#source-context).
+- Primary key (`entity_type`, `entity_id`, `source_type`, `key`)
+- `value` (JSONB, shaped for its display), `observed_at`, `expires_at` (indexed; rows expired over 30 days are pruned nightly)
+
+#### EntityRelationClaim
+Table `entity_relation_claims`: one enrichment source's claim that an entity is connected to another, one row per target name a declared `Relation` output lists. See [automation-ai-enrichment.md](automation-ai-enrichment.md#relations).
+- Primary key (`entity_type`, `entity_id`, `source_type`, `output`, `target_key`); `target_key` is the name folded for case and spacing
+- `relation`, `target_name`, `evidence`, `first_seen_at`, `last_seen_at`
+- `target_type`, `target_id` — the existing entity the name resolved to; both null while the claim is held, with `held_reason` `unknown` or `ambiguous`
+- Indexed on (`target_type`, `target_id`) and (`source_type`, `output`); claims whose entity is gone are pruned nightly
 
 #### EntityNote
 Table `entity_notes`: an analyst's note on an entity.
@@ -616,7 +646,7 @@ Table `entity_field_claims`: where each profile field value came from. It does f
 - `field` — the column, for example `motivation` or `targeted_sectors`
 - `value_text` — the value as the profile shows it
 - `source_kind` — `analyst`, `ai_extraction`, `ai_assessment`, `enrichment`, `external_feed` or `seed`
-- `source_ref` — the adapter or feed within that kind (for example `wikipedia`, `cybergeist`)
+- `source_ref` — the adapter or feed within that kind (for example `wikipedia`, `cybergeist`), or one part of a source's answer (`cvelist:cna`, `cvelist:adp` for the CVE record's CNA and CISA-ADP scores)
 - `entry_id` (FK, SET NULL), `quote` — the article and sentence behind the claim
 - `confidence`, `created_by` (SET NULL), `ai_result_id` (SET NULL)
 - `claim_key` (String 64, unique) — a digest of entity + field + value + source + article
@@ -627,9 +657,9 @@ Indexes on `(entity_type, entity_id, field)`, `(entity_type, last_asserted_at)` 
 #### EntityRelationship
 Table `entity_relationships`: a typed link between two entities, for example "APT29 uses Cobalt Strike".
 - `source_type`, `source_id`, `target_type`, `target_id` (all indexed)
-- `relationship_type` (indexed) — the verb: `uses`, `exploits`, `targets`, `attributed_to`, `variant_of`, `communicates_with`, `delivers`, `drops`, `controls`, `related_to`, `successor_of`, `subgroup_of`, `overlaps_with`. Which (source type, verb, target type) combinations are allowed is set by `ALLOWED_RELATIONSHIPS` in `app/intelligence/relationship_matrix.py`, checked on every write.
+- `relationship_type` (indexed) — the verb: `uses`, `exploits`, `targets`, `attributed_to`, `variant_of`, `communicates_with`, `delivers`, `drops`, `controls`, `related_to`, `successor_of`, `subgroup_of`, `overlaps_with`, `exposes` (observable → CVE), `operates_in` (vendor → sector). Which (source type, verb, target type) combinations are allowed is set by `ALLOWED_RELATIONSHIPS` in `app/intelligence/relationship_matrix.py`, checked on every write.
 - `confidence` (default `possible`) — `confirmed`, `probable` or `possible`
-- `source` (default `analyst_created`) — `co_occurrence`, `auto_extracted`, `analyst_confirmed`, `analyst_created`, `analyst_rejected` (hidden and never recreated by co-occurrence) or `external_feed`
+- `source` (default `analyst_created`) — `co_occurrence`, `auto_extracted`, `analyst_confirmed`, `analyst_created`, `analyst_rejected` (hidden and never recreated by co-occurrence), `external_feed` or `enrichment` (held by claims in `entity_relation_claims`)
 - `description`
 - `evidence_entry_ids` (UUID[]) — articles that support the link (GIN-indexed)
 - `adjudication_verdict`, `adjudicated_at` — the adjudicate stage's outcome:
@@ -768,7 +798,7 @@ Table `entry_tags`: one tag on one entry.
 
 Unique on `(entry_id, tag_id, user_id)` with NULLs not distinct.
 
-Read tags through `app.services.entry_tags.visible_to` and write them through `ensure_assignment`, which picks the owner from the tag's scope. In Meilisearch, global tag names are in `tags`. Personal tags are in the filter-only field `user_tags` as `"<user_id>:<name>"`; the server strips that field from results and folds it into the viewer's own `tags` facet. `scripts/maintenance/reindex_entry_tags.py` re-pushes the search index's tag fields.
+Read tags through `app.services.entry_tags.visible_to` and write them through `ensure_assignment`, which picks the owner from the tag's scope. In Meilisearch, global tag names are in `tags`. Personal tags are in the filter-only field `user_tags` as `"<user_id>:<name>"`; the server strips that field from results and folds it into the viewer's own `tags` facet.
 
 #### Comment
 Table `comments`: a comment on any object, with replies.
@@ -1060,7 +1090,7 @@ Fixed value sets are plain strings. The lists below come from code; where a migr
 | `tools.tool_type` | `c2_framework`, `credential_access`, `lateral_movement`, `reconnaissance`, `exploitation`, `persistence`, `defense_evasion`, `lolbas`, `framework`, `phishing_kit`, `tunneling`, `remote_access`, `ai_model`, `defensive`, `observability`, `cloud`, `identity`, `dev_tool`, `service`, `software`, `other` | `TOOL_TYPES` in `models/tool.py` |
 | TLP markings (`campaigns`, `intel_reports`) | `TLP:CLEAR`, `TLP:GREEN`, `TLP:AMBER`, `TLP:AMBER+STRICT`, `TLP:RED`. `TLP:WHITE` is accepted on input and stored as `TLP:CLEAR`. | `app/schemas/tlp.py` |
 | `users.role` | `admin`, `user`, `system` | CHECK `ck_users_role` |
-| `enrichment_sources.trigger_mode` | `auto`, `scheduled`, `manual` | |
+| `enrichment_sources.trigger_mode` | `auto`, `manual` | `EnrichmentSourceUpdate` in `schemas/enrichment.py` |
 | `enrichment_sources.health_status` | `healthy`, `degraded`, `down`, `unknown` | |
 
 TLP (Traffic Light Protocol) marks how widely a report may be shared.

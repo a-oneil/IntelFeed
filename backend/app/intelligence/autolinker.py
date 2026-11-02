@@ -1080,31 +1080,22 @@ async def autolink_entry(
             if match.get("entity_id"):
                 await invalidate_entity_cache(match["entity_type"], match["entity_id"])
 
-    _dispatch_stub_enrichment(stored)
+    await _enqueue_stub_enrichment(db, stored)
     return stored
 
 
-def _dispatch_stub_enrichment(stored: list[dict]) -> None:
+async def _enqueue_stub_enrichment(db: AsyncSession, stored: list[dict]) -> None:
     """Queue enrichment for CVE/TTP stubs this autolink pass created.
 
     A stub is just an id; enrichment fills in the rest (MITRE name/tactic for a
     TTP, NVD/EPSS/KEV for a CVE), the same as the extract path does for the
     stubs it mints.
     """
-    new_stubs = [m for m in stored if m.get("entity_type") in ("ttp", "cve") and m.get("is_new_stub")]
-    if not new_stubs:
-        return
-    try:
-        from app.workers.enrichment_tasks import auto_enrich_entity
+    from app.enrichment.queue import enqueue
 
-        for m in new_stubs:
-            auto_enrich_entity.delay(
-                entity_type=m["entity_type"],
-                entity_id=m["entity_id"],
-                entity_value=m["lookup_key"],
-            )
-    except Exception:
-        logger.exception("Failed to dispatch autolink stub enrichment")
+    for m in stored:
+        if m.get("entity_type") in ("ttp", "cve") and m.get("is_new_stub"):
+            await enqueue(db, m["entity_type"], m["entity_id"], m["lookup_key"])
 
 
 async def autolink_batch(
@@ -1176,7 +1167,7 @@ async def autolink_batch(
         if matches:
             stored = await store_autolink_matches(db, row.id, matches, context_text=" ".join(t for _, t in paragraphs))
             stats["linked"] += len(stored)
-            _dispatch_stub_enrichment(stored)
+            await _enqueue_stub_enrichment(db, stored)
 
         stats["scanned"] += 1
 

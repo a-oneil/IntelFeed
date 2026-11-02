@@ -251,6 +251,18 @@ async def _user_from_payload(payload: dict, db: AsyncSession) -> User:
     return user
 
 
+async def user_from_access_token(raw_token: str, db: AsyncSession) -> User:
+    """The active user an access token names, with every check get_current_user makes.
+
+    For routes that read the token themselves (``?token=`` on an <img> or
+    <audio> tag): the logout blacklist applies to them too.
+    """
+    payload = decode_token(raw_token)
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+    return await _user_from_payload(payload, db)
+
+
 async def get_current_user_from_query(
     token: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
@@ -258,20 +270,7 @@ async def get_current_user_from_query(
     """Auth via query param token — for SSE endpoints where headers aren't possible."""
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
-    payload = decode_token(token)
-    if payload.get("type") != "access":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
-    jti = payload.get("jti")
-    if jti and await is_token_blacklisted(jti):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
-    user = result.scalar_one_or_none()
-    if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-    return user
+    return await user_from_access_token(token, db)
 
 
 async def get_admin_user(user: User = Depends(get_current_user)) -> User:

@@ -1,16 +1,15 @@
-"""Observables in the automation engine (has_observable condition) and the
-enrichment write-back (reputation + dual-use infra tags)."""
+"""Observables in the automation engine (has_observable condition). The
+enrichment write-back (reputation + dual-use infra tags) is covered in
+test_entity_updater_field_map.py."""
 
 import uuid
 
 import pytest
 
 from app.automation.conditions import _evaluate_single
-from app.enrichment.entity_updater import _apply_observable_reputation
 from app.intelligence.observables import get_or_create_observable, record_sighting
 from app.models.entry import Entry
 from app.models.feed import Feed
-from app.models.observable import Observable
 
 
 async def _entry(db):
@@ -44,30 +43,6 @@ async def test_has_observable_condition_filters_kind_role_source_and_tag(db_sess
     # The VPN row is feed-sighted and infra-tagged: invisible by default, visible when asked.
     assert not await fires({"kinds": "ipv4"})
     assert await fires({"kinds": "ipv4", "sources": "feed", "exclude_infra_tagged": "false"})
-
-
-def test_reputation_write_back_fills_summary_and_dual_use_tag():
-    obs = Observable(kind="ipv4", value="45.33.32.156", base_confidence=0.8, current_confidence=0.8)
-    changed = _apply_observable_reputation(
-        obs,
-        {
-            "shodan": {"found": True, "ports": "22,443", "tags": "vpn,cloud", "hostnames": "exit1.vpn.example"},
-            "greynoise": {"found": True, "classification": "benign", "riot": False},
-            "virustotal": {"found": True, "detection_ratio": "3/92", "asn": 63949, "country": "US"},
-        },
-    )
-    assert changed
-    assert obs.reputation["ports"] == "22,443" and obs.reputation["vt_ratio"] == "3/92"
-    assert obs.reputation["asn"] == 63949 and obs.reputation["gn_classification"] == "benign"
-    assert obs.infra_tag == "vpn"  # Shodan's tag became the ledger's dual-use label
-
-    riot = Observable(kind="ipv4", value="8.8.4.4", base_confidence=0.8, current_confidence=0.8)
-    assert _apply_observable_reputation(riot, {"greynoise": {"found": True, "riot": True, "name": "Google DNS"}})
-    assert riot.infra_tag == "benign_service"
-
-    untouched = Observable(kind="ipv4", value="1.2.3.4", base_confidence=0.8, current_confidence=0.8, infra_tag="rmm")
-    assert not _apply_observable_reputation(untouched, {})
-    assert untouched.reputation is None and untouched.infra_tag == "rmm"
 
 
 @pytest.mark.asyncio
@@ -173,8 +148,12 @@ async def test_auto_enrich_fan_out_is_capped_per_entry(db_session, monkeypatch):
     from app.intelligence import observables as mod
 
     dispatched: list[str] = []
-    monkeypatch.setattr(mod, "_dispatch_auto_enrich", lambda obs: dispatched.append(obs.value))
-    monkeypatch.setattr(mod, "_auto_enrich_dispatched", {})
+
+    async def fake_enqueue(session, obs):
+        dispatched.append(obs.value)
+
+    monkeypatch.setattr(mod, "_enqueue_auto_enrich", fake_enqueue)
+    monkeypatch.setattr(mod, "_auto_enrich_queued", {})
     entry = await _entry(db_session)
     for i in range(mod.AUTO_ENRICH_PER_ENTRY_CAP + 10):
         await get_or_create_observable(

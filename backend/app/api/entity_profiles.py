@@ -2987,6 +2987,14 @@ class WikipediaFetchRequest(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": {"title": "Cozy Bear"}})
 
 
+def _wikipedia_refused(e) -> AppError:
+    """The wikipedia source's gateway refused the request: 503 when it can't
+    check its limits, else 429."""
+    if e.status == "gateway_unavailable":
+        return AppError(code=e.status, message="Wikipedia lookups are unavailable right now", status_code=503)
+    return AppError(code=e.status, message="Wikipedia is rate limited; try again later", status_code=429)
+
+
 @router.get("/{entity_type}/{entity_id}/wikipedia/search")
 async def search_wikipedia_titles(
     entity_type: str = Path(
@@ -2995,6 +3003,7 @@ async def search_wikipedia_titles(
     entity_id: uuid.UUID = Path(..., description="UUID of the entity being enriched."),
     q: str = Query(..., description="Search phrase for candidate Wikipedia article titles."),
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Search Wikipedia for candidate articles so the user can pick the right one."""
     if entity_type not in ENTITY_MODEL_MAP:
@@ -3002,10 +3011,15 @@ async def search_wikipedia_titles(
     if not q.strip():
         return {"results": []}
 
+    from app.enrichment.gateway import GatewayError
+    from app.enrichment.pipeline import gateway_for
     from app.enrichment.wikipedia_helper import search_wikipedia
 
+    gateway, _ = await gateway_for(db, "wikipedia")
     try:
-        results = await search_wikipedia(q.strip(), limit=8)
+        results = await search_wikipedia(q.strip(), gateway, limit=8)
+    except GatewayError as e:
+        raise _wikipedia_refused(e)
     except Exception:
         logger.exception("Wikipedia search failed for %r", q)
         raise AppError(code="upstream_error", message="Wikipedia search failed", status_code=502)
@@ -3044,13 +3058,21 @@ async def fetch_wikipedia_content(
     if not entity_name:
         raise AppError(code="bad_request", message="Entity has no searchable name", status_code=400)
 
+    from app.enrichment.gateway import GatewayError
+    from app.enrichment.pipeline import gateway_for
     from app.enrichment.wikipedia_helper import extract_first_paragraph, fetch_wikipedia, fetch_wikipedia_by_title
 
+    gateway, _ = await gateway_for(db, "wikipedia")
     chosen_title = (payload.title or "").strip() if payload else ""
-    if chosen_title:
-        wiki_result = await fetch_wikipedia_by_title(chosen_title)
-    else:
-        wiki_result = await fetch_wikipedia(entity_name, entity_type, aliases=getattr(entity, "aliases", None))
+    try:
+        if chosen_title:
+            wiki_result = await fetch_wikipedia_by_title(chosen_title, transport=gateway.transport())
+        else:
+            wiki_result = await fetch_wikipedia(
+                entity_name, entity_type, aliases=getattr(entity, "aliases", None), transport=gateway.transport()
+            )
+    except GatewayError as e:
+        raise _wikipedia_refused(e)
 
     if not wiki_result:
         raise AppError(

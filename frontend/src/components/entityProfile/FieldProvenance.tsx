@@ -147,7 +147,7 @@ export function FieldProvenance({
             const next = !v;
             if (next && wrapRef.current) {
               // Flip to right-aligned when the popover would run off the
-              // viewport — the marker usually sits in the right rail.
+              // viewport — markers often sit near its right edge.
               const r = wrapRef.current.getBoundingClientRect();
               const popWidth = Math.min(420, window.innerWidth * 0.78);
               setAlignRight(r.left + popWidth > window.innerWidth - 12);

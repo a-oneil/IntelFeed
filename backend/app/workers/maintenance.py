@@ -19,7 +19,7 @@ from app.models.entry import Entry
 from app.models.feed import Feed
 from app.services.system_settings import warm_settings_cache
 from app.workers.celery_app import celery_app
-from app.workers.db import run_async, worker_session
+from app.workers.db import run_async, source_job, worker_session
 
 logger = logging.getLogger(__name__)
 
@@ -851,6 +851,38 @@ STALE_ENTITY_TYPES: list[tuple[str, str]] = [
 _STALE_FLAGS_PER_TYPE_CAP = 500  # bound one run's log growth
 
 
+@celery_app.task(name="app.workers.maintenance.prune_entity_context", soft_time_limit=300, time_limit=360)
+def prune_entity_context():
+    """Nightly: delete entity_context rows that expired more than 30 days ago,
+    and relation claims whose entity is gone.
+
+    An expired row still shows on the profile, marked stale, until its source
+    looks again; a month on, nothing is going to.
+    """
+    start = time.monotonic()
+    try:
+        deleted = run_async(_prune_entity_context())
+        logger.info("Pruned %d expired entity_context rows and orphaned relation claims", deleted)
+        CELERY_TASKS_TOTAL.labels(task_name="prune_entity_context", status="success").inc()
+        return {"deleted": deleted}
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="prune_entity_context", status="error").inc()
+        logger.exception("entity_context pruning failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="prune_entity_context").observe(time.monotonic() - start)
+
+
+async def _prune_entity_context() -> int:
+    from app.enrichment.context import prune_expired_context
+    from app.enrichment.relations import prune_orphan_claims
+
+    async with _get_worker_session() as db:
+        deleted = await prune_expired_context(db) + await prune_orphan_claims(db)
+        await db.commit()
+    return deleted
+
+
 @celery_app.task(name="app.workers.maintenance.prune_engine_tables", soft_time_limit=300, time_limit=360)
 def prune_engine_tables():
     """Daily: delete engine bookkeeping rows older than 30 days.
@@ -915,9 +947,12 @@ async def _prune_engine_tables() -> int:
         )
         total += result.rowcount or 0
         # The retired link validator's proposals: past 30 days nothing re-judges them.
-        from app.services.proposal_dismissals import expire_legacy_link_proposals
+        from app.services.proposal_dismissals import expire_legacy_link_proposals, purge_gone_entity_proposals
 
         total += await expire_legacy_link_proposals(db)
+        # Proposals about entities that no longer exist: the Review queue hides
+        # them the moment the entity goes; this drops the rows.
+        total += await purge_gone_entity_proposals(db)
         await db.commit()
     return total
 
@@ -1077,13 +1112,7 @@ def reenrich_cve_nvd():
     try:
         stats = run_async(_reenrich_cve_nvd())
         CELERY_TASKS_TOTAL.labels(task_name="reenrich_cve_nvd", status="success").inc()
-        logger.info(
-            "cve nvd re-enrichment: %s attempted, %s enriched, %s got configurations, %s affected pairs",
-            stats["attempted"],
-            stats["enriched"],
-            stats["with_config"],
-            stats["pairs"],
-        )
+        logger.info("cve nvd re-enrichment stats: %s", stats)
         return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="reenrich_cve_nvd", status="error").inc()
@@ -1095,20 +1124,19 @@ def reenrich_cve_nvd():
 _REENRICH_PENDING_STATUSES = ("Awaiting Analysis", "Undergoing Analysis", "Received")
 
 
-async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
-    import asyncio
+# Wall-clock seconds a run may spend on lookups, under the task's soft limit.
+_REENRICH_BUDGET_S = 780
 
+
+@source_job("nvd", lane="backfill")
+async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
+    """Look the selected CVEs up again. The NVD source's gateway paces the
+    requests (no sleeps here); each answer goes through the NVD source's
+    field map (``apply_nvd``), so it never overwrites an analyst's value."""
     from sqlalchemy import and_, or_
 
-    from app.intelligence.cpe_resolver import build_cpe_index
-    from app.intelligence.cve import (
-        NVDRateLimited,
-        enrich_from_nvd,
-        nvd_request_pace,
-        nvd_retry_allowed,
-        stamp_nvd_miss,
-        sync_cve_affected,
-    )
+    from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS
+    from app.intelligence.cve import apply_nvd, enrich_from_nvd, nvd_gateway, nvd_retry_allowed, stamp_nvd_miss
     from app.models.cve import CVE
 
     if batch_size is None:
@@ -1136,9 +1164,19 @@ async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
         or_(~CVE.nvd_data.has_key("_enrich_last_attempt"), last_attempt < stale_cutoff),
     )
 
-    stats = {"attempted": 0, "enriched": 0, "with_config": 0, "pairs": 0}
+    stats = {
+        "fetched": 0,
+        "changed": 0,
+        "written": 0,
+        "attempted": 0,
+        "enriched": 0,
+        "with_config": 0,
+        "affected_products": 0,
+    }
+    stats["stopped"] = None
+    deadline = time.monotonic() + _REENRICH_BUDGET_S
     async with _get_worker_session() as db:
-        index = await build_cpe_index(db)
+        gateway, api_key = await nvd_gateway(db, max_wait=JOB_TOKEN_WAIT)
         rows = (
             (
                 await db.execute(
@@ -1151,40 +1189,38 @@ async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
             .scalars()
             .all()
         )
-        pace = nvd_request_pace()
+        cache: dict = {}
         for i, cve in enumerate(rows):
-            if i:
-                await asyncio.sleep(pace)  # stay under NVD's rolling window
-            stats["attempted"] += 1
-            try:
-                nvd = await enrich_from_nvd(cve.cve_id, raise_on_rate_limit=True)
-            except NVDRateLimited:
-                # Throttled even after backoff — abort the batch WITHOUT
-                # stamping this CVE; the nightly rerun picks it back up.
-                logger.warning("reenrich_cve_nvd aborting batch at %s/%s: NVD rate limit", i, len(rows))
+            left = deadline - time.monotonic()
+            if left <= 0:
+                stats["stopped"] = "out_of_time"
                 break
+            # A token wait never carries the run past its budget.
+            gateway.max_wait = min(JOB_TOKEN_WAIT, left)
+            try:
+                nvd = await enrich_from_nvd(cve.cve_id, gateway, api_key)
+            except SOURCE_REFUSALS as e:
+                # Throttled, breaker open or budget spent — stop WITHOUT
+                # stamping this CVE; the nightly rerun picks it back up.
+                logger.warning("reenrich_cve_nvd stopping at %s/%s: %s", i, len(rows), e)
+                stats["stopped"] = e.status
+                break
+            stats["attempted"] += 1
             if not nvd:
                 stamp_nvd_miss(cve, now)
                 continue
+            stats["fetched"] += 1
             stats["enriched"] += 1
-            if nvd.get("cvss_score") is not None:
-                cve.cvss_score = nvd["cvss_score"]
-            if nvd.get("severity"):
-                cve.severity = nvd["severity"]
-            if nvd.get("description") and not cve.description:
-                cve.description = nvd["description"]
-            if nvd.get("references"):
-                cve.references_ = nvd["references"]
-            blob = dict(nvd.get("nvd_data") or {})
-            if not blob.get("configurations"):
+            if not (nvd.get("nvd_data") or {}).get("configurations"):
                 # Still unanalyzed at NVD — stamp so the pending arm waits 14d
-                blob["_enrich_last_attempt"] = now.isoformat()
-            cve.nvd_data = blob
+                nvd = {**nvd, "nvd_data": {**(nvd.get("nvd_data") or {}), "_enrich_last_attempt": now.isoformat()}}
+            applied = await apply_nvd(db, cve, nvd, cache, via="reenrich-cve-nvd")
+            stats["changed"] += applied.changed
+            stats["written"] += applied.written
             products = nvd.get("affected_products") or []
             if products:
                 stats["with_config"] += 1
-                cve.affected_products = products
-                stats["pairs"] += await sync_cve_affected(db, cve.id, products, index)
+                stats["affected_products"] += len(products)
         await db.commit()
     return stats
 

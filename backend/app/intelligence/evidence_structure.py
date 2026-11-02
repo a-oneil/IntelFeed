@@ -116,7 +116,7 @@ async def _fetch_threads(db: AsyncSession, entry_ids: list[uuid.UUID]) -> dict[s
     rows = await db.execute(
         text(
             """
-            SELECT DISTINCT ON (ste.entry_id) ste.entry_id, st.slug, st.title
+            SELECT DISTINCT ON (ste.entry_id) ste.entry_id, st.id, st.slug, st.title
             FROM story_thread_entries ste
             JOIN story_threads st ON st.id = ste.thread_id
             WHERE ste.entry_id = ANY(:ids)
@@ -125,7 +125,20 @@ async def _fetch_threads(db: AsyncSession, entry_ids: list[uuid.UUID]) -> dict[s
         ),
         {"ids": entry_ids},
     )
-    return {str(r[0]): (r[1], r[2]) for r in rows.all()}
+    found = rows.all()
+
+    from app.core.public_access import viewer_is_anonymous
+
+    if not viewer_is_anonymous():
+        return {str(r[0]): (r[2], r[3]) for r in found}
+
+    # A stored slug and title come from the thread's seed article, which can
+    # be a hidden feed's: a visitor gets the alias and the earliest visible title.
+    from app.intelligence.story_threads import thread_title, visitor_slug
+    from app.services.public_view import visitor_thread_view
+
+    view = await visitor_thread_view(db, list({r[1] for r in found}))
+    return {str(r[0]): (visitor_slug(r[1]), thread_title(view[r[1]]["first_title"])) for r in found if r[1] in view}
 
 
 async def _fetch_feed_ids(db: AsyncSession, entry_ids: list[uuid.UUID]) -> dict[str, str]:

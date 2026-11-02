@@ -11,6 +11,7 @@ import {
   type ProcessingOutputs,
   type ProcessingStageCell,
   useEngineProcessing,
+  useRetryPipelineErrors,
   usePipelineOverview,
   usePipelinePlans,
   useUpsertPlan,
@@ -27,11 +28,12 @@ import SystemSettings from "@/components/SystemSettings";
 
 import { AutolinkingSection } from "./AutolinkingSection";
 import { EngineSettingsSearch } from "./EngineSettingsSearch";
+import { EngineSwitch } from "./EngineSwitch";
 import { EntryOutputs } from "./EntryOutputs";
-import { HeldLinksQueue, ReclassifyQueue, UnlinkQueue } from "./CleanupGroups";
+import { HeldLinksQueue } from "./CleanupGroups";
 import { ExtractionTab } from "./ExtractionTab";
 import { ProposalsQueue } from "./ProposalsQueue";
-import type { ProposalDomain } from "@/hooks/useHygiene";
+import type { ProposalDomain, ProposalOrigin } from "@/hooks/useHygiene";
 import { StagePanel } from "./StagePanel";
 import { skipReason, waitingOn } from "./adjudicationCopy";
 import type { EngineDest } from "./engineSettingsIndex";
@@ -43,7 +45,9 @@ export type BrowseView = "jobs" | "plans" | "enrichment" | "maintenance" | "publ
 /** The card's data views — all engine data lives in the one table card. */
 export type MatrixView = "entries" | "links" | "relationships" | "review" | "feeds";
 /** The Review tab's lenses: the proposals queue, AI-created entity curation, applied history. */
-export type ReviewLens = "proposals" | "unlink" | "reclassify" | "held" | "entities" | "history";
+export type ReviewLens = "proposals" | "held" | "entities" | "history";
+// The Action filter value that narrows the Review queue to type changes.
+const RECLASSIFY_ACTIONS = "needs_reclassification,adjudication_reclassify";
 
 const WINDOWS = ["1h", "24h", "7d"] as const;
 
@@ -101,10 +105,11 @@ function relTime(iso: string | null): string {
   return `${Math.round(s / 86_400)}d ago`;
 }
 
+// Radar score is 0–10 by rank (signals.py): 9+ is the top ~5%, 7+ the top ~18%.
 function scoreCls(v: number | null): string {
   if (v == null) return styles.scoreLo;
-  if (v >= 80) return styles.scoreHi;
-  if (v >= 50) return styles.scoreMid;
+  if (v >= 9) return styles.scoreHi;
+  if (v >= 7) return styles.scoreMid;
   return styles.scoreLo;
 }
 
@@ -299,7 +304,7 @@ export function EngineMatrix({
   );
   // Pre-applied filters when a chip deep-links into the proposals queue.
   const [proposalsAction, setProposalsAction] = useState<string | undefined>(undefined);
-  const [proposalsOrigin, setProposalsOrigin] = useState<"adjudicator" | "legacy" | undefined>(undefined);
+  const [proposalsOrigin, setProposalsOrigin] = useState<ProposalOrigin | undefined>(undefined);
   const [proposalsDomain, setProposalsDomain] = useState<ProposalDomain | undefined>(undefined);
   const [status, setStatus] = useState<string | undefined>(initialStatus);
   const [stage, setStage] = useState<string | undefined>(initialStage);
@@ -320,7 +325,7 @@ export function EngineMatrix({
     setProposalsDomain(undefined);
     if (v !== "review") setReviewLens("proposals");
   };
-  const openProposals = (opts: { action?: string; origin?: "adjudicator" | "legacy"; domain?: ProposalDomain }) => {
+  const openProposals = (opts: { action?: string; origin?: ProposalOrigin; domain?: ProposalDomain }) => {
     setView("review");
     setReviewLens("proposals");
     setProposalsAction(opts.action);
@@ -366,6 +371,7 @@ export function EngineMatrix({
   const { data: feedHealth } = useFeedHealth();
   const { data: feeds } = useFeeds();
   const upsertPlan = useUpsertPlan();
+  const retryErrors = useRetryPipelineErrors();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const setSelectedEntry = useUIStore((s) => s.setSelectedEntry);
@@ -535,6 +541,33 @@ export function EngineMatrix({
     setStage(undefined);
   };
 
+  // One click for the whole error column (or every column): the same
+  // re-dispatch the per-cell retry does, for every entry still stuck.
+  const retryAllErrors = async () => {
+    const where = stage ? `at ${labelByStage[stage] ?? stage}` : "at any stage";
+    if (
+      !(await confirmDialog({
+        title: "Retry every error",
+        message: `Re-run every stage still stuck on an error ${where}, for entries ingested in the last ${window_}? Each is re-dispatched the way the per-cell retry does it; entries already re-run green are left alone.`,
+        confirmLabel: "Retry all",
+      }))
+    )
+      return;
+    try {
+      const r = await retryErrors.mutateAsync({ stage, window: window_ });
+      const parts = [`${r.dispatched.toLocaleString()} re-dispatched`];
+      if (r.skipped) parts.push(`${r.skipped} not retryable`);
+      if (r.remaining) parts.push(`${r.remaining.toLocaleString()} more — run again`);
+      toast.success(parts.join(" · "), {
+        description: Object.entries(r.by_stage)
+          .map(([st, n]) => `${labelByStage[st] ?? st}: ${n}`)
+          .join(", "),
+      });
+    } catch (e) {
+      toast.error(`Retry failed: ${(e as Error).message}`);
+    }
+  };
+
   const failingFeeds = feedHealth?.erroring_feeds?.length ?? 0;
 
   // The queues that need a person. Each chip is a filter on the table: the
@@ -582,12 +615,9 @@ export function EngineMatrix({
       n: hygieneStats?.pending_advisories,
       label: "entities to reclassify",
       cls: m.aWarn,
-      active: view === "review" && reviewLens === "reclassify",
-      clear: () => setReviewLens("proposals"),
-      onClick: () => {
-        switchView("review");
-        setReviewLens("reclassify");
-      },
+      active: view === "review" && reviewLens === "proposals" && proposalsAction === RECLASSIFY_ACTIONS,
+      clear: () => switchView("review"),
+      onClick: () => openProposals({ action: RECLASSIFY_ACTIONS }),
     },
     {
       key: "adjudication",
@@ -689,6 +719,7 @@ export function EngineMatrix({
           ))}
         </div>
         <EngineSettingsSearch onPick={gotoSetting} className={m.attnSearch} />
+        <EngineSwitch />
       </div>
 
       {/* matrix */}
@@ -787,10 +818,12 @@ export function EngineMatrix({
                 className={m.popLink}
                 onClick={() => {
                   setPeek(null);
-                  setOpenStage(peek.stage);
+                  // Enrich has no stage panel: its settings are the Enrichment page.
+                  if (peek.stage === "enrich") onBrowse("enrichment");
+                  else setOpenStage(peek.stage);
                 }}
               >
-                Full stage settings →
+                {peek.stage === "enrich" ? "Open Enrichment →" : "Full stage settings →"}
               </button>
               <button
                 type="button"
@@ -886,6 +919,20 @@ export function EngineMatrix({
                       <button type="button" className={m.clearBtn} onClick={clearEntriesFilter}>
                         clear
                       </button>
+                      {status === "error" && (
+                        <>
+                          {" · "}
+                          <button
+                            type="button"
+                            className={m.retryAllBtn}
+                            disabled={retryErrors.isPending}
+                            title={`Re-run every stage still stuck on an error${stage ? ` at ${labelByStage[stage] ?? stage}` : ""} in this window`}
+                            onClick={retryAllErrors}
+                          >
+                            {retryErrors.isPending ? "retrying…" : "retry all"}
+                          </button>
+                        </>
+                      )}
                     </span>
                   )}
                   <span>
@@ -981,14 +1028,6 @@ export function EngineMatrix({
                       Proposals
                       {hygieneStats?.pending_total ? <span className={m.viewCnt}>{hygieneStats.pending_total.toLocaleString()}</span> : null}
                     </button>
-                    <button className={reviewLens === "unlink" ? m.lensOn : ""} onClick={() => setReviewLens("unlink")}>
-                      Remove links
-                      {hygieneStats?.pending_unlink_entities ? <span className={m.viewCnt}>{hygieneStats.pending_unlink_entities.toLocaleString()}</span> : null}
-                    </button>
-                    <button className={reviewLens === "reclassify" ? m.lensOn : ""} onClick={() => setReviewLens("reclassify")}>
-                      Reclassify
-                      {hygieneStats?.pending_advisories ? <span className={m.viewCnt}>{hygieneStats.pending_advisories.toLocaleString()}</span> : null}
-                    </button>
                     <button className={reviewLens === "held" ? m.lensOn : ""} onClick={() => setReviewLens("held")}>
                       Held links
                       {linkStats?.pending ? <span className={m.viewCnt}>{linkStats.pending.toLocaleString()}</span> : null}
@@ -1003,12 +1042,8 @@ export function EngineMatrix({
                   </div>
                   <span className={m.subLensHint}>
                     {reviewLens === "proposals"
-                      ? "Everything the adjudicator and the scans want changed, one queue. Apply or dismiss here; every apply stays undoable from History."
-                      : reviewLens === "unlink"
-                        ? "Links the review thinks are wrong, one row per entity."
-                        : reviewLens === "reclassify"
-                        ? "Entities the analysis thinks are filed under the wrong type, one row each."
-                        : reviewLens === "held"
+                      ? "Everything the adjudicator, the duplicate review and the scans want changed, one row per entity. Its buttons settle every article's copy at once; every apply stays undoable from History."
+                      : reviewLens === "held"
                           ? "Matches the autolinker won't commit to until AI or you confirm them."
                           : reviewLens === "entities"
                         ? "Entities the analysis created that nobody has confirmed yet. Confirm, merge, convert or delete."
@@ -1027,8 +1062,6 @@ export function EngineMatrix({
                   initialDomain={proposalsDomain}
                 />
               )}
-              {view === "review" && reviewLens === "unlink" && <UnlinkQueue />}
-              {view === "review" && reviewLens === "reclassify" && <ReclassifyQueue />}
               {view === "review" && reviewLens === "held" && <HeldLinksQueue />}
               {view === "review" && reviewLens === "history" && <ProposalsQueue lens="history" key="hist" />}
               {view === "review" && reviewLens === "entities" && (
@@ -1344,7 +1377,7 @@ function Row({
         ))}
         <td className={styles.gdiv}>
           <span className={`${styles.score} ${scoreCls(entry.radar_score)}`}>
-            {entry.radar_score != null ? Math.round(entry.radar_score) : "—"}
+            {entry.radar_score != null ? entry.radar_score.toFixed(1) : "—"}
             <span className={styles.scoreUnit}>rdr</span>
           </span>
         </td>

@@ -22,6 +22,7 @@ from app.schemas.entity_relationship import (
     EntityRelationshipCreate,
     EntityRelationshipResponse,
     EntityRelationshipUpdate,
+    RelationClaimsResponse,
 )
 
 router = APIRouter()
@@ -142,7 +143,8 @@ async def list_entity_relationships(
     base = select(EntityRelationship)
     count_base = select(func.count()).select_from(EntityRelationship)
 
-    if not include_rejected:
+    # A rejection is an analyst's call on this instance: visitors don't see them.
+    if not include_rejected or user.is_anonymous:
         base = base.where(EntityRelationship.source != "analyst_rejected")
         count_base = count_base.where(EntityRelationship.source != "analyst_rejected")
 
@@ -277,7 +279,7 @@ async def get_entity_relationships(
         (EntityRelationship.target_type == entity_type) & (EntityRelationship.target_id == entity_id),
     )
     query = select(EntityRelationship).where(condition)
-    if not include_rejected:
+    if not include_rejected or user.is_anonymous:
         query = query.where(EntityRelationship.source != "analyst_rejected")
     hidden = hidden_relationship_confidences()
     if hidden:
@@ -287,6 +289,87 @@ async def get_entity_relationships(
     query = query.order_by(EntityRelationship.created_at.desc())
     result = await db.execute(query)
     return await _enrich_names(db, list(result.scalars().all()))
+
+
+@router.get("/claims/{entity_type}/{entity_id}", response_model=RelationClaimsResponse)
+async def get_entity_relation_claims(
+    entity_type: str = Path(..., description="Entity type of the profile, e.g. threat_actor."),
+    entity_id: uuid.UUID = Path(..., description="UUID of the profile entity."),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Which enrichment sources claim this entity's connections, for the
+    profile's Relationships tab.
+
+    ``by_target`` maps ``<type>-<id>`` of each connected entity to the sources
+    whose claim names it, from either end (a claim runs from the entity the
+    source answered for, so an observable's claim about a malware family tags
+    the row on both profiles). ``sources`` counts linked claims per source.
+    ``held`` lists the names this entity's sources gave that matched no entity,
+    or more than one (``held_reason`` ``unknown`` / ``ambiguous``), for review.
+    Signed-in only: held names can come from sources a visitor doesn't see."""
+    from app.enrichment.registry import SOURCE_REGISTRY
+    from app.models.enrichment import EntityRelationClaim
+
+    def label(source_type: str) -> str:
+        cls = SOURCE_REGISTRY.get(source_type)
+        return cls.display_name if cls else source_type
+
+    C = EntityRelationClaim
+    forward = (
+        await db.execute(
+            select(C.source_type, C.relation, C.target_type, C.target_id, C.target_name, C.held_reason, C.evidence)
+            .where(C.entity_type == entity_type, C.entity_id == entity_id)
+            .order_by(C.source_type, C.target_name)
+        )
+    ).all()
+    reverse = (
+        await db.execute(
+            select(C.source_type, C.entity_type, C.entity_id).where(
+                C.target_type == entity_type, C.target_id == entity_id
+            )
+        )
+    ).all()
+
+    by_target: dict[str, list[str]] = {}
+    linked: dict[str, int] = {}
+
+    def tag(key: str, source_type: str) -> None:
+        bucket = by_target.setdefault(key, [])
+        if source_type not in bucket:
+            bucket.append(source_type)
+            linked[source_type] = linked.get(source_type, 0) + 1
+
+    held = []
+    for source_type, relation, target_type, target_id, target_name, held_reason, evidence in forward:
+        if target_id is None:
+            held.append(
+                {
+                    "source_type": source_type,
+                    "source_label": label(source_type),
+                    "relation": relation,
+                    "target_name": target_name,
+                    "target_type": target_type,
+                    "held_reason": held_reason,
+                    "evidence": evidence,
+                }
+            )
+        elif target_type:
+            tag(f"{target_type}-{target_id}", source_type)
+    for source_type, other_type, other_id in reverse:
+        tag(f"{other_type}-{other_id}", source_type)
+
+    return {
+        "entity_type": entity_type,
+        "entity_id": str(entity_id),
+        "sources": [
+            {"source_type": st, "label": label(st), "linked": n}
+            for st, n in sorted(linked.items(), key=lambda kv: (-kv[1], label(kv[0]).lower()))
+        ],
+        "by_target": by_target,
+        "held": held,
+        "held_count": len(held),
+    }
 
 
 @router.post("", response_model=EntityRelationshipResponse, status_code=201)

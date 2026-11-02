@@ -7,14 +7,18 @@ import { getPivotLinks } from "@/utils/pivotLinks";
 import { getEntityColor, getEntityLabel } from "@/utils/entityTheme";
 import { getSeverityColor } from "@/utils/colorSchemes";
 import { Chip } from "./primitives";
-import { useEnrichEntity, useEnrichmentSources } from "@/hooks/useEnrichment";
+import { useEnrichEntity } from "@/hooks/useEnrichment";
+import { useEntityGlance, type GlanceItem } from "@/hooks/useEntityGlance";
 import { useReportFalsePositive, type FalsePositiveScope } from "@/hooks/useFalsePositives";
 import {
   useConvertEntity,
+  useDeleteEntity,
   useUnlinkAllEntries,
   MERGEABLE_ENTITY_TYPES,
 } from "@/hooks/useEntityProfile";
+import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import { EntityMergeIntoModal } from "./EntityMergeIntoModal";
+import { keyLink } from "./entityProfile/ContextPanel";
 import { useDenyObservable, useUnlinkEntity } from "@/hooks/useIntelligence";
 import { convertTargetsFor, runEntityConvert } from "@/utils/entityConvert";
 import { useAuthStore, useIsVisitor } from "@/stores/authStore";
@@ -25,6 +29,44 @@ import { confirmDialog } from "@/utils/dialog";
 
 function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max).trimEnd() + "…" : text;
+}
+
+/** Types the shared delete handles (useDeleteEntity); others have no delete here. */
+const DELETABLE_TYPES = new Set(["threat_actor", "malware", "cve", "ttp", "country", "tool", "mitigation", "vendor", "product", "observable"]);
+
+interface LookupNote {
+  source_type: string;
+  text: string;
+  retry: boolean;
+}
+
+/** A source's answer to Look up, in words; null when there is nothing to say. */
+function lookupNote(status: string, sourceType: string, label: string): LookupNote | null {
+  const say = (text: string, retry = false) => ({ source_type: sourceType, text: `${label} ${text}`, retry });
+  switch (status) {
+    case "success":
+    case "cached":
+    case "skipped_low_confidence":
+      return null;
+    case "budget_exhausted":
+    case "backfill_share":
+      return say("is at its daily cap · fills in tomorrow");
+    case "rate_limited":
+    case "breaker_open":
+      return say("asked to slow down · fills in shortly");
+    case "paused":
+      return say("is paused with the rest of enrichment");
+    case "auth_failed":
+      return say("refused its key");
+    default:
+      return say("didn't answer", true);
+  }
+}
+
+/** "GreyNoise Community · Oct 28" for a chip's or fact's tooltip. */
+function sourceTitle(item: GlanceItem): string | undefined {
+  const when = item.observed_at ? new Date(item.observed_at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : null;
+  return [item.source, when].filter(Boolean).join(" · ") || undefined;
 }
 
 interface EntityPopoverProps {
@@ -105,20 +147,22 @@ export function EntityPopover({
   const pos = useClampPosition(ref, x, y);
   const navigate = useNavigate();
   const setHeaderSearchQuery = useUIStore((s) => s.setHeaderSearchQuery);
-  const [showEnrichMenu, setShowEnrichMenu] = useState(false);
   const [showFpMenu, setShowFpMenu] = useState(false);
   // Which way the dropdowns open. Decided when one is opened, from the room left
   // under the card — the card itself no longer moves to make space.
   const [menuUp, setMenuUp] = useState(false);
   const [showConvertMenu, setShowConvertMenu] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
-  const [enrichStatus, setEnrichStatus] = useState<string | null>(null);
+  // What the last Look up left to say: sources that waited or failed.
+  const [lookupNotes, setLookupNotes] = useState<LookupNote[]>([]);
   const enrichEntity = useEnrichEntity();
-  // Skip the authenticated sources fetch on public shared pages (no JWT → 401).
-  const { data: enrichSources } = useEnrichmentSources(!readOnly && !isVisitor);
+  // Enrichment's few words about this entity; absent until (and unless) it loads.
+  const { data: glance } = useEntityGlance(entity.type, entity.id || undefined);
   const reportFalsePositive = useReportFalsePositive();
   const convertEntity = useConvertEntity();
   const unlinkAll = useUnlinkAllEntries();
+  const deleteEntity = useDeleteEntity();
+  const undoableDelete = useUndoableDelete();
 
   // Convert, merge, and unlink-all are admin-only endpoints; the false-positive
   // scopes stay open to every analyst.
@@ -134,20 +178,33 @@ export function EntityPopover({
    *  direction depends on it, and the menu scrolls past this height anyway. */
   const MENU_HEIGHT = 250;
 
-  const toggleMenu = (which: "fp" | "enrich") => {
+  const toggleFpMenu = () => {
     const rect = ref.current?.getBoundingClientRect();
     if (rect) {
       const below = window.innerHeight - rect.bottom;
       setMenuUp(below < MENU_HEIGHT && rect.top > below);
     }
-    if (which === "fp") {
-      setShowEnrichMenu(false);
-      setShowFpMenu((o) => !o);
-    } else {
-      setShowFpMenu(false);
-      setShowEnrichMenu((o) => !o);
-    }
+    setShowFpMenu((o) => !o);
     setShowConvertMenu(false);
+  };
+
+  /** Look up (or refresh) at every source that applies; the glance fills in
+   *  place, and whatever waited or failed is said in words under the buttons. */
+  const lookUp = (sourceTypes: string[]) => {
+    const labels = new Map((glance?.lookup_sources ?? []).map((s) => [s.source_type, s.label]));
+    setLookupNotes((prev) => prev.filter((n) => !sourceTypes.includes(n.source_type)));
+    enrichEntity.mutate(
+      { entityType: entity.type, entityId: entity.id, sourceTypes, refresh: !!glance?.looked_up },
+      {
+        onSuccess: (data) =>
+          setLookupNotes(
+            (data.results ?? [])
+              .map((r) => lookupNote(r.status, r.source_type, labels.get(r.source_type) ?? r.source_type))
+              .filter((n): n is LookupNote => n !== null),
+          ),
+        onError: (e) => toast.error(`Look up failed: ${(e as Error).message}`),
+      },
+    );
   };
 
   const handleReportFalsePositive = async (scope: FalsePositiveScope) => {
@@ -234,6 +291,30 @@ export function EntityPopover({
     onClose();
   };
 
+  /** The match is so wrong the entity shouldn't exist: delete it (with its
+   *  article links and relationships), after a confirm and a 5-second undo. */
+  const handleDelete = async () => {
+    setShowFpMenu(false);
+    const ok = await confirmDialog({
+      title: `Delete ${getEntityLabel(entity.type).toLowerCase()}`,
+      message:
+        `Delete ${canonicalName}?\n\n` +
+        "Its article links and relationships go with it. Extraction can create it again from a new article; " +
+        "use \u201cNever match\u201d to stop that.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    undoableDelete({
+      label: `${getEntityLabel(entity.type).toLowerCase()} "${canonicalName}"`,
+      key: `entity-${entity.type}-${entity.id}`,
+      onInitiate: onClose,
+      onDelete: () => {
+        deleteEntity(entity.type, entity.id).catch(() => toast.error(`Couldn't delete ${canonicalName}`));
+      },
+    });
+  };
+
   const handleUnlinkAll = async () => {
     setShowFpMenu(false);
     if (
@@ -304,6 +385,22 @@ export function EntityPopover({
   const aliases = (meta?.aliases ?? []).filter(
     (a) => a.toLowerCase() !== entity.value.toLowerCase(),
   );
+  const hasGenericGrid = !!meta && (facts.length > 0 || !!meta.description || aliases.length > 0 || meta.article_count != null);
+  // The Context row: enrichment's few facts, last in the grid. Absent when
+  // there are none, so the popover reads as it would without enrichment.
+  const glanceFacts = glance?.facts.length ? (
+    <div className={`${styles.metaItem} ${styles.metaFull}`}>
+      <span className={styles.metaLabel}>Context</span>
+      <span className={`${styles.metaValue} ${styles.glanceFacts}`}>
+        {glance.facts.map((f) => (
+          <span key={f.text} title={sourceTitle(f)} className={f.tone === "bad" ? styles.factBad : f.tone === "warn" ? styles.factWarn : undefined}>
+            {f.text}
+          </span>
+        ))}
+      </span>
+    </div>
+  ) : null;
+  const sources = glance?.lookup_sources ?? [];
 
   // Portal to <body>: the popover is `position: fixed`, but when rendered inside
   // the AI-summary day divider it lives within the virtualized entry list, whose
@@ -317,6 +414,8 @@ export function EntityPopover({
       ref={ref}
       className={styles.popover}
       style={pos}
+      role="dialog"
+      aria-label={`${getEntityLabel(entity.type)}: ${entity.value}`}
     >
       <div className={styles.header}>
         <Chip
@@ -329,7 +428,7 @@ export function EntityPopover({
         {isCVE && cveMeta.is_kev && (
           <Chip
             tone="solid"
-            tint="#dc2626"
+            tint="var(--danger)"
             className={styles.kevBadge}
             title="CISA Known Exploited Vulnerability"
           >
@@ -345,6 +444,11 @@ export function EntityPopover({
             {cveMeta.severity}
           </Chip>
         )}
+        {glance?.chips.map((c) => (
+          <Chip key={`${c.source ?? ""}:${c.text}`} tone="toned" tint={c.tone === "bad" ? "var(--danger)" : "var(--warning)"} className={styles.verdict} title={sourceTitle(c)}>
+            {c.text}
+          </Chip>
+        ))}
       </div>
       <div className={styles.valueRow}>
         {meta?.image_url && (
@@ -411,6 +515,7 @@ export function EntityPopover({
               </span>
             </div>
           )}
+          {glanceFacts}
         </div>
       )}
 
@@ -441,11 +546,12 @@ export function EntityPopover({
               <span className={styles.metaDesc}>{truncate(ttpMeta.description, 220)}</span>
             </div>
           )}
+          {glanceFacts}
         </div>
       )}
 
       {/* Generic metadata (threat actors, malware, vendors, products, tools, etc.) */}
-      {!isCVE && !isTTP && meta && (facts.length > 0 || meta.description || (meta.aliases && meta.aliases.length > 0) || meta.article_count != null) && (
+      {!isCVE && !isTTP && hasGenericGrid && (
         <div className={styles.metaGrid}>
           {facts.map((f) => (
             <div key={f.label} className={styles.metaItem}>
@@ -477,8 +583,11 @@ export function EntityPopover({
               <span className={styles.metaDesc}>{truncate(meta.description, 220)}</span>
             </div>
           )}
+          {glanceFacts}
         </div>
       )}
+      {/* No grid above (an entity with no metadata yet): the Context row stands alone. */}
+      {!isCVE && !isTTP && !hasGenericGrid && glanceFacts && <div className={styles.metaGrid}>{glanceFacts}</div>}
 
       {/* Detection artifacts (offensive tools) */}
       {meta?.artifacts && meta.artifacts.length > 0 && (
@@ -536,14 +645,21 @@ export function EntityPopover({
           {!isVisitor && (<>
           <button
             className={styles.actionBtn}
-            onClick={() => toggleMenu("enrich")}
-            disabled={enrichEntity.isPending}
+            onClick={() => lookUp(sources.map((s) => s.source_type))}
+            disabled={enrichEntity.isPending || sources.length === 0}
+            title={
+              sources.length
+                ? `Ask ${sources.map((s) => s.label).join(", ")}`
+                : glance?.needs_key.length
+                  ? "The sources for this need a key first"
+                  : "No enrichment source looks this up"
+            }
           >
-            {enrichEntity.isPending ? "..." : "Enrich"}
+            {enrichEntity.isPending ? "…" : glance?.looked_up ? "Refresh" : "Look up"}
           </button>
           <button
             className={styles.actionBtn}
-            onClick={() => toggleMenu("fp")}
+            onClick={toggleFpMenu}
             disabled={reportFalsePositive.isPending}
             title="Report this as a wrong entity match"
           >
@@ -580,6 +696,10 @@ export function EntityPopover({
               Global tombstone needs an admin
             </div>
           )}
+          <div className={styles.menuDivider} />
+          <button className={`${styles.enrichMenuItem} ${styles.danger}`} onClick={handleDelete}>
+            Delete this observable…
+          </button>
         </div>
       )}
 
@@ -643,6 +763,11 @@ export function EntityPopover({
           <button className={styles.enrichMenuItem} onClick={() => handleReportFalsePositive("global")}>
             Never match "{entity.value}" anywhere
           </button>
+          {DELETABLE_TYPES.has(entity.type) && (
+            <button className={`${styles.enrichMenuItem} ${styles.danger}`} onClick={handleDelete}>
+              Delete {canonicalName}…
+            </button>
+          )}
         </div>
       )}
 
@@ -657,70 +782,37 @@ export function EntityPopover({
           />,
           document.body,
         )}
-
-      {/* Quick Enrich dropdown */}
-      {!readOnly && !isVisitor && showEnrichMenu && (() => {
-        // Map entity type to adapter type for matching
-        const adapterType = entity.type;
-
-        const applicable = enrichSources?.filter(
-          (s) =>
-            s.is_enabled &&
-            s.supported_entity_types.some(
-              (t) => t === adapterType || t === entity.type
-            )
-        ) ?? [];
-
-        const handleQuickEnrich = (sourceType: string) => {
-          enrichEntity.mutate(
-            {
-              entityType: entity.type,
-              entityId: entity.id,
-              sourceTypes: [sourceType],
-            },
-            {
-              onSuccess: (data) => {
-                const result = data.results[0];
-                setEnrichStatus(result?.status === "success" ? "Done" : result?.status ?? "error");
-                setTimeout(() => setEnrichStatus(null), 3000);
-              },
-              onError: () => {
-                setEnrichStatus("error");
-                setTimeout(() => setEnrichStatus(null), 3000);
-              },
-            }
-          );
-          setShowEnrichMenu(false);
-        };
-
-        return (
-          <div className={`${styles.enrichMenu} ${menuUp ? styles.menuUp : ""}`}>
-            {applicable.length === 0 && (
-              <div className={styles.enrichMenuEmpty}>No sources available</div>
-            )}
-            {applicable.slice(0, 5).map((s) => (
-              <button
-                key={s.id}
-                className={styles.enrichMenuItem}
-                onClick={() => handleQuickEnrich(s.source_type)}
-              >
-                {s.display_name}
-              </button>
-            ))}
-            {applicable.length > 5 && (
-              <button className={styles.enrichMenuItem} onClick={onNavigate}>
-                More...
-              </button>
-            )}
-          </div>
-        );
-      })()}
       </div>
 
-      {/* Enrich status flash */}
-      {!readOnly && !isVisitor && enrichStatus && (
-        <div className={styles.enrichFlash}>
-          {enrichStatus === "Done" ? "Enriched" : enrichStatus}
+      {/* What the last Look up left to say. A key note is for admins only. */}
+      {!readOnly && !isVisitor && (lookupNotes.length > 0 || (isAdmin && (glance?.needs_key.length ?? 0) > 0)) && (
+        <div className={styles.lookupNotes} role="status">
+          {lookupNotes.map((n) => (
+            <div key={n.source_type}>
+              {n.text}
+              {n.retry && (
+                <>
+                  {" · "}
+                  <button type="button" className={styles.noteLink} onClick={() => lookUp([n.source_type])}>
+                    Retry
+                  </button>
+                </>
+              )}
+            </div>
+          ))}
+          {isAdmin &&
+            glance?.needs_key.map((k) => (
+              <div key={k.source_type}>
+                {k.label} needs a key ·{" "}
+                <button
+                  type="button"
+                  className={styles.noteLink}
+                  onClick={() => navigate(keyLink(k.source_type))}
+                >
+                  Add key
+                </button>
+              </div>
+            ))}
         </div>
       )}
 

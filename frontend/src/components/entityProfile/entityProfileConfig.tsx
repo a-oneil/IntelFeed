@@ -8,7 +8,9 @@
  * not an edit to a monolithic component.
  */
 import type { EntityType } from "@/stores/intelStore";
+import type { ProfileOpenSections, ProfileOverviewMode } from "@/stores/uiStore";
 import type { EntitySearchResult } from "@/api/types";
+import type { EntityContextBadge } from "@/hooks/useEntityContext";
 import { getPivotLinks, type PivotLink } from "@/utils/pivotLinks";
 import { observablePivotLinks } from "@/utils/entityPopoverMeta";
 
@@ -21,8 +23,8 @@ export type TabKey =
   | "detection"
   | "geography"
   | "victimology"
-  // Not in any tabs array — reachable only via the rail's "Review gaps"
-  // action; ProfileTabs appends it as an ephemeral tab while active.
+  // Not in any tabs array — reachable only via the "Review gaps" next-action
+  // chip; ProfileTabs appends it as an ephemeral tab while active.
   | "detection_gaps";
 
 export const TAB_LABELS: Record<TabKey, string> = {
@@ -107,6 +109,89 @@ export function severityTone(severity: string | null | undefined): BadgeTone {
   }
 }
 
+/** Manifest badges (GET …/context `badges[]`) as header chips, after the
+ * hand-written ones. Quiet on purpose: only red/amber tones keep their color —
+ * "benign" or "info" is not something to look at, so it renders neutral. */
+export function contextBadgeSpecs(
+  badges: EntityContextBadge[] | undefined,
+  sources: Array<{ source_type: string; label: string }> = [],
+): BadgeSpec[] {
+  const labels = new Map(sources.map((s) => [s.source_type, s.label]));
+  return (badges ?? []).map((b) => {
+    const tone = b.tone?.toLowerCase();
+    return {
+      label: b.label,
+      tone:
+        tone === "critical" || tone === "high" || tone === "danger"
+          ? tone
+          : tone === "medium" || tone === "warning"
+            ? "medium"
+            : "neutral",
+      title: `From ${labels.get(b.source_type) ?? b.source_type}`,
+      ...(b.field ? { provenanceKey: b.field } : {}),
+    };
+  });
+}
+
+/** Product support lifecycle (endoflife.date) → a header badge. Quiet while
+ * the product is maintained; amber once only security fixes ship or the end
+ * is under 90 days off; red past end of life. */
+export function supportBadge(
+  e: { support_status?: string | null; next_eol?: string | null },
+  today: Date = new Date(),
+): BadgeSpec | null {
+  const status = e.support_status?.toLowerCase();
+  const eol = e.next_eol ?? null;
+  const base = { provenanceKey: "support_status", provenanceLabel: "Support status" };
+  if (status === "eol") {
+    return { ...base, label: "EOL", tone: "danger", title: "Past end of life: the vendor no longer ships security fixes" };
+  }
+  if (status === "security_only") {
+    return {
+      ...base,
+      label: eol ? `security fixes only · until ${eol}` : "security fixes only",
+      tone: "medium",
+      title: "Active support has ended; only security fixes ship",
+    };
+  }
+  if (status === "maintained" && eol) {
+    const days = (new Date(`${eol}T00:00:00Z`).getTime() - today.getTime()) / 86_400_000;
+    if (days >= 0 && days <= 90) {
+      return { ...base, label: `EOL ${eol}`, tone: "medium", title: "Security support ends soon" };
+    }
+  }
+  return null;
+}
+
+/** A CVE affecting an end-of-life product, or an end-of-life release of a
+ * product still maintained (Windows Server 23H2, PAN-OS 10.1): the vendor
+ * won't ship a fix for it, so the badge says so. Null when nothing affected
+ * is past end of life. */
+export function noPatchBadge(
+  rows:
+    | Array<{
+        product_name: string | null;
+        cpe_product: string;
+        product_support_status?: string | null;
+        eol_releases?: string[];
+      }>
+    | undefined,
+): BadgeSpec | null {
+  const names = new Set<string>();
+  for (const r of rows ?? []) {
+    const name = r.product_name ?? r.cpe_product;
+    if (r.product_support_status?.toLowerCase() === "eol") names.add(name);
+    else for (const release of r.eol_releases ?? []) names.add(`${name} ${release}`);
+  }
+  if (names.size === 0) return null;
+  const list = [...names];
+  return {
+    label: "no patch coming",
+    tone: "high",
+    title: `Affects ${list.join(", ")}, past end of life: no fix will ship for ${list.length === 1 ? "it" : "them"}`,
+  };
+}
+
 /** KEV = the CISA flag OR an exploit_status that already says known-exploited.
  * The retired KEVBadge honored both; keying on `is_kev` alone reads a CVE whose
  * enrichment wrote the status but never set the flag as "Not listed". */
@@ -157,6 +242,102 @@ export type OverviewPanelKey =
   | "observable_backlinks"
   | "infrastructure";
 
+// ── Overview sections ─────────────────────────────────────────────────────
+/**
+ * The Overview is one column of sections under the always-open brief (claims,
+ * assessment, next actions) and facts strip. Each section is a row that opens
+ * in place; closed, its digest answers the usual question. `overviewSections`
+ * is which rows a type has; the order is the same for every type
+ * (OVERVIEW_SECTION_ORDER), so Context is always the first row under the facts
+ * strip and Stories & reading, Activity and Workspace always close the page.
+ * `overviewOpen` is which start open until the analyst changes it (uiStore
+ * remembers per type).
+ */
+export type OverviewSectionKey =
+  | "victims"
+  | "catalog"
+  | "context"
+  | "exploit"
+  | "affected"
+  | "weakness_profile"
+  | "infrastructure"
+  | "attribution"
+  | "provenance"
+  | "reading"
+  | "activity"
+  | "workspace";
+
+/**
+ * One order for every type: Context first (every type has it), then the rows
+ * that are the entity's own record or structure, then what is written about it.
+ */
+export const OVERVIEW_SECTION_ORDER: OverviewSectionKey[] = [
+  "context",
+  "victims",
+  "catalog",
+  "provenance",
+  "exploit",
+  "affected",
+  "weakness_profile",
+  "infrastructure",
+  "attribution",
+  "reading",
+  "activity",
+  "workspace",
+];
+
+/** A type's rows in the shared order. */
+export function orderedOverviewSections(keys: OverviewSectionKey[]): OverviewSectionKey[] {
+  return OVERVIEW_SECTION_ORDER.filter((k) => keys.includes(k));
+}
+
+/**
+ * Which of a type's rows are open right now. "everything" opens them all. With
+ * nothing stored, the config's defaults. With a stored choice, the rows it left
+ * open — minus any id the page no longer has (renamed, removed, or hidden from
+ * a visitor), so a stale id is never shown or written back — plus any
+ * default-open row the choice never saw, so a row added later opens for people
+ * with a stored choice too. A bare stored list has no `seen`, so every current
+ * row counts as seen and only its ids are kept.
+ */
+export function resolveOpenSections(
+  stored: ProfileOpenSections | string[] | undefined,
+  sections: OverviewSectionKey[],
+  defaults: OverviewSectionKey[],
+  mode: ProfileOverviewMode,
+): OverviewSectionKey[] {
+  if (mode === "everything") return [...sections];
+  if (!stored) return sections.filter((k) => defaults.includes(k));
+  const open = Array.isArray(stored) ? stored : stored.open;
+  const seen = Array.isArray(stored) ? sections : stored.seen;
+  return sections.filter((k) => open.includes(k) || (defaults.includes(k) && !seen.includes(k)));
+}
+
+export const OVERVIEW_SECTION_LABELS: Record<OverviewSectionKey, string> = {
+  victims: "Recent victims",
+  catalog: "Catalog",
+  context: "Context",
+  exploit: "Exploit & PoC",
+  affected: "Affected",
+  weakness_profile: "Weakness profile",
+  infrastructure: "Infrastructure",
+  attribution: "Attribution",
+  provenance: "Provenance & confidence",
+  reading: "Stories & reading",
+  activity: "Activity",
+  workspace: "Workspace",
+};
+
+/** Which signal panels each section hosts. Every OverviewPanelKey appears once. */
+export const OVERVIEW_SECTION_PANELS: Partial<Record<OverviewSectionKey, OverviewPanelKey[]>> = {
+  catalog: ["ttp_mitre", "ttp_family", "ttp_mitigations", "cwe_family", "cwe_catalog", "cwe_mitigations", "cwe_affected_vendors"],
+  affected: ["cve_affected"],
+  weakness_profile: ["cwe_vendors"],
+  infrastructure: ["infrastructure"],
+  attribution: ["observable_backlinks"],
+  provenance: ["observable_provenance"],
+};
+
 // ── Actions ───────────────────────────────────────────────────────────────
 export type ActionKey =
   | "add_to_campaign"
@@ -185,6 +366,8 @@ export interface EntityProfileConfig {
    * "CWE-416 Use After Free"). Set only for types whose identity IS the id. */
   monoIdKey?: "technique_id" | "cwe_id" | "value";
   overviewPanels: OverviewPanelKey[];
+  overviewSections: OverviewSectionKey[];
+  overviewOpen: OverviewSectionKey[];
   externalLinks?: (e: EntitySearchResult) => PivotLink[];
   /** backend entity_type for cascade-delete preview (null = unsupported) */
   cascadeType?: string;
@@ -219,7 +402,8 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
   // file. It still pivots (its articles are a seed like any other), so it earns
   // the same four tabs the actors have, and the tabs it used to carry on its own
   // page collapse into shell surfaces: Timeline into the activity readout,
-  // Entities into the associates strip, Searches and Suggestions into the rail.
+  // Entities into the associates strip, Searches and Suggestions into the
+  // Activity section's intake panel.
   campaign: {
     tabs: ["overview", "relationships", "detection"],
     signalBadges: (e) => [
@@ -239,6 +423,8 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: true,
     overviewPanels: ["infrastructure"],
+    overviewSections: ["infrastructure", "reading", "activity", "workspace"],
+    overviewOpen: ["activity"],
     // Campaigns are internal objects; there is nothing to look them up in.
     externalLinks: () => [],
     // No cascadeType: the preview counts extraction links that would be severed,
@@ -266,6 +452,8 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     // Techniques/attribution now live in the hero (associates strip, badges) —
     // no overview panels repeat them.
     overviewPanels: ["infrastructure"],
+    overviewSections: ["context", "victims", "infrastructure", "reading", "activity", "workspace"],
+    overviewOpen: ["victims"],
     externalLinks: (e) => getPivotLinks("threat_actor", e.name || ""),
     cascadeType: "threat_actor",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -281,8 +469,10 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasAliases: true,
     hasDescription: true,
     nameEditable: true,
-    // Malpedia moved into the Sources rail card.
+    // Malpedia links live in the Sources card.
     overviewPanels: ["infrastructure"],
+    overviewSections: ["context", "infrastructure", "reading", "activity", "workspace"],
+    overviewOpen: ["reading"],
     externalLinks: (e) => getPivotLinks("malware", e.name || ""),
     cascadeType: "malware",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -328,10 +518,12 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasAliases: false,
     hasDescription: true,
     nameEditable: false,
-    // Exploitation/EPSS/KEV numbers live in the Snapshot rail card; PoC links
-    // in the Exploit & PoC card; references in Sources. Only the structured
+    // Exploitation/EPSS/KEV numbers live in the facts strip; PoC links in the
+    // Exploit & PoC section; references in Sources. Only the structured
     // CPE affected-products list keeps a panel of its own.
     overviewPanels: ["cve_affected"],
+    overviewSections: ["context", "exploit", "affected", "reading", "activity", "workspace"],
+    overviewOpen: ["context"],
     externalLinks: (e) => getPivotLinks("cve", e.cve_id || ""),
     cascadeType: "cve",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -397,6 +589,8 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     nameEditable: false,
     monoIdKey: "cwe_id",
     overviewPanels: ["cwe_family", "cwe_catalog", "cwe_mitigations", "cwe_affected_vendors"],
+    overviewSections: ["context", "catalog", "reading", "activity", "workspace"],
+    overviewOpen: ["catalog"],
     // The catalog page keys on the bare number.
     externalLinks: (e) => getPivotLinks("cwe", (e.cwe_id || "").replace(/^CWE-/i, "")),
     cascadeType: "cwe",
@@ -441,6 +635,8 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     nameEditable: false,
     monoIdKey: "technique_id",
     overviewPanels: ["ttp_mitre", "ttp_family", "ttp_mitigations"],
+    overviewSections: ["context", "catalog", "reading", "activity", "workspace"],
+    overviewOpen: ["context"],
     externalLinks: (e) => getPivotLinks("ttp", e.technique_id || ""),
     cascadeType: "ttp",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -458,6 +654,8 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: true,
     overviewPanels: [],
+    overviewSections: ["context", "reading", "activity", "workspace"],
+    overviewOpen: ["reading"],
     externalLinks: (e) => getPivotLinks("country", e.name || ""),
     cascadeType: "country",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -475,6 +673,8 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: false,
     overviewPanels: [],
+    overviewSections: ["context", "reading", "activity", "workspace"],
+    overviewOpen: ["reading"],
     externalLinks: (e) => getPivotLinks("sector", e.name || ""),
     actions: ["add_to_campaign", "generate_report", "ai_summary"],
   },
@@ -490,8 +690,10 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasAliases: true,
     hasDescription: true,
     nameEditable: true,
-    // Malpedia/GitHub moved into the Sources rail card.
+    // Malpedia/GitHub links live in the Sources card.
     overviewPanels: ["infrastructure"],
+    overviewSections: ["context", "infrastructure", "reading", "activity", "workspace"],
+    overviewOpen: ["infrastructure"],
     cascadeType: "tool",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
   },
@@ -523,6 +725,8 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     nameEditable: false,
     monoIdKey: "value",
     overviewPanels: ["observable_provenance", "observable_backlinks"],
+    overviewSections: ["context", "provenance", "attribution", "reading", "activity", "workspace"],
+    overviewOpen: ["provenance", "attribution"],
     externalLinks: (e) =>
       e.kind && e.value
         ? observablePivotLinks(e.kind, e.value).map((l) => ({ platform: l.label, url: l.url }))
@@ -543,6 +747,8 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: false,
     overviewPanels: [],
+    overviewSections: ["context", "reading", "activity", "workspace"],
+    overviewOpen: ["reading"],
     actions: ["add_to_campaign", "generate_report", "ai_summary", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
   },
 
@@ -550,6 +756,8 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     tabs: ["overview", "vulnerabilities", "relationships"],
     signalBadges: (e) => [
       { label: e.vendor_type || "", tone: "info", title: "Vendor type", editKey: "vendor_type", editKind: "text", placeholder: "set type" },
+      // The country the company is from (Wikidata), linking to its profile.
+      { label: e.country || "", tone: "neutral", title: "Country", editKind: "country" },
     ],
     identityFields: [
       { label: "Website", key: "website", kind: "text", placeholder: "Set website" },
@@ -559,15 +767,21 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     nameEditable: true,
     // Website lives in the Snapshot/Sources cards, not a one-link panel.
     overviewPanels: ["cwe_vendors"],
+    overviewSections: ["context", "weakness_profile", "reading", "activity", "workspace"],
+    overviewOpen: ["context"],
     cascadeType: "vendor",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
   },
 
   product: {
     tabs: ["overview", "vulnerabilities", "relationships"],
-    signalBadges: (e) => [
-      { label: e.product_type || "", tone: "info", title: "Product type", editKey: "product_type", editKind: "text", placeholder: "set type" },
-    ],
+    signalBadges: (e) => {
+      const support = supportBadge(e);
+      return [
+        { label: e.product_type || "", tone: "info", title: "Product type", editKey: "product_type", editKind: "text", placeholder: "set type" },
+        ...(support ? [support] : []),
+      ];
+    },
     identityFields: [
       { label: "Vendor", key: "vendor_id", kind: "vendor" },
       { label: "Website", key: "website", kind: "text", placeholder: "Set website" },
@@ -576,6 +790,8 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: true,
     overviewPanels: ["cwe_vendors"],
+    overviewSections: ["context", "weakness_profile", "reading", "activity", "workspace"],
+    overviewOpen: ["context"],
     cascadeType: "product",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
   },

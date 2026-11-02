@@ -111,7 +111,7 @@ async def test_denied_cve_is_not_recreated(db_session):
 
 
 async def test_autolink_entry_queues_enrichment_for_new_cve_stub(db_session, monkeypatch):
-    from app.workers.enrichment_tasks import auto_enrich_entity
+    from app.models.enrichment import EnrichmentJob, EnrichmentSource
 
     async def _noop(_db):
         return None
@@ -120,18 +120,30 @@ async def test_autolink_entry_queues_enrichment_for_new_cve_stub(db_session, mon
     vocab = EntityVocabulary()
     vocab.build_from_entities([], [])
     monkeypatch.setattr(autolinker_mod, "_vocabulary", vocab)
-    queued: list[dict] = []
-    monkeypatch.setattr(auto_enrich_entity, "delay", lambda **kw: queued.append(kw))
+    nvd = (
+        await db_session.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "nvd"))
+    ).scalar_one_or_none() or EnrichmentSource(source_type="nvd", display_name="NVD")
+    nvd.is_enabled, nvd.trigger_mode = True, "auto"
+    db_session.add(nvd)
+    await db_session.flush()
+
+    async def queued():
+        rows = await db_session.execute(
+            select(EnrichmentJob.entity_type, EnrichmentJob.entity_value, EnrichmentJob.lane).where(
+                EnrichmentJob.source_type == "nvd"
+            )
+        )
+        return rows.all()
 
     entry = await _mk_entry(db_session, "Exploitation of CVE-2026-40404 began Monday.")
     await autolink_entry(db_session, entry.id, entry.content_text, entry.title, "")
 
-    assert [(q["entity_type"], q["entity_value"]) for q in queued] == [("cve", "CVE-2026-40404")]
+    assert await queued() == [("cve", "CVE-2026-40404", "new")]
 
     # A second article mentioning the same id links the existing row: no new stub, no new job.
     other = await _mk_entry(db_session, "More on CVE-2026-40404.")
     await autolink_entry(db_session, other.id, other.content_text, other.title, "")
-    assert len(queued) == 1
+    assert len(await queued()) == 1
 
 
 # ── NVD backfill retry budget ───────────────────────────────────────
@@ -152,7 +164,7 @@ def backfill(db_session, monkeypatch):
 
     looked_up: list[str] = []
 
-    async def fake_enrich(cve_id, raise_on_rate_limit: bool = False):
+    async def fake_enrich(cve_id, gateway, api_key=None):
         looked_up.append(cve_id)
         return None  # NVD has nothing for any of these
 
@@ -189,12 +201,13 @@ async def test_backfill_stamps_misses_and_respects_the_budget(db_session, backfi
 
 
 async def test_backfill_rate_limit_does_not_spend_a_retry(db_session, backfill, monkeypatch):
+    from app.enrichment.gateway import RateLimited
     from app.intelligence import cve as cve_mod
 
     run, _ = backfill
 
-    async def throttled(cve_id, raise_on_rate_limit: bool = False):
-        raise cve_mod.NVDRateLimited(cve_id)
+    async def throttled(cve_id, gateway, api_key=None):
+        raise RateLimited("nvd", 60)
 
     monkeypatch.setattr(cve_mod, "enrich_from_nvd", throttled)
     row = CVE(cve_id="CVE-2026-55555", nvd_data={})
@@ -203,7 +216,7 @@ async def test_backfill_rate_limit_does_not_spend_a_retry(db_session, backfill, 
 
     stats = await run()
 
-    assert stats["rate_limited"] is True
+    assert stats["stopped"] == "rate_limited"
     await db_session.refresh(row)
     assert "_enrich_attempts" not in row.nvd_data
 

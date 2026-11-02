@@ -150,6 +150,28 @@ def _private_scale_cutoffs(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _private_gateway_keys(monkeypatch):
+    """Give each test its own Redis namespace for the enrichment gateways'
+    buckets, budgets and breakers, so no test drains another's (or dev's)
+    allowance. The keys expire on their own."""
+    import uuid
+
+    from app.enrichment import gateway
+
+    monkeypatch.setattr(gateway, "KEY_PREFIX", f"intelfeed:test:{uuid.uuid4().hex}:gw:")
+
+
+@pytest.fixture(autouse=True)
+def _engine_switch_reads_test_db(monkeypatch):
+    """The engine switch reads its setting on a connection of its own; point
+    it at the test database, not dev's, and forget the last read."""
+    from app.services import engine_switch
+
+    monkeypatch.setattr(engine_switch, "_dsn", lambda: TEST_DATABASE_URL.replace("+asyncpg", "", 1))
+    monkeypatch.setattr(engine_switch, "_cached", None)
+
+
+@pytest.fixture(autouse=True)
 def _offline_meilisearch():
     """Keep tests off the network.
 
@@ -337,3 +359,24 @@ async def test_ttp(db_session: AsyncSession) -> TTP:
     db_session.add(ttp)
     await db_session.flush()
     return ttp
+
+
+@pytest.fixture
+def pause_enrichment(db_session: AsyncSession):
+    """Pause enrichment the way the Settings page does: store the
+    ``enrichment_paused`` setting and sync the gateways' Redis flag from it.
+
+    Writing only the Redis flag doesn't pause a source job: ``source_job``
+    re-asserts the flag from the stored setting before the body runs, and the
+    test schema has no system_settings row until one is made here.
+    """
+    from app.enrichment.pause import set_paused
+    from app.models.system_setting import SystemSettings
+
+    async def pause(paused: bool = True) -> None:
+        if await db_session.get(SystemSettings, 1) is None:
+            db_session.add(SystemSettings(id=1, settings={}, secrets={}))
+            await db_session.flush()
+        await set_paused(db_session, paused)
+
+    return pause

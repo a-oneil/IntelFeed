@@ -28,12 +28,15 @@ IntelFeed runs background work with **Celery** (a Python task queue) and **Redis
 
 ### Queues and workers
 
-There are two queues:
+There are three queues:
 
 | Queue | Served by | Concurrency | What runs there |
 |-------|-----------|-------------|-----------------|
 | `celery` (default) | `celery-worker` | 4 in dev, 2 in prod | Everything not routed elsewhere |
 | `ai` | `celery-worker-ai` | 1 (`CLAUDE_CODE_CONCURRENCY`, default 1) | Tasks that call an AI provider |
+| `enrichment` | `celery-worker-enrichment` | 1 | `dispatch_enrichment_jobs`, the enrichment dispatcher |
+
+The `enrichment` worker runs one dispatcher tick at a time, so ticks never overlap, and a tick waiting on a throttled source never holds a default-worker slot.
 
 `celery-worker-ai` also drains the old `claude_code` queue name.
 
@@ -42,6 +45,8 @@ The `ai` worker runs one AI call at a time, whatever the provider. That paces a 
 `task_routes` sends these tasks to `ai`: `run_entry_analysis_task` (one-pass entry analysis), `adjudicate_entry_task` and `backfill_entry_adjudications` (the adjudicate stage), `refresh_actor_profile`, `process_name_normalization_batch`, `ai_enrich_gap_batch`, `narrate_story_threads`, `run_copilot_stream`, `run_claude_auth` and `refresh_claude_auth_status`. Some jobs also send their AI work there by hand with `apply_async(queue="ai")`, for example `kickoff_assessment_backfill` and `kickoff_actor_profile_refresh`.
 
 **Any new task that calls an AI provider must be routed to `ai`.** On the default queue, a long AI call fills the worker's slots and blocks `poll_due_feeds`, which stops ingest.
+
+Every worker and beat obey the **Stop engine** button: while it's on, workers take nothing off their queues and beat sends nothing. New tasks and queues are covered automatically. See [Stopping the engine](engine.md#stopping-the-engine).
 
 ### Per-Worker Async Pattern and Connection Management
 
@@ -62,7 +67,7 @@ engine = create_async_engine(
 
 ### Task Catalog and Schedules
 
-`JOB_REGISTRY` (`backend/app/workers/job_registry.py:44`) lists all **66** scheduled jobs. Each has a task, a description, a category, a default schedule and, where it has them, the `settings_keys` that tune it. The Engine → Jobs screen reads it and shows those settings next to the job. Every setting named there is listed in [engine-settings.md](engine-settings.md#setting--scheduled-job).
+`JOB_REGISTRY` (`backend/app/workers/job_registry.py:45`) lists all **84** scheduled jobs. Each has a task, a description, a category, a default schedule and, where it has them, the `settings_keys` that tune it. The Engine → Jobs screen reads it and shows those settings next to the job. Every setting named there is listed in [engine-settings.md](engine-settings.md#setting--scheduled-job).
 
 All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means that work runs on the `ai` worker.
 
@@ -79,10 +84,6 @@ All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means
 
 | Task | Default schedule | What it does |
 |------|------------------|--------------|
-| `sync_kev_feed` | Every 6 h at :15 | Sync the CISA Known Exploited Vulnerabilities catalog |
-| `refresh_cwe_catalog` | Monday 03:45 | Re-pull the MITRE CWE catalog and re-match unmatched NVD weakness references |
-| `sync_cybergeist_feeds` | Daily 02:30 | Sync threat actor and malware lists from Cybergeist |
-| `sync_ransomware_victims` | Every 30 min | Collect ransomware leak-site victim posts as structured records |
 | `refresh_autolinker_vocabulary` | Every 30 min | Rebuild the entity-matching dictionary (Aho-Corasick automaton) |
 | `rebuild_entity_profiles` | Daily 03:30 | Rebuild entity correlation profiles |
 | `archive_correlation_events` | Daily 04:45 | Archive old correlation events |
@@ -103,22 +104,38 @@ All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means
 | `rescore_recent_entries` | Every 6 h at :35 | Re-score recent entries so KEV and EPSS changes reach priority scores |
 | `rescore_all_entries` | **Off by default** | Re-score every scored entry. Run it with **Run now**; the Sunday 03:00 schedule only applies if an admin turns it on |
 
-When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker_vocabulary` and, 30 seconds later, `rescan_recent_entries` for the last 7 days. The delay lets the new dictionary load before old entries are re-scanned.
-
 #### Enrichment
 
-| Task | Default schedule | What it does |
-|------|------------------|--------------|
-| `run_scheduled_enrichment` | Every 15 min | Run enrichment sources whose schedule is due |
-| `run_epss_bulk_sync` | Daily 06:30 | Update EPSS scores (exploit likelihood) for all CVEs |
-| `run_mitre_attack_sync` | Sunday 03:00 | Sync MITRE ATT&CK techniques, groups and mitigations |
-| `run_misp_galaxy_sync` | Sunday 03:30 | Refresh known actor aliases (`known_alias_map`) from the MISP Galaxy threat-actor cluster |
-| `run_malpedia_sync` | Sunday 03:30 | Sync malware families from Malpedia; aliases pass the junk-alias filter |
-| `run_metasploit_sync` | Sunday 03:45 | Map tracked CVEs to Metasploit modules and mark them weaponized |
-| `run_cve_nvd_refresh` | Daily 12:00 | Re-check NVD for CVSS changes |
-| `run_cve_nvd_backfill` | Daily 01:30 | Fill in NVD data (CVSS, description, affected products, references) for CVEs that lack it |
-| `run_github_poc_scan` | Daily 05:00 | Search GitHub for proof-of-concept exploits |
-| `run_wikipedia_bulk_sync` | Wednesday 04:00 | Add Wikipedia content to entities that lack it |
+| Task | Source | Default schedule | What it does |
+|------|--------|------------------|--------------|
+| `dispatch_enrichment_jobs` | | Every 30 s | Run due lookups from the enrichment job queue (`enrichment` queue). See [Enrichment Pipeline](#enrichment-pipeline) |
+| `sync_enrichment_pause` | | Every 60 s | Copy the `enrichment_paused` setting onto the Redis flag the gateways read, on the default worker, so a Redis that lost the flag is corrected even while the enrichment worker is down. A run is kept in `job_runs` only when it had to restore the flag |
+| `run_epss_bulk_sync` | `epss` | Daily 06:30 | Update EPSS scores (exploit likelihood) for all CVEs |
+| `sync_kev_feed` | `cisa_kev` | Every 6 h at :15 | Sync the CISA Known Exploited Vulnerabilities catalog |
+| `run_mitre_attack_sync` | `mitre_attack` | Sunday 03:00 | Sync MITRE ATT&CK techniques, groups and mitigations |
+| `run_misp_galaxy_sync` | `misp_galaxy` | Sunday 03:30 | Refresh known actor aliases (`known_alias_map`) from the MISP Galaxy threat-actor cluster |
+| `run_malpedia_sync` | `malpedia` | Saturday 01:00 | Sync malware families from Malpedia; aliases pass the junk-alias filter |
+| `run_metasploit_sync` | `metasploit` | Sunday 03:45 | Map tracked CVEs to Metasploit modules and mark them weaponized |
+| `refresh_cwe_catalog` | `mitre_cwe` | Monday 03:45 | Re-pull the MITRE CWE catalog and re-match unmatched NVD weakness references |
+| `run_cve_nvd_refresh` | `nvd` | Daily 12:00 | Re-check NVD for CVSS changes |
+| `run_cve_nvd_backfill` | `nvd` | Daily 01:30 | Look up NVD data (CVSS, description, affected products, references) for CVEs with no NVD record yet; stops starting lookups 2 minutes before its time limit. Backfill lane |
+| `reenrich_cve_nvd` | `nvd` | Daily 03:05 | Re-fetch NVD data for CVEs still missing it |
+| `run_github_poc_scan` | `github_poc` | Daily 05:00 | Search GitHub for proof-of-concept exploits; stops starting searches 2 minutes before its time limit |
+| `run_wikipedia_bulk_sync` | `wikipedia` | Wednesday 04:00 | Add Wikipedia content to entities that lack it; stops 5 minutes before its time limit. Backfill lane |
+| `sync_cybergeist_feeds` | `cybergeist` | Daily 02:30 | Sync threat actor and malware lists from Cybergeist |
+| `sync_ransomware_victims` | `ransomware_live` | Every 30 min | Collect ransomware leak-site victim posts as structured records |
+| `run_wikidata_sync` | `wikidata` | Thursday 04:30 | Fill vendor websites, countries and industries, product vendors, country regions, victim countries and vendor facts from Wikidata |
+| `run_github_repo_sync` | `github_repo` | Tuesday 05:15 | Read stars, last push, archived state, license and topics of tools' GitHub repositories |
+| `run_endoflife_sync` | `endoflife` | Daily 05:15 | Match products to endoflife.date and set their support status and next end of life |
+| `run_ctid_sync` | `ctid` | Sunday 04:15 | Write NIST 800-53 and CIS controls onto techniques from CTID's Mappings Explorer |
+| `run_d3fend_sync` | `d3fend` | Sunday 04:30 | Show the D3FEND countermeasures for each technique |
+| `run_capec_sync` | `capec` | Monday 04:00 | Refresh the CAPEC catalog and each technique's attack patterns |
+| `run_etda_sync` | `etda` | Tuesday 04:15 | Match ETDA Threat Group Cards to tracked actors: aliases, origin, targets, tools, operations |
+| `run_ransomware_group_profiles` | `ransomware_live` | Every 4 h at :50 | Techniques, tools and leak-site status for up to 10 tracked ransomware groups |
+
+Each source declares its jobs in its manifest ([Source Jobs](automation-ai-enrichment.md#source-jobs)). A job skips while its source is switched off (`{"skipped": "source disabled"}`), and sends its requests through its source's gateway ([Source Gateway](automation-ai-enrichment.md#source-gateway)). A refusal (rate limited, breaker open, budget spent, backfill share used, paused) stops the job; it keeps what it did and records `stopped` in its stats. A key the source rejects fails the run, so Engine → Jobs shows why. Jobs marked "Backfill lane" (and `cvelist-backfill`) stop once their source has used 60% of its daily budget. Each source job's run details start with `fetched`, `changed` and `written`.
+
+When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker_vocabulary` and, 30 seconds later, `rescan_recent_entries` for the last 7 days. The delay lets the new dictionary load before old entries are re-scanned.
 
 #### Maintenance
 
@@ -128,8 +145,8 @@ When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker
 | `cleanup_expired_entries` | Daily 02:05 | Delete entries past their feed's retention period, and remove them from search |
 | `decay_observable_confidence` | Daily 02:20 | Lower confidence on aging observables (IOCs) and move them through their lifecycle |
 | `prune_engine_tables` | Daily 02:40 | Delete engine bookkeeping rows (`job_runs`, …) older than 30 days |
+| `prune_entity_context` | Daily 02:45 | Delete enrichment context rows (`entity_context`) that expired more than 30 days ago, and withdraw relation claims whose entity is gone |
 | `reconcile_observable_counters` | Daily 02:50 | Recount observable sighting and article counters, which deletes can throw off |
-| `reenrich_cve_nvd` | Daily 03:05 | Re-fetch NVD data for CVEs still missing it |
 | `cleanup_orphaned_references` | Daily 03:15 | Remove references to deleted entities |
 | `resolve_cve_affected` | Daily 03:35 | Re-match unmatched CVE affected-product (CPE) pairs to current vendors and products |
 | `decay_relationship_confidence` | Sunday 03:45 | Demote co-occurrence relationships with no recent evidence from probable to possible |
@@ -168,7 +185,7 @@ When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker
 
 ### Beat Schedule and Runtime Overrides
 
-`build_beat_schedule()` (`backend/app/workers/job_registry.py:719`) builds the schedule when beat starts:
+`build_beat_schedule()` (`backend/app/workers/job_registry.py:655`) builds the schedule when beat starts:
 
 1. Read overrides from the Redis key `intelfeed:job_schedule_overrides`.
 2. For each job, skip it if the override disables it, or if it has `enabled_by_default: False` and no override turns it on.
@@ -222,7 +239,9 @@ The stages come from the pipeline registry. See [Pipeline Engine](#pipeline-engi
 
 #### Enrichment Pipeline
 
-`auto_enrich_entity` (`backend/app/workers/enrichment_tasks.py`) runs after extraction and calls every enrichment source set to `trigger_mode='auto'` for the entity.
+A new entity does not call its sources directly. The code that creates it (the autolinker, TTP and CVE extraction, the observables ledger, GitHub rule import) calls `enqueue()` in `backend/app/enrichment/queue.py`, which adds one `enrichment_jobs` row per enabled `trigger_mode='auto'` source that handles the entity type.
+
+`dispatch_enrichment_jobs` (`backend/app/workers/enrichment_dispatch_tasks.py`) runs every 30 seconds on the `enrichment` queue. For up to 25 seconds it claims due rows (`FOR UPDATE SKIP LOCKED`, highest lane first, then oldest `due_at`), runs each through the pipeline for its one source, and writes the results onto the entity. A lookup the source refuses is rescheduled, not dropped. The lanes and outcomes are in [automation-ai-enrichment.md](automation-ai-enrichment.md#enrichment-job-queue).
 
 #### Report Generation
 
@@ -242,7 +261,7 @@ Reusing `fetch_feed` means de-duplication, sanitizing, media, autolinking and li
 
 ### Observability
 
-Tasks record Prometheus metrics `CELERY_TASKS_TOTAL` and `CELERY_TASK_DURATION_SECONDS` (`backend/app/core/metrics.py`) and log through structlog. Each scheduled run is also written to the `job_runs` table, which the Engine → Jobs screen shows as run history.
+Tasks record Prometheus metrics `CELERY_TASKS_TOTAL` and `CELERY_TASK_DURATION_SECONDS` (`backend/app/core/metrics.py`) and log through structlog. Each scheduled run is also written to the `job_runs` table, which the Engine → Jobs screen shows as run history. Each job there shows how many of its runs in the last 30 days succeeded ("12/14 ok in 30 days") and, when its last run failed, that run's error. A job an enrichment source owns carries a "source · NVD" chip, since the source's page in the Enrichment console is where it is managed.
 
 ---
 
@@ -555,31 +574,34 @@ Built from the `JOB_REGISTRY` defaults. Admins can change any of these in Engine
 
 ```text
 00:30 ├─ check_requirement_expiry_task
+01:00 ├─ run_malpedia_sync (Sat)
 01:30 ├─ run_cve_nvd_backfill
 02:00 ├─ backup_database
 02:05 ├─ cleanup_expired_entries
 02:20 ├─ decay_observable_confidence
 02:30 ├─ sync_cybergeist_feeds
 02:40 ├─ prune_engine_tables
+02:45 ├─ prune_entity_context
 02:50 ├─ reconcile_observable_counters
 03:00 ├─ kickoff_actor_profile_refresh (Mon) · run_mitre_attack_sync (Sun)
 03:05 ├─ reenrich_cve_nvd
 03:15 ├─ cleanup_orphaned_references
-03:30 ├─ rebuild_entity_profiles · run_malpedia_sync (Sun) · run_misp_galaxy_sync (Sun)
+03:30 ├─ rebuild_entity_profiles · run_misp_galaxy_sync (Sun)
 03:35 ├─ resolve_cve_affected
 03:45 ├─ decay_relationship_confidence (Sun) · refresh_cwe_catalog (Mon) · run_metasploit_sync (Sun)
 03:50 ├─ rebuild_rule_coverage
-04:00 ├─ run_wikipedia_bulk_sync (Wed)
+04:00 ├─ run_wikipedia_bulk_sync (Wed) · run_capec_sync (Mon)
 04:10 ├─ evict_image_cache
-04:15 ├─ evict_tts_cache
+04:15 ├─ evict_tts_cache · run_ctid_sync (Sun) · run_etda_sync (Tue)
 04:20 ├─ recompute_signal_rates · rank_threat_board · rollup_targeted_sectors · cleanup_telegram_media (Sun)
 04:25 ├─ evict_old_telegram_media
-04:30 ├─ promote_watchlist_threats
+04:30 ├─ promote_watchlist_threats · run_wikidata_sync (Thu) · run_d3fend_sync (Sun)
 04:35 ├─ fit_user_signal_weights · evict_old_ingest_files
 04:40 ├─ generate_threat_briefs
 04:45 ├─ archive_correlation_events
 04:50 ├─ backfill_rule_data_sources (Sun)
 05:00 ├─ run_github_poc_scan
+05:15 ├─ run_endoflife_sync · run_github_repo_sync (Tue)
 05:30 ├─ backfill_rule_attack_mappings (Sun)
 05:45 ├─ kickoff_assessment_backfill
 06:00 ├─ generate_daily_summaries
@@ -590,15 +612,17 @@ Built from the `JOB_REGISTRY` defaults. Admins can change any of these in Engine
 12:00 └─ run_cve_nvd_refresh
 
 Recurring:
-  Every 60 s      poll_due_feeds, run_scheduled_automations
+  Every 30 s      dispatch_enrichment_jobs
+  Every 60 s      poll_due_feeds, run_scheduled_automations, sync_enrichment_pause
   Every 5 min     refresh_saved_search_counts, sync_campaign_saved_searches, retry_failed_indexing
   Every 10 min    poll_analysis_batches
-  Every 15 min    embed_pending_entries, run_scheduled_enrichment, sync_campaign_sources
+  Every 15 min    embed_pending_entries, sync_campaign_sources
   Every 30 min    sync_ransomware_victims, refresh_autolinker_vocabulary, refresh_claude_auth_status,
                   retry_untranslated_entries, submit_analysis_batches
   Hourly (:10)    refresh_correlation_cache
   Every 2 h       rebuild_story_threads
-  Every 4 h       build_telegram_forward_relationships (:20), sync_entity_search_indexes (:45)
+  Every 4 h       build_telegram_forward_relationships (:20), sync_entity_search_indexes (:45),
+                  run_ransomware_group_profiles (:50)
   Every 6 h       sync_kev_feed (:15), check_feed_health (:30), rescore_recent_entries (:35),
                   retro_sight_observables (:40)
 
@@ -626,7 +650,8 @@ poll_due_feeds (every 60 s)
         detect_correlation_events
         match_requirements_task
       → score_entry_task
-  side tasks: run_entry_automations, auto_enrich_entity
+  side tasks: run_entry_automations; new entities queue enrichment_jobs rows,
+              run by dispatch_enrichment_jobs (enrichment queue)
   later, after AI analysis: adjudicate_entry_task (ai queue)
 ```
 

@@ -19,7 +19,9 @@ import { EntityActionsMenu } from "./EntityActionsMenu";
 import { WatchToggleButton } from "./WatchToggleButton";
 import type { EntityProvenance } from "@/hooks/useEntityProvenance";
 import { IdentityMetaFields } from "./IdentityFields";
-import { entityDisplayName, type EntityProfileConfig } from "./entityProfileConfig";
+import { contextBadgeSpecs, entityDisplayName, noPatchBadge, type EntityProfileConfig } from "./entityProfileConfig";
+import { useEntityContext } from "@/hooks/useEntityContext";
+import { useCveAffectedRows } from "@/hooks/useAffectedCves";
 import styles from "./entityProfile.module.css";
 import { useIsVisitor } from "@/stores/authStore";
 
@@ -78,6 +80,12 @@ export function ProfileHeader({
   const [editingAliases, setEditingAliases] = useState(false);
   // Public read-only mode: the dossier reads, but nothing on it edits.
   const isVisitor = useIsVisitor();
+  // Manifest badges (noise class, SSVC, EOL) — same query as the Context panel.
+  const { data: context } = useEntityContext(entityType, entityId);
+  // A CVE affecting an end-of-life product gets "no patch coming" — same
+  // query as the Overview's Affected panel.
+  const { data: affectedRows } = useCveAffectedRows(entityType === "cve" ? entityId : undefined);
+  const noPatch = entityType === "cve" ? noPatchBadge(affectedRows) : null;
   const aliases = entity.aliases ?? [];
   // Catalog-keyed types (ttp, cwe) lead with the id in mono, then the name.
   // Which field holds the id is config, not a branch per type here.
@@ -159,7 +167,11 @@ export function ProfileHeader({
 
           <div className={styles.heroBadges}>
             <SignalBadges
-              badges={config.signalBadges(entity)}
+              badges={[
+                ...config.signalBadges(entity),
+                ...(noPatch ? [noPatch] : []),
+                ...contextBadgeSpecs(context?.badges, context?.sources),
+              ]}
               entity={entity}
               relatedCountries={relatedCountries}
               provenance={provenance}

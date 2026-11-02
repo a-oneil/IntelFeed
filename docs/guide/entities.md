@@ -84,10 +84,15 @@ under **Settings → Engine**, in the enrich stage:
 | Malpedia | Actor and malware profiles and aliases |
 | GitHub PoC | Links to proof-of-concept exploit code |
 | Wikipedia | A summary from Wikipedia |
-| VirusTotal, GreyNoise, Shodan InternetDB | Reputation data for observables (VirusTotal and GreyNoise need an API key) |
+| Wikidata | A vendor's country, industry and website; a victim's country |
+| GitHub repository | Stars, last push and license of a tool's GitHub project |
+| VirusTotal, GreyNoise, Shodan InternetDB | Reputation data for observables (VirusTotal needs an API key). They send the indicator to an outside service, so they run when you ask |
 
-Sources run when an entity is created, on a schedule, or when you ask. The
-page shows how old results are; the refresh icon fetches them again.
+Sources run when an entity is created, on a schedule, or when you ask. What
+they say shows in the **Context** section, the first row of the Overview,
+with when each source last answered and whether that answer is fresh or
+stale. The refresh icon fetches them again. A CVE also shows **CVSS by
+source**: each source's score, and which one the profile uses.
 
 If Wikipedia matched the wrong article, choose **None — no Wikipedia article**
 in the profile's Wikipedia picker. It won't be matched again.

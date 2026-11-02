@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Computed, DateTime, ForeignKey, Integer, SmallInteger, String, Text, func
+from sqlalchemy import Computed, Date, DateTime, ForeignKey, Integer, SmallInteger, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -37,6 +37,10 @@ class Product(Base):
     description: Mapped[str | None] = mapped_column(Text)
     product_type: Mapped[str | None] = mapped_column(String(50), index=True)
     website: Mapped[str | None] = mapped_column(Text)
+    # From endoflife.date (app/enrichment/endoflife.py): maintained,
+    # security_only, eol or unknown; and the soonest end of security support.
+    support_status: Mapped[str | None] = mapped_column(String(20))
+    next_eol: Mapped[date | None] = mapped_column(Date)
     article_count: Mapped[int] = mapped_column(Integer, default=1)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

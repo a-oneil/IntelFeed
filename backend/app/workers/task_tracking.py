@@ -43,7 +43,58 @@ def _clip(value, depth: int = 0):
     return str(value)[:200]
 
 
-def _task_detail(args, kwargs, retval) -> dict | None:
+#: The three counts an enrichment source's job reports — ``fetched`` (records
+#: or answers the source returned), ``changed`` (answers that differed from what
+#: was stored) and ``written`` (entities whose columns or links changed) — and,
+#: for a job that doesn't name one, the stat it reports under another name. A
+#: job declared with ``counts=False`` in its manifest reports none of them.
+COUNT_KEYS: dict[str, tuple[str, ...]] = {
+    "fetched": (
+        "fetched",
+        "total_scores",
+        "records",
+        "rows",
+        "catalog",
+        "cards",
+        "looked_up",
+        "listed",
+        "modules_seen",
+        "clusters",
+        "parsed",
+        "scanned",
+        "checked",
+        "attempted",
+    ),
+    "changed": ("changed", "updated", "cves_updated", "score_changes"),
+    "written": ("written", "updated", "cves_updated", "alias_rows", "ranked", "mapped", "enriched"),
+}
+
+
+def job_counts(task_name: str, result):
+    """A source job's result with ``fetched``, ``changed`` and ``written`` first
+    (None when the job reports nothing like it), so every enrichment job's
+    job_runs.detail reads the same; other jobs' results pass through."""
+    job = JOB_REGISTRY.get(KNOWN_JOB_TASKS.get(task_name, ""), {})
+    if (
+        not job.get("source")
+        or job.get("counts") is False
+        or not isinstance(result, dict)
+        or result.get("skipped") == "source disabled"
+    ):
+        return result
+    counts = {
+        key: next(
+            (result[k] for k in aliases if isinstance(result.get(k), int) and not isinstance(result.get(k), bool)),
+            None,
+        )
+        for key, aliases in COUNT_KEYS.items()
+    }
+    if None in counts.values() and "stopped" not in result:
+        logger.warning("%s reported no %s count", task_name, ", ".join(k for k, v in counts.items() if v is None))
+    return {**counts, **{k: v for k, v in result.items() if k not in counts}}
+
+
+def _task_detail(args, kwargs, retval, task_name: str = "") -> dict | None:
     """Clipped {"args", "kwargs", "result"} — what the job ran against and what it did."""
     detail: dict = {}
     try:
@@ -52,7 +103,7 @@ def _task_detail(args, kwargs, retval) -> dict | None:
         if kwargs:
             detail["kwargs"] = _clip(dict(kwargs))
         if retval is not None:
-            detail["result"] = _clip(retval)
+            detail["result"] = _clip(job_counts(task_name, retval))
     except Exception:
         logger.debug("job_run detail capture failed", exc_info=True)
     return detail or None
@@ -111,7 +162,9 @@ def _job_run_postrun(task_id=None, task=None, state=None, args=None, kwargs=None
         if state == "FAILURE":
             return
         status = "success" if state == "SUCCESS" else (state or "success").lower()
-        _record_run(task.name, task_id, status, started, None, detail=_task_detail(args, kwargs, retval))
+        if status == "success" and not retval and not JOB_REGISTRY[KNOWN_JOB_TASKS[task.name]].get("record_idle", True):
+            return
+        _record_run(task.name, task_id, status, started, None, detail=_task_detail(args, kwargs, retval, task.name))
     except Exception:
         logger.debug("job_run postrun tracking failed", exc_info=True)
 

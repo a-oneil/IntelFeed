@@ -1,0 +1,16 @@
+################################################################
+# abuse.ch URLhaus Database Dump (CSV)                         #
+# Last updated: 2026-10-28 04:00:00 UTC                        #
+#                                                              #
+# Terms Of Use: https://urlhaus.abuse.ch/api/                  #
+# For questions please contact urlhaus [at] abuse.ch           #
+################################################################
+#
+# IntelFeed test fixture, not a recording: no abuse.ch Auth-Key was available.
+# Built from the dump's column layout and the URLs of the API documentation's
+# examples (https://urlhaus-api.abuse.ch/), trimmed.
+#
+# id,dateadded,url,url_status,last_online,threat,tags,urlhaus_link,reporter
+"121319","2019-02-11 07:45:05","http://vektorex.com/source/Z/5016223.exe","online","2026-10-28 03:55:00","malware_download","AZORult,exe","https://urlhaus.abuse.ch/url/121319/","abuse_ch"
+"121316","2019-02-11 06:47:03","http://vektorex.com/source/Z/Order%20839.png","offline","2019-02-20 10:00:00","malware_download","exe,Loki","https://urlhaus.abuse.ch/url/121316/","abuse_ch"
+"105821","2019-01-19 01:33:26","http://sskymedia.com/VMYB-ht_JAQo-gi/INV/99401FORPO/20673114777/US/Outstanding-Invoices/","offline","2019-01-25 00:00:00","malware_download","emotet,epoch2,heodo","https://urlhaus.abuse.ch/url/105821/","Cryptolaemus1"

@@ -1,17 +1,16 @@
 """CVE extraction and NVD enrichment."""
 
-import asyncio
 import logging
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
-import httpx
 from sqlalchemy import Integer, and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.enrichment.gateway import MAX_TOKEN_WAIT, GatewayError, SourceGateway
 from app.intelligence.cpe_resolver import CPEIndex, build_cpe_index
 from app.models.cve import CVE, EntryCVE
 from app.models.cve_affected import CVEAffected
@@ -22,12 +21,11 @@ logger = logging.getLogger(__name__)
 CVE_PATTERN = re.compile(r"CVE-\d{4}-\d{4,}")
 
 NVD_API_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-NVD_MAX_RETRIES = 3
-NVD_BACKOFF_BASE = 2  # seconds
-# NVD rolling window is 5 req/30s unkeyed, 50 req/30s with an API key
+# Seconds per request inside NVD's rolling window: 5 req/30s unkeyed, 50 req/30s
+# with an API key. The NVD source's gateway enforces the window; these only
+# size work (how many lookups fit in a run).
 NVD_PACE_UNKEYED = 6.5
 NVD_PACE_KEYED = 0.7
-
 
 # NVD sweeps stop asking about an id after this many misses, spaced at least
 # NVD_RETRY_DAYS apart. A miss is stamped into nvd_data, so a junk id pulled
@@ -57,15 +55,18 @@ def stamp_nvd_miss(cve: CVE, now: datetime) -> None:
     cve.nvd_data = blob
 
 
-class NVDRateLimited(Exception):
-    """NVD kept returning 403/429 after all retries — back off, don't record
-    the failure against the CVE's retry budget."""
-
-
-def nvd_request_pace() -> float:
-    """Seconds to sleep between consecutive NVD requests in sweep loops."""
-    api_key = settings.get("nvd_api_key") or settings.nvd_api_key
+def nvd_request_pace(api_key: str | None) -> float:
+    """Seconds one NVD request takes of the rolling window, for sizing a run.
+    Nothing sleeps on it: the gateway paces the requests."""
     return NVD_PACE_KEYED if api_key else NVD_PACE_UNKEYED
+
+
+async def nvd_gateway(db: AsyncSession, max_wait: float = MAX_TOKEN_WAIT) -> tuple[SourceGateway, str | None]:
+    """The NVD source's gateway and key (the source row's key, else the
+    instance-wide ``nvd_api_key`` setting)."""
+    from app.enrichment.pipeline import gateway_for
+
+    return await gateway_for(db, "nvd", max_wait=max_wait)
 
 
 def extract_cve_ids(text: str) -> list[str]:
@@ -75,100 +76,177 @@ def extract_cve_ids(text: str) -> list[str]:
     return list(set(CVE_PATTERN.findall(text)))
 
 
-async def enrich_from_nvd(cve_id: str, raise_on_rate_limit: bool = False) -> dict | None:
-    """Fetch CVE details from NVD API 2.0 with optional API key and retry.
+async def enrich_from_nvd(cve_id: str, gateway: SourceGateway, api_key: str | None = None) -> dict | None:
+    """Fetch CVE details from NVD API 2.0 through the NVD source's gateway.
 
-    With raise_on_rate_limit, exhausting retries on 403/429 raises
-    NVDRateLimited instead of returning None, so sweep callers can
-    distinguish "NVD has nothing for this id" from "we're being throttled".
+    Returns None when NVD has nothing for the id or the request failed. A
+    gateway refusal (throttled, breaker open, budget spent) raises, so callers
+    can tell "NVD has nothing" from "not now".
     """
-    headers: dict[str, str] = {}
-    api_key = settings.get("nvd_api_key") or settings.nvd_api_key
-    if api_key:
-        headers["apiKey"] = api_key
+    headers = {"apiKey": api_key} if api_key else {}
+    try:
+        async with gateway.client(timeout=15) as client:
+            resp = await client.get(NVD_API_URL, params={"cveId": cve_id}, headers=headers)
+        if resp.status_code != 200:
+            logger.warning(f"NVD returned {resp.status_code} for {cve_id}")
+            return None
+        data = resp.json()
+    except GatewayError:
+        raise
+    except Exception as e:
+        logger.warning(f"NVD enrichment failed for {cve_id}: {e}")
+        return None
 
-    rate_limited = False
-    for attempt in range(NVD_MAX_RETRIES):
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(
-                    NVD_API_URL,
-                    params={"cveId": cve_id},
-                    headers=headers,
-                )
+    vulns = data.get("vulnerabilities", [])
+    if not vulns:
+        return None
+    return parse_nvd_record(vulns[0].get("cve", {}))
 
-                if resp.status_code in (403, 429):
-                    rate_limited = True
-                    # Back off past the 30s rolling window on the last retry
-                    wait = NVD_BACKOFF_BASE ** (attempt + 1) if attempt < NVD_MAX_RETRIES - 1 else 31
-                    logger.warning(f"NVD rate limited for {cve_id}, retrying in {wait}s (attempt {attempt + 1})")
-                    await asyncio.sleep(wait)
-                    continue
-                rate_limited = False
 
-                if resp.status_code != 200:
-                    logger.warning(f"NVD returned {resp.status_code} for {cve_id}")
-                    return None
+#: Records per page of a change window: the most NVD returns in one answer.
+NVD_PAGE = 2000
+#: The longest window one change query may cover (NVD's limit).
+NVD_MAX_WINDOW = timedelta(days=120)
 
-                data = resp.json()
 
-            vulns = data.get("vulnerabilities", [])
-            if not vulns:
-                return None
+def _nvd_time(at: datetime) -> str:
+    return at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
-            cve_data = vulns[0].get("cve", {})
 
-            # Extract CVSS v3.1 score
-            cvss_score = None
-            severity = None
-            metrics = cve_data.get("metrics", {})
-            for version_key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
-                metric_list = metrics.get(version_key, [])
-                if metric_list:
-                    cvss_data = metric_list[0].get("cvssData", {})
-                    cvss_score = cvss_data.get("baseScore")
-                    severity = cvss_data.get("baseSeverity", "").upper()
-                    break
+async def fetch_nvd_changes(
+    start: datetime, end: datetime, gateway: SourceGateway, api_key: str | None = None, start_index: int = 0
+) -> tuple[list[dict], int]:
+    """One page of the NVD records last modified between ``start`` and
+    ``end`` (at most ``NVD_MAX_WINDOW`` apart), parsed as ``enrich_from_nvd``
+    parses one, and how many the whole window holds. A failed request raises:
+    a window read in part must not count as read."""
+    headers = {"apiKey": api_key} if api_key else {}
+    params = {
+        "lastModStartDate": _nvd_time(start),
+        "lastModEndDate": _nvd_time(end),
+        "resultsPerPage": NVD_PAGE,
+        "startIndex": start_index,
+    }
+    async with gateway.client(timeout=60) as client:
+        resp = await client.get(NVD_API_URL, params=params, headers=headers)
+    resp.raise_for_status()
+    data = resp.json()
+    records = [parse_nvd_record(v["cve"]) for v in data.get("vulnerabilities", []) if v.get("cve", {}).get("id")]
+    return records, int(data.get("totalResults") or 0)
 
-            # Description
-            descriptions = cve_data.get("descriptions", [])
-            description = next(
-                (d["value"] for d in descriptions if d.get("lang") == "en"),
-                descriptions[0]["value"] if descriptions else None,
+
+def parse_nvd_record(cve_data: dict) -> dict:
+    """One NVD CVE record (``vulnerabilities[].cve``) as the values IntelFeed
+    keeps: score, severity, description, affected products, references, and
+    the record itself as ``nvd_data``."""
+    # Extract CVSS v3.1 score
+    cvss_score = None
+    severity = None
+    vector = None
+    metrics = cve_data.get("metrics", {})
+    for version_key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+        metric_list = metrics.get(version_key, [])
+        if metric_list:
+            cvss_data = metric_list[0].get("cvssData", {})
+            cvss_score = cvss_data.get("baseScore")
+            severity = (cvss_data.get("baseSeverity") or metric_list[0].get("baseSeverity") or "").upper()
+            vector = cvss_data.get("vectorString")
+            break
+
+    # Description
+    descriptions = cve_data.get("descriptions", [])
+    description = next(
+        (d["value"] for d in descriptions if d.get("lang") == "en"),
+        descriptions[0]["value"] if descriptions else None,
+    )
+
+    affected_products = parse_cpe_affected(cve_data)
+
+    # References (tags drive the advisory/patch/analysis grouping in the UI)
+    references = [
+        {"url": r.get("url"), "source": r.get("source"), "tags": r.get("tags", [])}
+        for r in cve_data.get("references", [])
+    ]
+
+    return {
+        "cvss_score": cvss_score,
+        "severity": severity or _severity_from_score(cvss_score),
+        "cvss_vector": vector,
+        "description": description,
+        "affected_products": affected_products,
+        "references": references,
+        "nvd_data": cve_data,
+    }
+
+
+async def apply_nvd_record(db: AsyncSession, cve: CVE, nvd: dict, cache: dict | None = None) -> int:
+    """Write what an NVD record carries beyond the field map's columns (score,
+    severity and description go through the NVD source's outputs): the record
+    itself, affected products and references, its cve_affected and
+    cve_weaknesses links. ``cache`` holds the CPE and CWE indexes across the
+    CVEs of one run. Returns the affected pairs written."""
+    cache = {} if cache is None else cache
+    blob = dict(nvd.get("nvd_data") or {})
+    # Keep the sweeps' own stamps; a hit ends the miss count.
+    for key in ("_refreshed_at", "_enrich_last_attempt"):
+        if key in (cve.nvd_data or {}) and key not in blob:
+            blob[key] = cve.nvd_data[key]
+    cve.nvd_data = blob
+    if nvd.get("references"):
+        cve.references_ = nvd["references"]
+    products = nvd.get("affected_products") or []
+    pairs = 0
+    if products:
+        cve.affected_products = products
+        if "cpe_index" not in cache:
+            cache["cpe_index"] = await build_cpe_index(db)
+        pairs = await sync_cve_affected(db, cve.id, products, cache["cpe_index"])
+    weaknesses = parse_nvd_weaknesses(blob)
+    if weaknesses:
+        if "cwe_index" not in cache:
+            cache["cwe_index"] = await build_cwe_index(db)
+        await sync_cve_weaknesses(db, cve.id, weaknesses, cache["cwe_index"])
+    db.add(cve)
+    return pairs
+
+
+async def adopt_nvd_values(db: AsyncSession, cve: CVE) -> None:
+    """Claim for NVD the score, severity and description it wrote before
+    claims were recorded: a value that matches the stored NVD record is NVD's,
+    so the field map lets NVD update it."""
+    from app.services.claim_provenance import record_claim
+
+    if not (cve.nvd_data or {}).get("id"):
+        return
+    old = parse_nvd_record(cve.nvd_data)
+    for field in ("cvss_score", "severity", "description"):
+        current, was = getattr(cve, field), old.get(field)
+        if current is None or was is None:
+            continue
+        same = float(current) == float(was) if field == "cvss_score" else str(current) == str(was)
+        if same:
+            await record_claim(
+                db,
+                entity_type="cve",
+                entity_id=cve.id,
+                field=field,
+                value=current,
+                source_kind="enrichment",
+                source_ref="nvd",
             )
 
-            affected_products = parse_cpe_affected(cve_data)
 
-            # References (tags drive the advisory/patch/analysis grouping in the UI)
-            references = [
-                {"url": r.get("url"), "source": r.get("source"), "tags": r.get("tags", [])}
-                for r in cve_data.get("references", [])
-            ]
+async def apply_nvd(db: AsyncSession, cve: CVE, nvd: dict, cache: dict | None = None, via: str = "job"):
+    """An NVD answer from a sweep, applied as a lookup's would be: the record's
+    extra writes (``apply_nvd_record``), then the NVD source's result stored,
+    its context written and its columns applied through the field map.
+    Returns the pipeline's ``Applied``."""
+    from app.enrichment.adapters.nvd import nvd_result
+    from app.enrichment.pipeline import apply_source_result
 
-            return {
-                "cvss_score": cvss_score,
-                "severity": severity or _severity_from_score(cvss_score),
-                "description": description,
-                "affected_products": affected_products,
-                "references": references,
-                "nvd_data": cve_data,
-            }
-
-        except httpx.TimeoutException:
-            if attempt < NVD_MAX_RETRIES - 1:
-                wait = NVD_BACKOFF_BASE ** (attempt + 1)
-                logger.warning(f"NVD timeout for {cve_id}, retrying in {wait}s")
-                await asyncio.sleep(wait)
-                continue
-            logger.warning(f"NVD enrichment timed out for {cve_id} after {NVD_MAX_RETRIES} attempts")
-            return None
-        except Exception as e:
-            logger.warning(f"NVD enrichment failed for {cve_id}: {e}")
-            return None
-
-    if rate_limited and raise_on_rate_limit:
-        raise NVDRateLimited(cve_id)
-    return None
+    await adopt_nvd_values(db, cve)
+    await apply_nvd_record(db, cve, nvd, cache)
+    return await apply_source_result(db, "cve", cve.id, "nvd", nvd_result(nvd, via=via), cache)
 
 
 def parse_cpe_affected(cve_data: dict) -> list[dict]:
@@ -212,13 +290,30 @@ async def sync_cve_affected(
     cve_pk: uuid.UUID,
     affected_products: list[dict],
     index: "CPEIndex",
+    source: str = "nvd",
 ) -> int:
     """Upsert cve_affected rows for a CVE from parsed CPE pairs.
 
     Idempotent on (cve_id, cpe_vendor, cpe_product). Existing rows get version
     ranges refreshed and null FKs filled when the pair now resolves — resolved
-    FKs are never cleared by a later non-resolving pass.
+    FKs are never cleared by a later non-resolving pass. A pair keeps the
+    source that first recorded it: another source's pass leaves its versions
+    alone. A pair from a source other than NVD whose product (or, with no
+    product, vendor) resolves to one the CVE already has a row for is skipped,
+    so a CNA's "Palo Alto Networks / PAN-OS" doesn't repeat NVD's
+    "paloaltonetworks / pan-os".
     """
+    held: set = set()
+    if source != "nvd":
+        held = {
+            pid or vid
+            for pid, vid in (
+                await db.execute(
+                    select(CVEAffected.product_id, CVEAffected.vendor_id).where(CVEAffected.cve_id == cve_pk)
+                )
+            ).all()
+            if pid or vid
+        }
     count = 0
     seen: set[tuple[str, str]] = set()
     for item in affected_products:
@@ -228,6 +323,9 @@ async def sync_cve_affected(
             continue
         seen.add((cpe_vendor, cpe_product))
         vendor_id, product_id = index.resolve_pair(cpe_vendor, cpe_product)
+        if source != "nvd" and (product_id or vendor_id) in held - {None}:
+            continue
+        held.add(product_id or vendor_id)
         resolved_at = datetime.now(UTC) if (vendor_id or product_id) else None
         stmt = pg_insert(CVEAffected).values(
             id=uuid.uuid4(),
@@ -238,10 +336,12 @@ async def sync_cve_affected(
             product_id=product_id,
             version_start=item.get("version_start"),
             version_end=item.get("version_end"),
+            source=source,
             resolved_at=resolved_at,
         )
         stmt = stmt.on_conflict_do_update(
             constraint="uq_cve_affected_pair",
+            where=CVEAffected.source == stmt.excluded.source,
             set_={
                 "version_start": stmt.excluded.version_start,
                 "version_end": stmt.excluded.version_end,
@@ -299,12 +399,15 @@ async def sync_cve_weaknesses(
     cve_pk: uuid.UUID,
     weaknesses: list[dict],
     index: dict[str, uuid.UUID],
+    source: str = "nvd",
 ) -> int:
-    """Upsert cve_weaknesses rows for a CVE from parsed NVD weakness records.
+    """Upsert cve_weaknesses rows for a CVE from parsed weakness records (NVD's,
+    or the CNA's from its CVE record, ``source="cvelist"``).
 
-    Idempotent on (cve_id, cwe_ref). Mirrors sync_cve_affected: the raw ref is
-    always stored, the FK is filled only when it resolves, and a resolved FK is
-    never cleared by a later pass.
+    Idempotent on (cve_id, cwe_ref); a pair keeps the source that first
+    recorded it. Mirrors sync_cve_affected: the raw ref is always stored, the
+    FK is filled only when it resolves, and a resolved FK is never cleared by a
+    later pass.
     """
     count = 0
     for item in weaknesses:
@@ -318,6 +421,7 @@ async def sync_cve_weaknesses(
             cwe_id=cwe_pk,
             is_primary=item.get("is_primary", False),
             assigner=item.get("assigner"),
+            source=source,
             resolved_at=resolved_at,
         )
         stmt = stmt.on_conflict_do_update(
@@ -455,36 +559,58 @@ def risk_tier_rank_expr(epss_threshold: float | None = None):
     )
 
 
+async def _lookup_pending(db: AsyncSession, cve_id: uuid.UUID) -> bool:
+    """Whether a lookup of the CVE is already queued or running."""
+    from app.models.enrichment import EnrichmentJob
+
+    found = await db.scalar(
+        select(EnrichmentJob.id)
+        .where(
+            EnrichmentJob.entity_type == "cve",
+            EnrichmentJob.entity_id == cve_id,
+            EnrichmentJob.status.in_(("queued", "running")),
+        )
+        .limit(1)
+    )
+    return found is not None
+
+
 async def extract_and_store_cves(
     db: AsyncSession,
     entry_id: uuid.UUID,
     text: str,
     enrich: bool = True,
 ) -> list[CVE]:
-    """Extract CVE IDs from text, optionally enrich from NVD, and store."""
+    """Extract CVE IDs from text, store them and link them to the entry.
+
+    Nothing here calls a source. A new CVE, or one whose score and
+    description are both still missing, is queued for lookup (the ``new``
+    lane), so the enrichment queue applies each source's switch, trigger mode,
+    rate limit and budget; NVD's answer fills the CVE from there.
+    """
     cve_ids = extract_cve_ids(text)
     if not cve_ids:
         return []
 
+    from app.enrichment.queue import enqueue
+
     stored = []
-    freshly_enriched: list[tuple[CVE, list[dict]]] = []
+    to_enqueue: list[CVE] = []
     for cve_id in cve_ids:
         result = await db.execute(select(CVE).where(CVE.cve_id == cve_id))
         existing = result.scalar_one_or_none()
 
         if existing:
             existing.updated_at = datetime.now(UTC)
-            # Re-enrich from NVD if key data is still missing (e.g., prior NVD lookup failed)
-            if enrich and not existing.cvss_score and not existing.description:
-                nvd = await enrich_from_nvd(cve_id)
-                if nvd:
-                    existing.cvss_score = nvd.get("cvss_score")
-                    existing.severity = nvd.get("severity")
-                    existing.description = nvd.get("description")
-                    existing.affected_products = nvd.get("affected_products", [])
-                    existing.references_ = nvd.get("references", [])
-                    existing.nvd_data = nvd.get("nvd_data", {})
-                    freshly_enriched.append((existing, existing.affected_products))
+            # Ask again while key data is still missing (a prior lookup was
+            # refused, or the sources are off), unless a lookup is already waiting.
+            if (
+                enrich
+                and not existing.cvss_score
+                and not existing.description
+                and not await _lookup_pending(db, existing.id)
+            ):
+                to_enqueue.append(existing)
             cve_obj = existing
         else:
             # An analyst deleted this CVE from the AI entities table — don't
@@ -496,21 +622,10 @@ async def extract_and_store_cves(
                 continue
 
             cve_obj = CVE(cve_id=cve_id, created_via="ai_extraction", created_from_entry_id=entry_id)
-
-            # NVD enrichment
-            if enrich:
-                nvd = await enrich_from_nvd(cve_id)
-                if nvd:
-                    cve_obj.cvss_score = nvd.get("cvss_score")
-                    cve_obj.severity = nvd.get("severity")
-                    cve_obj.description = nvd.get("description")
-                    cve_obj.affected_products = nvd.get("affected_products", [])
-                    cve_obj.references_ = nvd.get("references", [])
-                    cve_obj.nvd_data = nvd.get("nvd_data", {})
-                    freshly_enriched.append((cve_obj, cve_obj.affected_products))
-
             db.add(cve_obj)
             await db.flush()
+            if enrich:
+                to_enqueue.append(cve_obj)
 
         # Link to entry (atomic upsert — prevents duplicates under concurrency)
         await db.execute(pg_insert(EntryCVE).values(entry_id=entry_id, cve_id=cve_obj.id).on_conflict_do_nothing())
@@ -519,42 +634,7 @@ async def extract_and_store_cves(
 
     await db.flush()
 
-    # Authoritative affects-links from the parsed CPE data (cve_affected table)
-    if any(products for _, products in freshly_enriched):
-        try:
-            index = await build_cpe_index(db)
-            for cve_obj, products in freshly_enriched:
-                if products:
-                    await sync_cve_affected(db, cve_obj.id, products, index)
-            await db.flush()
-        except Exception:
-            logger.exception("cve_affected sync failed")
-
-    # Authoritative weakness links from the same NVD payload (cve_weaknesses).
-    # Separate try block: a CPE-index failure must not cost us the CWE links.
-    if freshly_enriched:
-        try:
-            cwe_index = await build_cwe_index(db)
-            for cve_obj, _ in freshly_enriched:
-                parsed_weaknesses = parse_nvd_weaknesses(cve_obj.nvd_data or {})
-                if parsed_weaknesses:
-                    await sync_cve_weaknesses(db, cve_obj.id, parsed_weaknesses, cwe_index)
-            await db.flush()
-        except Exception:
-            logger.exception("cve_weaknesses sync failed")
-
-    # Dispatch auto-enrichment for newly created CVEs
-    try:
-        from app.workers.enrichment_tasks import auto_enrich_entity
-
-        for cve_obj in stored:
-            if cve_obj.first_seen_at and (datetime.now(UTC) - cve_obj.first_seen_at).total_seconds() < 5:
-                auto_enrich_entity.delay(
-                    entity_type="cve",
-                    entity_id=str(cve_obj.id),
-                    entity_value=cve_obj.cve_id,
-                )
-    except Exception:
-        pass  # Don't fail extraction if enrichment dispatch fails
+    for cve_obj in to_enqueue:
+        await enqueue(db, "cve", cve_obj.id, cve_obj.cve_id)
 
     return stored

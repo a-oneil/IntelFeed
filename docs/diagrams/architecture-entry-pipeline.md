@@ -31,7 +31,7 @@ flowchart TD
     FINAL -. "minutes to hours later, ai queue" .-> ADJ["post_analysis: adjudicate_entry_task<br/>(AI review of what the analysis wrote)"]
 
     NEW -. "side: dispatched by fetch_feed" .-> AUTO["run_entry_automations"]
-    NEW -. "side: when a new entity is created" .-> ENRICH["auto_enrich_entity"]
+    NEW -. "side: when a new entity is created" .-> ENRICH["enrichment_jobs row →<br/>dispatch_enrichment_jobs (every 30s)"]
 ```
 
 When pipeline plans are on (`pipeline_engine_enabled`), `PipelinePlan` rows (feed, then category, then global) decide which parallel stages run. Otherwise `feed_runs_extraction()` decides the `extract` stage from the feed's `auto_extract_on_ingest` and `extract_detection_rules` switches.

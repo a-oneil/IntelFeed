@@ -1,0 +1,361 @@
+/* Context — the body of the Overview's Context section, flat like its
+   neighbours: quiet text, one accent for links, amber only on "stale". */
+
+.panel {
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  margin-bottom: 6px;
+}
+
+/* The Overview's section row already says "Context": the heading stays for
+   assistive tech and is not painted again. */
+.title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.summary {
+  flex: 1;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.btn {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--r-sm);
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.btn:disabled,
+.iconBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn:focus-visible,
+.iconBtn:focus-visible,
+.link:focus-visible,
+.ghostLink:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.note {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  margin-bottom: var(--sp-3);
+}
+
+/* ── One source ── */
+
+.source + .source,
+.source + .ghost {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border-color);
+}
+
+.sourceHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-2);
+}
+
+/* The row itself is the toggle: caret, name, then the closed digest. */
+.sourceToggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sourceToggle:hover .sourceName,
+.sourceToggle:focus-visible .sourceName {
+  color: var(--accent);
+}
+
+.sourceToggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--r-sm);
+}
+
+.caret {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  align-self: center;
+  color: var(--text-muted);
+  transition: transform 120ms ease;
+}
+.caretOpen { transform: rotate(90deg); }
+
+.sourceName {
+  flex: none;
+  min-width: 0;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sourceDigest {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.age {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.stale {
+  color: var(--warning);
+}
+
+/* Muted until the block is hovered or the button is focused. */
+.iconBtn {
+  border: none;
+  background: none;
+  padding: 0 var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.source:hover .iconBtn,
+.iconBtn:focus-visible {
+  opacity: 1;
+}
+
+.iconBtn:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+.items {
+  margin: 0;
+}
+
+/* Label column then value, read left to right: in a wide column a value
+   pushed to the far edge loses its label. */
+.fact {
+  display: grid;
+  grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--sp-3);
+  font-size: var(--fs-base);
+  padding: 2px 0;
+}
+
+.block {
+  padding: 3px 0;
+  font-size: var(--fs-base);
+}
+
+.block > dt {
+  margin-bottom: var(--sp-2);
+}
+
+.key {
+  color: var(--text-muted);
+  flex: none;
+}
+
+.val {
+  margin: 0;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* CVSS by source: the vector is detail, the tag says which score is on the profile. */
+.vector {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.shownTag,
+.claimTag {
+  margin-left: var(--sp-2);
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.shownTag {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.block > dd {
+  margin: 0;
+}
+
+.prose {
+  color: var(--text-primary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.more {
+  margin-top: var(--sp-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.more:hover,
+.more:focus-visible {
+  color: var(--text-primary);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.event {
+  display: flex;
+  gap: var(--sp-3);
+  padding: 2px 0;
+  color: var(--text-secondary);
+}
+
+.date {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 2px var(--sp-3) 2px 0;
+  border-bottom: 1px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 2px var(--sp-3) 2px 0;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.license {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+}
+
+/* ── Quiet rows: no data yet, a source that needs a key ── */
+
+.ghost {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  padding: var(--sp-2) 0;
+}
+
+.ghost + .ghost {
+  border-top: 1px dashed var(--border-color);
+}
+
+.ghostLink {
+  color: var(--text-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ghostLink:hover {
+  color: var(--text-primary);
+}
+
+/* Phone width: the label sits over its value. */
+@media (max-width: 480px) {
+  .fact {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}

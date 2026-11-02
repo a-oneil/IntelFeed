@@ -1,0 +1,372 @@
+{
+ "entities": {
+  "-1": {
+   "site": "enwiki",
+   "title": "Nonexistent_page_xyz",
+   "missing": ""
+  },
+  "Q2283": {
+   "type": "item",
+   "id": "Q2283",
+   "sitelinks": {
+    "enwiki": {
+     "site": "enwiki",
+     "title": "Microsoft",
+     "badges": []
+    }
+   },
+   "claims": {
+    "P856": [
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P856",
+       "datavalue": {
+        "value": "https://www.microsoft.com/",
+        "type": "string"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$50dd9437-4895-4a60-ddc7-39c713d7e944",
+      "rank": "preferred"
+     },
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P856",
+       "datavalue": {
+        "value": "https://www.microsoft.com/en-gb",
+        "type": "string"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$87da4b2c-40db-692f-b611-830ff7f1f2c6",
+      "rank": "normal"
+     },
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P856",
+       "datavalue": {
+        "value": "https://www.microsoft.com/de-de/",
+        "type": "string"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$60e2a7d9-413a-7897-a884-e955ec89abf4",
+      "rank": "normal"
+     },
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P856",
+       "datavalue": {
+        "value": "https://www.microsoft.com/ja-jp/",
+        "type": "string"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$c1b626cd-42e9-03a1-ac5c-b52a7c9ec8ee",
+      "rank": "normal"
+     },
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P856",
+       "datavalue": {
+        "value": "https://microsoft.cz/",
+        "type": "string"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$687b104b-4bea-636d-d3fa-ab53bffbf30d",
+      "rank": "normal"
+     }
+    ],
+    "P17": [
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P17",
+       "datavalue": {
+        "value": {
+         "entity-type": "item",
+         "numeric-id": 30,
+         "id": "Q30"
+        },
+        "type": "wikibase-entityid"
+       }
+      },
+      "type": "statement",
+      "id": "q2283$8C7D81B4-1432-4A06-810C-85BDFF3126CB",
+      "rank": "normal"
+     }
+    ],
+    "P159": [
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P159",
+       "datavalue": {
+        "value": {
+         "entity-type": "item",
+         "numeric-id": 223718,
+         "id": "Q223718"
+        },
+        "type": "wikibase-entityid"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$7a094ecb-4c33-833e-02c0-0f23705ac13d",
+      "rank": "normal"
+     }
+    ],
+    "P452": [
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P452",
+       "datavalue": {
+        "value": {
+         "entity-type": "item",
+         "numeric-id": 21157865,
+         "id": "Q21157865"
+        },
+        "type": "wikibase-entityid"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$318cf0c3-4da2-24c7-ba6c-073a7231d0ee",
+      "rank": "normal"
+     },
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P452",
+       "datavalue": {
+        "value": {
+         "entity-type": "item",
+         "numeric-id": 880371,
+         "id": "Q880371"
+        },
+        "type": "wikibase-entityid"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$82453290-46b4-42f7-18db-c70c972dae34",
+      "rank": "normal"
+     },
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P452",
+       "datavalue": {
+        "value": {
+         "entity-type": "item",
+         "numeric-id": 638608,
+         "id": "Q638608"
+        },
+        "type": "wikibase-entityid"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$74413a0f-4f31-aff4-9f18-e7e3a68f01d4",
+      "rank": "normal"
+     },
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P452",
+       "datavalue": {
+        "value": {
+         "entity-type": "item",
+         "numeric-id": 1666934,
+         "id": "Q1666934"
+        },
+        "type": "wikibase-entityid"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$034b9498-4773-2a46-12bb-d92e6fc78228",
+      "rank": "normal"
+     },
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P452",
+       "datavalue": {
+        "value": {
+         "entity-type": "item",
+         "numeric-id": 73768396,
+         "id": "Q73768396"
+        },
+        "type": "wikibase-entityid"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$43be26f3-45b8-007e-e157-452ae0455bcc",
+      "rank": "normal"
+     }
+    ],
+    "P571": [
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P571",
+       "datavalue": {
+        "value": {
+         "time": "+1975-04-04T00:00:00Z",
+         "timezone": 0,
+         "before": 0,
+         "after": 0,
+         "precision": 11,
+         "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+        },
+        "type": "time"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$a8db9118-405d-08e3-b063-f50030db8757",
+      "rank": "normal"
+     }
+    ],
+    "P154": [
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P154",
+       "datavalue": {
+        "value": "Microsoft logo (1980).svg",
+        "type": "string"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$fcb20f4e-4a07-1d68-5a38-694064267f4d",
+      "rank": "normal"
+     },
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P154",
+       "datavalue": {
+        "value": "Microsoft logo (1982).svg",
+        "type": "string"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$f0d7b397-4881-a094-7a47-3a2b125ca240",
+      "rank": "normal"
+     },
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P154",
+       "datavalue": {
+        "value": "Microsoft logo (1987).svg",
+        "type": "string"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$3fc4fd16-437e-c2ec-19ca-2e36815337e5",
+      "rank": "normal"
+     },
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P154",
+       "datavalue": {
+        "value": "Microsoft logo (2012).svg",
+        "type": "string"
+       }
+      },
+      "type": "statement",
+      "id": "Q2283$988e8a63-4384-d471-085c-fbb685e56148",
+      "rank": "preferred"
+     }
+    ]
+   }
+  },
+  "Q11219": {
+   "type": "item",
+   "id": "Q11219",
+   "sitelinks": {
+    "enwiki": {
+     "site": "enwiki",
+     "title": "Windows Server",
+     "badges": []
+    }
+   },
+   "claims": {
+    "P178": [
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P178",
+       "datavalue": {
+        "value": {
+         "entity-type": "item",
+         "numeric-id": 2283,
+         "id": "Q2283"
+        },
+        "type": "wikibase-entityid"
+       }
+      },
+      "type": "statement",
+      "id": "Q11219$CCA8C732-520F-4411-93FD-BC4C110042E3",
+      "rank": "normal"
+     }
+    ]
+   }
+  },
+  "Q183": {
+   "type": "item",
+   "id": "Q183",
+   "sitelinks": {
+    "enwiki": {
+     "site": "enwiki",
+     "title": "Germany",
+     "badges": [
+      "Q17437796"
+     ]
+    }
+   },
+   "claims": {
+    "P30": [
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P30",
+       "datavalue": {
+        "value": {
+         "entity-type": "item",
+         "numeric-id": 46,
+         "id": "Q46"
+        },
+        "type": "wikibase-entityid"
+       }
+      },
+      "type": "statement",
+      "id": "q183$76123936-F15F-4D73-BB22-1E86BC0614FE",
+      "rank": "normal"
+     }
+    ],
+    "P297": [
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P297",
+       "datavalue": {
+        "value": "DE",
+        "type": "string"
+       }
+      },
+      "type": "statement",
+      "id": "q183$A945083A-AAD3-4793-B94A-5FB16F00174C",
+      "rank": "normal"
+     }
+    ]
+   }
+  }
+ },
+ "success": 1
+}

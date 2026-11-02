@@ -15,6 +15,10 @@ from pydantic import ValidationError
 from app.config import Settings
 
 _ENV_EXAMPLE = Path(__file__).resolve().parents[2] / ".env.example"
+needs_env_example = pytest.mark.skipif(
+    not _ENV_EXAMPLE.exists(),
+    reason="needs the repo checkout (frontend/ or .env.example not mounted in the api container)",
+)
 _STRONG = {
     "secret_key": "a" * 64,
     "encryption_key": Fernet.generate_key().decode(),
@@ -29,6 +33,7 @@ def _example_value(name: str) -> str:
     return match.group(1).strip()
 
 
+@needs_env_example
 @pytest.mark.parametrize("field", sorted(_STRONG))
 def test_env_example_placeholders_refused_in_production(monkeypatch, field):
     monkeypatch.setenv("ENV", "production")
@@ -48,6 +53,7 @@ def test_strong_secrets_accepted_in_production(monkeypatch):
     Settings(_env_file=None, **_STRONG)
 
 
+@needs_env_example
 def test_placeholders_only_warn_in_development(monkeypatch):
     monkeypatch.setenv("ENV", "development")
     Settings(_env_file=None, secret_key=_example_value("SECRET_KEY"), encryption_key=_example_value("ENCRYPTION_KEY"))

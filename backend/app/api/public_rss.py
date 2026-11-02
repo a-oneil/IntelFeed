@@ -12,6 +12,7 @@ only access control.
 
 from __future__ import annotations
 
+import hmac
 import html
 import re
 import uuid
@@ -88,7 +89,7 @@ async def _resolve_token(db: AsyncSession, token: str) -> None:
         raise AppError(code="not_found", message="Not found", status_code=404)
 
     expected = await get_public_rss_token(db, create_if_missing=False)
-    if not expected or token != expected:
+    if not expected or not hmac.compare_digest(token.encode(), expected.encode()):
         raise AppError(code="not_found", message="Not found", status_code=404)
 
 

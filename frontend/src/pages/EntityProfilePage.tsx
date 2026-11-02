@@ -26,6 +26,7 @@ import { PulseLine } from "@/components/entityProfile/PulseLine";
 import { ProfileHeader } from "@/components/entityProfile/ProfileHeader";
 
 import { ProfileTabs } from "@/components/entityProfile/ProfileTabs";
+import { OverviewDensityToggle } from "@/components/entityProfile/OverviewSection";
 import { OverviewTab } from "@/components/entityProfile/tabs/OverviewTab";
 import { RelationshipsTab } from "@/components/entityProfile/tabs/RelationshipsTab";
 import { VulnerabilitiesTab } from "@/components/entityProfile/tabs/VulnerabilitiesTab";
@@ -304,6 +305,7 @@ export function EntityProfilePage({ slug }: { slug: string }) {
         active={activeTab}
         counts={counts}
         onChange={setActiveTab}
+        trailing={activeTab === "overview" ? <OverviewDensityToggle /> : null}
       />
 
       <div className={styles.body}>

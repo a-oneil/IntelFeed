@@ -851,10 +851,10 @@ async def test_feed_tags_origin_and_filters_adjudicator_rows(client, admin_heade
     assert {link["kind"] for link in veto["links"]} == {"entity", "entry"}
 
     resp = await client.get(
-        "/api/admin/hygiene/feed", params={"pending": "true", "origin": "legacy"}, headers=admin_headers
+        "/api/admin/hygiene/feed", params={"pending": "true", "origin": "scan"}, headers=admin_headers
     )
     rows = resp.json()["rows"]
-    assert len(rows) == 1 and rows[0]["origin"] == "legacy" and rows[0]["reason"] == "nightly"
+    assert len(rows) == 1 and rows[0]["origin"] == "scan" and rows[0]["reason"] == "nightly"
 
     stats = (await client.get("/api/admin/hygiene/stats", headers=admin_headers)).json()
     assert stats["adjudication_mode"] == "shadow" and stats["adjudication_pending"] == 2
@@ -1651,10 +1651,108 @@ async def test_resweep_marks_rows_without_an_analysis_failed(db_session: AsyncSe
 
 
 @pytest.mark.asyncio
-async def test_reclassify_on_a_tool_link_is_advisory_and_apply_converts(
+async def test_reclassify_waits_for_consensus_then_converts_in_apply_mode(
     client, admin_headers, db_session: AsyncSession, feed
 ):
-    await _seed_settings(db_session, adjudication_mode="apply")
+    """One article's say-so files a reclassify as a proposal (a vote); the
+    second article that agrees, at the confidence floor, converts the entity
+    and settles every pending proposal about it. The queue's Apply still
+    works on the first proposal alone."""
+    await _seed_settings(db_session, adjudication_mode="apply", adjudication_reclassify_consensus=2)
+    entry = await _make_entry(db_session, feed)
+    tool = Tool(name="Warlock", article_count=1, created_from_entry_id=entry.id)
+    db_session.add(tool)
+    await db_session.flush()
+    db_session.add(EntryTool(entry_id=entry.id, tool_id=tool.id, confidence="high", source="ai"))
+    await db_session.flush()
+    raw = [
+        {
+            "item_id": f"link:tool:{tool.id}",
+            "verdict": "reclassify",
+            "suggested_type": "malware",
+            "confidence": "high",
+            "reason": "it is a ransomware family",
+        }
+    ]
+    _items, verdicts = await _verdicts_for(db_session, entry, raw)
+    cfg = await adj._settings(db_session)
+    assert cfg["reclassify_consensus"] == 2
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.commit()
+    # First vote: filed, not applied — the link is intact and the tool still exists.
+    assert detail["verdicts"] == {"reclassify": 1} and detail["applied"] == 0 and detail["shadowed"] == 1
+    assert (await db_session.execute(select(EntryTool).where(EntryTool.entry_id == entry.id))).scalar_one()
+    rows = (await db_session.execute(select(EntityMaintenanceLog))).scalars().all()
+    assert [r.action for r in rows] == [adj.ACTION_RECLASSIFY]
+    assert rows[0].after["suggested_type"] == "malware" and rows[0].after["agreement"] == 1 and not rows[0].applied
+
+    # A second article agreeing reaches the consensus: converted inline, the
+    # first article's proposal cleared, an applied audit row written.
+    entry2 = await _make_entry(db_session, feed)
+    db_session.add(EntryTool(entry_id=entry2.id, tool_id=tool.id, confidence="high", source="ai"))
+    await db_session.flush()
+    tool_id, entry_id, entry2_id = tool.id, entry.id, entry2.id
+    _items, verdicts = await _verdicts_for(db_session, entry2, raw)
+    detail = await apply_verdicts(db_session, entry2, verdicts, _payload(), cfg)
+    await db_session.commit()
+    db_session.expire_all()
+    assert detail["applied"] == 1 and detail["shadowed"] == 0
+    assert (await db_session.execute(select(Tool).where(Tool.id == tool_id))).scalar_one_or_none() is None
+    malware = (await db_session.execute(select(MalwareFamily).where(MalwareFamily.name == "Warlock"))).scalar_one()
+    linked = {
+        r.entry_id
+        for r in (await db_session.execute(select(EntryMalware).where(EntryMalware.malware_family_id == malware.id)))
+        .scalars()
+        .all()
+    }
+    assert linked == {entry_id, entry2_id}
+    rows = (
+        (
+            await db_session.execute(
+                select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == adj.ACTION_RECLASSIFY)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [r.applied for r in rows] == [True]
+    assert rows[0].after["agreement"] == 2 and rows[0].after["outcome"]["target_type"] == "malware"
+
+
+@pytest.mark.asyncio
+async def test_reclassify_consensus_of_one_converts_on_the_first_verdict(db_session: AsyncSession, feed):
+    await _seed_settings(db_session, adjudication_mode="apply", adjudication_reclassify_consensus=1)
+    entry = await _make_entry(db_session, feed)
+    tool = Tool(name="Warlock", article_count=1, created_from_entry_id=entry.id)
+    db_session.add(tool)
+    await db_session.flush()
+    db_session.add(EntryTool(entry_id=entry.id, tool_id=tool.id, confidence="high", source="ai"))
+    await db_session.flush()
+    tool_id = tool.id
+    _items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [
+            {
+                "item_id": f"link:tool:{tool.id}",
+                "verdict": "reclassify",
+                "suggested_type": "malware",
+                "confidence": "high",
+                "reason": "r",
+            }
+        ],
+    )
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), await adj._settings(db_session))
+    await db_session.commit()
+    db_session.expire_all()
+    assert detail["applied"] == 1
+    assert (await db_session.execute(select(Tool).where(Tool.id == tool_id))).scalar_one_or_none() is None
+    assert (await db_session.execute(select(MalwareFamily).where(MalwareFamily.name == "Warlock"))).scalar_one()
+
+
+@pytest.mark.asyncio
+async def test_reclassify_below_confidence_floor_is_only_a_vote(db_session: AsyncSession, feed):
+    await _seed_settings(db_session, adjudication_mode="apply", adjudication_reclassify_consensus=1)
     entry = await _make_entry(db_session, feed)
     tool = Tool(name="Warlock", article_count=1, created_from_entry_id=entry.id)
     db_session.add(tool)
@@ -1669,32 +1767,56 @@ async def test_reclassify_on_a_tool_link_is_advisory_and_apply_converts(
                 "item_id": f"link:tool:{tool.id}",
                 "verdict": "reclassify",
                 "suggested_type": "malware",
-                "confidence": "high",
-                "reason": "it is a ransomware family",
+                "confidence": "medium",
+                "reason": "r",
             }
         ],
     )
-    cfg = await adj._settings(db_session)
-    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), await adj._settings(db_session))
     await db_session.commit()
-    # Advisory even in apply mode: the link is intact and no unlink row exists.
-    assert detail["verdicts"] == {"reclassify": 1} and detail["applied"] == 0
-    assert (await db_session.execute(select(EntryTool).where(EntryTool.entry_id == entry.id))).scalar_one()
-    rows = (await db_session.execute(select(EntityMaintenanceLog))).scalars().all()
-    assert [r.action for r in rows] == [adj.ACTION_RECLASSIFY]
-    assert rows[0].after["suggested_type"] == "malware" and not rows[0].applied
+    assert detail["applied"] == 0 and detail["shadowed"] == 1
+    assert (await db_session.execute(select(Tool).where(Tool.id == tool.id))).scalar_one()
+    row = (await db_session.execute(select(EntityMaintenanceLog))).scalar_one()
+    assert row.action == adj.ACTION_RECLASSIFY and not row.applied
 
-    # Applying it from the queue converts the entity; the entry stays linked.
-    tool_id, entry_id = tool.id, entry.id
-    resp = await client.post(f"/api/admin/hygiene/adjudication/{rows[0].id}/apply", headers=admin_headers)
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["applied"] is True
-    db_session.expire_all()
-    assert (await db_session.execute(select(Tool).where(Tool.id == tool_id))).scalar_one_or_none() is None
-    malware = (await db_session.execute(select(MalwareFamily).where(MalwareFamily.name == "Warlock"))).scalar_one()
-    assert (
-        await db_session.execute(select(EntryMalware).where(EntryMalware.malware_family_id == malware.id))
-    ).scalar_one().entry_id == entry_id
+
+@pytest.mark.asyncio
+async def test_reclassify_back_into_a_folded_type_is_dropped_unfiled(db_session: AsyncSession, feed):
+    """Warlock was folded out of malware into tool (tombstone). A later review
+    proposing tool → malware would start a ping-pong, so it is dropped:
+    no proposal filed, nothing converted, counted on the run detail."""
+    from app.models.entity_maintenance import EntityReclassifyTombstone
+
+    await _seed_settings(db_session, adjudication_mode="apply", adjudication_reclassify_consensus=1)
+    entry = await _make_entry(db_session, feed)
+    tool = Tool(name="Warlock", article_count=1, created_from_entry_id=entry.id)
+    db_session.add(tool)
+    await db_session.flush()
+    db_session.add(EntryTool(entry_id=entry.id, tool_id=tool.id, confidence="high", source="ai"))
+    db_session.add(
+        EntityReclassifyTombstone(
+            normalized_name="warlock", source_type="malware", target_type="tool", target_id=tool.id
+        )
+    )
+    await db_session.flush()
+    _items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [
+            {
+                "item_id": f"link:tool:{tool.id}",
+                "verdict": "reclassify",
+                "suggested_type": "malware",
+                "confidence": "high",
+                "reason": "r",
+            }
+        ],
+    )
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), await adj._settings(db_session))
+    await db_session.commit()
+    assert detail["reclassify_flip_guarded"] == 1 and detail["applied"] == 0 and detail["shadowed"] == 0
+    assert (await db_session.execute(select(Tool).where(Tool.id == tool.id))).scalar_one()
+    assert (await db_session.execute(select(EntityMaintenanceLog))).scalars().all() == []
 
 
 @pytest.mark.asyncio
@@ -1994,13 +2116,13 @@ async def test_bulk_apply_and_origin_scoped_dismiss(client, admin_headers, db_se
         .all()
     )
     assert [r.action for r in pending] == ["normalize_name"]
-    resp = await client.post("/api/admin/hygiene/dismiss-proposals", headers=admin_headers, json={"origin": "legacy"})
+    resp = await client.post("/api/admin/hygiene/dismiss-proposals", headers=admin_headers, json={"origin": "scan"})
     assert resp.json()["dismissed"] == 1
 
 
 @pytest.mark.asyncio
-async def test_orphaned_feed_lists_legacy_rows_no_entry_can_carry(
-    client, admin_headers, db_session: AsyncSession, feed
+async def test_orphaned_feed_lists_scan_rows_no_entry_can_carry(
+    client, admin_headers, db_session: AsyncSession, feed, admin_user
 ):
     await _seed_settings(db_session)
     entry = await _make_entry(db_session, feed)
@@ -2027,6 +2149,13 @@ async def test_orphaned_feed_lists_legacy_rows_no_entry_can_carry(
     listed = {r["entity_id"] for r in resp.json()["rows"]}
     assert str(lone.id) in listed  # nothing records which entry created it
     assert str(minted.id) not in listed  # the backfill will reach its entry
+
+    # The registry tool calls the route function directly, so it must not
+    # inherit the route's orphaned filter: unfiltered, it lists both rows.
+    from app.tools.curation import _get_hygiene_feed
+
+    out = await _get_hygiene_feed(db_session, admin_user.id)
+    assert {str(r["entity_id"]) for r in out["rows"]} >= {str(lone.id), str(minted.id)}
 
 
 @pytest.mark.asyncio

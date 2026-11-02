@@ -17,6 +17,9 @@ class CVE(Base):
     cvss_score: Mapped[Decimal | None] = mapped_column(Numeric(3, 1))
     severity: Mapped[str | None] = mapped_column(String(20), index=True)
     description: Mapped[str | None] = mapped_column(Text)
+    # Other ids for the same vulnerability (GHSA-…, a distro's advisory id),
+    # unioned from sources that know them (OSV).
+    aliases: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, server_default="{}", nullable=False)
     affected_products: Mapped[list] = mapped_column(JSONB, default=list)
     exploit_status: Mapped[str | None] = mapped_column(String(30))
     exploit_sources: Mapped[list] = mapped_column(JSONB, default=list)
@@ -44,6 +47,11 @@ class CVE(Base):
     is_kev: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false", index=True)
     kev_date_added: Mapped[date | None] = mapped_column(Date)
     kev_due_date: Mapped[date | None] = mapped_column(Date)
+    # CISA's SSVC decision points, from its ADP container in the CVE record
+    # (cvelist enrichment source): none | poc | active, yes | no, partial | total.
+    ssvc_exploitation: Mapped[str | None] = mapped_column(String(10))
+    ssvc_automatable: Mapped[str | None] = mapped_column(String(10))
+    ssvc_technical_impact: Mapped[str | None] = mapped_column(String(10))
     github_poc_count: Mapped[int | None] = mapped_column(Integer)
     github_poc_urls: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     metasploit_module: Mapped[str | None] = mapped_column(String(255))

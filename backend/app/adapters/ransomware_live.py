@@ -19,11 +19,11 @@ from datetime import UTC, datetime, timedelta
 import httpx
 
 from app.adapters.base import ExtendedAdapter, ParsedEntry, ParsedFeedMeta
+from app.enrichment.gateway import SourceGateway
 
 logger = logging.getLogger(__name__)
 
 RANSOMWARE_LIVE_RECENT_URL = "https://api.ransomware.live/v2/recentvictims"
-
 # First poll (no stored high-water mark) looks back this far.
 _INITIAL_LOOKBACK_DAYS = 7
 
@@ -61,15 +61,17 @@ class RansomwareLiveAdapter(ExtendedAdapter):
 
     SOURCE = "ransomware.live"
 
+    def __init__(self, gateway: SourceGateway):
+        self.gateway = gateway
+
     async def fetch_entries(
         self, config: dict, since: datetime | None = None
     ) -> tuple[ParsedFeedMeta, list[ParsedEntry]]:
         meta = self.get_feed_meta(config)
         cutoff = since or (datetime.now(UTC) - timedelta(days=_INITIAL_LOOKBACK_DAYS))
 
-        headers = {"User-Agent": "IntelFeed/1.0", "Accept": "application/json"}
         try:
-            async with httpx.AsyncClient(timeout=60.0, headers=headers) as client:
+            async with self.gateway.client(timeout=60.0, headers={"Accept": "application/json"}) as client:
                 resp = await client.get(RANSOMWARE_LIVE_RECENT_URL)
         except httpx.HTTPError as exc:
             logger.warning("ransomware.live fetch failed: %s", exc)

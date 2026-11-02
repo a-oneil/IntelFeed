@@ -14,6 +14,7 @@ from app.models.automation_rule import AutomationRule
 
 # Phase 9-12: Detection Engineering, Threat Intelligence, Enrichment
 from app.models.campaign import Campaign, CampaignEntity, CampaignEntry, CampaignSavedSearch
+from app.models.capec import CAPECPattern
 from app.models.category import Category
 from app.models.comment import Comment, CommentMention
 from app.models.correlation_event import CorrelationEventRecord
@@ -26,7 +27,14 @@ from app.models.dashboard import Dashboard, DashboardWidget
 from app.models.detection_rule import DetectionRule
 from app.models.detection_rule_version import DetectionRuleVersion
 from app.models.detection_summary import DetectionSummary
-from app.models.enrichment import EnrichmentResult, EnrichmentSource, UserEnrichmentOverride
+from app.models.enrichment import (
+    EnrichmentJob,
+    EnrichmentResult,
+    EnrichmentSource,
+    EntityContext,
+    EntityRelationClaim,
+    UserEnrichmentOverride,
+)
 from app.models.entity_field_claim import EntityFieldClaim
 
 # Entity link AI validation
@@ -136,6 +144,7 @@ __all__ = [
     "CVE",
     "CVEAffected",
     "CWE",
+    "CAPECPattern",
     "EntryCWE",
     "CVEWeakness",
     "EntryCVE",
@@ -203,6 +212,9 @@ __all__ = [
     "EnrichmentSource",
     "UserEnrichmentOverride",
     "EnrichmentResult",
+    "EnrichmentJob",
+    "EntityContext",
+    "EntityRelationClaim",
     "DetectionSummary",
     "FalsePositiveRecord",
     # Glossary

@@ -1,13 +1,13 @@
 /**
- * SnapshotCard — the rail's consolidated fact card: the single home for the
- * numbers that used to repeat across the header badges, the stat-tile row, the
- * KEV banner and the Exploitation panel. Header badges keep the qualitative
- * headline (severity, KEV, Active); the quantitative detail lives here only.
+ * SnapshotCard — the Overview's facts strip: the one home for the entity's
+ * numbers. Header badges carry the qualitative headline (severity, KEV,
+ * Active); the quantitative detail lives here only, one tile per fact across
+ * the full width under the assessment.
  *
- * Per one-home-per-fact, a type contributes rows ONLY for facts that don't
+ * Per one-home-per-fact, a type contributes tiles ONLY for facts that don't
  * already live in an editable header badge or identity field — so the actor
- * card is thin (motivation/origin/MITRE are editable badges) while the CVE
- * card carries the full numeric read.
+ * strip is thin (motivation/origin/MITRE are editable badges) while the CVE
+ * strip carries the full numeric read.
  */
 import { Link } from "react-router-dom";
 import type { EntityType } from "@/stores/intelStore";
@@ -21,13 +21,11 @@ import styles from "./entityProfile.module.css";
 
 function Row({ k, v, mono, sub }: { k: string; v: React.ReactNode; mono?: boolean; sub?: React.ReactNode }) {
   return (
-    <>
-      <div className={styles.panelRow}>
-        <span className={styles.panelKey}>{k}</span>
-        <span className={`${styles.panelVal} ${mono ? styles.mono : ""}`}>{v}</span>
-      </div>
-      {sub && <div className={styles.snapSub}>{sub}</div>}
-    </>
+    <div className={styles.factTile}>
+      <span className={styles.factKey}>{k}</span>
+      <span className={`${styles.factVal} ${mono ? styles.mono : ""}`}>{v}</span>
+      {sub && <span className={styles.factSub}>{sub}</span>}
+    </div>
   );
 }
 
@@ -142,31 +140,37 @@ export function SnapshotCard({
         />,
       );
     // One home per fact: exploitation status lives in the header badge
-    // (editable, provenance-marked) and the lifecycle rail dates it; KEV
-    // membership + deadline live on the rail too. The Snapshot only states
+    // (editable, provenance-marked) and the lifecycle strip dates it; KEV
+    // membership + deadline live on the strip too. The Snapshot only states
     // the negative — "Not listed" — which no other surface carries.
     const isKev = isKnownExploited({
       is_kev: cveDetail?.is_kev ?? entity.is_kev,
       exploit_status: cveDetail?.exploit_status ?? entity.exploit_status,
     });
     if (!isKev) rows.push(<Row key="kev" k="CISA KEV" v="Not listed" />);
-    for (const w of (cveWeaknesses ?? []).slice(0, 2)) {
+    const weaknesses = (cveWeaknesses ?? []).slice(0, 2);
+    if (weaknesses.length > 0)
       rows.push(
         <Row
-          key={`cwe:${w.cwe_ref}`}
-          k="Weakness"
+          key="cwe"
+          k={weaknesses.length === 1 ? "Weakness" : "Weaknesses"}
           v={
-            w.cwe_id ? (
-              <Link className={styles.affVendorLink} to={entityProfilePath("cwe", w.cwe_id)}>
-                {w.cwe_ref} {w.name}
-              </Link>
-            ) : (
-              <span className={styles.affUnres}>{w.cwe_ref === "NVD-CWE-noinfo" ? "Unclassified by NVD" : w.cwe_ref}</span>
-            )
+            <span className={styles.factStack}>
+              {weaknesses.map((w) =>
+                w.cwe_id ? (
+                  <Link key={w.cwe_ref} className={`${styles.affVendorLink} ${styles.cweLink}`} to={entityProfilePath("cwe", w.cwe_id)}>
+                    {w.cwe_ref} {w.name}
+                  </Link>
+                ) : (
+                  <span key={w.cwe_ref} className={styles.affUnres}>
+                    {w.cwe_ref === "NVD-CWE-noinfo" ? "Unclassified by NVD" : w.cwe_ref}
+                  </span>
+                ),
+              )}
+            </span>
           }
         />,
       );
-    }
   }
 
   if (entityType === "cwe") {
@@ -424,9 +428,9 @@ export function SnapshotCard({
 
   if (rows.length === 0) return null;
   return (
-    <div className={styles.panel}>
-      <div className={styles.panelTitle}>Snapshot</div>
-      {rows}
+    <div className={styles.facts} aria-label="Facts">
+      <span className={styles.sectionLabel}>Facts</span>
+      <div className={styles.factsStrip}>{rows}</div>
     </div>
   );
 }

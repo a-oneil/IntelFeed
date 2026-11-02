@@ -398,3 +398,80 @@ async def test_ttp_door_observables_list_in_the_extraction_table(client, admin_h
     )
     assert resp.status_code == 200, resp.text
     assert [i["id"] for i in resp.json()["items"]] == [str(obs_id)]
+
+
+async def test_delete_from_review_clears_pending_proposals_and_takes_vendors(
+    client, admin_headers, db_session, gates_off
+):
+    """The review queues delete through the same endpoint: vendors and
+    products are accepted, and the pending proposals about the deleted
+    entity (both logs) go with it instead of lingering as 'gone' rows."""
+    from app.models.entity_link_validation_log import EntityLinkValidationLog
+    from app.models.entity_maintenance import EntityMaintenanceLog
+    from app.models.vendor import Vendor
+
+    entry_id = await _entry(db_session)
+    vendor = Vendor(name="Acme Threat Group")
+    db_session.add(vendor)
+    await db_session.flush()
+    vendor_id = vendor.id
+    db_session.add(
+        EntityLinkValidationLog(
+            entry_id=entry_id,
+            entity_type="vendor",
+            entity_id=vendor_id,
+            entity_name_snapshot="Acme Threat Group",
+            action="needs_reclassification",
+            suggested_entity_type="threat_actor",
+        )
+    )
+    db_session.add(
+        EntityMaintenanceLog(
+            entity_type="vendor",
+            entity_id=vendor_id,
+            action="adjudication_unlink",
+            mode="shadow",
+            applied=False,
+            before={"entry_id": str(entry_id)},
+            after={"reason": "r"},
+        )
+    )
+    db_session.add(
+        EntityMaintenanceLog(
+            entity_type="vendor",
+            entity_id=vendor_id,
+            action="reclassify",
+            mode="apply",
+            applied=True,
+            before={},
+            after={},
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/engine/extraction/delete",
+        json={"entity_type": "vendor", "ids": [str(vendor_id)]},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"deleted": 1, "denied": 1}
+    assert await db_session.get(Vendor, vendor_id) is None
+    assert (await db_session.execute(select(EntityLinkValidationLog))).scalars().all() == []
+    left = (await db_session.execute(select(EntityMaintenanceLog))).scalars().all()
+    # Applied history stays; only the pending proposal is cleared.
+    assert [(r.action, r.applied) for r in left] == [("reclassify", True)]
+
+    # A seeded catalogue is deleted but never denylisted.
+    country = Country(name="Freedonia", iso_code="FD", aliases=[])
+    db_session.add(country)
+    await db_session.flush()
+    country_id = country.id
+    await db_session.commit()
+    resp = await client.post(
+        "/api/engine/extraction/delete",
+        json={"entity_type": "country", "ids": [str(country_id)]},
+        headers=admin_headers,
+    )
+    assert resp.json() == {"deleted": 1, "denied": 0}
+    assert await db_session.get(Country, country_id) is None

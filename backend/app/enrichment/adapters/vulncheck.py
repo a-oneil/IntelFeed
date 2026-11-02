@@ -6,14 +6,28 @@ Checks if a CVE is in VulnCheck's KEV database with exploit references.
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.manifest import Context, Display, Egress, Key, License, Quota
 
 
 class VulnCheckAdapter(EnrichmentAdapter):
     source_type = "vulncheck"
     display_name = "VulnCheck KEV"
-    supported_entity_types = ["cve"]
-    requires_api_key = True
-    default_trigger_mode = "scheduled"
+    about = "VulnCheck's wider list of exploited vulnerabilities, with exploitation dates."
+    applies_to = {"cve": None}
+    requires = (Key(),)
+    # VulnCheck's free tier allows 1,000 requests a minute.
+    quota = Quota(1000, 60, daily_budget=1000, ceiling_per_period=1000)
+    egress = Egress.LOW
+    # Free in open-source and commercial products with prominent attribution,
+    # labelled "VulnCheck KEV":
+    # https://docs.vulncheck.com/community/vulncheck-kev/attribution/
+    license = License("VulnCheck KEV community terms", attribution="VulnCheck KEV")
+    outputs = (
+        Context("in_kev", "VulnCheck KEV", Display.BADGE, tones={True: "critical"}),
+        Context("date_added", "Added", Display.FACT),
+        Context("known_ransomware_campaign_use", "Known ransomware use", Display.FACT),
+        Context("exploit_references", "Exploit references", Display.TABLE, item={"Link": "url", "Added": "date_added"}),
+    )
 
     _api_base = "https://api.vulncheck.com/v3/"
 
@@ -27,7 +41,7 @@ class VulnCheckAdapter(EnrichmentAdapter):
 
         headers = {"Authorization": f"Bearer {self.api_key}"}
 
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with self.http(timeout=10) as client:
             resp = await client.get(
                 f"{self._api_base}index/vulncheck-kev",
                 headers=headers,
@@ -65,12 +79,12 @@ class VulnCheckAdapter(EnrichmentAdapter):
             return False
         try:
             headers = {"Authorization": f"Bearer {self.api_key}"}
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with self.http(timeout=5) as client:
                 resp = await client.get(
                     f"{self._api_base}index/vulncheck-kev",
                     headers=headers,
                     params={"cve": "CVE-2021-44228"},
                 )
                 return resp.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False

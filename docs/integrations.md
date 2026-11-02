@@ -807,25 +807,43 @@ OpenRouter's health check doesn't validate the key, so a bad key passes **Test**
 
 ### 18. Configure Enrichment Sources
 
-Enrichment adds outside data to CVEs, techniques, malware and indicators. Sources are in `backend/app/enrichment/registry.py`:
+Enrichment adds outside data to CVEs, techniques, malware and indicators. Each source declares itself in its class (`backend/app/enrichment/adapters/`, `backend/app/enrichment/catalogs.py`, `wikidata.py`, `endoflife.py`, `capec.py`, `ctid.py`, `d3fend.py`, `etda.py`), listed in `backend/app/enrichment/registry.py`:
 
-| Source | Key | Default trigger | Default rate limit | Adds |
-|--------|---------|-----------------|--------------------|------|
-| FIRST EPSS | No | Scheduled | 100/min | CVE exploit probability |
-| NVD API 2.0 | No | Auto | 50 per 30 s | CVE details, CVSS |
-| CISA KEV | No | Scheduled | 100/min | Known exploited CVEs |
-| MITRE ATT&CK | No | Scheduled | 10/hour | Technique data |
-| VulnCheck KEV | Yes | Scheduled | 1,000/min | KEV, EPSS, exploit data |
-| OSV | No | Auto | 100/min | Open-source vulnerabilities |
-| Malpedia | No | Scheduled | 30/min | Malware families |
-| GitHub PoC | No | Scheduled | 10/min | Public PoC repos |
-| CVEDetails | Yes | Auto | 60/min | CVE context |
-| Wikipedia | No | Auto | 10/min | Background articles |
-| VirusTotal v3 | Yes | Manual | 4/min | Indicator reputation |
-| GreyNoise Community | Yes | Manual | 10/hour | IP noise, reputation |
-| Shodan InternetDB | No | Auto | 30/min | IP open ports and tags |
+| Source | Key | Default trigger | Default rate limit | Scheduled jobs | Adds |
+|--------|---------|-----------------|--------------------|----------------|------|
+| FIRST EPSS | No | Manual | 100/min | Daily score sync | CVE exploit probability |
+| NVD API 2.0 | No | Auto | 5 per 30 s; 50 with a key | Backfill, refresh, re-enrich | CVE details, CVSS |
+| CISA KEV | No | Manual | 100/min | Catalog sync every 6 h | Known exploited CVEs |
+| MITRE ATT&CK | No | Manual | 10/hour | Weekly bundle sync | Technique data |
+| VulnCheck KEV | Yes | Manual | 1,000/min | | KEV, EPSS, exploit data |
+| OSV | No | Auto | 100/min | | Open-source vulnerabilities |
+| Malpedia | No | Manual | 30/min | Weekly family sync | Malware families |
+| GitHub PoC | No (optional token) | Manual | 10/min, 30/min with a token | Daily PoC scan | Public PoC repos |
+| CVEDetails | Yes | Auto | 60/min | | CVE context |
+| CVE List (cvelistV5) | No | Manual | 30/min | Hourly backfill, hourly delta sync | CNA CVSS and descriptions, CISA SSVC |
+| Wikipedia | No | Auto | 20/min | Weekly sync | Background articles |
+| VirusTotal v3 | Yes | Manual | 4/min | | Indicator reputation |
+| GreyNoise Community | No (optional) | Manual | 10/hour | | IP noise, reputation |
+| Shodan InternetDB | No | Auto | 30/min | | IP open ports and tags |
+| Team Cymru | No | Auto | 60/min (DNS) | | IP origin AS, AS name, country, prefix |
+| RDAP | No | Auto | 1/s | | Domain registration date, registrar, expiry, nameservers |
+| abuse.ch ThreatFox | Yes (abuse.ch, shared) | Manual | 10/min | Daily export match | Malware families behind IPs, domains, URLs and hashes; role, confidence, tags |
+| abuse.ch URLhaus | Yes (abuse.ch, shared) | Manual | 10/min | Export match every 6 h | Malware URL status, tags and families for URLs and their hosts |
+| abuse.ch MalwareBazaar | Yes (abuse.ch, shared) | Manual | 10/min | | Sample signature, file type, delivery method, vendor labels |
+| MISP Galaxy | No | — | 10/hour | Weekly | Reference actor aliases |
+| Metasploit modules | No | — | 10/hour | Weekly | CVEs with Metasploit modules |
+| MITRE CWE | No | — | 10/hour | Weekly | The CWE catalog |
+| ransomware.live | No | — | 2/min | Every 30 min; group profiles every 4 h | Leak-site victims; group techniques, tools and leak-site status |
+| Cybergeist | No | — | 10/hour | Daily | Threat actors and malware |
+| Wikidata | No | — | 30/min | Weekly | Vendor websites and facts, product vendors, country regions |
+| endoflife.date | No | — | 1/s | Daily | Product support status and release lifecycles |
+| Tranco | No | — | 1/s | Daily | Domain popularity rank |
+| MITRE CAPEC | No | — | 10/hour | Weekly | The attack-pattern catalog: names for CWEs' CAPEC ids, patterns on techniques |
+| CTID control mappings | No | — | 10/hour | Weekly | NIST 800-53 and CIS controls on techniques |
+| MITRE D3FEND | No | — | 10/hour | Weekly | Countermeasures for techniques |
+| ETDA Threat Group Cards | No | — | 10/hour | Weekly | Actor aliases, origin, MITRE id, targeted sectors and countries, tools, operations |
 
-Auto = on new data, Scheduled = on a timer, Manual = on request from an entity or indicator.
+Auto = looked up when a new entity appears; Manual = on request from an entity or indicator. The last twelve are catalog sources: they only run their jobs. Team Cymru, RDAP and the abuse.ch sources look up active observables only. The three abuse.ch sources share one free Auth-Key (https://auth.abuse.ch/): save it on any of them. Their export jobs send nothing about your indicators; a lookup sends the indicator to abuse.ch, so it runs only on request. abuse.ch's terms allow not-for-profit use (https://abuse.ch/terms-of-use/). Turning a source off also stops its jobs. A rate above what a source documents it allows is refused.
 
 **To configure:** **Settings → Engine → Pipeline** → **enrich** stage: turn on sources, paste keys, optionally change rate limit and confidence threshold, save.
 
@@ -944,8 +962,8 @@ For email, add a **Run Webhook** to an email relay (recipe 5):
 
 ### Enrichment sources not running
 
-- Is it on (**Settings → Engine → Pipeline**, enrich stage), with a working key and healthy status?
-- Errors are in **Settings → Logs** (Tasks).
+- Is it on (**Settings → Engine → Enrichment**), with a working key? A status of **failing** or **needs key** says which; expand the row for the last job error. A disabled source's jobs report `skipped: source disabled`.
+- Errors are in **Settings → Logs** (Jobs).
 - Lower the rate limit if throttled.
 
 ### Image proxy issues

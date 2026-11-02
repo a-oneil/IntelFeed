@@ -46,6 +46,34 @@ def test_every_setting_group_is_labelled():
     assert not unknown, f"settings in unknown groups: {sorted(unknown)}"
 
 
+def _weekly_slot(job: dict) -> tuple[str, str, str] | None:
+    sched = job["default_schedule"]
+    if sched["type"] != "crontab" or sched.get("day_of_week", "*") == "*":
+        return None
+    return sched["day_of_week"], sched["hour"], sched["minute"]
+
+
+def test_weekly_enrichment_syncs_start_in_their_own_slots():
+    """Weekly catalog syncs write the same entity tables; two started together deadlocked."""
+    slots: dict[tuple, str] = {}
+    for name, job in JOB_REGISTRY.items():
+        slot = _weekly_slot(job)
+        if job["category"] != "enrichment" or slot is None:
+            continue
+        assert slot not in slots, f"{name} shares its weekly slot with {slots[slot]}"
+        slots[slot] = name
+
+
+def test_malpedia_sync_has_its_weekly_hour_to_itself():
+    day, hour, _ = _weekly_slot(JOB_REGISTRY["malpedia-sync"])
+    neighbours = [
+        name
+        for name, job in JOB_REGISTRY.items()
+        if name != "malpedia-sync" and (slot := _weekly_slot(job)) and slot[:2] == (day, hour)
+    ]
+    assert not neighbours
+
+
 def test_job_registry_entries_are_complete():
     for name, job in JOB_REGISTRY.items():
         assert job.get("task"), f"{name} has no task path"

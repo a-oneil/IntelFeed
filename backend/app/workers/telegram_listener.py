@@ -61,8 +61,13 @@ class _ChannelDispatcher:
         async with self._lock:
             self._pending.pop(feed_id, None)
         try:
+            from app.services.engine_switch import is_stopped_async
             from app.workers.feed_tasks import fetch_feed
 
+            if await is_stopped_async():
+                # The feed's own poll picks the messages up after the start.
+                logger.info("dispatch_skipped_engine_stopped", feed_id=feed_id)
+                return
             fetch_feed.delay(feed_id)
             logger.info("dispatched_fetch", feed_id=feed_id)
         except Exception as exc:

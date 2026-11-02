@@ -887,6 +887,8 @@ export interface Vendor {
   description: string | null;
   website: string | null;
   vendor_type: string | null;
+  /** The country the company is from (Wikidata), a country row id. */
+  country_id?: string | null;
   article_count: number;
   first_seen_at: string;
   last_seen_at: string;
@@ -1507,16 +1509,23 @@ export interface ObservableResponse {
   feed_source_count: number;
   /** Compact enrichment summary (Shodan / GreyNoise / VT) written by the updater. */
   reputation?: {
-    asn?: number | string | null;
-    country?: string | null;
     ports?: string | null;
     tags?: string | null;
     hostnames?: string | null;
     vt_ratio?: string | null;
-    gn_classification?: string | null;
     gn_riot?: boolean | null;
     enriched_at?: string | null;
   } | null;
+  /** Network context: origin AS, its name and allocation country (Team Cymru / VT). */
+  asn?: number | null;
+  asn_org?: string | null;
+  geo_country?: string | null;
+  /** When the registrable domain was registered (RDAP). */
+  registered_at?: string | null;
+  /** Rank in the daily Tranco top-1M list; null when unlisted. */
+  popularity_rank?: number | null;
+  /** GreyNoise: malicious / benign / unknown when seen scanning, else not_seen. */
+  noise_class?: string | null;
   first_seen_at: string;
   last_seen_at: string;
   // Decay projection.
@@ -1553,6 +1562,11 @@ export interface ObservableEntryPayload {
   candidates: ObservableCandidate[];
 }
 
+export interface CAPECRef {
+  capec_id: string;
+  name: string | null;
+}
+
 export interface CWEResponse {
   id: string;
   cwe_id: string;
@@ -1567,6 +1581,8 @@ export interface CWEResponse {
   likelihood_of_exploit: string | null;
   alternate_terms: string[];
   capec_ids: string[];
+  /** `capec_ids` with names from the CAPEC catalog (single-weakness endpoint only). */
+  capec_patterns?: CAPECRef[];
   consequences: Array<{ scope?: string | null; impacts?: string[]; note?: string | null }>;
   mitigations: Array<{ phase?: string | null; strategy?: string | null; description?: string | null }>;
   detection_methods: Array<{ method?: string | null; description?: string | null; effectiveness?: string | null }>;
@@ -1687,6 +1703,7 @@ export interface EntitySearchResult {
   likelihood_of_exploit?: string | null;
   alternate_terms?: string[];
   capec_ids?: string[];
+  capec_patterns?: CAPECRef[];
   consequences?: Array<{ scope?: string | null; impacts?: string[]; note?: string | null }>;
   mitigations?: Array<{ phase?: string | null; strategy?: string | null; description?: string | null }>;
   detection_methods?: Array<{ method?: string | null; description?: string | null; effectiveness?: string | null }>;
@@ -1717,6 +1734,10 @@ export interface EntitySearchResult {
   product_type?: string;
   vendor_id?: string;
   vendor_name?: string;
+  /** endoflife.date: maintained | security_only | eol | unknown. */
+  support_status?: string | null;
+  /** Soonest end of security support (YYYY-MM-DD). */
+  next_eol?: string | null;
   // Rule fields
   rule_type?: string;
   title?: string;
@@ -1767,6 +1788,8 @@ export interface EntitySearchResult {
   context_role?: 'reporting_source';
   country_relationship?: 'targets' | 'operates_from' | 'infrastructure';
   origin_country_id?: string | null;
+  /** Vendor: the country the company is from (Wikidata), a country row id. */
+  country_id?: string | null;
   first_seen_at?: string;
   last_seen_at?: string;
   // Wikipedia
@@ -2810,47 +2833,12 @@ export interface EnrichmentSource {
   min_confidence_threshold: string;
   daily_budget: number | null;
   daily_budget_used: number;
-  schedule_interval_hours: number;
-  next_scheduled_at: string | null;
   supported_entity_types: string[];
   last_synced_at: string | null;
   health_status: string;
   config: Record<string, unknown>;
   created_at: string;
   updated_at: string;
-}
-
-export interface EnrichmentBudgetSummary {
-  source_type: string;
-  display_name: string;
-  daily_budget: number;
-  used_today: number;
-  remaining: number;
-}
-
-export interface EnrichmentResult {
-  id: string;
-  entity_type: string;
-  entity_id: string;
-  source_type: string;
-  parsed_data: Record<string, unknown>;
-  enriched_at: string;
-  expires_at: string;
-  status: string;
-}
-
-export interface UserEnrichmentOverride {
-  id: string;
-  source_id: string;
-  has_api_key: boolean;
-  created_at: string;
-}
-
-export interface EnrichmentStatus {
-  total_sources: number;
-  enabled_sources: number;
-  healthy_sources: number;
-  enrichments_today: number;
 }
 
 // --- Detection Summary Persistence ---

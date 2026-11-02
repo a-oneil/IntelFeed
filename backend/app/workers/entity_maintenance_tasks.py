@@ -13,8 +13,15 @@ the same maintenance log (``entity_maintenance_log``):
   entity_name_normalization    — on demand: canonical-name proposals.
   ai_enrich_gap_batch          — on demand: fill empty profile fields.
 
-Duplicate entities are judged at creation by the adjudicate stage
-(``services/entry_adjudication.py``), not here.
+  merge review                 — daily: put likely-duplicate pairs of
+                                  existing actors, malware and tools in
+                                  front of the model; "same" verdicts become
+                                  Merge proposals on the Review tab
+                                  (``services/entity_merge_review.py``).
+
+An entity minted by one article is judged against the catalogue at creation
+by the adjudicate stage (``services/entry_adjudication.py``); the merge
+review is for pairs that both already exist.
 
 All of them run on the dedicated `celery-worker-ai` service (the serialized
 "ai" queue) so AI calls hit the provider one at a time.
@@ -1356,3 +1363,134 @@ async def _apply_ai_gap_value(
         return True
 
     return False
+
+
+# ============================================================
+# Duplicate (merge) review — one task, a few AI calls
+# ============================================================
+
+
+@celery_app.task(bind=True, max_retries=1, soft_time_limit=1800)
+def review_duplicate_entities(self) -> dict:
+    """Judge the most likely duplicate pairs in the catalogue and file Merge
+    proposals for the ones the model calls the same thing. Runs on the ai
+    queue; a handful of calls per run, paced by the batch settings. One run at
+    a time: the daily job and the Review tab's button can coincide, and two
+    runs would file the same pairs twice."""
+    import redis as _redis
+
+    from app.services.entity_merge_review import LOCK_KEY, LOCK_TTL_SECONDS
+
+    r = _redis.from_url(settings.redis_url)
+    if not r.set(LOCK_KEY, "1", nx=True, ex=LOCK_TTL_SECONDS):
+        r.close()
+        logger.info("review_duplicate_entities already running — skipping")
+        return {"status": "locked"}
+    start = time.monotonic()
+    try:
+        stats = run_async(_review_duplicate_entities_async())
+        CELERY_TASKS_TOTAL.labels(task_name="review_duplicate_entities", status="success").inc()
+        logger.info("review_duplicate_entities: %s", stats)
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="review_duplicate_entities", status="error").inc()
+        logger.exception("review_duplicate_entities failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="review_duplicate_entities").observe(time.monotonic() - start)
+        try:
+            r.delete(LOCK_KEY)
+            r.close()
+        except Exception:
+            pass
+
+
+async def _review_duplicate_entities_async() -> dict:
+    from app.services.entity_merge_review import (
+        TASK_NAME as MERGE_REVIEW_TASK,
+    )
+    from app.services.entity_merge_review import (
+        file_verdicts,
+        find_merge_candidates,
+        pairs_block,
+    )
+
+    async with worker_session() as db:
+        from app.services.system_settings import _ensure_cache, invalidate_cache
+
+        invalidate_cache()
+        await _ensure_cache(db)
+
+        batch_size = max(0, int(settings.get("merge_review_batch_size")))
+        per_call = max(1, int(settings.get("merge_review_pairs_per_call")))
+        min_similarity = float(settings.get("merge_review_min_similarity"))
+        retry_days = max(1, int(settings.get("merge_review_retry_days")))
+        min_confidence = str(settings.get("merge_review_min_confidence") or "medium")
+        if batch_size == 0:
+            return {"status": "disabled", "candidates": 0}
+
+        system_user_id = await _resolve_system_user(db)
+        if not system_user_id:
+            return {"status": "no_admin_user"}
+
+        candidates = await find_merge_candidates(
+            db, limit=batch_size, min_similarity=min_similarity, retry_days=retry_days
+        )
+        if not candidates:
+            return {"status": "ok", "candidates": 0, "proposed": 0, "distinct": 0, "unsure": 0, "calls": 0}
+
+        totals = {"proposed": 0, "distinct": 0, "unsure": 0, "ignored": 0}
+        calls = 0
+        for i in range(0, len(candidates), per_call):
+            chunk = candidates[i : i + per_call]
+            variables = {"pairs_block": pairs_block(chunk), "pair_count": len(chunk)}
+            batch_id = uuid.uuid4()
+            try:
+                result = await run_task(
+                    db=db,
+                    user_id=system_user_id,
+                    task_name=MERGE_REVIEW_TASK,
+                    variables=variables,
+                    target_type="merge_review_batch",
+                    target_id=batch_id,
+                    force=True,
+                    caller=Caller.system(system_user_id),
+                )
+            except Exception as e:  # provider quota / transient
+                from app.ai.providers.claude_code_provider import QuotaExhaustedError
+
+                if isinstance(e, QuotaExhaustedError):
+                    await db.commit()
+                    return {
+                        "status": "provider_paused",
+                        "candidates": len(candidates),
+                        "calls": calls,
+                        **totals,
+                        "pause_until": e.pause_until.isoformat() if getattr(e, "pause_until", None) else None,
+                    }
+                raise
+            calls += 1
+            if not result:
+                await db.commit()
+                return {"status": "no_assignment", "candidates": len(candidates), "calls": calls, **totals}
+            # run_task hands back only the parsed answer; the stored result row
+            # is what the filed proposals point at (the row's "view the model
+            # output" link, the Origin facet).
+            from app.models.ai_result import AIResult
+
+            ai_result_id = (
+                await db.execute(
+                    select(AIResult.id)
+                    .where(AIResult.target_type == "merge_review_batch", AIResult.target_id == batch_id)
+                    .order_by(AIResult.created_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            counts = await file_verdicts(
+                db, chunk, result.get("decisions") or [], min_confidence=min_confidence, ai_result_id=ai_result_id
+            )
+            for k, v in counts.items():
+                totals[k] += v
+            await db.commit()
+
+    return {"status": "ok", "candidates": len(candidates), "calls": calls, **totals}

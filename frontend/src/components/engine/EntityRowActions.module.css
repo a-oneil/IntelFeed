@@ -1,0 +1,64 @@
+/* The "⋯" trigger matches the review queues' row buttons. */
+.trigger {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1;
+}
+.trigger:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--bg-hover);
+}
+.trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Fixed-position popover; translateX(-100%) right-aligns it to the trigger. */
+.menu {
+  position: fixed;
+  transform: translateX(-100%);
+  z-index: 60;
+  min-width: 196px;
+  padding: 4px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.28));
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.item:hover {
+  background: var(--bg-hover);
+}
+.danger {
+  color: var(--danger);
+}
+.submenu {
+  margin: 2px 0 2px 8px;
+  padding-left: 6px;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}

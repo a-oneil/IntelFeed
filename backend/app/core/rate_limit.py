@@ -58,6 +58,8 @@ ANON_HEAVY_PREFIXES = (
     # A count over every link table, and the whole CWE catalog's rollup.
     "/api/entity-links",
     "/api/cwes",
+    # One Meilisearch search per glossary name when its cache is cold.
+    "/api/glossary/counts",
 )
 # TAXII and the EDL/lookup files are pulled by firewalls and SIEMs with
 # their own publish token, not by people: they keep a plain per-minute

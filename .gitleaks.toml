@@ -74,6 +74,19 @@ regexes = [
 ]
 
 [[allowlists]]
+description = "Malpedia name-attribution entries: an actor alias, a colon and the MISP Galaxy UUID it points at"
+regexTarget = "match"
+# backend/tests/fixtures/enrichment/malpedia.json is a recorded Malpedia
+# actor record. Its "name-attribution" list holds strings like
+# "Hidden Cobra:b8ca0932-c4cb-45c0-b7b1-88b9685ba24b": the alias, then the
+# UUID of the MISP Galaxy cluster it names. The UUID is a public catalog id.
+# The rule's match starts at the word that tripped it ("GhostSecret"), so the
+# shape is alias, colon, UUID, closing quote: one JSON string, nothing wider.
+regexes = [
+  '''^"?[A-Za-z0-9 .'()/+-]+:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",?$''',
+]
+
+[[allowlists]]
 description = "Build output and caches that are not part of the source tree"
 # These are gitignored, so they never reach a CI checkout — but a developer
 # running gitleaks locally would otherwise wade through thousands of hits from

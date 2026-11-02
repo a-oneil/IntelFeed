@@ -1,0 +1,331 @@
+{
+ "metadata": {
+  "mapping_version": "",
+  "technology_domain": "enterprise",
+  "attack_version": "19.1",
+  "mapping_framework": "cis",
+  "mapping_framework_version": "8.1.2",
+  "author": null,
+  "contact": null,
+  "organization": null,
+  "creation_date": "08/31/2026",
+  "last_update": "09/25/2026",
+  "mapping_types": {
+   "mitigates": {
+    "name": "mitigates",
+    "description": "The security control may prevent successful execution of the technique or sub-technique."
+   },
+   "non_mappable": {
+    "name": "non_mappable",
+    "description": "The control is out of scope (e.g., does not provide security capabilities) or does not provide mitigation of specific threats as contained in ATT&CK."
+   }
+  },
+  "capability_groups": {
+   "CIS-1": "Inventory and Control of Enterprise Assets",
+   "CIS-2": "Inventory and Control of Software Assets",
+   "CIS-3": "Data Protection",
+   "CIS-4": "Secure Configuration of Enterprise Assets and Software",
+   "CIS-5": "Account Management",
+   "CIS-6": "Access Control Management",
+   "CIS-7": "Continuous Vulnerability Management",
+   "CIS-8": "Audit Log Management",
+   "CIS-9": "Email and Web Browser Protections",
+   "CIS-10": "Malware Defenses",
+   "CIS-11": "Data Recovery",
+   "CIS-12": "Network Infrastructure Management",
+   "CIS-13": "Network Monitoring and Defense",
+   "CIS-14": "Security Awareness and Skills Training",
+   "CIS-15": "Service Provider Management",
+   "CIS-16": "Application Software Security",
+   "CIS-17": "Incident Response Management",
+   "CIS-18": "Penetration Testing"
+  }
+ },
+ "mapping_objects": [
+  {
+   "capability_id": "CIS-13.7",
+   "capability_description": "Deploy a Host-Based Intrusion Prevention Solution",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "CIS-13",
+   "comments": "Adversaries use PowerShell to execute commands, scripts, and payloads. EDR/HIPS can monitor PowerShell process behavior,",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls13/#137-deploy-a-host-based-intrusion-prevention-solution"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-16.3",
+   "capability_description": "Perform Root Cause Analysis on Security Vulnerabilities",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CIS-16",
+   "comments": "Application developers can use root cause analysis to address code or build process practices that expose credentials to",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-15.7",
+   "capability_description": "Securely Decommission Service Providers",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CIS-15",
+   "comments": "Disabling provider user and service accounts and revoking associated credentials, tokens, and access permissions prevent",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-13.5",
+   "capability_description": "Manage Access Control for Remote Access",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CIS-13",
+   "comments": "Access control policies for remote enterprise assets can evaluate device compliance before permitting access to enterpri",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls13/#135-manage-assets-remotely-connecting-to-enterprise-infrastructure"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-13.7",
+   "capability_description": "Deploy a Host-Based Intrusion Prevention Solution",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "CIS-13",
+   "comments": "Host-based intrusion prevention capabilities can enforce behavioral controls such as Attack Surface Reduction rules to p",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls13/#137-deploy-a-host-based-intrusion-prevention-solution"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-10.7",
+   "capability_description": "Use Behavior-Based Anti-Malware Software",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "CIS-10",
+   "comments": "Behavioral anti-malware commonly monitors scripting engines and detects malicious script execution through behavioral in",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls10/"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-10.7",
+   "capability_description": "Use Behavior-Based Anti-Malware Software",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "CIS-10",
+   "comments": "Behavior-based anti-malware can analyze PowerShell process ancestry, commands, script content, memory activity, and resu",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls10/"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-10.1",
+   "capability_description": "Deploy and Maintain Anti-Malware Software",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "CIS-10",
+   "comments": "Anti-malware integrates with PowerShell logging and AMSI to inspect scripts and commands before execution, making PowerS",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls10/"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-5.2",
+   "capability_description": "Use Unique Passwords",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CIS-5",
+   "comments": "Unique passwords reduce credential reuse across systems and accounts, limiting adversary use of one compromised password",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls5/"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-5.3",
+   "capability_description": "Disable Dormant Accounts",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CIS-5",
+   "comments": "Disabling stale accounts removes valid authentication paths available to adversaries.\n",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls5/"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-5.4",
+   "capability_description": "Restrict Administrator Privileges to Dedicated Administrator Accounts",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CIS-5",
+   "comments": "Separating privileged accounts from daily-use accounts limits the privilege available if a primary account is compromise",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls5/"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-6.5",
+   "capability_description": "Require MFA for Administrative Access",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CIS-6",
+   "comments": "Implement multi-factor authentication (MFA) for administrative accounts to help prevent unauthorized access, even if cre",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls6/#65-require-mfa-for-administrative-access"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-6.2",
+   "capability_description": "Establish an Access Revoking Process",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CIS-6",
+   "comments": "Disabling accounts that are no longer needed immediately upon termination, rights revocation, or role change prevents ad",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls6/#62-establish-an-access-revoking-process"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-9.7",
+   "capability_description": "Deploy and Maintain Email Server Anti-Malware Protections",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "CIS-9",
+   "comments": "Email anti-malware can block suspicious script attachments before they reach an interpreter. Most command and scripting ",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-9.7",
+   "capability_description": "Deploy and Maintain Email Server Anti-Malware Protections",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "CIS-9",
+   "comments": "Email scanning or sandboxing may identify PowerShell script attachments or documents that launch PowerShell. ",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-4.7",
+   "capability_description": "Manage Default Accounts on Enterprise Assets and Software",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CIS-4",
+   "comments": "Default accounts are defined as built-in or factory/provider-set accounts across systems, software, and devices. Managin",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-4.3",
+   "capability_description": "Configure Automatic Session Locking on Enterprise Assets",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CIS-4",
+   "comments": "The safeguard forces a renewed authentication checkpoint after inactivity and therefore reduces any possibility of oppor",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-2.7",
+   "capability_description": "Allowlist Authorized Scripts",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "CIS-2",
+   "comments": "Unauthorized PowerShell scripts fail execution under enforced script allowlisting.",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls2/#25-allowlist-authorized-software"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-2.5",
+   "capability_description": "Allowlist Authorized Software",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "CIS-2",
+   "comments": "If interpreters themselves are restricted or constrained by allowlisting, adversary-launched unauthorized interpreter bi",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls2/#25-allowlist-authorized-software"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-3.3",
+   "capability_description": "Configure Data Access Control Lists",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CIS-3",
+   "score_category": "protect",
+   "comments": "ACLs constrain which accounts can reach data and therefore directly reduce abuse of valid accounts and local data access",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls3/"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-16.10",
+   "capability_description": "Apply Secure Design Principles in Application Architectures",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CIS-16",
+   "comments": "Apply secure design principles to ensure that applications do not store sensitive data or credentials insecurely (e.g. p",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls16/#1610-apply-secure-design-principles-in-application-architectures"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-16.12",
+   "capability_description": "Implement Code-Level Security Checks",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CIS-16",
+   "comments": "Where code-level security checks scan application code, configuration, and repositories for hardcoded or otherwise insec",
+   "references": [
+    "https://cas.docs.cisecurity.org/en/latest/source/Controls16/#1612-implement-code-level-security-checks"
+   ],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CIS-5.5",
+   "capability_description": "Establish and Maintain an Inventory of Service Accounts",
+   "mapping_type": "non_mappable",
+   "attack_object_id": null,
+   "attack_object_name": null,
+   "capability_group": "CIS-5",
+   "references": [],
+   "status": "non_mappable"
+  }
+ ]
+}

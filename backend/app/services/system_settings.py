@@ -64,7 +64,13 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "adjudication_max_per_hour": int,
     "adjudication_min_priority_score": float,
     "adjudication_apply_min_confidence": str,
+    "adjudication_reclassify_consensus": int,
     "adjudication_circuit_breaker_pct": float,
+    "merge_review_batch_size": int,
+    "merge_review_pairs_per_call": int,
+    "merge_review_min_similarity": float,
+    "merge_review_min_confidence": str,
+    "merge_review_retry_days": int,
     "adjudication_content_max_chars": int,
     "adjudication_scope": str,
     "entity_maintenance_mode": str,
@@ -83,6 +89,9 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "cve_reenrich_batch_size": int,
     "github_poc_batch_limit": int,
     "github_poc_rescan_days": int,
+    "wikimedia_contact_email": str,
+    "enrichment_paused": bool,
+    "engine_stopped": bool,
     # Relationship strength formula (composite of corroboration/closeness/recency)
     "relationship_corroboration_saturation": int,
     "relationship_recency_half_life_days": int,
@@ -460,6 +469,16 @@ SETTING_METADATA: dict[str, dict] = {
         "group": "adjudication",
         "options": ["high", "medium", "low"],
     },
+    "adjudication_reclassify_consensus": {
+        "label": "Reclassify Consensus",
+        "description": (
+            "A type change is catalogue-wide, so in apply mode it is applied only once this many distinct "
+            "articles' reviews agree on the same target type (each earlier review's proposal is a vote). "
+            "1 applies the first verdict at the confidence floor. A name an analyst folded out of a type "
+            "is never proposed back into it"
+        ),
+        "group": "adjudication",
+    },
     "adjudication_circuit_breaker_pct": {
         "label": "Circuit Breaker",
         "description": (
@@ -468,6 +487,40 @@ SETTING_METADATA: dict[str, dict] = {
             "runs above the same threshold pauses dispatch for the hour; shadow runs are not sampled, "
             "because they change nothing"
         ),
+        "group": "adjudication",
+    },
+    "merge_review_batch_size": {
+        "label": "Duplicate Review: Pairs Per Run",
+        "description": (
+            "How many likely-duplicate pairs of existing actors, malware and tools the daily duplicate "
+            "review puts in front of the model (most likely first: similar names, a shared alias). "
+            "Each pair it calls the same thing becomes a Merge proposal on the Review "
+            "tab; nothing is merged without a person. 0 turns the review off"
+        ),
+        "group": "adjudication",
+    },
+    "merge_review_pairs_per_call": {
+        "label": "Duplicate Review: Pairs Per Call",
+        "description": "Pairs sent to the model in one call. Smaller is slower but harder to truncate",
+        "group": "adjudication",
+    },
+    "merge_review_min_similarity": {
+        "label": "Duplicate Review: Name Similarity Floor",
+        "description": (
+            "Trigram similarity (0–1) two names need before they are a candidate pair on name alone. "
+            "A shared alias qualifies a pair whatever its names; shared articles only order the pairs"
+        ),
+        "group": "adjudication",
+    },
+    "merge_review_min_confidence": {
+        "label": "Duplicate Review: Propose At Confidence",
+        "description": "A 'same' verdict below this confidence is remembered as unsure instead of proposed",
+        "group": "adjudication",
+        "options": ["high", "medium", "low"],
+    },
+    "merge_review_retry_days": {
+        "label": "Duplicate Review: Retry After (days)",
+        "description": "A pair the model called different or unsure is not asked again for this long",
         "group": "adjudication",
     },
     "adjudication_content_max_chars": {
@@ -1056,6 +1109,27 @@ SETTING_METADATA: dict[str, dict] = {
         "description": "Days before an already-scanned CVE is eligible for another PoC search",
         "group": "enrichment",
     },
+    "wikimedia_contact_email": {
+        "label": "Wikimedia contact email",
+        "description": (
+            "Sent in the User-Agent of every Wikipedia and Wikidata request, as Wikimedia's User-Agent policy "
+            "asks, so they can reach you instead of blocking the instance"
+        ),
+        "group": "enrichment",
+    },
+    "enrichment_paused": {
+        "label": "Pause Enrichment",
+        "description": "Refuse every request to outside enrichment sources; queued lookups wait until it is off",
+        "group": "enrichment",
+    },
+    "engine_stopped": {
+        "label": "Stop Engine",
+        "description": (
+            "Stop every background process: feed polling, analysis, enrichment and scheduled jobs. "
+            "Queued work waits until the engine starts again"
+        ),
+        "group": "maintenance",
+    },
     "relationship_corroboration_saturation": {
         "label": "Corroboration Saturation",
         "description": "Independent reporting count at which the corroboration component of strength maxes out",
@@ -1350,7 +1424,13 @@ _ENGINE_SECTION_GROUPS: dict[str, str] = {
     "adjudication_max_per_hour": "adjudication",
     "adjudication_min_priority_score": "adjudication",
     "adjudication_apply_min_confidence": "adjudication",
+    "adjudication_reclassify_consensus": "adjudication",
     "adjudication_circuit_breaker_pct": "adjudication",
+    "merge_review_batch_size": "adjudication",
+    "merge_review_pairs_per_call": "adjudication",
+    "merge_review_min_similarity": "adjudication",
+    "merge_review_min_confidence": "adjudication",
+    "merge_review_retry_days": "adjudication",
     "adjudication_content_max_chars": "adjudication",
     "adjudication_scope": "adjudication",
     # Score stage

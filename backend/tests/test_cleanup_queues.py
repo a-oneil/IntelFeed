@@ -394,3 +394,129 @@ def test_only_ambiguous_country_names_are_held():
     assert not is_provisional_form("country", "Australia")
     assert is_provisional_form("malware", "Royal")
     assert not is_provisional_form("vendor", "Royal")
+
+
+# ---------------------------------------------------------------------------
+# The Review tab's one queue: every pending proposal folded per entity
+# ---------------------------------------------------------------------------
+
+
+async def _seed_everything(db_session, feed):
+    everest = MalwareFamily(name="Everest")
+    db_session.add(everest)
+    await db_session.flush()
+    entries = await _seed_reclassify(db_session, feed, everest)
+    linuxish, tool, _ = await _seed_unlinks(db_session, feed)
+    edge_id = uuid.uuid4()
+    db_session.add(
+        EntityMaintenanceLog(
+            entity_type="relationship",
+            entity_id=edge_id,
+            action="adjudication_edge_demote",
+            mode="shadow",
+            before={"entry_id": str(entries[0].id), "claim": "Everest uses Linuxish"},
+            after={"reason": "never asserted", "confidence": "high"},
+            applied=False,
+        )
+    )
+    await db_session.flush()
+    return everest, linuxish, tool, edge_id
+
+
+async def test_review_groups_fold_every_kind_per_entity(client, admin_headers, db_session, test_feed):
+    everest, linuxish, tool, edge_id = await _seed_everything(db_session, test_feed)
+    await db_session.commit()
+
+    resp = await client.get("/api/admin/hygiene/review-groups", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == 4 and body["proposals"] == 10
+    by_name = {g["name"]: g for g in body["groups"]}
+    assert [g["name"] for g in body["groups"]][:2] == ["Everest", "Linuxish"]  # most proposals first
+
+    ev = by_name["Everest"]
+    assert ev["entity_id"] == str(everest.id) and ev["exists"] is True and ev["proposals"] == 5
+    assert {k["action"]: k["count"] for k in ev["kinds"]} == {"needs_reclassification": 4, "adjudication_reclassify": 1}
+    assert ev["reclassify_to"] == [{"type": "threat_actor", "count": 4}, {"type": "tool", "count": 1}]
+    assert ev["origin"] == "mixed" and ev["domains"] == ["entities"]
+
+    lx = by_name["Linuxish"]
+    assert lx["kinds"] == [{"action": "shadow_remove", "count": 3}] and lx["linked"] == 3
+    assert lx["matched_names"] == ["Linuxish"] and lx["reason"] == "the OS, not malware"
+    assert lx["sample_entry_id"] and lx["domains"] == ["links"]
+
+    py = next(g for g in body["groups"] if g["entity_id"] == str(tool.id))
+    assert py["kinds"] == [{"action": "adjudication_unlink", "count": 1}] and py["matched_names"] == ["python3"]
+
+    edge = next(g for g in body["groups"] if g["entity_type"] == "relationship")
+    assert edge["entity_id"] == str(edge_id) and edge["subject"] == "Demote: Everest uses Linuxish"
+    assert edge["exists"] is True and edge["row_ids"] == []  # a pseudo type is never assumed gone
+
+    # Facets narrow the same way the flat feed does.
+    links = (await client.get("/api/admin/hygiene/review-groups?domain=links", headers=admin_headers)).json()
+    assert {g["name"] for g in links["groups"]} == {"Linuxish", py["name"]}
+    recl = (
+        await client.get(
+            "/api/admin/hygiene/review-groups?action=needs_reclassification,adjudication_reclassify",
+            headers=admin_headers,
+        )
+    ).json()
+    assert [g["name"] for g in recl["groups"]] == ["Everest"]
+    found = (await client.get("/api/admin/hygiene/review-groups?q=linux", headers=admin_headers)).json()
+    assert [g["name"] for g in found["groups"]] == ["Linuxish"]
+    adj = (await client.get("/api/admin/hygiene/review-groups?origin=adjudicator", headers=admin_headers)).json()
+    assert {g["name"] for g in adj["groups"]} == {"Everest", py["name"], edge["name"]}
+    assert next(g for g in adj["groups"] if g["name"] == "Everest")["proposals"] == 1
+
+    # The expand: one entity's rows from the flat feed.
+    rows = (
+        await client.get(
+            f"/api/admin/hygiene/feed?pending=true&entity_type=malware&entity_id={everest.id}", headers=admin_headers
+        )
+    ).json()["rows"]
+    assert len(rows) == 5 and all(r["entity_id"] == str(everest.id) for r in rows)
+
+
+async def test_review_groups_drop_deleted_entities(client, admin_headers, db_session, test_feed):
+    everest, _lx, _tool, _edge = await _seed_everything(db_session, test_feed)
+    eid = everest.id
+    await db_session.delete(everest)
+    await db_session.commit()
+
+    body = (await client.get("/api/admin/hygiene/review-groups", headers=admin_headers)).json()
+    assert "Everest" not in {g["name"] for g in body["groups"]} and body["total"] == 3
+    # Hidden at once; the rows go with the nightly prune, not inside a GET.
+    assert await _pending_reclassify_rows(db_session, eid) == 5
+    from app.services.proposal_dismissals import purge_gone_entity_proposals
+
+    assert await purge_gone_entity_proposals(db_session) == 5
+    assert await _pending_reclassify_rows(db_session, eid) == 0
+    assert await purge_gone_entity_proposals(db_session) == 0  # live entities' rows are untouched
+
+
+async def test_review_groups_dismiss_settles_the_entity_and_sticks(client, admin_headers, db_session, test_feed):
+    everest, linuxish, _tool, _edge = await _seed_everything(db_session, test_feed)
+    body0 = (await client.get("/api/admin/hygiene/review-groups", headers=admin_headers)).json()
+    edge = next(g for g in body0["groups"] if g["entity_type"] == "relationship")
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/admin/hygiene/review-groups/dismiss",
+        json={
+            "items": [
+                {"entity_type": "malware", "entity_id": str(everest.id)},
+                {"entity_type": "malware", "entity_id": str(linuxish.id)},
+                {"entity_type": "relationship", "entity_id": edge["entity_id"]},
+            ]
+        },
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"entities": 3, "cleared_rows": 9}
+    body = (await client.get("/api/admin/hygiene/review-groups", headers=admin_headers)).json()
+    assert [g["kinds"][0]["action"] for g in body["groups"]] == ["adjudication_unlink"]
+    # Links untouched, the type change won't be proposed again.
+    assert await _count(db_session, EntryMalware, EntryMalware.malware_family_id == linuxish.id) == 3
+    from app.services.proposal_dismissals import reclassify_dismissed
+
+    assert await reclassify_dismissed(db_session, "malware", everest.id) is True

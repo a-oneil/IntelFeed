@@ -267,6 +267,17 @@
   color: var(--text-secondary);
 }
 
+/* The adjudicator's knobs, unfolded beside the mode switch. */
+.tuning {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+}
+
 .empty {
   text-align: center;
   color: var(--text-secondary);

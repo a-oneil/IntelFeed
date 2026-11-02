@@ -1,9 +1,10 @@
 """Tests for CVE extraction and NVD enrichment."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import httpx
+import pytest
 
+from app.enrichment.adapters.nvd import NVDAdapter
+from app.enrichment.gateway import BreakerOpen, RateLimited, SourceGateway
 from app.intelligence.cve import (
     _severity_from_score,
     calculate_cve_priority,
@@ -11,7 +12,7 @@ from app.intelligence.cve import (
     enrich_from_nvd,
     extract_cve_ids,
 )
-from app.workers.enrichment_tasks import parse_epss_csv
+from app.workers.enrichment_tasks import iter_epss_csv
 
 # --- Severity classification tests ---
 
@@ -114,24 +115,27 @@ def _make_nvd_response(cve_id: str = "CVE-2024-21762") -> dict:
     }
 
 
+def _nvd_gateway(handler) -> SourceGateway:
+    """The NVD source's gateway with ``handler`` standing in for NVD."""
+    return SourceGateway(
+        "nvd",
+        rate_limit_config={"requests_per_period": 50, "period_seconds": 30},
+        throttle_statuses=NVDAdapter.throttle_statuses,
+        inner=httpx.MockTransport(handler),
+    )
+
+
 async def test_enrich_from_nvd_success():
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = _make_nvd_response()
+    seen: list[httpx.Request] = []
 
-    mock_client_instance = AsyncMock()
-    mock_client_instance.get.return_value = mock_response
-    mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
-    mock_client_instance.__aexit__ = AsyncMock(return_value=False)
+    def nvd(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=_make_nvd_response())
 
-    with (
-        patch("app.intelligence.cve.httpx.AsyncClient", return_value=mock_client_instance),
-        patch("app.intelligence.cve.settings") as mock_settings,
-    ):
-        mock_settings.nvd_api_key = ""
+    result = await enrich_from_nvd("CVE-2024-21762", _nvd_gateway(nvd), "nvd-key")
 
-        result = await enrich_from_nvd("CVE-2024-21762")
-
+    assert seen[0].url.params["cveId"] == "CVE-2024-21762"
+    assert seen[0].headers["apiKey"] == "nvd-key"
     assert result is not None
     assert result["cvss_score"] == 9.8
     assert result["severity"] == "CRITICAL"
@@ -144,81 +148,32 @@ async def test_enrich_from_nvd_success():
 
 
 async def test_enrich_from_nvd_not_found():
-    mock_response = MagicMock()
-    mock_response.status_code = 404
-
-    mock_client_instance = AsyncMock()
-    mock_client_instance.get.return_value = mock_response
-    mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
-    mock_client_instance.__aexit__ = AsyncMock(return_value=False)
-
-    with (
-        patch("app.intelligence.cve.httpx.AsyncClient", return_value=mock_client_instance),
-        patch("app.intelligence.cve.settings") as mock_settings,
-    ):
-        mock_settings.nvd_api_key = ""
-
-        result = await enrich_from_nvd("CVE-9999-99999")
-
+    result = await enrich_from_nvd("CVE-9999-99999", _nvd_gateway(lambda r: httpx.Response(404)))
     assert result is None
 
 
-async def test_enrich_from_nvd_rate_limited():
-    """Mock 403 on first attempt, then 200 on second. Verify retry with backoff."""
-    mock_response_403 = MagicMock()
-    mock_response_403.status_code = 403
+async def test_enrich_from_nvd_403_opens_the_breaker():
+    """NVD throttles with 403 as well as 429: the gateway backs off for the
+    whole source instead of enrich_from_nvd retrying in a loop."""
+    seen: list[httpx.Request] = []
 
-    mock_response_200 = MagicMock()
-    mock_response_200.status_code = 200
-    mock_response_200.json.return_value = _make_nvd_response()
+    def nvd(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(403)
 
-    # Each iteration of the retry loop creates a new AsyncClient context manager,
-    # so we need successive client instances that return different responses.
-    mock_client_1 = AsyncMock()
-    mock_client_1.get.return_value = mock_response_403
-    mock_client_1.__aenter__ = AsyncMock(return_value=mock_client_1)
-    mock_client_1.__aexit__ = AsyncMock(return_value=False)
-
-    mock_client_2 = AsyncMock()
-    mock_client_2.get.return_value = mock_response_200
-    mock_client_2.__aenter__ = AsyncMock(return_value=mock_client_2)
-    mock_client_2.__aexit__ = AsyncMock(return_value=False)
-
-    with (
-        patch("app.intelligence.cve.httpx.AsyncClient", side_effect=[mock_client_1, mock_client_2]),
-        patch("app.intelligence.cve.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
-        patch("app.intelligence.cve.settings") as mock_settings,
-    ):
-        mock_settings.nvd_api_key = ""
-
-        result = await enrich_from_nvd("CVE-2024-21762")
-
-    # asyncio.sleep should have been called once for the backoff after 403
-    mock_sleep.assert_called_once()
-    backoff_wait = mock_sleep.call_args[0][0]
-    assert backoff_wait > 0
-
-    assert result is not None
-    assert result["cvss_score"] == 9.8
+    gateway = _nvd_gateway(nvd)
+    with pytest.raises(RateLimited):
+        await enrich_from_nvd("CVE-2024-21762", gateway)
+    with pytest.raises(BreakerOpen):
+        await enrich_from_nvd("CVE-2024-21763", gateway)
+    assert len(seen) == 1
 
 
 async def test_enrich_from_nvd_timeout():
-    """Mock timeout exception on all retries, should return None."""
-    mock_client_instance = AsyncMock()
-    mock_client_instance.get.side_effect = httpx.TimeoutException("Connection timed out")
-    mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
-    mock_client_instance.__aexit__ = AsyncMock(return_value=False)
+    def nvd(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("Connection timed out")
 
-    with (
-        patch("app.intelligence.cve.httpx.AsyncClient", return_value=mock_client_instance),
-        patch("app.intelligence.cve.asyncio.sleep", new_callable=AsyncMock),
-        patch("app.intelligence.cve.settings") as mock_settings,
-    ):
-        mock_settings.nvd_api_key = ""
-
-        result = await enrich_from_nvd("CVE-2024-21762")
-
-    assert result is None
+    assert await enrich_from_nvd("CVE-2024-21762", _nvd_gateway(nvd)) is None
 
 
 # --- Risk tier derivation tests ---
@@ -293,27 +248,24 @@ def test_calculate_cve_priority_is_kev_flag():
 # --- EPSS CSV parsing tests ---
 
 
-def test_parse_epss_csv_basic():
+def test_iter_epss_csv_basic():
     text = (
         "#model_version:v2023.03.01,score_date:2026-07-04\n"
         "cve,epss,percentile\n"
         "CVE-2024-21762,0.96432,0.99871\n"
         "CVE-2019-0001,0.00042,0.05123\n"
     )
-    result = parse_epss_csv(text)
-    assert len(result) == 2
-    assert result["CVE-2024-21762"]["epss_score"] == 0.96432
-    assert result["CVE-2024-21762"]["percentile"] == 0.99871
-    assert result["CVE-2019-0001"]["epss_score"] == 0.00042
+    assert list(iter_epss_csv(text)) == [
+        ("CVE-2024-21762", 0.96432, 0.99871),
+        ("CVE-2019-0001", 0.00042, 0.05123),
+    ]
 
 
-def test_parse_epss_csv_skips_malformed_rows():
+def test_iter_epss_csv_skips_malformed_rows():
     text = "cve,epss,percentile\nCVE-2024-1111,not-a-number,0.5\nNOT-A-CVE,0.5,0.5\nCVE-2024-2222,0.25,0.75\n"
-    result = parse_epss_csv(text)
-    assert list(result) == ["CVE-2024-2222"]
-    assert result["CVE-2024-2222"] == {"epss_score": 0.25, "percentile": 0.75}
+    assert list(iter_epss_csv(text)) == [("CVE-2024-2222", 0.25, 0.75)]
 
 
-def test_parse_epss_csv_empty():
-    assert parse_epss_csv("") == {}
-    assert parse_epss_csv("#comment only\n") == {}
+def test_iter_epss_csv_empty():
+    assert list(iter_epss_csv("")) == []
+    assert list(iter_epss_csv("#comment only\n")) == []

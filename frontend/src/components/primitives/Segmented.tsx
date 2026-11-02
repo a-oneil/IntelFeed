@@ -6,6 +6,9 @@ export interface SegmentedOption<T extends string> {
   /** Native tooltip — several call sites explain the mode this way. */
   title?: string;
   disabled?: boolean;
+  /** Tab wiring: the tab's own id and the id of the panel it controls. */
+  id?: string;
+  controls?: string;
 }
 
 interface SegmentedProps<T extends string> {
@@ -54,8 +57,10 @@ export function Segmented<T extends string>({
             key={opt.value}
             type="button"
             className={styles.segment}
+            id={opt.id}
             role={isTabs ? "tab" : undefined}
             aria-selected={isTabs ? selected : undefined}
+            aria-controls={isTabs ? opt.controls : undefined}
             aria-pressed={isTabs ? undefined : selected}
             title={opt.title}
             disabled={opt.disabled}
