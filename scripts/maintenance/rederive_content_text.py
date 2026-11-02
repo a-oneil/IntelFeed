@@ -37,6 +37,11 @@ autolink, observables and extract stages for each changed entry, followed by
 its co-occurrence stage (Celery tasks; no AI call, no automation rules), at
 most ``--rerun-max`` entries.
 
+``--refresh-links`` recomputes paragraph_indices for every scanned entry,
+changed or not — for entries whose text was rewritten by a run that stopped
+before placing their links. ``--max-entries`` stops after that many entries
+(in id order, the order the script walks).
+
 Dry-run by default; --apply writes, in batches of 500. Idempotent.
 
 Run inside the api container:
@@ -155,6 +160,7 @@ async def main(args) -> None:
     changed_ids: list[uuid.UUID] = []
     search_failed = False
     last_id: uuid.UUID | None = None
+    scanned = 0
 
     async with async_session() as db:
         while True:
@@ -170,6 +176,11 @@ async def main(args) -> None:
             rows = (await db.execute(q)).all()
             if not rows:
                 break
+            if args.max_entries:
+                rows = rows[: max(0, args.max_entries - scanned)]
+                if not rows:
+                    break
+            scanned += len(rows)
             last_id = rows[-1][0]
 
             writes: list[tuple[uuid.UUID, str, int]] = []
@@ -196,6 +207,9 @@ async def main(args) -> None:
                     except Exception as e:
                         search_failed = True
                         print(f"Search update failed ({e}); run rebuild_search_indexes.py --entries-only.")
+            if args.refresh_links and args.apply:
+                placed = await backfill_paragraph_indices(db, [r[0] for r in rows], refresh=True)
+                stats["links_refreshed"] += placed["updated"]
             stats["written" if args.apply else "would_write"] += len(writes)
             seen = sum(v for k, v in stats.items() if k not in ("written", "would_write"))
             if seen % (BATCH_SIZE * 20) < BATCH_SIZE:
@@ -211,6 +225,8 @@ async def main(args) -> None:
         return
     print(f"\n{stats['written']} entries rewritten; content_hash left as it was.")
     print(f"{stats['links_replaced']} link positions recomputed for the new paragraphs.")
+    if args.refresh_links:
+        print(f"{stats['links_refreshed']} link positions refreshed across all {scanned} scanned entries.")
     if args.rerun and changed_ids:
         todo = changed_ids[: args.rerun_max]
         _rerun(todo)
@@ -231,10 +247,14 @@ def cli() -> None:
     ap.add_argument("--entry", help="Only this entry (UUID).")
     ap.add_argument("--include-differing", action="store_true", help="Also write rows that differ beyond whitespace.")
     ap.add_argument("--rerun", action="store_true", help="With --apply: queue the link stages for changed entries.")
+    ap.add_argument("--refresh-links", action="store_true", help="With --apply: re-place links on every scanned entry.")
+    ap.add_argument("--max-entries", type=int, help="Stop after this many entries (id order).")
     ap.add_argument("--rerun-max", type=int, default=5000, help="Queue at most this many entries (default 5000).")
     args = ap.parse_args()
     if args.rerun and not args.apply:
         ap.error("--rerun needs --apply")
+    if args.refresh_links and not args.apply:
+        ap.error("--refresh-links needs --apply")
     asyncio.run(main(args))
 
 
