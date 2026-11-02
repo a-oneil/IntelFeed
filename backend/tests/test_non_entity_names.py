@@ -227,6 +227,7 @@ REAL_MALWARE = [
     "PIPEDREAM",
     "SSLoad",
     "NFQUEUEBot",
+    "T9000",
 ]
 
 
@@ -237,6 +238,7 @@ def test_real_malware_passes(name):
 
 REAL_ACTORS = [
     "764",
+    "7777",
     "8220 Gang",
     "APT28",
     "APT-C-36",

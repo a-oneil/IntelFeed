@@ -325,7 +325,8 @@ _CLI_FLAG_RE = re.compile(r"^--?\S")
 _FUNC_CALL_RE = re.compile(r"[A-Za-z0-9_\]]\([^)]*\)")
 _ACRONYM_PARENS_RE = re.compile(r"\s\([A-Z0-9/]{1,6}\)")
 _SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)+$")
-_TECHNIQUE_ID_RE = re.compile(r"^T\d{4}(\.\d{3})?$", re.IGNORECASE)
+# ATT&CK technique ids are T0xxx (ICS) and T1xxx; "T9000" is a backdoor, not a technique
+_TECHNIQUE_ID_RE = re.compile(r"^T[01]\d{3}(\.\d{3})?$", re.IGNORECASE)
 _TECHNIQUE_PHRASES = frozenset(
     {
         "dll sideloading",
@@ -864,9 +865,9 @@ _KNOWN_CONSTANT_RE = re.compile(
 _HEX_LITERAL_RE = re.compile(r"^0x[0-9a-f]+$", re.IGNORECASE)
 _DIGITS_ONLY_RE = re.compile(r"^\d+$")
 # Numeric names that really are tracked groups. "764" is the FBI-tracked
-# extortion network; an existing row resolves before the gate anyway, this
+# extortion network, "7777" the Quad7 botnet; an existing row resolves before the gate anyway, this
 # keeps a fresh install able to create it.
-_NUMERIC_ACTOR_ALLOWLIST = frozenset({"764"})
+_NUMERIC_ACTOR_ALLOWLIST = frozenset({"764", "7777"})
 
 # Descriptions of an actor rather than its name: "China-nexus", "North
 # Korea-linked group", "Russia-aligned cluster", "Iran-based actors".
