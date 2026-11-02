@@ -125,6 +125,32 @@ async def expire_legacy_link_proposals(db: AsyncSession, days: int = LEGACY_LINK
     return (await db.execute(text(EXPIRE_LEGACY_LINK_PROPOSALS_SQL).bindparams(days=days))).rowcount or 0
 
 
+async def purge_gone_entity_proposals(db: AsyncSession) -> int:
+    """Delete every pending proposal, both logs, whose entity no longer exists
+    (deleted by a veto, a merge, a purge, an analyst). The Review queue hides
+    these groups as soon as the entity is gone; this is the nightly sweep that
+    drops the rows. Applied rows stay as history. Pseudo types (relationship,
+    entry) have no model and are left alone."""
+    from app.services.entry_adjudication import _ENDPOINT_MODELS, _model_for
+
+    n = 0
+    for etype in _ENDPOINT_MODELS:
+        model = _model_for(etype)
+        if model is None:
+            continue
+        for log, pending in (
+            (EntityLinkValidationLog, EntityLinkValidationLog.action.in_(["shadow_remove", LINK_RECLASSIFY])),
+            (EntityMaintenanceLog, EntityMaintenanceLog.applied.is_(False)),
+        ):
+            alive = select(model.id).where(model.id == log.entity_id).exists()
+            n += (
+                await db.execute(
+                    delete(log).where(pending, log.entity_type == etype, log.entity_id.isnot(None), ~alive)
+                )
+            ).rowcount or 0
+    return n
+
+
 async def clear_entity_proposals(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> int:
     """Delete every pending proposal about an entity that no longer exists —
     both logs, every action. Called when an analyst deletes the entity from a

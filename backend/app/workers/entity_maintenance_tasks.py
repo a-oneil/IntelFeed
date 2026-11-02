@@ -1374,7 +1374,18 @@ async def _apply_ai_gap_value(
 def review_duplicate_entities(self) -> dict:
     """Judge the most likely duplicate pairs in the catalogue and file Merge
     proposals for the ones the model calls the same thing. Runs on the ai
-    queue; a handful of calls per run, paced by the batch settings."""
+    queue; a handful of calls per run, paced by the batch settings. One run at
+    a time: the daily job and the Review tab's button can coincide, and two
+    runs would file the same pairs twice."""
+    import redis as _redis
+
+    from app.services.entity_merge_review import LOCK_KEY, LOCK_TTL_SECONDS
+
+    r = _redis.from_url(settings.redis_url)
+    if not r.set(LOCK_KEY, "1", nx=True, ex=LOCK_TTL_SECONDS):
+        r.close()
+        logger.info("review_duplicate_entities already running — skipping")
+        return {"status": "locked"}
     start = time.monotonic()
     try:
         stats = run_async(_review_duplicate_entities_async())
@@ -1387,6 +1398,11 @@ def review_duplicate_entities(self) -> dict:
         raise
     finally:
         CELERY_TASK_DURATION_SECONDS.labels(task_name="review_duplicate_entities").observe(time.monotonic() - start)
+        try:
+            r.delete(LOCK_KEY)
+            r.close()
+        except Exception:
+            pass
 
 
 async def _review_duplicate_entities_async() -> dict:
@@ -1428,6 +1444,7 @@ async def _review_duplicate_entities_async() -> dict:
         for i in range(0, len(candidates), per_call):
             chunk = candidates[i : i + per_call]
             variables = {"pairs_block": pairs_block(chunk), "pair_count": len(chunk)}
+            batch_id = uuid.uuid4()
             try:
                 result = await run_task(
                     db=db,
@@ -1435,7 +1452,7 @@ async def _review_duplicate_entities_async() -> dict:
                     task_name=MERGE_REVIEW_TASK,
                     variables=variables,
                     target_type="merge_review_batch",
-                    target_id=uuid.uuid4(),
+                    target_id=batch_id,
                     force=True,
                     caller=Caller.system(system_user_id),
                 )
@@ -1456,7 +1473,22 @@ async def _review_duplicate_entities_async() -> dict:
             if not result:
                 await db.commit()
                 return {"status": "no_assignment", "candidates": len(candidates), "calls": calls, **totals}
-            counts = await file_verdicts(db, chunk, result.get("decisions") or [], min_confidence=min_confidence)
+            # run_task hands back only the parsed answer; the stored result row
+            # is what the filed proposals point at (the row's "view the model
+            # output" link, the Origin facet).
+            from app.models.ai_result import AIResult
+
+            ai_result_id = (
+                await db.execute(
+                    select(AIResult.id)
+                    .where(AIResult.target_type == "merge_review_batch", AIResult.target_id == batch_id)
+                    .order_by(AIResult.created_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            counts = await file_verdicts(
+                db, chunk, result.get("decisions") or [], min_confidence=min_confidence, ai_result_id=ai_result_id
+            )
             for k, v in counts.items():
                 totals[k] += v
             await db.commit()

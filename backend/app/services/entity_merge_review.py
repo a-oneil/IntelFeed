@@ -7,9 +7,11 @@ that. It is deterministic about *which* pairs to ask about and leaves the
 *answer* to the model:
 
   candidates   — same-type pairs of actors, malware and tools that look alike
-                 by one of three signals: a trigram-similar name, a shared
-                 alias (one side's name or alias equals the other's), or
-                 co-occurrence in the same articles. Pairs an analyst marked
+                 by name: a trigram-similar name, or a shared alias (one
+                 side's name or alias equals the other's). Shared articles
+                 are counted per pair and shown to the model, but never make
+                 a pair on their own: two famous things reported together is
+                 the normal case, not a duplicate. Pairs an analyst marked
                  "not a duplicate", pairs with a pending merge proposal and
                  pairs judged recently are skipped.
   review       — the pairs go to the ``entity_merge_review`` AI task a few at
@@ -43,10 +45,15 @@ logger = logging.getLogger(__name__)
 
 TASK_NAME = "entity_merge_review"
 ACTION_DISTINCT = "merge_review_distinct"
-ORIGIN = "merge_review"
-
 # What a filed proposal's ``after.origin`` says, so the queue can tell these
 # rows from the adjudicate stage's own merges.
+ORIGIN = "merge_review"
+# One run at a time: the daily job and the Review tab's button can coincide,
+# and two runs only see each other's rows once committed.
+LOCK_KEY = "merge_review:lock"
+LOCK_TTL_SECONDS = 1800
+
+# model, entry junction, junction FK, table name — per reviewable type.
 _TYPES: dict[str, tuple[type, type, str, str]] = {
     THREAT_ACTOR: (ThreatActor, EntryThreatActor, "threat_actor_id", "threat_actors"),
     MALWARE: (MalwareFamily, EntryMalware, "malware_family_id", "malware_families"),
@@ -56,44 +63,15 @@ REVIEWABLE_TYPES = tuple(_TYPES)
 
 _CONF_RANK = {"high": 3, "medium": 2, "low": 1}
 
-# Pairs that only share articles (no name or alias signal) need this many
-# before they are worth a question: the names differ, so co-occurrence alone
-# is usually two different things in the same report.
-_MIN_SHARED_ONLY = 3
-
 # ---------------------------------------------------------------------------
 # Candidates
 # ---------------------------------------------------------------------------
 
-# Name-similar pairs (trigram index) and alias-sharing pairs, in one query per
-# type. Excluded: pairs an analyst marked not-duplicate, pairs with a pending
-# merge proposal either way, and pairs judged within the retry window.
-_CANDIDATES_SQL = """
-WITH pairs AS (
-    SELECT a.id AS a_id, b.id AS b_id,
-           similarity(a.normalized_name, b.normalized_name) AS sim,
-           EXISTS (
-             SELECT 1
-             FROM unnest(array_append(coalesce(a.aliases, ARRAY[]::text[]), a.name)) x
-             JOIN unnest(array_append(coalesce(b.aliases, ARRAY[]::text[]), b.name)) y
-               ON lower(x) = lower(y)
-           ) AS alias_hit
-    FROM {table} a
-    JOIN {table} b ON a.id < b.id
-    WHERE (
-        (a.normalized_name IS NOT NULL AND b.normalized_name IS NOT NULL
-         AND a.normalized_name % b.normalized_name
-         AND similarity(a.normalized_name, b.normalized_name) >= :min_sim)
-        OR EXISTS (
-             SELECT 1
-             FROM unnest(array_append(coalesce(a.aliases, ARRAY[]::text[]), a.name)) x
-             JOIN unnest(array_append(coalesce(b.aliases, ARRAY[]::text[]), b.name)) y
-               ON lower(x) = lower(y)
-        )
-    )
-)
-SELECT a_id, b_id, sim, alias_hit
-FROM pairs p
+# Two queries, one per signal, so each uses its own index: a single OR'd WHERE
+# loses the trigram index. Both share the exclusions: pairs an analyst marked
+# not-duplicate, pairs with a pending merge proposal either way, and pairs
+# judged within the retry window.
+_EXCLUSIONS_SQL = """
 WHERE NOT EXISTS (
     SELECT 1 FROM proposal_dismissals d
     WHERE d.kind = 'not_duplicate' AND d.entity_type = :etype
@@ -111,36 +89,45 @@ AND NOT EXISTS (
 )
 """
 
-# Pairs that co-occur in articles, whatever their names: the same entity under
-# two names tends to be linked from the same reporting. Same exclusions.
-_COOCCUR_SQL = """
+# Trigram-similar names: `%` walks the GIN index on normalized_name.
+_NAME_SQL = (
+    """
 WITH pairs AS (
-    SELECT x.{fk} AS a_id, y.{fk} AS b_id, count(*) AS shared
-    FROM {junction} x
-    JOIN {junction} y ON x.entry_id = y.entry_id AND x.{fk} < y.{fk}
-    GROUP BY 1, 2
-    HAVING count(*) >= :min_shared
+    SELECT a.id AS a_id, b.id AS b_id, similarity(a.normalized_name, b.normalized_name) AS sim
+    FROM {table} a
+    JOIN {table} b ON a.id < b.id
+    WHERE a.normalized_name IS NOT NULL AND b.normalized_name IS NOT NULL
+      AND a.normalized_name % b.normalized_name
+      AND similarity(a.normalized_name, b.normalized_name) >= :min_sim
 )
-SELECT a_id, b_id, shared
+SELECT a_id, b_id, sim
 FROM pairs p
-WHERE NOT EXISTS (
-    SELECT 1 FROM proposal_dismissals d
-    WHERE d.kind = 'not_duplicate' AND d.entity_type = :etype
-      AND ((d.entity_id = p.a_id AND d.other_key = p.b_id::text)
-        OR (d.entity_id = p.b_id AND d.other_key = p.a_id::text))
-)
-AND NOT EXISTS (
-    SELECT 1 FROM entity_maintenance_log m
-    WHERE m.entity_type = :etype
-      AND ((m.entity_id = p.a_id AND m.after->>'target_id' = p.b_id::text)
-        OR (m.entity_id = p.b_id AND m.after->>'target_id' = p.a_id::text))
-      AND ((m.action = 'adjudication_merge' AND m.applied = false)
-        OR (m.action = 'merge_review_distinct'
-            AND m.created_at > now() - make_interval(days => :retry_days)))
-)
-ORDER BY shared DESC
-LIMIT :cap
 """
+    + _EXCLUSIONS_SQL
+)
+
+# A shared name or alias: every row's forms (name plus aliases, lower-cased)
+# laid flat once, then joined on the form. A hash join, not a nested loop.
+_ALIAS_SQL = (
+    """
+WITH forms AS (
+    SELECT e.id, lower(btrim(f)) AS form
+    FROM {table} e
+    CROSS JOIN unnest(array_append(coalesce(e.aliases, ARRAY[]::text[]), e.name)) AS f
+    WHERE f IS NOT NULL AND btrim(f) <> ''
+),
+pairs AS (
+    SELECT DISTINCT x.id AS a_id, y.id AS b_id
+    FROM forms x
+    JOIN forms y ON y.form = x.form AND x.id < y.id
+)
+SELECT p.a_id, p.b_id, similarity(a.normalized_name, b.normalized_name) AS sim
+FROM pairs p
+JOIN {table} a ON a.id = p.a_id
+JOIN {table} b ON b.id = p.b_id
+"""
+    + _EXCLUSIONS_SQL
+)
 
 
 @dataclass
@@ -168,6 +155,8 @@ class Candidate:
 
 
 def _score(c: Candidate) -> float:
+    """Name similarity first, a shared alias on top; shared articles only
+    break ties between pairs that already look alike."""
     return c.similarity + (0.35 if c.alias_hit else 0.0) + min(c.shared_entries, 5) * 0.04
 
 
@@ -187,41 +176,33 @@ async def find_merge_candidates(
     retry_days: int,
     types: tuple[str, ...] = REVIEWABLE_TYPES,
 ) -> list[Candidate]:
-    """The ``limit`` most likely duplicate pairs across the reviewable types,
-    scored by name similarity, a shared alias and shared articles."""
+    """The ``limit`` most likely duplicate pairs across the reviewable types:
+    pairs with a trigram-similar name or a shared alias, ranked by how alike
+    they look, with their shared-article count as a tie-breaker and context."""
     found: dict[tuple[str, uuid.UUID, uuid.UUID], Candidate] = {}
     for etype in types:
         if etype not in _TYPES:
             continue
-        _model, junction, fk, table = _TYPES[etype]
+        _model, _junction, _fk, table = _TYPES[etype]
+        params = {"etype": etype, "retry_days": retry_days}
         rows = (
-            await db.execute(
-                text(_CANDIDATES_SQL.format(table=table)).bindparams(
-                    etype=etype, min_sim=min_similarity, retry_days=retry_days
-                )
-            )
+            await db.execute(text(_NAME_SQL.format(table=table)).bindparams(min_sim=min_similarity, **params))
         ).all()
-        for a_id, b_id, sim, alias_hit in rows:
+        for a_id, b_id, sim in rows:
             found[(etype, a_id, b_id)] = Candidate(
-                entity_type=etype, a_id=a_id, b_id=b_id, similarity=float(sim or 0.0), alias_hit=bool(alias_hit)
+                entity_type=etype, a_id=a_id, b_id=b_id, similarity=float(sim or 0.0)
             )
-        rows = (
-            await db.execute(
-                text(_COOCCUR_SQL.format(junction=junction.__tablename__, fk=fk)).bindparams(
-                    etype=etype, min_shared=_MIN_SHARED_ONLY, retry_days=retry_days, cap=max(limit * 3, 50)
-                )
-            )
-        ).all()
-        for a_id, b_id, shared in rows:
+        rows = (await db.execute(text(_ALIAS_SQL.format(table=table)).bindparams(**params))).all()
+        for a_id, b_id, sim in rows:
             key = (etype, a_id, b_id)
-            if key in found:
-                found[key].shared_entries = int(shared)
-            else:
-                found[key] = Candidate(entity_type=etype, a_id=a_id, b_id=b_id, shared_entries=int(shared))
-    # Name/alias pairs did not count shared articles yet: cheap per pair.
+            c = found.get(key)
+            if c is None:
+                c = found[key] = Candidate(entity_type=etype, a_id=a_id, b_id=b_id, similarity=float(sim or 0.0))
+            c.alias_hit = True
+    # Shared articles: one small index lookup per pair, for the model to see
+    # and to order pairs that look equally alike.
     for c in found.values():
-        if c.shared_entries == 0 and (c.similarity or c.alias_hit):
-            c.shared_entries = await _shared_entries(db, c.entity_type, c.a_id, c.b_id)
+        c.shared_entries = await _shared_entries(db, c.entity_type, c.a_id, c.b_id)
         c.score = _score(c)
     ranked = sorted(found.values(), key=lambda c: -c.score)[:limit]
     for i, c in enumerate(ranked, 1):
@@ -385,7 +366,9 @@ async def file_verdicts(
             continue
         # different, unsure, or a same verdict under the floor: remember the
         # answer so the pair is not asked again until the retry window passes.
-        outcome = "distinct" if verdict == "different" else "unsure"
+        # A "same" the floor refused is stored as unsure — the row says what
+        # happened to the pair, and keeps the model's own word beside it.
+        outcome, stored = ("distinct", "different") if verdict == "different" else ("unsure", "unsure")
         db.add(
             EntityMaintenanceLog(
                 entity_type=c.entity_type,
@@ -396,7 +379,8 @@ async def file_verdicts(
                 after={
                     "target_id": str(c.b_id),
                     "other_name": c.b.get("name"),
-                    "verdict": verdict,
+                    "verdict": stored,
+                    "model_verdict": verdict,
                     "confidence": confidence,
                     "origin": ORIGIN,
                 },

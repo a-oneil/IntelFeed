@@ -656,8 +656,8 @@ async def _get_hygiene_stats(db: AsyncSession, user_id: uuid.UUID) -> dict:
         "Chronological hygiene feed: a merge of the entity-link log and the entity-maintenance log, normalized "
         "(action, mode, applied, subject, reason, affected-entity links, origin). Filter by action code "
         "(comma-separate for several), log source, mode, origin (adjudicator = filed by the adjudicate stage, "
-        "legacy = scans and analysts), pending-only, or a since timestamp. Read-only — applying or dismissing "
-        "proposals happens in the Proposals queue."
+        "merge_review = the duplicate review, scan = the on-demand scans and analysts), pending-only, or a since "
+        "timestamp. Read-only — applying or dismissing proposals happens in the Proposals queue."
     ),
     input_schema={
         "properties": {
@@ -678,8 +678,9 @@ async def _get_hygiene_stats(db: AsyncSession, user_id: uuid.UUID) -> dict:
             },
             "origin": {
                 "type": "string",
-                "enum": ["adjudicator", "legacy"],
-                "description": "adjudicator = rows the adjudicate stage filed; legacy = scans and analysts",
+                "enum": ["adjudicator", "merge_review", "scan"],
+                "description": "adjudicator = rows the adjudicate stage filed; merge_review = the duplicate "
+                "review; scan = the on-demand scans and analysts",
             },
             "pending": {
                 "type": "boolean",
@@ -711,8 +712,8 @@ async def _get_hygiene_feed(
         return {"error": "source must be 'link_validator' or 'entity_maintenance'"}
     if mode is not None and mode not in ("shadow", "apply"):
         return {"error": "mode must be 'shadow' or 'apply'"}
-    if origin is not None and origin not in ("adjudicator", "legacy"):
-        return {"error": "origin must be 'adjudicator' or 'legacy'"}
+    if origin is not None and origin not in ("adjudicator", "merge_review", "scan"):
+        return {"error": "origin must be 'adjudicator', 'merge_review' or 'scan'"}
     since_dt = None
     if since is not None:
         try:
@@ -727,6 +728,7 @@ async def _get_hygiene_feed(
         mode=mode,
         origin=origin,
         pending=pending,
+        orphaned=False,
         since=since_dt,
         limit=max(1, min(limit, 200)),
         offset=max(0, offset),

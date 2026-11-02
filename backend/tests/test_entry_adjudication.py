@@ -851,10 +851,10 @@ async def test_feed_tags_origin_and_filters_adjudicator_rows(client, admin_heade
     assert {link["kind"] for link in veto["links"]} == {"entity", "entry"}
 
     resp = await client.get(
-        "/api/admin/hygiene/feed", params={"pending": "true", "origin": "legacy"}, headers=admin_headers
+        "/api/admin/hygiene/feed", params={"pending": "true", "origin": "scan"}, headers=admin_headers
     )
     rows = resp.json()["rows"]
-    assert len(rows) == 1 and rows[0]["origin"] == "legacy" and rows[0]["reason"] == "nightly"
+    assert len(rows) == 1 and rows[0]["origin"] == "scan" and rows[0]["reason"] == "nightly"
 
     stats = (await client.get("/api/admin/hygiene/stats", headers=admin_headers)).json()
     assert stats["adjudication_mode"] == "shadow" and stats["adjudication_pending"] == 2
@@ -2116,13 +2116,13 @@ async def test_bulk_apply_and_origin_scoped_dismiss(client, admin_headers, db_se
         .all()
     )
     assert [r.action for r in pending] == ["normalize_name"]
-    resp = await client.post("/api/admin/hygiene/dismiss-proposals", headers=admin_headers, json={"origin": "legacy"})
+    resp = await client.post("/api/admin/hygiene/dismiss-proposals", headers=admin_headers, json={"origin": "scan"})
     assert resp.json()["dismissed"] == 1
 
 
 @pytest.mark.asyncio
-async def test_orphaned_feed_lists_legacy_rows_no_entry_can_carry(
-    client, admin_headers, db_session: AsyncSession, feed
+async def test_orphaned_feed_lists_scan_rows_no_entry_can_carry(
+    client, admin_headers, db_session: AsyncSession, feed, admin_user
 ):
     await _seed_settings(db_session)
     entry = await _make_entry(db_session, feed)
@@ -2149,6 +2149,13 @@ async def test_orphaned_feed_lists_legacy_rows_no_entry_can_carry(
     listed = {r["entity_id"] for r in resp.json()["rows"]}
     assert str(lone.id) in listed  # nothing records which entry created it
     assert str(minted.id) not in listed  # the backfill will reach its entry
+
+    # The registry tool calls the route function directly, so it must not
+    # inherit the route's orphaned filter: unfiltered, it lists both rows.
+    from app.tools.curation import _get_hygiene_feed
+
+    out = await _get_hygiene_feed(db_session, admin_user.id)
+    assert {str(r["entity_id"]) for r in out["rows"]} >= {str(lone.id), str(minted.id)}
 
 
 @pytest.mark.asyncio

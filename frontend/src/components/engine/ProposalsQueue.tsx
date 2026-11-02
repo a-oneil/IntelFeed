@@ -42,6 +42,7 @@ import {
   type FeedResponse,
   type FeedRow,
   type ProposalDomain,
+  type ProposalOrigin,
   type ReviewGroup,
 } from "@/hooks/useHygiene";
 import { useHygieneRowAction } from "@/hooks/useHygieneRowAction";
@@ -55,7 +56,7 @@ import cg from "./CleanupGroups.module.css";
 import { confirmDialog } from "@/utils/dialog";
 
 export type ReviewLens = "queue" | "history";
-export type ProposalOrigin = "adjudicator" | "legacy";
+export type { ProposalOrigin };
 
 const CHANGE_META: Record<string, { label: string; cls: string }> = {
   // pending proposals
@@ -127,11 +128,16 @@ type OriginFacet = "" | ProposalOrigin | "orphaned";
 const ORIGINS: { value: OriginFacet; label: string; title: string; queueOnly?: boolean }[] = [
   { value: "", label: "All", title: "Every proposal" },
   { value: "adjudicator", label: "Adjudicator", title: "Filed by the post-analysis review, with the article in hand" },
-  { value: "legacy", label: "Scans", title: "Filed by the on-demand scans and the retired nightly jobs" },
+  {
+    value: "merge_review",
+    label: "Duplicate review",
+    title: "Filed by the catalogue-wide duplicate review, from the two profiles side by side",
+  },
+  { value: "scan", label: "Scans", title: "Filed by the on-demand scans and analysts" },
   {
     value: "orphaned",
     label: "Orphaned",
-    title: "Legacy proposals no entry can carry to the adjudicate stage — yours to dismiss or apply by hand",
+    title: "Scan proposals no entry can carry to the adjudicate stage — yours to dismiss or apply by hand",
     queueOnly: true,
   },
 ];
@@ -222,6 +228,11 @@ function ProposalRow({
         {row.origin === "adjudicator" && !sub && (
           <span className={styles.originTag} title="Filed by the post-analysis review, with the article in hand">
             adjudicator
+          </span>
+        )}
+        {row.origin === "merge_review" && !sub && (
+          <span className={styles.originTag} title="Filed by the catalogue-wide duplicate review, from the two profiles side by side">
+            duplicate review
           </span>
         )}
       </td>
@@ -338,12 +349,14 @@ export function ProposalsQueue({
   const origin = orphaned || !originFilter ? undefined : (originFilter as ProposalOrigin);
   const domain = domainFilter || undefined;
   const stats = useHygieneStats();
-  // History and the orphaned switch are flat rows; the queue is per entity.
+  // History and the orphaned switch are flat rows; the queue is per entity,
+  // so the flat query only runs when one of those is showing.
   const flat = hist || orphaned;
   const feed = useHygieneFeed(
     hist
       ? { mode: "apply", action: actionFilter || undefined, origin, domain, limit: 100 }
       : { pending: true, action: actionFilter || undefined, origin, domain, orphaned: true, limit: 100 },
+    { enabled: flat },
   );
   const PAGE = 100;
   const groups = useReviewGroups({
@@ -415,8 +428,8 @@ export function ProposalsQueue({
                 .mutateAsync()
                 .then((r) =>
                   r.dispatched
-                    ? toast.success(`Reviewing ${r.candidates} likely-duplicate pair${r.candidates === 1 ? "" : "s"} on the AI worker — Merge rows appear as it finishes`)
-                    : toast.message("No likely-duplicate pairs left to review"),
+                    ? toast.success("Duplicate review started on the AI worker — Merge rows appear as it finishes")
+                    : toast.message("The duplicate review is already running"),
                 )
                 .catch((e) => toast.error(`Review failed: ${(e as Error).message}`)),
           },
@@ -500,7 +513,8 @@ export function ProposalsQueue({
       ? (FILTERS.find((f) => f.value === actionFilter)?.label ?? "these").toLowerCase()
       : "every pending";
     const where = domainFilter ? ` ${DOMAIN_LABELS[domainFilter].toLowerCase()}` : "";
-    const who = origin === "adjudicator" ? " adjudicator" : origin === "legacy" ? " scan" : "";
+    const who =
+      origin === "adjudicator" ? " adjudicator" : origin === "merge_review" ? " duplicate-review" : origin === "scan" ? " scan" : "";
     return `${what}${who}${where}`;
   };
 
@@ -545,6 +559,17 @@ export function ProposalsQueue({
             params: { pending: "true", entity_type: g.entity_type, entity_id: g.entity_id, limit: 200 },
           });
           targets = data.rows.filter((r) => !UNLINK_KINDS.has(r.action) && !RECLASSIFY_KINDS.has(r.action));
+          // One entity merges once: the most-proposed target's row, applied
+          // last. The merge removes the entity, which settles every other
+          // proposal about it, so a second target would only fail.
+          const merges = targets.filter((r) => r.action === "adjudication_merge");
+          if (merges.length > 0) {
+            // merge_into arrives most-proposed first.
+            const top = g.merge_into[0]?.target_id;
+            const pick =
+              merges.find((r) => (r.payload.after as { target_id?: string } | undefined)?.target_id === top) ?? merges[0];
+            targets = [...targets.filter((r) => r.action !== "adjudication_merge"), pick];
+          }
         } else {
           // A row with no entity is its own group: enough of a FeedRow for the
           // per-row endpoints (they key on source, id and action).
@@ -961,7 +986,7 @@ export function ProposalsQueue({
                 <td colSpan={6} className={styles.empty}>
                   {hist
                     ? "No applied changes match — nothing has run yet."
-                    : "No orphaned proposals — every pending legacy proposal has an entry the stage can re-judge it against."}
+                    : "No orphaned proposals — every pending scan proposal has an entry the stage can re-judge it against."}
                 </td>
               </tr>
             )}

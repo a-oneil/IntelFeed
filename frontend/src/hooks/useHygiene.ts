@@ -124,11 +124,14 @@ export interface FeedRow {
   payload: Record<string, unknown>;
   actions: string[];
   links: FeedLink[];
-  /** Who proposed it: the post-analysis adjudicate stage, or the legacy jobs/scans. */
-  origin: "adjudicator" | "legacy" | null;
+  /** Who proposed it: the post-analysis adjudicate stage (article in hand), the
+   *  catalogue-wide duplicate review (two profiles side by side), or a scan / an analyst. */
+  origin: ProposalOrigin | null;
   /** What applying it changes (the Review tab's Domain facet). */
   domain: ProposalDomain;
 }
+
+export type ProposalOrigin = "adjudicator" | "merge_review" | "scan";
 
 /** Observables are an entity type, so dropping one is an "entities" proposal. */
 export type ProposalDomain = "links" | "entities" | "relationships";
@@ -148,8 +151,8 @@ export interface FeedFilters {
   mode?: "shadow" | "apply";
   /** Only unapplied proposals (review-queue mode) — skips applied history. */
   pending?: boolean;
-  origin?: "adjudicator" | "legacy";
-  /** Pending legacy proposals no entry can carry to the adjudicate stage —
+  origin?: ProposalOrigin;
+  /** Pending scan proposals no entry can carry to the adjudicate stage —
    *  listed for manual disposition; nothing automatic touches them. */
   orphaned?: boolean;
   /** One entity's rows (the Review queue's expand). */
@@ -178,13 +181,6 @@ export interface OrphanListResponse {
   total: number;
   items: OrphanRow[];
   by_type: Record<string, number>;
-}
-
-export interface GapBucket {
-  entity_type: string;
-  field: string;
-  missing: number;
-  sample: Array<{ id: string; name: string; article_count: number | null }>;
 }
 
 export interface ApplyAdvisoriesResult {
@@ -230,8 +226,9 @@ export function useHygieneStats() {
   });
 }
 
-export function useHygieneFeed(filters: FeedFilters) {
+export function useHygieneFeed(filters: FeedFilters, opts: { enabled?: boolean } = {}) {
   return useQuery({
+    enabled: opts.enabled ?? true,
     queryKey: [...HYGIENE_KEYS, "feed", filters],
     queryFn: async () => {
       const params: Record<string, string | number> = {
@@ -261,19 +258,6 @@ export function useOrphans(entityType?: string) {
       const { data } = await api.get<OrphanListResponse>("/admin/hygiene/orphans", {
         params: entityType ? { entity_type: entityType } : undefined,
       });
-      return data;
-    },
-    staleTime: 60 * 1000,
-  });
-}
-
-export function useEnrichmentGaps() {
-  return useQuery({
-    queryKey: [...HYGIENE_KEYS, "enrichment-gaps"],
-    queryFn: async () => {
-      const { data } = await api.get<{ buckets: GapBucket[] }>(
-        "/admin/hygiene/enrichment-gaps",
-      );
       return data;
     },
     staleTime: 60 * 1000,
@@ -402,7 +386,7 @@ export interface ReviewGroup {
   reclassify_to: { type: string; count: number }[];
   merge_into: { target_type: string; target_id: string; name: string | null; count: number }[];
   domains: ProposalDomain[];
-  origin: "adjudicator" | "legacy" | "mixed";
+  origin: ProposalOrigin | "mixed";
   subject: string | null;
   reason: string | null;
   links: FeedLink[];
@@ -417,7 +401,7 @@ export interface ReviewGroupsFilters {
   entity_type?: string;
   action?: string;
   domain?: ProposalDomain;
-  origin?: "adjudicator" | "legacy";
+  origin?: ProposalOrigin;
   limit?: number;
   offset?: number;
 }
@@ -458,12 +442,13 @@ export function useDismissReviewGroups() {
 }
 
 /** Run the duplicate review now: likely-duplicate pairs go to the model on
- *  the AI worker and come back as Merge proposals. */
+ *  the AI worker and come back as Merge proposals. Only dispatches; a run
+ *  already in progress is reported, not doubled. */
 export function useScanDuplicates() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const { data } = await api.post<{ dispatched: boolean; candidates: number }>("/admin/hygiene/scan-duplicates");
+      const { data } = await api.post<{ dispatched: boolean; already_running: boolean }>("/admin/hygiene/scan-duplicates");
       return data;
     },
     onSuccess: () => {
@@ -492,7 +477,7 @@ export function useDismissProposals() {
     mutationFn: async (body: {
       action?: string;
       source?: string;
-      origin?: "adjudicator" | "legacy";
+      origin?: ProposalOrigin;
       domain?: ProposalDomain;
     }) => {
       const { data } = await api.post<{ dismissed: number }>("/admin/hygiene/dismiss-proposals", body);

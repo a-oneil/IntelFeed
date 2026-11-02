@@ -2293,7 +2293,7 @@ Return strict JSON matching the provided schema: the verdicts list first, one ob
         "display_name": "Duplicate Entity Review (merge candidates)",
         "description": (
             "The daily duplicate review: pairs of existing threat actors, malware families or tools "
-            "that look like the same thing (similar names, a shared alias, the same articles) are put "
+            "that look like the same thing (similar names or a shared alias) are put "
             "side by side and the model says whether they are one entity. A 'same' verdict becomes a "
             "Merge proposal on the Engine Review tab for a person to apply."
         ),
@@ -2301,7 +2301,7 @@ Return strict JSON matching the provided schema: the verdicts list first, one ob
         "variables": ["pairs_block", "pair_count"],
         "default_system_template": """You are a senior cyber-threat-intelligence analyst curating a catalogue of threat actors, malware families and tools. You are shown pairs of catalogue entries that an automated check flagged as possible duplicates. For each pair decide whether the two entries describe the SAME real-world thing under two names, or two DIFFERENT things.
 
-Use what you know about the threat landscape: vendor naming schemes (APT29 = Cozy Bear = The Dukes = Midnight Blizzard = NOBELIUM), version and variant names that are still the same family (Qakbot = QBot = Pinkslipbot), and the many names that only look alike but are not (APT28 vs APT29, Emotet vs Dridex, Cobalt Strike vs Cobalt Group, LockBit 2.0 vs LockBit 3.0 are the same operation but Conti vs Ryuk are not).
+Use what you know about the threat landscape: vendor naming schemes (APT29 = Cozy Bear = The Dukes = Midnight Blizzard = NOBELIUM), version and variant names that are still the same family or operation (Qakbot = QBot = Pinkslipbot, LockBit 2.0 = LockBit 3.0), and the many names that only look alike but are not (APT28 vs APT29, Emotet vs Dridex, Cobalt Strike vs Cobalt Group, Conti vs Ryuk).
 
 VERDICTS
   same       — the two entries are one thing. Also say which side to KEEP as the canonical record: prefer the entry with the name the community actually uses, the fuller profile, more articles, and a catalogue origin over an AI-created one. The other side is merged into it (its name becomes an alias, its articles move).

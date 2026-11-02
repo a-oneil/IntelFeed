@@ -485,7 +485,13 @@ async def test_review_groups_drop_deleted_entities(client, admin_headers, db_ses
 
     body = (await client.get("/api/admin/hygiene/review-groups", headers=admin_headers)).json()
     assert "Everest" not in {g["name"] for g in body["groups"]} and body["total"] == 3
+    # Hidden at once; the rows go with the nightly prune, not inside a GET.
+    assert await _pending_reclassify_rows(db_session, eid) == 5
+    from app.services.proposal_dismissals import purge_gone_entity_proposals
+
+    assert await purge_gone_entity_proposals(db_session) == 5
     assert await _pending_reclassify_rows(db_session, eid) == 0
+    assert await purge_gone_entity_proposals(db_session) == 0  # live entities' rows are untouched
 
 
 async def test_review_groups_dismiss_settles_the_entity_and_sticks(client, admin_headers, db_session, test_feed):

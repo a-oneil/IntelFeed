@@ -2249,6 +2249,12 @@ async def apply_adjudication_row(db: AsyncSession, row) -> dict:
         from app.services.proposal_dismissals import clear_reclassify_proposals
 
         await clear_reclassify_proposals(db, row.entity_type, row.entity_id)
+    elif row.action == ACTION_MERGE and row.entity_id:
+        # The loser is gone: a second merge target, an unlink, a veto about it
+        # have nothing left to act on. This applied row stays as the undo record.
+        from app.services.proposal_dismissals import clear_entity_proposals
+
+        await clear_entity_proposals(db, row.entity_type, row.entity_id)
     return outcome
 
 

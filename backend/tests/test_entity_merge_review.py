@@ -1,7 +1,8 @@
 """The catalogue-wide duplicate review.
 
-- Candidate pairs come from a similar name, a shared alias or shared articles,
-  minus pairs an analyst settled or the review judged recently.
+- Candidate pairs come from a similar name or a shared alias (shared articles
+  are context and a tie-breaker, never a signal on their own), minus pairs an
+  analyst settled or the review judged recently.
 - A "same" verdict becomes an adjudication_merge proposal (loser → keeper)
   that the Review queue can apply with no article behind it.
 - "different" / "unsure" is remembered as merge_review_distinct for the retry
@@ -71,8 +72,31 @@ async def test_candidates_score_name_alias_and_shared_articles(db_session, test_
     assert "3 shared articles" in block and "created by AI extraction" in block
 
 
+async def test_shared_articles_alone_never_make_a_pair(db_session, test_feed):
+    """Two famous things reported together is the normal case, not a duplicate."""
+    _a, _b, far = await _seed_pair(db_session, test_feed, shared=0)
+    other = ThreatActor(name="Kimsuky", aliases=["Velvet Chollima"], article_count=4)
+    db_session.add(other)
+    await db_session.flush()
+    for _ in range(5):
+        e = Entry(feed_id=test_feed.id, title="DPRK roundup", url=f"https://x/{uuid.uuid4()}", guid=str(uuid.uuid4()))
+        db_session.add(e)
+        await db_session.flush()
+        db_session.add_all(
+            [
+                EntryThreatActor(entry_id=e.id, threat_actor_id=far.id),
+                EntryThreatActor(entry_id=e.id, threat_actor_id=other.id),
+            ]
+        )
+    await db_session.flush()
+    cands = await _find(db_session)
+    assert {far.id, other.id} not in [{c.a_id, c.b_id} for c in cands]
+    # The look-alike pair is still found, and its (zero) shared count is reported honestly.
+    assert len(cands) == 1 and cands[0].shared_entries == 0 and "shared article" not in pairs_block(cands)
+
+
 async def test_same_verdict_files_a_merge_the_queue_can_apply(client, admin_headers, db_session, test_feed):
-    a, b, _far = await _seed_pair(db_session, test_feed)
+    a, b, far = await _seed_pair(db_session, test_feed)
     cands = await _find(db_session)
     counts = await file_verdicts(
         db_session,
@@ -90,18 +114,46 @@ async def test_same_verdict_files_a_merge_the_queue_can_apply(client, admin_head
 
     # A pending merge takes the pair out of the next run's candidates.
     assert await _find(db_session) == []
+    # A second, competing proposal about the same loser (another target).
+    db_session.add(
+        EntityMaintenanceLog(
+            entity_type="threat_actor",
+            entity_id=b.id,
+            action=ACTION_MERGE,
+            mode="shadow",
+            before={"entity": {"id": str(b.id), "name": "APT 29"}},
+            after={"target_id": str(far.id), "target_type": "threat_actor", "merge_into": "Lazarus Group"},
+            applied=False,
+        )
+    )
     await db_session.commit()
 
-    # The Review queue shows it as a Merge row...
+    # The Review queue shows it as a Merge row, under its own origin...
     feed = (await client.get("/api/admin/hygiene/feed?pending=true", headers=admin_headers)).json()
     merge_rows = [r for r in feed["rows"] if r["action"] == "adjudication_merge"]
-    assert len(merge_rows) == 1 and "duplicate review" in merge_rows[0]["subject"]
-    assert merge_rows[0]["actions"] == ["apply", "dismiss"]
+    assert len(merge_rows) == 2
+    ours = next(r for r in merge_rows if r["payload"]["log_id"] == str(row.id))
+    assert "duplicate review" in ours["subject"] and ours["origin"] == "merge_review"
+    assert ours["actions"] == ["apply", "dismiss"]
+    only_review = (
+        await client.get("/api/admin/hygiene/feed?pending=true&origin=merge_review", headers=admin_headers)
+    ).json()
+    assert [r["payload"]["log_id"] for r in only_review["rows"]] == [str(row.id)]
+    only_stage = (
+        await client.get("/api/admin/hygiene/feed?pending=true&origin=adjudicator", headers=admin_headers)
+    ).json()
+    assert str(row.id) not in {r["payload"]["log_id"] for r in only_stage["rows"]}
     groups = (await client.get("/api/admin/hygiene/review-groups", headers=admin_headers)).json()
     g = groups["groups"][0]
-    assert g["name"] == "APT 29" and g["merge_into"][0]["name"] == "APT29"
+    assert g["name"] == "APT 29" and g["merge_into"][0]["name"] == "APT29" and g["origin"] == "mixed"
+    assert [m["name"] for m in g["merge_into"]] == ["APT29", "Lazarus Group"]
+    by_origin = (await client.get("/api/admin/hygiene/review-groups?origin=merge_review", headers=admin_headers)).json()
+    assert by_origin["total"] == 1 and by_origin["groups"][0]["origin"] == "merge_review"
+    assert by_origin["groups"][0]["proposals"] == 1
+    assert (await client.get("/api/admin/hygiene/feed?origin=nightly", headers=admin_headers)).status_code == 400
 
-    # ...and applies it with no article behind it.
+    # ...and applies it with no article behind it. The loser is gone, so the
+    # competing proposal about it is cleared too.
     resp = await client.post(f"/api/admin/hygiene/adjudication/{row.id}/apply", headers=admin_headers)
     assert resp.status_code == 200, resp.text
     assert resp.json()["applied"] is True
@@ -109,6 +161,18 @@ async def test_same_verdict_files_a_merge_the_queue_can_apply(client, admin_head
     keeper = await db_session.get(ThreatActor, a.id)
     await db_session.refresh(keeper)
     assert "APT 29" in keeper.aliases
+    left = (
+        (
+            await db_session.execute(
+                select(EntityMaintenanceLog).where(
+                    EntityMaintenanceLog.entity_id == b.id, EntityMaintenanceLog.applied.is_(False)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert left == []
 
 
 async def test_different_is_remembered_for_the_retry_window(db_session, test_feed):
@@ -138,7 +202,7 @@ async def test_different_is_remembered_for_the_retry_window(db_session, test_fee
     assert len(await _find(db_session)) == 1
 
 
-async def test_low_confidence_same_is_only_remembered(db_session, test_feed):
+async def test_low_confidence_same_is_only_remembered(client, admin_headers, db_session, test_feed):
     await _seed_pair(db_session, test_feed)
     cands = await _find(db_session)
     counts = await file_verdicts(
@@ -148,6 +212,20 @@ async def test_low_confidence_same_is_only_remembered(db_session, test_feed):
         min_confidence="medium",
     )
     assert counts["proposed"] == 0 and counts["unsure"] == 1
+    row = (
+        await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == ACTION_DISTINCT))
+    ).scalar_one()
+    # The row says what happened (unsure), and keeps the model's own word.
+    assert row.after["verdict"] == "unsure" and row.after["model_verdict"] == "same"
+    await db_session.commit()
+    hist = (
+        await client.get("/api/admin/hygiene/feed?mode=apply&action=merge_review_distinct", headers=admin_headers)
+    ).json()
+    assert hist["rows"][0]["subject"] in (
+        "Unsure: APT29 vs APT 29 · duplicate review",
+        "Unsure: APT 29 vs APT29 · duplicate review",
+    )
+    assert hist["rows"][0]["origin"] == "merge_review" and hist["rows"][0]["actions"] == []
 
 
 async def test_dismissing_a_filed_merge_marks_the_pair_not_duplicate(client, admin_headers, db_session, test_feed):
@@ -178,19 +256,55 @@ async def test_analyst_not_duplicate_keeps_the_pair_out(db_session, test_feed):
     assert await _find(db_session) == []
 
 
-async def test_scan_endpoint_dispatches_when_there_are_candidates(
-    client, admin_headers, db_session, test_feed, monkeypatch
-):
+@pytest.fixture
+def private_lock_key(monkeypatch) -> str:
+    """The review's one-run-at-a-time lock under a key of this test's own.
+    The worker and the scan endpoint read ``LOCK_KEY`` from the service
+    module at call time, so the shared dev Redis's real lock is never taken
+    or released here."""
+    from app.services import entity_merge_review
+
+    key = f"intelfeed:test:{uuid.uuid4().hex}:merge_review:lock"
+    monkeypatch.setattr(entity_merge_review, "LOCK_KEY", key)
+    return key
+
+
+async def test_scan_endpoint_only_dispatches(client, admin_headers, monkeypatch, private_lock_key):
+    """The candidate search runs on the worker, never inside the request; the
+    endpoint reads the worker's lock to tell a run in progress."""
+    import redis
+
+    from app.config import settings
     from app.workers import entity_maintenance_tasks as tasks
 
     sent: list[dict] = []
     monkeypatch.setattr(tasks.review_duplicate_entities, "apply_async", lambda **kw: sent.append(kw))
     resp = await client.post("/api/admin/hygiene/scan-duplicates", headers=admin_headers)
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"dispatched": False, "candidates": 0} and sent == []
+    assert resp.json() == {"dispatched": True, "already_running": False} and sent == [{"queue": "ai"}]
 
-    await _seed_pair(db_session, test_feed)
-    await db_session.commit()
-    resp = await client.post("/api/admin/hygiene/scan-duplicates", headers=admin_headers)
-    assert resp.json() == {"dispatched": True, "candidates": 1}
-    assert sent == [{"queue": "ai"}]
+    # A run in progress holds the lock: reported, not doubled.
+    r = redis.from_url(settings.redis_url)
+    try:
+        r.set(private_lock_key, "1", ex=60)
+        resp = await client.post("/api/admin/hygiene/scan-duplicates", headers=admin_headers)
+    finally:
+        r.delete(private_lock_key)
+        r.close()
+    assert resp.json() == {"dispatched": False, "already_running": True} and len(sent) == 1
+
+
+def test_worker_runs_one_review_at_a_time(private_lock_key):
+    import redis
+
+    from app.config import settings
+    from app.workers.entity_maintenance_tasks import review_duplicate_entities
+
+    r = redis.from_url(settings.redis_url)
+    try:
+        assert r.set(private_lock_key, "1", nx=True, ex=60)
+        assert review_duplicate_entities() == {"status": "locked"}
+        assert r.exists(private_lock_key)  # the skipped run never releases the other run's lock
+    finally:
+        r.delete(private_lock_key)
+        r.close()

@@ -277,7 +277,7 @@ _REGION_NAMES = frozenset(
     "europe|western europe|eastern europe|central europe|northern europe|southern europe|european union|eu|"
     "asia|east asia|south asia|southeast asia|south east asia|central asia|west asia|asia pacific|apac|"
     "africa|north africa|west africa|east africa|southern africa|sub saharan africa|"
-    "middle east|mena|gulf region|the gulf|persian gulf|levant|"
+    "middle east|mena|gulf region|gulf|persian gulf|levant|"
     "oceania|australasia|pacific|pacific islands|caribbean|balkans|caucasus|nordics|scandinavia|benelux|"
     "baltics|emea|global|worldwide|international|nato|five eyes|g7|g20|brics|asean|arctic|antarctica".split("|")
 )
