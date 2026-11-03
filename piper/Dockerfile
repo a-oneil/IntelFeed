@@ -1,6 +1,6 @@
 # Isolated Piper TTS sidecar. Heavy ONNX/audio deps live here, not in the
 # shared backend image (which rebuilds on every deploy against a build-cache cap).
-FROM python:3.12.15-slim-bookworm
+FROM python:3.12.16-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         espeak-ng \

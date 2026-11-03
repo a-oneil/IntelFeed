@@ -4,7 +4,7 @@
 #
 # This is also the only Python that runs IntelFeed code, which is why CI tests
 # 3.14 alone (see .github/workflows/ci.yml).
-FROM python:3.14.9-slim-bookworm AS base
+FROM python:3.14.10-slim-bookworm AS base
 
 WORKDIR /app
 ENV PYTHONPATH=/app
