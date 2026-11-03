@@ -2,7 +2,6 @@ import { useState, useMemo } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 import { useFeedHealth, useFeedValueScores } from "@/hooks/useAnalytics";
-import { useUpdateFeed, useDeleteFeed } from "@/hooks/useFeeds";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import { formatDate } from "@/utils/formatDate";
 import { describeHealthWarning } from "@/utils/feedHealth";
@@ -124,53 +123,45 @@ export function FeedHealthView({
   const { data: healthData, isLoading: healthLoading } = useFeedHealth(staleDays);
   const { data: valueData, isLoading: valueLoading } = useFeedValueScores(valueDays);
 
-  const updateFeed = useUpdateFeed();
-  const deleteFeed = useDeleteFeed();
   const undoableDelete = useUndoableDelete();
-  // Pool-level resume (admin): with per-user subscriptions on, the PUT
-  // is_active toggle only writes the caller's own pause, so a feed the health
-  // check paused needs this to come back for everyone.
+  // Pool-level pause/resume (admin): with per-user subscriptions on, the PUT
+  // is_active toggle only writes the caller's own pause, so it neither stopped
+  // an erroring feed's polling nor brought a paused feed back for everyone.
+  const invalidateFeedState = () => {
+    queryClient.invalidateQueries({ queryKey: ["feed-health"] });
+    queryClient.invalidateQueries({ queryKey: ["feeds"] });
+    queryClient.invalidateQueries({ queryKey: ["analytics", "feed-value"] });
+  };
   const resumeFeed = useMutation({
     mutationFn: async (feedId: string) => (await api.post(`/feeds/${feedId}/resume`)).data,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["feed-health"] });
-      queryClient.invalidateQueries({ queryKey: ["feeds"] });
-    },
+    onSuccess: invalidateFeedState,
+  });
+  const pauseFeed = useMutation({
+    mutationFn: async (feedId: string) => (await api.post(`/feeds/${feedId}/pause`)).data,
+    onSuccess: invalidateFeedState,
+  });
+  const togglePending = pauseFeed.isPending || resumeFeed.isPending;
+  // Remove for everyone: DELETE /feeds/{id} only unsubscribes the caller, so a
+  // dead feed stayed on every other reader's list. Entries are kept.
+  const removeFeed = useMutation({
+    mutationFn: async (feedId: string) => (await api.post(`/feeds/${feedId}/remove`)).data,
+    onSuccess: invalidateFeedState,
   });
 
   const handleRemove = (feedId: string, title: string) => {
     undoableDelete({
       label: `Feed "${title}"`,
       key: `feed-${feedId}`,
-      onDelete: () => deleteFeed.mutate(feedId, {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: ["feed-health"] });
-        },
-      }),
+      onDelete: () => removeFeed.mutate(feedId),
     });
   };
 
   const toggleActive = (feedId: string, currentlyActive: boolean) => {
-    updateFeed.mutate(
-      { feedId, data: { is_active: !currentlyActive } },
-      {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: ["feed-health"] });
-        },
-      },
-    );
+    (currentlyActive ? pauseFeed : resumeFeed).mutate(feedId);
   };
 
   const pauseReviewCandidate = (feedId: string) => {
-    updateFeed.mutate(
-      { feedId, data: { is_active: false } },
-      {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: ["feed-health"] });
-          queryClient.invalidateQueries({ queryKey: ["analytics", "feed-value"] });
-        },
-      },
-    );
+    pauseFeed.mutate(feedId);
   };
 
   const sortedFeeds = useMemo(() => {
@@ -337,7 +328,7 @@ export function FeedHealthView({
                             <button
                               className={`${styles.actionBtn} ${styles.removeBtn}`}
                               onClick={() => handleRemove(f.id, f.title)}
-                              disabled={deleteFeed.isPending}
+                              disabled={removeFeed.isPending}
                             >
                               Remove
                             </button>
@@ -384,14 +375,14 @@ export function FeedHealthView({
                             <button
                               className={styles.actionBtn}
                               onClick={() => toggleActive(f.id, f.is_active)}
-                              disabled={updateFeed.isPending}
+                              disabled={togglePending}
                             >
                               Pause
                             </button>
                             <button
                               className={`${styles.actionBtn} ${styles.removeBtn}`}
                               onClick={() => handleRemove(f.id, f.title)}
-                              disabled={deleteFeed.isPending}
+                              disabled={removeFeed.isPending}
                             >
                               Remove
                             </button>
@@ -448,14 +439,14 @@ export function FeedHealthView({
                             <button
                               className={styles.actionBtn}
                               onClick={() => toggleActive(f.id, f.is_active)}
-                              disabled={updateFeed.isPending}
+                              disabled={togglePending}
                             >
                               {f.is_active ? "Pause" : "Resume"}
                             </button>
                             <button
                               className={`${styles.actionBtn} ${styles.removeBtn}`}
                               onClick={() => handleRemove(f.id, f.title)}
-                              disabled={deleteFeed.isPending}
+                              disabled={removeFeed.isPending}
                             >
                               Remove
                             </button>
@@ -496,14 +487,14 @@ export function FeedHealthView({
                             <button
                               className={styles.actionBtn}
                               onClick={() => toggleActive(f.id, f.is_active)}
-                              disabled={updateFeed.isPending}
+                              disabled={togglePending}
                             >
                               {f.is_active ? "Pause" : "Resume"}
                             </button>
                             <button
                               className={`${styles.actionBtn} ${styles.removeBtn}`}
                               onClick={() => handleRemove(f.id, f.title)}
-                              disabled={deleteFeed.isPending}
+                              disabled={removeFeed.isPending}
                             >
                               Remove
                             </button>
@@ -544,14 +535,14 @@ export function FeedHealthView({
                             <button
                               className={`${styles.actionBtn} ${styles.resumeBtn}`}
                               onClick={() => toggleActive(f.id, false)}
-                              disabled={updateFeed.isPending}
+                              disabled={togglePending}
                             >
                               Resume
                             </button>
                             <button
                               className={`${styles.actionBtn} ${styles.removeBtn}`}
                               onClick={() => handleRemove(f.id, f.title)}
-                              disabled={deleteFeed.isPending}
+                              disabled={removeFeed.isPending}
                             >
                               Remove
                             </button>
@@ -653,7 +644,7 @@ export function FeedHealthView({
                               <button
                                 className={styles.actionBtn}
                                 onClick={() => pauseReviewCandidate(c.feed_id)}
-                                disabled={updateFeed.isPending}
+                                disabled={togglePending}
                               >
                                 Pause
                               </button>

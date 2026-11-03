@@ -7,6 +7,7 @@ import api from "@/api/client";
 import type { EntitySearchResult, PaginatedResponse } from "@/api/types";
 import { bulkExportEntityProfiles } from "@/hooks/useExport";
 import { useRelationshipSignals, type RelationshipSignals, type RelationshipSignalTop } from "@/hooks/useRelationships";
+import { useContextColumns, useContextValues, type ContextColumn } from "@/hooks/useEntityContext";
 import { useDeleteEntity, MERGEABLE_ENTITY_TYPES } from "@/hooks/useEntityProfile";
 import { useDenyObservable } from "@/hooks/useIntelligence";
 import { EntityMergeSelectionModal, type MergeSelectionEntity } from "@/components/EntityMergeSelectionModal";
@@ -46,6 +47,25 @@ const COVERAGE_TIP: Record<string, string> = {
 };
 
 const PAGE_SIZE = 100;
+
+const CONTEXT_FILTER_HELP =
+  "Filter: text matches anywhere (any item of a list). >N, <N, =N compare numbers, or list length; " +
+  "other values compare as text, so >2025-06 works on dates. * has a value, ! has none. " +
+  "Sorting puts blanks last.";
+
+function contextCell(value: unknown, display: ContextColumn["display"]): ReactNode {
+  if (value === undefined || value === null || (Array.isArray(value) && value.length === 0)) {
+    return <span className={table.zero}>·</span>;
+  }
+  if (typeof value === "number") return <span className={table.count}>{value.toLocaleString()}</span>;
+  const text = Array.isArray(value)
+    ? value.join(", ")
+    : typeof value === "boolean"
+      ? value ? "yes" : "no"
+      : String(value);
+  if (display === "badge") return <span className={table.chip} title={text}>{text}</span>;
+  return <span className={`${styles.entityMeta} ${table.ellipsis}`} title={text}>{text}</span>;
+}
 
 interface EntityTableSectionProps<T> {
   title: string;
@@ -127,7 +147,8 @@ export function EntityTableSection<T>({
 
   const items = useMemo(() => data?.pages.flatMap((p) => p.items) ?? [], [data]);
   const total = data?.pages[0]?.total ?? 0;
-  const ids = useMemo(() => items.map(rowId), [items, rowId]);
+  // Per page, for the batched per-row lookups: each page is requested once.
+  const pageIds = useMemo(() => data?.pages.map((p) => p.items.map(rowId)) ?? [], [data, rowId]);
 
   // --- Markdown export (selected rows or all-of-type) ---
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -256,7 +277,7 @@ export function EntityTableSection<T>({
 
   // Batched relationship signals for the "Linked" / "Top link" columns (one
   // request per loaded page of rows, cached a minute).
-  const { data: signals } = useRelationshipSignals(entityType, ids);
+  const signals = useRelationshipSignals(entityType, pageIds);
 
   // Telemetry-aware rule coverage, batched the same way. Only TTP rows carry
   // technique IDs, so every other table passes an empty list and the query stays
@@ -274,11 +295,35 @@ export function EntityTableSection<T>({
     [coverage]
   );
 
+  // Enrichment values as columns, one per source output the type has
+  // (hidden until picked in the Columns menu). Sorted and filtered on the server.
+  const { data: contextColumns } = useContextColumns(entityType);
+  const contextValues = useContextValues(entityType, pageIds, !!contextColumns?.length);
+  const contextDefs = useMemo<DataTableColumn<T>[]>(() => {
+    const cols = contextColumns ?? [];
+    const labelCount = new Map<string, number>();
+    for (const c of cols) labelCount.set(c.label, (labelCount.get(c.label) ?? 0) + 1);
+    return cols.map((c) => ({
+      key: c.id,
+      // Two sources can both say "Country": name the source when they collide.
+      label: (labelCount.get(c.label) ?? 0) > 1 ? `${c.label} (${c.source_label})` : c.label,
+      width: c.display === "chips" ? 180 : 120,
+      minWidth: 70,
+      hideable: true,
+      defaultHidden: true,
+      serverSort: true,
+      serverText: true,
+      hint: { title: c.label, body: `From ${c.source_label}.`, aside: CONTEXT_FILTER_HELP },
+      render: (item: T) => contextCell(contextValues?.[rowId(item)]?.[c.id], c.display),
+    }));
+  }, [contextColumns, contextValues, rowId]);
+
   // These columns are appended rather than declared per entity type: every
   // entity has relationships, and coverage comes from one shared batched hook.
   const allColumns = useMemo<DataTableColumn<T>[]>(
     () => [
       ...columns,
+      ...contextDefs,
       ...(entityType === "ttp" && !isVisitor
         ? ([
             {
@@ -395,7 +440,7 @@ export function EntityTableSection<T>({
         ),
       },
     ],
-    [columns, signals, rowId, entityType, coverageOf, isVisitor]
+    [columns, contextDefs, signals, rowId, entityType, coverageOf, isVisitor]
   );
 
   const onSelectionChange = useCallback((next: string[]) => setSelectedIds(new Set(next)), []);

@@ -91,6 +91,9 @@ ANONYMOUS_READ_POST_MAX_BYTES = 16 * 1024
 # same relationships a visitor sees on a profile.
 ANONYMOUS_READ_POST_TEMPLATES: dict[str, int] = {
     "/api/entity-relationships/signals/{entity_type}": 48 * 1024,
+    # Context-column values: the same page of loaded row ids, and only the
+    # enrichment sources a visitor may see (app/enrichment/context_columns.py).
+    "/api/entities/{entity_type}/context-values": 48 * 1024,
 }
 _READ_POST_PATTERNS = tuple(
     (re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", template) + "$"), limit)

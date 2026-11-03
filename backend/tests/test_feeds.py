@@ -943,3 +943,67 @@ async def test_resume_feed_is_admin_only_and_clears_the_streak(
     await db_session.refresh(dead)
     assert dead.is_active and dead.auto_paused_at is None
     assert dead.error_count == 0 and dead.last_error is None and dead.error_since is None
+
+
+@pytest.mark.asyncio
+async def test_pause_feed_is_admin_only_and_pauses_the_pool(
+    client: AsyncClient, auth_headers: dict, admin_headers: dict, db_session: AsyncSession
+):
+    """The Feeds view's Pause on an erroring feed: the PUT toggle writes only
+    the caller's subscription, so this endpoint is what stops the polling."""
+    failing = Feed(
+        title="Failing",
+        url="https://failing2.example/rss",
+        feed_type="rss",
+        is_active=True,
+        error_count=12,
+        last_error="HTTP 503",
+    )
+    db_session.add(failing)
+    await db_session.flush()
+
+    response = await client.post(f"/api/feeds/{failing.id}/pause", headers=auth_headers)
+    assert response.status_code == 403
+
+    response = await client.post(f"/api/feeds/{failing.id}/pause", headers=admin_headers)
+    assert response.status_code == 200
+    assert response.json() == {"id": str(failing.id), "is_active": False}
+    await db_session.refresh(failing)
+    assert failing.is_active is False and failing.auto_paused_at is None
+    assert failing.error_count == 12 and failing.last_error == "HTTP 503"
+
+    health = (await client.get("/api/feeds/health", headers=admin_headers)).json()
+    assert "Failing" in [f["title"] for f in health["disabled_feeds"]]
+    assert "Failing" not in [f["title"] for f in health["erroring_feeds"]]
+
+
+@pytest.mark.asyncio
+async def test_remove_feed_for_everyone_unsubscribes_all_and_keeps_entries(
+    client: AsyncClient, auth_headers: dict, admin_headers: dict, db_session: AsyncSession, test_user, admin_user
+):
+    """DELETE /feeds/{id} unsubscribes only the caller; the Feeds view's Remove
+    is for everyone, so a dead feed leaves every reader's list."""
+    from sqlalchemy import select
+
+    from app.models.entry import Entry
+    from app.models.user_feed_subscription import UserFeedSubscription
+
+    dead = Feed(title="Dead", url="https://dead3.example/rss", feed_type="rss", is_active=True)
+    db_session.add(dead)
+    await db_session.flush()
+    for u in (test_user, admin_user):
+        db_session.add(UserFeedSubscription(user_id=u.id, feed_id=dead.id))
+    entry = Entry(feed_id=dead.id, title="Kept", url="https://dead3.example/a", guid="dead3-a")
+    db_session.add(entry)
+    await db_session.flush()
+
+    assert (await client.post(f"/api/feeds/{dead.id}/remove", headers=auth_headers)).status_code == 403
+
+    response = await client.post(f"/api/feeds/{dead.id}/remove", headers=admin_headers)
+    assert response.status_code == 200
+    assert response.json() == {"id": str(dead.id), "is_active": False, "unsubscribed": 2}
+    await db_session.refresh(dead)
+    assert dead.is_active is False
+    left = await db_session.execute(select(UserFeedSubscription).where(UserFeedSubscription.feed_id == dead.id))
+    assert left.scalars().all() == []
+    assert await db_session.get(Entry, entry.id) is not None

@@ -820,6 +820,59 @@ async def resume_feed(
     return {"id": str(feed.id), "is_active": True}
 
 
+@router.post("/{feed_id}/pause")
+async def pause_feed(
+    feed_id: uuid.UUID = Path(..., description="UUID of the feed to pause"),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stop polling a feed for everyone. The counterpart of /resume: with
+    per-user subscriptions on, `is_active` on PUT /feeds/{id} pauses only the
+    caller's own subscription, so an erroring feed kept being fetched.
+
+    The error streak is kept, so the feed shows why it was paused until it is
+    resumed. Not an auto-pause: it lands under Disabled, not Dead.
+    """
+    feed = await db.get(Feed, feed_id)
+    if not feed:
+        raise AppError(code="not_found", message="Feed not found", status_code=404)
+    feed.is_active = False
+    db.add(feed)
+    await db.commit()
+    return {"id": str(feed.id), "is_active": False}
+
+
+@router.post("/{feed_id}/remove")
+async def remove_feed_for_everyone(
+    feed_id: uuid.UUID = Path(..., description="UUID of the feed to remove"),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Take a feed away from every reader and stop polling it. Admin only.
+
+    With per-user subscriptions on, DELETE /feeds/{id} only unsubscribes the
+    caller, so removing a dead feed from the Feeds view left it on everyone
+    else's list, still fetching. Entries stay: their entity links and threads
+    are intelligence. DELETE with purge=true is the one that deletes them.
+    """
+    from app.models.user_feed_subscription import UserFeedSubscription
+
+    feed = await db.get(Feed, feed_id)
+    if not feed:
+        raise AppError(code="not_found", message="Feed not found", status_code=404)
+    subs = (await db.execute(select(UserFeedSubscription).where(UserFeedSubscription.feed_id == feed_id))).scalars()
+    readers = []
+    for sub in subs:
+        readers.append(sub.user_id)
+        await db.delete(sub)
+    feed.is_active = False
+    db.add(feed)
+    await db.commit()
+    for reader in readers:
+        await _invalidate_unread_cache(reader)
+    return {"id": str(feed.id), "is_active": False, "unsubscribed": len(readers)}
+
+
 @router.get("/{feed_id}/analytics")
 async def get_feed_analytics(
     feed_id: uuid.UUID = Path(..., description="UUID of the feed to analyze"),

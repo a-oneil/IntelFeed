@@ -197,6 +197,30 @@ def test_language_words_do_not_link_countries():
     assert _state("Attacks hit hospitals in Spain.", "Spain") == "linked"
 
 
+def test_simplified_chinese_is_a_language():
+    _activate(countries=[_entity("China", ["Chinese"])])
+    assert _state("The operator's scripts carry Simplified Chinese comments.", "China") is None
+    assert _state("Chinese hackers breached the ministry.", "China") == "linked"
+
+
+def test_country_name_inside_a_longer_place_name_is_dropped(tier_on):
+    _activate(
+        countries=[
+            _entity("United States", ["America", "American"]),
+            _entity("Korea"),
+            _entity("Sudan"),
+            _entity("Ukraine"),
+        ]
+    )
+    assert _state("The broker ships freight across North America.", "United States") is None
+    assert _state("The Latin American leader in access control.", "United States") is None
+    assert _state("Investigators blamed North Korea.", "Korea") is None
+    assert _state("Fighting spread in South Sudan.", "Sudan") is None
+    # A region of the country is still the country.
+    assert _state("Power went out across eastern Ukraine.", "Ukraine") == "linked"
+    assert _state("American banks reported the fraud.", "United States") == "linked"
+
+
 def test_surname_matching_a_demonym_is_held(tier_on):
     _activate(countries=[_entity("Moldova", ["Moldovan"])])
     assert _state("The talk was given by researcher Adi Moldovan last week.", "Moldova") == "held"

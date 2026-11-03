@@ -194,6 +194,47 @@ async def test_both_clients_blocked_records_the_403():
 
 
 @pytest.mark.asyncio
+async def test_dropped_connection_retries_through_curl_cffi_and_remembers_it():
+    """SiteGround's anti-bot hangs up on Python's TLS handshake instead of
+    answering 403, so the bot-wall check never saw a status. Cyber Security
+    News, HACKMAGEDDON and Sekoia failed this way for 12 days on prod."""
+    feed = _feed()
+    client = _httpx_client(httpx.RemoteProtocolError("Server disconnected without sending a response."))
+    curl = AsyncMock(return_value=_response(200, RSS_ONE_ITEM, url=feed.url))
+
+    await _run_fetch(feed, client, curl)
+
+    curl.assert_awaited_once()
+    assert feed.error_count == 0 and feed.last_error is None
+    assert _client_memory(feed) == "curl_cffi"
+
+
+@pytest.mark.asyncio
+async def test_host_down_does_not_try_curl():
+    feed = _feed()
+    curl = AsyncMock(return_value=_response(304))
+
+    await _run_fetch(feed, _httpx_client(httpx.ConnectTimeout("timed out")), curl)
+
+    curl.assert_not_awaited()
+    assert feed.error_count == 1
+
+
+@pytest.mark.asyncio
+async def test_dropped_connection_keeps_the_httpx_error_when_curl_fails_too():
+    feed = _feed()
+    client = _httpx_client(httpx.RemoteProtocolError("Server disconnected without sending a response."))
+    curl = AsyncMock(side_effect=RuntimeError("curl: (28) Operation timed out"))
+
+    await _run_fetch(feed, client, curl)
+
+    curl.assert_awaited_once()
+    assert feed.error_count == 1
+    assert "Server disconnected" in (feed.last_error or "")
+    assert _client_memory(feed) is None
+
+
+@pytest.mark.asyncio
 async def test_plain_503_does_not_try_curl_but_a_challenge_page_does():
     feed = _feed()
     curl = AsyncMock(return_value=_response(304))

@@ -18,6 +18,20 @@ from app.models.user import User
 
 router = APIRouter()
 
+
+class ContextColumn(BaseModel):
+    id: str = Field(description="ctx:<source_type>:<key>: the sort_by value and filter parameter on the list endpoint")
+    source_type: str
+    source_label: str
+    key: str
+    label: str
+    display: str = Field(description="fact, badge or chips")
+
+
+class ContextValuesRequest(BaseModel):
+    ids: list[uuid.UUID] = Field(description="Entity UUIDs (the rows the table has loaded); the first 1000 are served")
+
+
 #: Every profile type's model; a campaign has a profile but no article junction.
 _MODELS = {**{t: config[0] for t, config in ENTITY_CONFIG.items()}, "campaign": Campaign}
 
@@ -44,6 +58,47 @@ _EXAMPLE = {
     ],
     "can_enrich": True,
 }
+
+
+@router.get("/{entity_type}/context-columns", response_model=list[ContextColumn])
+async def get_context_columns(
+    entity_type: str = Path(..., description="Entity type slug, e.g. cve or observable."),
+    user: User = Depends(get_viewer),
+    db: AsyncSession = Depends(get_db),
+):
+    """The enrichment values the entity table can show as columns: each enabled
+    source's ``fact``, ``badge`` and ``chips`` outputs for the type
+    (``app/enrichment/context_columns.py``). The type's list endpoint sorts on
+    a column with ``sort_by=<id>`` and filters it with ``<id>=<filter>``: text
+    to match, ``>N``/``<N``/``=N`` (lists compare by length, dates as text),
+    ``*`` for any value or ``!`` for none. Visitors don't see sources that send
+    observables to a third party or bar commercial use."""
+    from app.enrichment.context_columns import context_columns
+
+    if entity_type not in _MODELS:
+        raise AppError(code="bad_request", message=f"Unsupported entity type: {entity_type}", status_code=400)
+    return await context_columns(db, entity_type, user)
+
+
+@router.post(
+    "/{entity_type}/context-values",
+    responses={200: {"content": {"application/json": {"example": {"<uuid>": {"ctx:epss:epss": 0.94}}}}}},
+)
+async def get_context_values(
+    body: ContextValuesRequest,
+    entity_type: str = Path(..., description="Entity type slug, e.g. cve or observable."),
+    user: User = Depends(get_viewer),
+    db: AsyncSession = Depends(get_db),
+):
+    """The context-column values of the given entities, ``{entity_id: {column_id:
+    value}}``; an entity with none is left out. Only columns the user can see
+    (see ``context-columns``), and only entities they can see."""
+    from app.enrichment.context_columns import context_values
+
+    model = _MODELS.get(entity_type)
+    if model is None:
+        raise AppError(code="bad_request", message=f"Unsupported entity type: {entity_type}", status_code=400)
+    return await context_values(db, model, entity_type, body.ids[:1000], user)
 
 
 @router.get(
