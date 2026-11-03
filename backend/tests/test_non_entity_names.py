@@ -90,6 +90,14 @@ JUNK = [
     ("Anthropic models", "category_phrase", ALL4),
     ("Content Inspection", "category_phrase", ALL4),
     ("real-time monitoring", "category_phrase", ALL4),
+    # mainstream platforms filed as tools/actors — products are exempt
+    ("Windows", "platform", AMT),
+    ("Android", "platform", AMT),
+    ("Telegram", "platform", AMT),
+    ("Claude", "platform", AMT),
+    ("WordPress", "platform", AMT),
+    ("JavaScript", "platform", AMT),
+    ("Microsoft 365", "platform", AMT),
     # techniques filed as tools/actors
     ("BYOVD", "technique_term", ALL4),
     ("Bring Your Own Vulnerable Driver (BYOVD)", "technique_term", ALL4),
@@ -145,6 +153,11 @@ def test_number_and_descriptor_rules_hit_actors_only_or_hex(name):
 
 @pytest.mark.parametrize("name", ["WebRTC", "Kerberos", "OpenID Connect", "Model Context Protocol", "MQTT"])
 def test_protocols_may_be_products(name):
+    assert non_entity_reason("product", name) is None
+
+
+@pytest.mark.parametrize("name", ["Windows", "Android", "Telegram", "Claude", "WordPress", "Microsoft 365"])
+def test_platforms_may_be_products(name):
     assert non_entity_reason("product", name) is None
 
 
