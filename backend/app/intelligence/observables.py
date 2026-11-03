@@ -227,7 +227,86 @@ _REFERENCE_HOSTS = frozenset(
         "thehackernews.com",
         "therecord.media",
         "krebsonsecurity.com",
+        # Services malware uses or an article names in passing, minted by the
+        # AI door as indicators until 2026-11 (planning/new-entities/2026-11-02).
+        # Their bare host is never an indicator; a subdomain or full URL on one
+        # still can be.
+        "webhook.site",
+        "requestrepo.com",
+        "oast.fun",
+        "oast.online",
+        "dnslog.pp.ua",
+        "transfer.sh",
+        "bashupload.com",
+        "file.io",
+        "filebin.net",
+        "gofile.io",
+        "pixeldrain.com",
+        "mediafire.com",
+        "catbox.moe",
+        "litter.catbox.moe",
+        "telegra.ph",
+        "telegram.org",
+        "api.github.com",
+        "docs.github.com",
+        "registry.npmjs.org",
+        "nodejs.org",
+        "unpkg.com",
+        "cdn.jsdelivr.net",
+        "sites.google.com",
+        "accounts.google.com",
+        "login.microsoftonline.com",
+        "aka.ms",
+        "bing.com",
+        "apple.com",
+        "okta.com",
+        "booking.com",
+        "monday.com",
+        "api.openai.com",
+        "api.anthropic.com",
+        "api.deepseek.com",
+        "openrouter.ai",
+        "api64.ipify.org",
+        "geoplugin.net",
+        "check-host.net",
+        "etherscan.io",
+        "binance.com",
+        "binance.org",
+        "dedyn.io",
+        "s3.wasabisys.com",
+        "cloudflarestorage.com",
+        "broker.hivemq.com",
     }
+)
+#: Cloudflare's published edge ranges. An IP behind a Cloudflare-fronted lure is
+#: a shared edge address serving thousands of sites: the domain is the
+#: indicator. Only the AI door refuses these; an analyst can still add one.
+_CLOUDFLARE_NETS = tuple(
+    ipaddress.ip_network(n)
+    for n in (
+        "173.245.48.0/20",
+        "103.21.244.0/22",
+        "103.22.200.0/22",
+        "103.31.4.0/22",
+        "141.101.64.0/18",
+        "108.162.192.0/18",
+        "190.93.240.0/20",
+        "188.114.96.0/20",
+        "197.234.240.0/22",
+        "198.41.128.0/17",
+        "162.158.0.0/15",
+        "104.16.0.0/13",
+        "104.24.0.0/14",
+        "172.64.0.0/13",
+        "131.0.72.0/22",
+        "2400:cb00::/32",
+        "2606:4700::/32",
+        "2803:f800::/32",
+        "2405:b500::/32",
+        "2405:8100::/32",
+        "2a06:98c0::/29",
+        "2c0f:f248::/32",
+    )
 )
 
 
@@ -255,6 +334,23 @@ def _valid_public_ip(value: str) -> bool:
     return ip.is_global and not ip.is_multicast and value not in _BENIGN_IPS
 
 
+_psl = None
+#: Alternative roots some malware resolves through; not in the public suffix list.
+_ALT_ROOT_TLDS = frozenset({"bit", "i2p"})
+
+
+def _known_suffix(domain: str) -> bool:
+    """True when ``domain`` ends in a real public suffix. Catches table cells
+    glued into one token ("campaignbpdaersa.clickdomainhost") and dotted
+    non-domains ("com.android.sys.prot", "solana.memo.dead.drop")."""
+    global _psl
+    if _psl is None:
+        from publicsuffixlist import PublicSuffixList
+
+        _psl = PublicSuffixList(accept_unknown=False)
+    return domain.rsplit(".", 1)[-1] in _ALT_ROOT_TLDS or _psl.publicsuffix(domain) is not None
+
+
 def _plausible_domain(value: str) -> bool:
     v = value.lower().rstrip(".")
     if any(v == s or v.endswith("." + s) for s in _BENIGN_DOMAIN_SUFFIXES):
@@ -262,7 +358,7 @@ def _plausible_domain(value: str) -> bool:
     if v in _PLACEHOLDER_DOMAINS or v.startswith("www.") and v[4:] in _PLACEHOLDER_DOMAINS:
         return False
     tld = v.rsplit(".", 1)[-1]
-    if _GLUED_TLD_RE.match(tld):
+    if _GLUED_TLD_RE.match(tld) or not _known_suffix(v):
         return False
     # Version-ish and filename-ish tails regex-match a domain; a real TLD is
     # never all digits and this list covers the common file-suffix collisions.
@@ -379,6 +475,10 @@ def normalize_value(kind: str, value: str) -> str:
     if kind == "cmdline":
         return re.sub(r"\s+", " ", v)
     if kind == "url":
+        # Copied from HTML source: "&amp;" (sometimes "&amp;amp;") is the
+        # query's "&", and keeping it splits one URL into several rows.
+        while "&amp;" in v:
+            v = v.replace("&amp;", "&")
         m = re.match(r"(?i)^(https?)(://[^/]+)(.*)$", v)
         if m:
             return m.group(1).lower() + m.group(2).lower() + m.group(3)
@@ -1105,6 +1205,9 @@ async def sight_known_values(session: AsyncSession, entry_id, candidates: list[C
 _PLACEHOLDER_RE = re.compile(
     r"(?i)redacted|anonymi[sz]ed|<[^>\s]{1,40}>|\{[a-z_][\w\s]{0,40}\}|\[(?:redacted|victim|target|user)[^\]]*\]"
 )
+#: Template and elision marks a writer leaves in an example URL: "#{host}",
+#: "$(hostname)", "[information removed]", a "…" cut, a printf "%u".
+_TEMPLATE_MARKER_RE = re.compile(r"#\{|\$\(|\[information removed\]|…|%[us](?![0-9a-f])", re.IGNORECASE)
 
 #: Discovery / admin commands every incident report quotes and no ledger
 #: wants: they carry nothing attacker-chosen, so an exact match in telemetry
@@ -1364,9 +1467,13 @@ def validate_kind_value(kind: str, raw: str) -> str | None:
     if kind in HASH_KINDS:
         return canonical if HASH_RE.fullmatch(canonical) and _classify_hash(canonical) == kind else None
     if kind == "url":
+        if _PLACEHOLDER_RE.search(canonical) or _TEMPLATE_MARKER_RE.search(canonical):
+            return None
         return canonical if URL_FULL_RE.fullmatch(canonical) else None
     if kind == "email":
-        return canonical if EMAIL_RE.fullmatch(canonical) else None
+        if not EMAIL_RE.fullmatch(canonical) or _PLACEHOLDER_RE.search(canonical):
+            return None
+        return canonical if _plausible_domain(canonical.rsplit("@", 1)[-1]) else None
     if kind == "uri_path":
         if not canonical.startswith("/") or len(canonical) < 3 or canonical.lower() in _BENIGN_URI_PATHS:
             return None
@@ -1428,6 +1535,38 @@ def _hash_evidence_vetoed(kind: str, evidence: str | None) -> bool:
     return bool(_NOT_A_HASH_EVIDENCE_RE.search(evidence)) and "hash" not in evidence.lower()
 
 
+#: A wallet, contract or transaction id is 0x + 40 (or 64) hex: sha1's (or
+#: sha256's) shape once the model drops the prefix.
+_CHAIN_EVIDENCE_RE = re.compile(
+    r"(?i)\b(?:wallets?|smart contracts?|contract address(?:es)?|transactions?|txid|tx hash|ethereum|blockchain)\b"
+)
+
+
+def _ai_door_vetoed(kind: str, canonical: str, evidence: str | None) -> bool:
+    """Values the AI keeps reporting that are never indicators on their own.
+    Applied to the AI door only — an analyst or a curated list can still add one.
+
+    - a bare service host (webhook.site, api.github.com, login.microsoftonline.com),
+      or such a host's URL with no path: the service, not the attacker's use of it;
+    - a Cloudflare edge address: the lure domain behind it is the indicator;
+    - a "hash" whose evidence or 0x prefix says it is a wallet, contract or transaction.
+    """
+    if kind == "domain" and is_reference_host(canonical):
+        return True
+    if kind == "url" and is_reference_host(canonical):
+        path = canonical.split("://", 1)[-1].partition("/")[2]
+        if not path.strip("/"):
+            return True
+    if kind in ("ipv4", "ipv6"):
+        ip = ipaddress.ip_address(canonical)
+        if any(ip in net for net in _CLOUDFLARE_NETS if net.version == ip.version):
+            return True
+    if kind in HASH_KINDS and evidence:
+        if ("0x" + canonical) in evidence.lower() or _CHAIN_EVIDENCE_RE.search(evidence):
+            return True
+    return _hash_evidence_vetoed(kind, evidence)
+
+
 async def _ttp_id_for(session: AsyncSession, technique_id: str | None):
     if not technique_id:
         return None
@@ -1452,7 +1591,7 @@ async def store_observables(session: AsyncSession, entry_id, iocs: list[dict]) -
         if canonical is None:
             continue
         evidence = (item.get("evidence") or "").strip() or None
-        if _hash_evidence_vetoed(kind, evidence):
+        if _ai_door_vetoed(kind, canonical, evidence):
             continue
         defanged = bool(item.get("defanged")) or is_defanged(raw)
         obs = await get_or_create_observable(
@@ -1507,7 +1646,7 @@ async def shadow_observables(
         canonical = validate_kind_value(kind, raw)
         if canonical is None or (kind, canonical) in seen:
             continue
-        if _hash_evidence_vetoed(kind, (item.get("evidence") or "").strip() or None):
+        if _ai_door_vetoed(kind, canonical, (item.get("evidence") or "").strip() or None):
             continue
         seen.add((kind, canonical))
         role = (item.get("role") or "").strip()

@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     ai_daily_budget_usd: float = 2.0
     ai_analysis_relevance_threshold: float = 0.15
     ai_tool_evidence_required: bool = True
+    ai_entity_evidence_required: bool = True
     ai_batch_max_requests: int = 500
     ai_analysis_content_max_chars: int = 12000
     ai_use_batches: bool = True
@@ -277,9 +278,7 @@ class Settings(BaseSettings):
     observables_analysis_tail_reserve: float = 0.4
     observables_publisher_ioc_enabled: bool = True
     observables_publisher_ioc_max_values: int = 2000
-    observables_ai_capture_kinds: str = (
-        "ipv4,ipv6,domain,url,uri_path,email,ja3,ja4,cert_fingerprint,md5,sha1,sha256,script"
-    )
+    observables_ai_capture_kinds: str = "ipv4,ipv6,domain,url,email,ja3,ja4,cert_fingerprint,md5,sha1,sha256,script"
     observables_codeblock_skip_categories: str = "Security Advisories,Government / CERT"
     observables_publish_enabled: bool = False
     observables_publish_token: str = ""

@@ -667,6 +667,47 @@ def test_validate_url_allows_parens():
     assert classify_value("https://evil.com/a(1).zip") == ("url", "https://evil.com/a(1).zip")
 
 
+def test_validators_reject_shapes_the_2026_11_vet_found():
+    """Each value here was captured on prod and deleted in the 2026-11-02 vet."""
+    # Table cells glued into one token, and dotted non-domains: no real suffix.
+    assert validate_kind_value("domain", "campaignbpdaersa.clickdomainhost") is None
+    assert validate_kind_value("domain", "com.android.sys.prot") is None
+    assert validate_kind_value("domain", "bobik.botnet") is None
+    # Real and alternative-root suffixes still pass.
+    assert validate_kind_value("domain", "bpdaersa.click") == "bpdaersa.click"
+    assert validate_kind_value("domain", "abc.onion") == "abc.onion"
+    assert validate_kind_value("domain", "evil.bit") == "evil.bit"
+    # "&amp;" copied from HTML is the query's "&".
+    assert validate_kind_value("url", "https://evil.com/a?x=1&amp;amp;y=2") == "https://evil.com/a?x=1&y=2"
+    # Templates and redactions are not exact values.
+    assert validate_kind_value("url", "https://#{domain}/drop") is None
+    assert validate_kind_value("url", "https://evil.com/[REDACTED]/x") is None
+    assert validate_kind_value("url", "https://evil.com/a…") is None
+    assert validate_kind_value("email", "test@example.invalid") is None
+    assert validate_kind_value("email", "invoices@evil-billing.com") == "invoices@evil-billing.com"
+
+
+def test_ai_door_refuses_services_cloudflare_edges_and_wallets():
+    from app.intelligence.observables import _ai_door_vetoed
+
+    # The bare service is not the attacker's use of it.
+    assert _ai_door_vetoed("domain", "webhook.site", None)
+    assert _ai_door_vetoed("domain", "login.microsoftonline.com", None)
+    assert _ai_door_vetoed("url", "https://api.github.com/", None)
+    assert not _ai_door_vetoed("domain", "f00d.webhook.site", None)
+    assert not _ai_door_vetoed("url", "https://github.com/evilorg/loader", None)
+    # Cloudflare edge addresses front thousands of sites; other IPs pass.
+    assert _ai_door_vetoed("ipv4", "104.21.89.96", None)
+    assert _ai_door_vetoed("ipv6", "2606:4700:3037::6815:388b", None)
+    assert not _ai_door_vetoed("ipv4", "45.88.138.44", None)
+    # A wallet address is sha1-shaped once the 0x is dropped.
+    addr = "52908400098527886e0f7030069857d2e4169ee7"
+    assert _ai_door_vetoed("sha1", addr, f"The attacker's wallet 0x{addr} received the funds.")
+    assert _ai_door_vetoed("sha1", addr, "funds moved through this Ethereum wallet")
+    assert not _ai_door_vetoed("sha1", addr, "The dropper's SHA1 hash is listed below.")
+    assert not _ai_door_vetoed("sha256", "a" * 64, "Contract.pdf.lnk, the lure, SHA256 below")
+
+
 @pytest.mark.asyncio
 async def test_ioc_list_bulk_counters_and_idempotency(db_session):
     """The bulk feed door keeps record_sighting's semantics: one sighting per
