@@ -664,6 +664,8 @@ export interface CopilotContext {
   route?: string;
   /** Documentation page being read — puts the copilot in docs mode. */
   doc_slug?: string;
+  /** Read tools only: for a surface that can't show confirm cards. */
+  read_only?: boolean;
 }
 
 /**

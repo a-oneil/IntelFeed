@@ -66,6 +66,7 @@ from app.tools.gate import STAGED_TTL_SECONDS as _PENDING_TTL_SECONDS  # noqa: E
 _SUPPORTED_ACTION_TYPES = ("create_campaign", "add_note")
 
 from app.tools import DEFAULT_COPILOT_LOCAL_WRITE_TOOLS, DEFAULT_COPILOT_TOOLS  # noqa: E402
+from app.tools.gate import auto_approvable_tools  # noqa: E402
 
 
 def _default_copilot_tools() -> list[str]:
@@ -85,15 +86,20 @@ def _copilot_tool_override(config: dict) -> list[str] | None:
     return list(override) if override else None
 
 
-def _copilot_tool_plan(role: str, config: dict) -> tuple[list[dict], list[dict]]:
-    """(definitions shown to the model, definitions ``call_tool`` may reach) for one user."""
+def _copilot_tool_plan(role: str, config: dict, *, read_only: bool = False) -> tuple[list[dict], list[dict]]:
+    """(definitions shown to the model, definitions ``call_tool`` may reach) for one user.
+
+    ``read_only`` (the docs-page copilot, which has no confirm cards) leaves
+    out every tool that changes data.
+    """
     from app.tools.gate import meta_tool_definitions, model_tool_definitions
 
+    include_writes = not read_only
     override = _copilot_tool_override(config)
     if override is not None:
-        defs = model_tool_definitions(role=role, names=override)
+        defs = model_tool_definitions(role=role, names=override, include_writes=include_writes)
         return defs, defs
-    reachable = model_tool_definitions(role=role)
+    reachable = model_tool_definitions(role=role, include_writes=include_writes)
     direct = set(_default_copilot_tools())
     return [d for d in reachable if d["name"] in direct] + meta_tool_definitions(), reachable
 
@@ -111,6 +117,9 @@ class CopilotContext(BaseModel):
     # Slug of the documentation page being read, when the analyst is in the
     # docs. Empty string / absent on the docs landing page.
     doc_slug: str | None = None
+    # Read tools only. The docs-page copilot sets it: it shows no confirm
+    # cards, so a change it proposed would have nowhere to be confirmed.
+    read_only: bool = False
 
 
 # Directory under docs/ holding the user-facing guide, as opposed to the
@@ -507,6 +516,7 @@ async def copilot_config(
         "provider_type": None,
         "provider_name": None,
         "default_tools": _default_copilot_tools(),
+        "auto_approvable_tools": auto_approvable_tools(),
         "enabled_tools": None,
         "source": None,
         "model": None,
@@ -532,6 +542,9 @@ async def copilot_config(
         # (the rest stay reachable through find_tools / call_tool) — the
         # Prompt Workspace tools editor renders it as the default selection.
         "default_tools": _default_copilot_tools(),
+        # Writes the copilot_auto_approve_tools setting may name (the Prompt
+        # Workspace's "skip Confirm" checkboxes).
+        "auto_approvable_tools": auto_approvable_tools(),
         # The assignment's ``agent_tools`` when it narrows the copilot to just
         # those (None = every tool the user may run), used by the dock to hide
         # "/" commands whose tool isn't enabled.
@@ -580,6 +593,7 @@ async def copilot_stream(
         raise AppError(code="bad_request", message="Question is required", status_code=400)
 
     ctx = body.context
+    read_only_turn = bool(ctx and ctx.read_only)
 
     # Resolve the copilot task -> provider: the person's own key when one
     # applies, else the site assignment (seeded to the claude_code provider
@@ -766,7 +780,7 @@ async def copilot_stream(
                                 "timeout_seconds": cli_timeout,
                                 "provider_config": config,
                                 "agent_user_id": str(user.id),
-                                "agent_conversation_id": str(conversation_id),
+                                "agent_conversation_id": None if read_only_turn else str(conversation_id),
                             },
                             queue="ai",
                         )
@@ -786,7 +800,7 @@ async def copilot_stream(
                             timeout_seconds=cli_timeout,
                             heartbeat_label="copilot stream",
                             agent_user_id=user.id,
-                            agent_conversation_id=conversation_id,
+                            agent_conversation_id=None if read_only_turn else conversation_id,
                         )
                 elif getattr(provider, "supports_tools", False) and hasattr(provider, "stream_agent"):
                     # In-process tool loop (Anthropic API, OpenAI-compatible,
@@ -798,7 +812,7 @@ async def copilot_stream(
                     # it is refused.
                     from app.tools.gate import ToolGate, auto_approve_tools
 
-                    tool_defs, reachable = _copilot_tool_plan(user.role, config)
+                    tool_defs, reachable = _copilot_tool_plan(user.role, config, read_only=read_only_turn)
                     gate = ToolGate(
                         db=db,
                         user_id=user.id,

@@ -74,13 +74,18 @@ async def complete_with_agent(
     system: str | None,
     model: str | None,
     tools: list[dict],
-    tool_executor: ToolExecutor,
+    tool_executor: ToolExecutor | None,
     temperature: float,
     max_tokens: int,
     timeout_seconds: float | None,
     response_format: dict | None,
+    **agent_options,
 ) -> AIResponse:
-    """Run a tool loop to its answer; with a schema, re-express it as JSON."""
+    """Run a tool loop to its answer; with a schema, re-express it as JSON.
+
+    ``agent_options`` go to the provider's ``stream_agent`` (e.g. the Anthropic
+    API's ``web_search``).
+    """
     import time
 
     start = time.monotonic()
@@ -93,10 +98,11 @@ async def complete_with_agent(
         system=system,
         model=model,
         tools=tools,
-        tool_executor=_recording(tool_executor, findings),
+        tool_executor=_recording(tool_executor, findings) if tool_executor is not None else None,
         temperature=temperature,
         max_tokens=max_tokens,
         timeout_seconds=timeout_seconds,
+        **agent_options,
     ):
         kind = ev.get("kind")
         if kind == "text":

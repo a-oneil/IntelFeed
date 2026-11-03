@@ -653,8 +653,8 @@ SETTING_METADATA: dict[str, dict] = {
         "label": "Copilot Writes Without Confirm",
         "description": (
             "Comma-separated copilot tools that change data but run without the person clicking Confirm, "
-            "e.g. create_note,add_tag,star_entry,bookmark_entry,watch_entity. Admin-only tools always ask. "
-            "Empty: every change waits for Confirm."
+            "e.g. create_note,add_tag,star_entry,bookmark_entry,watch_entity. Admin-only tools and deletes "
+            "always ask. Empty: every change waits for Confirm. Edited in the Prompt Workspace (Copilot)."
         ),
         "group": "ai",
     },

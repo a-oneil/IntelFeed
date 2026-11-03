@@ -46,6 +46,8 @@ export interface CopilotConfig {
   provider_name: string | null;
   /** Tools shown directly when the assignment sets no agent_tools; the rest stay reachable via find_tools/call_tool. */
   default_tools?: string[];
+  /** Writes the "Skip Confirm for" setting may name: never admin-only tools or deletes. */
+  auto_approvable_tools?: string[];
   /**
    * The assignment's actual effective tool allowlist (override or default),
    * or null when the provider is unrestricted. Used to hide "/" commands in

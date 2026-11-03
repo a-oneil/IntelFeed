@@ -154,8 +154,10 @@ Tasks that use tools, such as the copilot, run on any provider type: Claude
 Code, the Claude API, OpenAI-compatible and Ollama. An OpenAI-compatible
 provider has a **Tool calling** switch in its Configure panel; turn it off for a
 local server that handles tools badly, and those tasks can't be assigned to it.
-**Copilot Writes Without Confirm** (an AI setting) lists low-risk changes, such
-as notes and tags, that may skip the click. It is empty by default.
+On the copilot's page in **Prompts**, **Skip Confirm for** picks low-risk
+changes, such as notes and tags, that run without the click. It is empty by
+default; deletes and admin-only changes always ask. The copilot on the
+documentation page only looks things up.
 
 On the Cost Dashboard, a copilot on a flat-rate sign-in shows what the tokens
 *would* cost at API prices, not a real charge. The real limit is the plan's

@@ -229,13 +229,23 @@ def check_call(name: str, args: dict, *, role: str, offered: Iterable[str] | Non
     return None
 
 
+def auto_approvable_tools() -> list[str]:
+    """Writes an admin may let skip the click: never an admin tool, never a two-step delete.
+
+    A delete's first call only returns a token, so "running it" without the
+    click would delete nothing and hand the model a token it can't use.
+    """
+    blocked = ADMIN_TOOLS | confirmation_token_tools()
+    return sorted(t["name"] for t in TOOL_DEFINITIONS if needs_confirmation(t["name"]) and t["name"] not in blocked)
+
+
 def auto_approve_tools() -> frozenset[str]:
-    """Writes an admin lets the copilot run without a click. Never an admin tool."""
+    """Writes an admin lets the copilot run without a click (``copilot_auto_approve_tools``)."""
     from app.config import settings
 
     raw = str(settings.get("copilot_auto_approve_tools") or "")
     names = {n.strip() for n in raw.split(",") if n.strip()}
-    return frozenset(n for n in names if needs_confirmation(n) and n not in ADMIN_TOOLS)
+    return frozenset(names & set(auto_approvable_tools()))
 
 
 async def stage_tool_call(

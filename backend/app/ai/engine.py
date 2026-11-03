@@ -1023,6 +1023,10 @@ async def run_task(
         # Who the CLI's IntelFeed tools act for. The provider turns it into a
         # read-only agent token for that run; nothing else reaches the agent.
         complete_kwargs["agent_user_id"] = user_id
+    if provider_model.provider_type == "claude" and "WebSearch" in (config.get("allowed_tools") or []):
+        # The CLI's WebSearch has an Anthropic API equivalent, run on
+        # Anthropic's side (entity_enrichment_research needs it).
+        complete_kwargs["web_search"] = True
     if provider_model.provider_type in _IN_PROCESS_TOOL_TYPES and provider_model.supports_tools:
         from app.ai.capabilities import task_requires_tools
 

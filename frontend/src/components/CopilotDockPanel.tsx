@@ -597,7 +597,7 @@ export function CopilotDockPanel() {
                 </Chip>
               )}
               {copilotConfig?.configured && copilotConfig.supports_tools === false && (
-                <Chip size="sm" tone="toned" tint="var(--warning)" title="This provider has no tool loop: answers come without live data lookups">
+                <Chip size="sm" tone="toned" tint="var(--warning)" title="Tool calling is turned off for this provider: answers come without live data lookups">
                   no tools
                 </Chip>
               )}

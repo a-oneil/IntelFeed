@@ -33,6 +33,22 @@ TOOL_CAPABLE_PROVIDER_TYPES: frozenset[str] = frozenset({"claude_code", "ollama"
 TOOLS_TOGGLEABLE_PROVIDER_TYPES: frozenset[str] = frozenset({"openai_compatible"})
 
 
+# Tasks whose job is web research (assignment ``allowed_tools`` names
+# WebSearch). The Claude Code CLI and the Anthropic API run web search on
+# Anthropic's side; the other loops have no search tool, so onboarding never
+# routes these tasks to them (an admin still can, by hand).
+WEB_SEARCH_TASKS: frozenset[str] = frozenset({"entity_enrichment_research"})
+WEB_SEARCH_PROVIDER_TYPES: frozenset[str] = frozenset({"claude_code", "claude"})
+
+
+def task_requires_web_search(task_name: str | None) -> bool:
+    return task_name in WEB_SEARCH_TASKS
+
+
+def provider_type_supports_web_search(provider_type: str | None) -> bool:
+    return provider_type in WEB_SEARCH_PROVIDER_TYPES
+
+
 def task_requires_tools(task_name: str | None) -> bool:
     return task_name in TOOL_REQUIRED_TASKS
 

@@ -299,7 +299,7 @@ There are four provider types (`backend/app/ai/providers/`):
 | `ollama` | `OllamaProvider` | An Ollama server (`base_url`, default `http://localhost:11434`) | Yes, a native `/api/chat` tool loop over the backend tool registry |
 | `openai_compatible` | `OpenAICompatibleProvider` | Any `/v1/chat/completions` server: OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter, Groq. `base_url` is required | Yes, a `tools` / `tool_calls` loop, unless the row sets `tools_enabled: false` |
 
-Some tasks only work with tools. `TOOL_REQUIRED_TASKS` (`copilot`, `entity_enrichment_research`) and `provider_type_supports_tools` in `backend/app/ai/capabilities.py` stop you from assigning those tasks to a provider that cannot run tools: today that is only an `openai_compatible` row with tool calling turned off. Background agentic tasks get read-only tools; only the copilot proposes writes, and the user confirms each one (see [copilot.md](copilot.md#the-tool-layer-one-gate-for-every-provider)).
+Some tasks only work with tools. `TOOL_REQUIRED_TASKS` (`copilot`, `entity_enrichment_research`) and `provider_type_supports_tools` in `backend/app/ai/capabilities.py` stop you from assigning those tasks to a provider that cannot run tools: today that is only an `openai_compatible` row with tool calling turned off. Onboarding also keeps `entity_enrichment_research`, which works by web search, on a provider that has it: the Claude Code CLI or the Anthropic API, which gets Anthropic's server-side web search when the assignment's `allowed_tools` lists `WebSearch` (`WEB_SEARCH_TASKS` in `capabilities.py`). Background agentic tasks get read-only tools; only the copilot proposes writes, and the user confirms each one (see [copilot.md](copilot.md#the-tool-layer-one-gate-for-every-provider)).
 
 Useful `config` keys by type (provider row, overridable per assignment):
 
@@ -405,7 +405,7 @@ An admin can let people register their own AI keys and have the tasks *they* sta
 |---|---|---|
 | `allow_user_ai_providers` | `false` | The main switch. Off = every call uses the site assignment. Saved keys and routes stay but are ignored |
 | `require_user_ai_provider` | `false` | With the switch on: refuse an interactive task instead of falling back to the instance's providers |
-| `user_ai_provider_types` | `claude,openai_compatible` | Key types a person may register. `ollama` may be added. `claude_code` is never allowed (`PERSONAL_PROVIDER_TYPES`, `backend/app/ai/capabilities.py:74`) |
+| `user_ai_provider_types` | `claude,openai_compatible` | Key types a person may register. `ollama` may be added. `claude_code` is never allowed (`PERSONAL_PROVIDER_TYPES`, `backend/app/ai/capabilities.py:94`) |
 | `user_ai_allow_private_endpoints` | `false` | Let a personal key point at a private address (a LAN Ollama). Keep it off on a public instance: the server calls whatever URL people enter |
 | `user_ai_daily_request_cap` | `300` | Daily call limit on one person's keys. It counts calls, not dollars, because Ollama and unpriced models report $0. `0` = unlimited |
 | `site_ai_user_daily_requests` | `0` | Daily requests one person may make on the *instance's* providers. `0` = unlimited. See [Allowances & Caps](#allowances--caps) |
@@ -416,7 +416,7 @@ A person's routing lives in two tables (`backend/app/models/user_ai_route.py`):
 - `user_ai_routes`: one row per `(user, task)`, plus at most one default row (`task_id` NULL). A route names one of the person's own keys, a model, and optional config. A per-task row with no provider sends that task back to the instance's provider even when a default key exists (the picker calls it "Instance default").
 - `user_ai_preferences`: `fallback_to_site` (default `true`) and `monthly_cap_usd` (the person's own dollar cap; NULL = none).
 
-**Which tasks may use a personal key** is a per-task flag, `ai_tasks.allows_user_provider`. The rule: does the result belong to the person who clicked? Copilot turns, rule drafts, summaries and report sections do. Entity links, adjudication verdicts, briefs and thread spines are read by everyone, so they always use the instance's providers. `USER_PROVIDER_ELIGIBLE_TASKS` (`backend/app/ai/capabilities.py:53`) lists the 14 tasks that may use one. The admin can turn the flag off for any of them, or on for a custom task, but not on for a task outside that set (`PATCH /api/ai/tasks/{id}` answers 400 `task_site_only`; the task API shows the lock as `user_provider_locked`).
+**Which tasks may use a personal key** is a per-task flag, `ai_tasks.allows_user_provider`. The rule: does the result belong to the person who clicked? Copilot turns, rule drafts, summaries and report sections do. Entity links, adjudication verdicts, briefs and thread spines are read by everyone, so they always use the instance's providers. `USER_PROVIDER_ELIGIBLE_TASKS` (`backend/app/ai/capabilities.py:73`) lists the 14 tasks that may use one. The admin can turn the flag off for any of them, or on for a custom task, but not on for a task outside that set (`PATCH /api/ai/tasks/{id}` answers 400 `task_site_only`; the task API shows the lock as `user_provider_locked`).
 
 **The lookup**, for a `user` caller with the switch on (`resolve_assignment`, `backend/app/ai/engine.py:609`):
 

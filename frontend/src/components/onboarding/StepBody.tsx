@@ -552,8 +552,8 @@ function AIStep() {
             <>
               {" "}
               {result.tasks_skipped_agentic.length} agentic task
-              {result.tasks_skipped_agentic.length !== 1 ? "s" : ""} stayed on the Claude Code CLI —
-              they only work by calling tools, which this provider can't do.
+              {result.tasks_skipped_agentic.length !== 1 ? "s" : ""} stayed where they were: they need
+              tool calling or web search, which this provider doesn't have turned on.
             </>
           )}
         </div>

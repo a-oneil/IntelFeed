@@ -62,6 +62,10 @@ export const USER_AI_SETTING_KEYS = [
   "share_ai_daily_requests",
 ] as const;
 
+/** The `ai` group's copilot keys: edited on the copilot's Prompt Workspace
+ *  page ("Skip Confirm for"), not the Analyze stage panel. */
+export const COPILOT_AI_SETTING_KEYS = ["copilot_auto_approve_tools"] as const;
+
 /** Key-level exceptions to GROUP_DEST: the observables publish knobs render
  *  on the Publishing browse screen, not the stage panel; the personal-key
  *  settings on the User keys tab. */
@@ -73,6 +77,7 @@ const KEY_DEST: Record<string, EngineDest> = {
   user_ai_daily_request_cap: { kind: "settings", section: "ai", tab: "keys" },
   site_ai_user_daily_requests: { kind: "settings", section: "ai", tab: "keys" },
   share_ai_daily_requests: { kind: "settings", section: "ai", tab: "keys" },
+  copilot_auto_approve_tools: { kind: "settings", section: "ai", tab: "prompts" },
   observables_publish_enabled: { kind: "browse", browse: "publishing" },
   observables_publish_token: { kind: "browse", browse: "publishing" },
   observables_publish_min_confidence: { kind: "browse", browse: "publishing" },

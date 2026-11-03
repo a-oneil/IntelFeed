@@ -785,7 +785,7 @@ function RoutesCard({
                         </span>
                       )}
                       {noTools && (
-                        <Chip size="sm" tone="toned" tint="var(--warning)" title="This provider type has no tool calling" className={styles.toolsChip}>
+                        <Chip size="sm" tone="toned" tint="var(--warning)" title="Tool calling is turned off for this key" className={styles.toolsChip}>
                           no tools
                         </Chip>
                       )}

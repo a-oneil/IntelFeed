@@ -32,6 +32,7 @@ import {
   useAgentTools,
 } from "@/hooks/useAI";
 import { useCopilotConfig } from "@/hooks/useCopilotAuth";
+import { useSystemSettings, useUpdateSystemSettings } from "@/hooks/useSystemSettings";
 import { useAutomationRules } from "@/hooks/useAutomation";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import { AI_VARIABLE_GROUPS } from "@/utils/aiVariables";
@@ -1555,6 +1556,88 @@ function AgentToolsRow({
   );
 }
 
+/**
+ * Copilot writes that run without the person clicking Confirm — the
+ * `copilot_auto_approve_tools` system setting. Empty by default. Only writes
+ * the backend says may skip the click are listed: never admin-only tools or
+ * deletes. Applies whichever provider answers, the Claude CLI included.
+ */
+function CopilotAutoApproveRow() {
+  const { data: copilotCfg } = useCopilotConfig();
+  const { data: settings } = useSystemSettings();
+  const updateSettings = useUpdateSystemSettings();
+  const candidates = copilotCfg?.auto_approvable_tools ?? [];
+  const stored = String(settings?.settings.copilot_auto_approve_tools?.value ?? "");
+  const current = useMemo(
+    () => new Set(stored.split(",").map((t) => t.trim()).filter(Boolean)),
+    [stored]
+  );
+  const [expanded, setExpanded] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(current);
+  useEffect(() => setSelected(current), [current]);
+
+  const chosen = candidates.filter((t) => current.has(t));
+  const summary = chosen.length === 0 ? "None: every change asks" : `${chosen.length} skip Confirm`;
+
+  return (
+    <div className={styles.settingRow}>
+      <div className={styles.settingInfo}>
+        <div className={styles.settingLabel}>Skip Confirm for</div>
+        <div className={styles.settingHint}>
+          Changes the copilot may make without the person clicking Confirm, on every provider. Pick
+          only low-risk ones (notes, tags, stars, watches): article text the copilot reads could ask
+          for them. Admin-only changes and deletes always ask.
+        </div>
+        {expanded && (
+          <div className={styles.toolsGrid}>
+            {candidates.map((name) => (
+              <label key={name} className={styles.toolChk}>
+                <input
+                  type="checkbox"
+                  checked={selected.has(name)}
+                  onChange={(e) => {
+                    setSelected((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(name);
+                      else next.delete(name);
+                      return next;
+                    });
+                  }}
+                />
+                <span>{name}</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className={styles.settingCtl}>
+        <span className={styles.settingHint}>{summary}</span>
+        {expanded ? (
+          <>
+            <button
+              className={styles.toolsBtn}
+              disabled={updateSettings.isPending}
+              onClick={() => {
+                updateSettings.mutate({ copilot_auto_approve_tools: [...selected].sort().join(",") });
+                setExpanded(false);
+              }}
+            >
+              Save
+            </button>
+            <button className={styles.toolsBtn} onClick={() => setExpanded(false)}>
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button className={styles.toolsBtn} onClick={() => setExpanded(true)} disabled={!settings}>
+            Edit
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Routing & Visibility ──────────────────────────────────────── */
 
 function RoutingPanel({
@@ -1661,6 +1744,7 @@ function RoutingPanel({
       </div>
 
       <AgentToolsRow task={task} assignment={assignment} providers={providers} />
+      {task.name === "copilot" && <CopilotAutoApproveRow />}
 
       <div className={styles.settingRow}>
         <div className={styles.settingInfo}>

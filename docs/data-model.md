@@ -512,7 +512,7 @@ Table `ai_tasks`: one kind of AI job, for example `entry_analysis`, `entry_adjud
 - `variables` (JSONB) — hints for the prompt editor only. The backend never checks them when rendering.
 - `is_system` (built-in), `is_deprecated` (kept for old `ai_results`, hidden from pickers)
 - `show_in_entry_actions`, `entry_action_order`, `show_in_entity_actions` — where the task appears as a one-click action
-- `allows_user_provider` (default false) — a person's own key may answer this task. It starts true for the tasks in `USER_PROVIDER_ELIGIBLE_TASKS` (`backend/app/ai/capabilities.py:53`). The admin can turn it off, or on for a custom task, but not on for a pipeline task outside that set.
+- `allows_user_provider` (default false) — a person's own key may answer this task. It starts true for the tasks in `USER_PROVIDER_ELIGIBLE_TASKS` (`backend/app/ai/capabilities.py:73`). The admin can turn it off, or on for a custom task, but not on for a pipeline task outside that set.
 
 Has many prompt templates, assignments and user routes (all CASCADE).
 

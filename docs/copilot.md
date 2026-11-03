@@ -58,11 +58,11 @@ Both the assignment and the prompt are editable at **Settings → AI Configurati
 
 ## Request flow: `POST /api/ai/copilot/stream`
 
-`copilot_stream` (`backend/app/api/copilot.py:551`) takes `{question, conversation_id?, context?}` and returns an SSE stream. For each turn:
+`copilot_stream` (`backend/app/api/copilot.py:564`) takes `{question, conversation_id?, context?}` and returns an SSE stream. For each turn:
 
 1. **Pick the provider**: `resolve_assignment(db, Caller.user(user.id), "copilot")`. This is where a turn can be refused before anything streams: 403 `user_ai_key_required` (personal keys are required, or the person turned off fallback and their key cannot answer; `details.reason` says why) or 429 `ai_allowance_exceeded` (the person used up today's `site_ai_user_daily_requests`).
-2. **Load or create the conversation.** A given `conversation_id` must belong to the caller (404 otherwise). A new conversation is titled from the first 60 characters of the question. Its scope comes from the context (`_scope_from_context`, `backend/app/api/copilot.py:352`): `entry`, `multi_entry`, `entity` (`scope_id = "{entity_type}:{entity_id}"`) or `global`.
-3. **Describe where the analyst is** (`_build_ambient_context`, `backend/app/api/copilot.py:297`) from the optional `CopilotContext` (`backend/app/api/copilot.py:101`). Each lookup is best effort; a failure just drops that line.
+2. **Load or create the conversation.** A given `conversation_id` must belong to the caller (404 otherwise). A new conversation is titled from the first 60 characters of the question. Its scope comes from the context (`_scope_from_context`, `backend/app/api/copilot.py:361`): `entry`, `multi_entry`, `entity` (`scope_id = "{entity_type}:{entity_id}"`) or `global`.
+3. **Describe where the analyst is** (`_build_ambient_context`, `backend/app/api/copilot.py:306`) from the optional `CopilotContext` (`backend/app/api/copilot.py:101`). Each lookup is best effort; a failure just drops that line.
 
    | Context field | What the model gets |
    |---|---|
@@ -152,7 +152,7 @@ Either way the endpoint handles events the same way, because the worker relays `
 
 `run_copilot_stream` (`backend/app/workers/copilot_tasks.py:115`; soft limit 300 s, hard limit 360 s) has no business logic. It runs `ClaudeCodeProvider.stream_agent` and pushes each event onto the list `copilot:stream:{run_id}`, then an `__end__` or `__error__` marker. A list (not pub/sub) means no events are lost if the api subscribes late or falls behind. The list expires after 300 s (`_STREAM_TTL_SECONDS`, `backend/app/workers/copilot_tasks.py:40`) so abandoned runs clean themselves up. Even if the task crashes, it pushes an error marker (`_emergency_terminate`, `backend/app/workers/copilot_tasks.py:152`), so the api never waits forever.
 
-The api reads the list with BLPOP (`_iter_worker_events`, `backend/app/api/copilot.py:460`). If nothing arrives for the CLI timeout plus 60 seconds (180 + 60 when no timeout is set), the turn fails with "Copilot worker produced no output".
+The api reads the list with BLPOP (`_iter_worker_events`, `backend/app/api/copilot.py:469`). If nothing arrives for the CLI timeout plus 60 seconds (180 + 60 when no timeout is set), the turn fails with "Copilot worker produced no output".
 
 ### The `ai` queue
 
@@ -172,7 +172,8 @@ Article text reaches the model's context through pinned articles, search results
 - **What may run.** `check_call` refuses a tool that was not offered, an admin tool for a non-admin (checked again here, not only in the offer), and any call that carries a `confirmation_token`: that token stands for the user's yes, not the model's.
 - **Reads** run straight away.
 - **Writes are staged, not run.** `needs_confirmation` covers every mutating tool plus the reads that store what they produce (`PERSISTING_READ_TOOLS`: extractions, `run_ai_task`, `generate_detection_rules`). The call is saved for the asking user (`stage_tool_call`) and the model gets `{"status": "awaiting_confirmation", ...}` back. Only the user's click runs it ([below](#confirmed-writes-staging-and-the-confirm-endpoint)).
-- **Skipping the click.** An admin can list low-risk writes in `copilot_auto_approve_tools` (comma-separated, empty by default), e.g. `create_note,add_tag,star_entry,watch_entity`. Admin tools on that list are ignored.
+- **Skipping the click.** An admin can pick low-risk writes that run without it: **Skip Confirm for**, on the copilot's page in the Prompt Workspace (Settings → AI Configuration → Prompts). It stores the `copilot_auto_approve_tools` setting, empty by default. Only `auto_approvable_tools()` may be picked: never an admin tool, and never a two-step delete, whose first call deletes nothing.
+- **Read-only surfaces.** The documentation page's copilot (`DocsCopilot.tsx`) shows no confirm cards, so it sends `context.read_only: true` and is offered read tools only (and the CLI gets a `read` token).
 
 The in-process loops call `ToolGate` directly. The Claude CLI reaches the registry over HTTP, so `/api/tools/execute` (`backend/app/api/tools.py`) applies the same checks to its agent token.
 
@@ -229,7 +230,7 @@ Two things to know:
 - The header copilot button (`frontend/src/components/AppHeader.tsx`) and `Cmd/Ctrl+Shift+K` (`frontend/src/hooks/useGlobalShortcuts.ts`) toggle the dock. Plain `Cmd/Ctrl+K` opens the command palette, which also has an "Ask Copilot" action.
 - **"Ask Copilot" buttons** call `openCopilotWith(seed)`: on entity profile headers, the entry reader, the entry AI panel, AI results, the bulk-selection toolbar (which pins several articles) and the detection workbench. A `CopilotSeed` can carry a starter `prompt` (sent at once), a `context` to pin, a `label`, and `lockContext`. When a seed arrives, the dock stops any running stream, starts a new thread, pins the context for that thread, and sends the prompt.
 
-**Page context.** `useCopilotContext` (`frontend/src/hooks/useCopilotContext.ts`) builds the request `context` from the route and stores: the selected entry, the entity from workbench URLs (`actor` becomes `threat_actor`), the campaign, the search query and the path. The copilot embedded in the documentation pages (`DocsCopilot.tsx`) sends `route: "/documentation"` and the `doc_slug` of the page being read. A pinned (seeded) context replaces it. The `ContextPill` (`frontend/src/components/ContextPill.tsx`) shows what is pinned; dismiss it to ask about the whole instance.
+**Page context.** `useCopilotContext` (`frontend/src/hooks/useCopilotContext.ts`) builds the request `context` from the route and stores: the selected entry, the entity from workbench URLs (`actor` becomes `threat_actor`), the campaign, the search query and the path. The copilot embedded in the documentation pages (`DocsCopilot.tsx`) sends `route: "/documentation"`, the `doc_slug` of the page being read, and `read_only: true`. A pinned (seeded) context replaces it. The `ContextPill` (`frontend/src/components/ContextPill.tsx`) shows what is pinned; dismiss it to ask about the whole instance.
 
 **Streaming.** `streamCopilotChat` (`frontend/src/hooks/useAI.ts`) reads SSE over `fetch`, because `EventSource` cannot send an Authorization header. Each assistant turn shows tool-trace chips (pending, then success or error), the streamed Markdown, and one confirm card per `confirm_request` (`frontend/src/components/ConfirmCard.tsx`). A card shows the tool and every argument; a destructive one adds a warning. While any card is open, the input is disabled ("Resolve the pending action above to continue…"). Confirming posts to `/ai/copilot/confirm`, adds the result as a message, and refreshes every cached query, since a write can touch any page.
 
@@ -313,7 +314,7 @@ Celery results share Redis with the copilot, so they expire after one hour (`res
 | `copilot_worker_dispatch` | `backend/app/config.py:477` | `true` (default): run the CLI in `celery-worker-ai`. `false`: run it in the api. The Anthropic API, OpenAI-compatible and Ollama always run in the api |
 | `allowed_tools`, `timeout_seconds` | Copilot assignment config (Settings → AI Configuration) | `["IntelFeed"]`, 240 s |
 | `agent_tools` | Copilot assignment config (Prompt Workspace → Routing) | Limits the copilot on the Anthropic API, OpenAI-compatible and Ollama to exactly these tools. Unset (default): the everyday tools plus `find_tools` / `call_tool` for the rest. `ollama_tools` is its old name and still works |
-| `copilot_auto_approve_tools` | System setting, AI group (Settings → Engine) | Writes that run without the click. Empty (default): every write waits for Confirm. Admin tools always wait |
+| `copilot_auto_approve_tools` | **Skip Confirm for**, the copilot's page in the Prompt Workspace | Writes that run without the click. Empty (default): every write waits for Confirm. Admin tools and deletes always wait |
 | Tool calling (`tools_enabled`) | An `openai_compatible` provider's Configure panel | On by default. Off: that provider answers without tools |
 | History | `_MAX_HISTORY_MESSAGES` | Last 20 messages sent as `conversation_history` |
 | Pinned articles | `_PINNED_ENTRY_MAX_CHARS`, `_PINNED_MULTI_MAX_ENTRIES`, `_PINNED_MULTI_MAX_CHARS` | 15,000 characters for one article; 8 articles at 4,000 each when several are pinned |

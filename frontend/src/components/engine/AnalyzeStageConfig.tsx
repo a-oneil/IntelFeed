@@ -11,7 +11,7 @@ import { useExtractionStatus } from "@/hooks/useEngine";
 import { DenylistPanel } from "./DenylistPanel";
 
 import styles from "./AnalyzeStageConfig.module.css";
-import { USER_AI_SETTING_KEYS } from "./engineSettingsIndex";
+import { COPILOT_AI_SETTING_KEYS, USER_AI_SETTING_KEYS } from "./engineSettingsIndex";
 
 /** Analyze stage panel: one-pass AI analysis status + model + budget/gate
  *  settings, plus the entity-creation guardrails its output passes through.
@@ -136,6 +136,7 @@ export function AnalyzeStageConfig() {
           "attack_ics_context_keywords",
           "cve_epss_high_risk_threshold",
           ...USER_AI_SETTING_KEYS,
+          ...COPILOT_AI_SETTING_KEYS,
         ]}
         renderAfterKey={{
           ai_use_batches: () =>

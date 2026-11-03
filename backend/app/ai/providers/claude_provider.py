@@ -55,6 +55,13 @@ from app.ai.providers.schema_utils import enforce_no_additional_properties as _e
 logger = logging.getLogger(__name__)
 
 OAUTH_BETA_HEADER = "oauth-2025-04-20"
+
+# Anthropic's server-side web search, offered when a task's assignment lists
+# WebSearch (entity_enrichment_research). It runs on Anthropic's side, like the
+# CLI's, so nothing is fetched from this host. Billed per search by Anthropic.
+WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_uses": 5}
+# Server-tool blocks in a reply, replayed verbatim on the next request.
+_SERVER_BLOCK_TYPES = frozenset({"server_tool_use", "web_search_tool_result"})
 OAUTH_TOKEN_PREFIX = "sk-ant-oat"
 
 
@@ -184,8 +191,9 @@ class ClaudeProvider(AIProvider):
         heartbeat_label: str | None = None,
         tools: list[dict] | None = None,
         tool_executor: ToolExecutor | None = None,
+        web_search: bool = False,
     ) -> AIResponse:
-        if tools and tool_executor is not None:
+        if (tools and tool_executor is not None) or web_search:
             # An agentic task: run the tool loop instead of answering blind.
             return await complete_with_agent(
                 self,
@@ -198,6 +206,7 @@ class ClaudeProvider(AIProvider):
                 max_tokens=max_tokens,
                 timeout_seconds=timeout_seconds,
                 response_format=response_format,
+                web_search=web_search,
             )
         # timeout_seconds / heartbeat_label are claude_code-provider specific
         # (subprocess wait). Accepted here for interface compatibility, ignored
@@ -321,7 +330,11 @@ class ClaudeProvider(AIProvider):
 
     @staticmethod
     def _assistant_blocks(message) -> list[dict]:
-        """The reply's text and tool_use blocks, replayed as the next request's assistant turn."""
+        """The reply's blocks, replayed as the next request's assistant turn.
+
+        Text and tool_use are rebuilt clean; web search's server blocks go
+        back as the API sent them, since a search result must follow its call.
+        """
         blocks: list[dict] = []
         for block in message.content:
             btype = getattr(block, "type", None)
@@ -329,6 +342,8 @@ class ClaudeProvider(AIProvider):
                 blocks.append({"type": "text", "text": block.text})
             elif btype == "tool_use":
                 blocks.append({"type": "tool_use", "id": block.id, "name": block.name, "input": block.input or {}})
+            elif btype in _SERVER_BLOCK_TYPES:
+                blocks.append(block.model_dump(exclude_none=True))
         return blocks
 
     async def stream_agent(
@@ -342,14 +357,17 @@ class ClaudeProvider(AIProvider):
         max_tokens: int = 4096,
         timeout_seconds: float | None = None,
         heartbeat_label: str | None = None,
+        web_search: bool = False,
     ) -> AsyncGenerator[dict, None]:
         """Run one agent turn over the Messages API, yielding typed events.
 
         Text streams as it arrives; each ``tool_use`` block is run through
         ``tool_executor`` and its result sent back, until the model answers
-        without calling a tool or the iteration cap is hit. Event shapes are
-        the ones in app.ai.agent_loop. Cost is left to the engine's token
-        table (``total_cost_usd`` None).
+        without calling a tool or the iteration cap is hit. ``web_search``
+        adds Anthropic's server-side search, whose long turns can pause
+        (``pause_turn``) and are resumed as they are. Event shapes are the
+        ones in app.ai.agent_loop. Cost is left to the engine's token table
+        (``total_cost_usd`` None).
         """
         del temperature, heartbeat_label
         client = self._build_client()
@@ -362,8 +380,11 @@ class ClaudeProvider(AIProvider):
         system_blocks = self._build_system(system)
         if system_blocks is not None:
             kwargs["system"] = system_blocks
+        offered: list[dict] = [WEB_SEARCH_TOOL] if web_search else []
         if tools and tool_executor is not None:
-            kwargs["tools"] = self._cached_tools(tools)
+            offered += tools
+        if offered:
+            kwargs["tools"] = self._cached_tools(offered)
 
         tokens_input = 0
         tokens_output = 0
@@ -395,6 +416,11 @@ class ClaudeProvider(AIProvider):
                 + (getattr(usage, "cache_creation_input_tokens", 0) or 0)
             )
             tokens_output += usage.output_tokens or 0
+
+            if final.stop_reason == "pause_turn":
+                # A long server-side search turn: send it back to carry on.
+                messages.append({"role": "assistant", "content": self._assistant_blocks(final)})
+                continue
 
             tool_uses = [b for b in final.content if getattr(b, "type", None) == "tool_use"]
             if final.stop_reason != "tool_use" or not tool_uses or tool_executor is None:

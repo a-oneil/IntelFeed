@@ -197,9 +197,15 @@ def test_auto_approve_setting_never_covers_admin_tools_or_reads(monkeypatch):
     from app.config import settings
 
     monkeypatch.setattr(
-        type(settings), "get", lambda self, key: "create_note, merge_entities,search_entries,delete_feed,  add_tag"
+        type(settings),
+        "get",
+        lambda self, key: "create_note, merge_entities,search_entries,delete_feed,  add_tag,delete_detection_rule",
     )
+    # Admin tools, reads and two-step deletes never skip the click.
     assert gate.auto_approve_tools() == frozenset({"create_note", "add_tag"})
+    allowed = set(gate.auto_approvable_tools())
+    assert not allowed & ADMIN_TOOLS and not allowed & gate.confirmation_token_tools()
+    assert "create_note" in allowed and "search_entries" not in allowed
 
 
 # ----------------------------------------------------------------- confirmed
@@ -500,3 +506,50 @@ async def test_call_tool_goes_through_the_same_gate(fake_redis, ran):
     assert "error" in nested
     assert ran == [("get_feeds", {"limit": 1})]
     assert [s["tool_name"] for s in await gate.take_staged(g.conversation_id, g.user_id)] == ["delete_detection_rule"]
+
+
+def test_read_only_plan_has_no_writes():
+    """The docs-page copilot shows no confirm cards, so it is offered reads only."""
+    from app.api.copilot import _copilot_tool_plan
+
+    for config in ({}, {"agent_tools": ["search_entries", "create_note"]}):
+        direct, reachable = _copilot_tool_plan("admin", config, read_only=True)
+        names = {d["name"] for d in direct} | {d["name"] for d in reachable}
+        assert not {n for n in names if gate.needs_confirmation(n)}
+        assert "search_entries" in names
+
+
+# --------------------------------------------------- Anthropic web search
+
+
+@pytest.mark.asyncio
+async def test_anthropic_web_search_is_offered_and_a_paused_turn_resumes():
+    search_block = _block(type="server_tool_use", id="s1", name="web_search", input={"query": "x"})
+    search_block.model_dump = lambda exclude_none=True: {
+        "type": "server_tool_use",
+        "id": "s1",
+        "name": "web_search",
+        "input": {"query": "x"},
+    }
+    paused = SimpleNamespace(content=[search_block], stop_reason="pause_turn", usage=_usage())
+    answer = SimpleNamespace(content=[_block(type="text", text="Found it.")], stop_reason="end_turn", usage=_usage())
+    provider, messages = _claude_with([(paused, []), (answer, ["Found it."])])
+
+    events = [ev async for ev in provider.stream_agent(prompt="research", web_search=True)]
+
+    assert messages.requests[0]["tools"][0]["type"] == "web_search_20250305"
+    # The paused turn went back as the assistant's content, server block included.
+    assert messages.requests[1]["messages"][-1] == {
+        "role": "assistant",
+        "content": [{"type": "server_tool_use", "id": "s1", "name": "web_search", "input": {"query": "x"}}],
+    }
+    assert "".join(e["text"] for e in events if e["kind"] == "text") == "Found it."
+
+
+def test_research_task_routing_rules():
+    from app.ai.capabilities import provider_type_supports_web_search, task_requires_web_search
+
+    assert task_requires_web_search("entity_enrichment_research")
+    assert provider_type_supports_web_search("claude") and provider_type_supports_web_search("claude_code")
+    assert not provider_type_supports_web_search("ollama")
+    assert not provider_type_supports_web_search("openai_compatible")
