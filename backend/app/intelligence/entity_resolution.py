@@ -1211,7 +1211,8 @@ def _tool_junk_reason(name: str) -> str | None:
         return "category_phrase"
     # "comprehensive audit logging", "linux kernel primitives": three or more
     # lowercase dictionary words. Tool names carry a capital, digit or symbol.
-    if len(words) >= 3 and all(w.isalpha() and w.islower() for w in words):
+    # Command lines ("pip install unsloth") fall through to shell_command.
+    if len(words) >= 3 and all(w.isalpha() and w.islower() for w in words) and not _command_line(stripped):
         return "description_phrase"
     return _description_reason(stripped)
 
