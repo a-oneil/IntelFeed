@@ -51,7 +51,7 @@ services:
           memory: 1500M
 
   redis:
-    image: redis:7.4.11-alpine3.21
+    image: redis:7.4.12-alpine3.21
     restart: unless-stopped
     logging: *default-logging
     # Protect redis: it's the fattest RSS on the box (correlation cache) and the
