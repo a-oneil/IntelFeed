@@ -6,14 +6,14 @@ import styles from "./ConfirmCard.module.css";
 export type ConfirmState =
   | { status: "pending" }
   | { status: "in_flight"; approved: boolean }
-  | { status: "executed"; summary: string; link?: string }
+  | { status: "executed"; summary: string }
   | { status: "cancelled" }
   | { status: "error"; message: string };
 
-/** Human-friendly label for the action's verb (e.g. "create_campaign"). */
-function actionLabel(actionType: string): string {
-  if (!actionType) return "Proposed action";
-  return actionType
+/** Human-friendly label for the tool (e.g. "create_campaign" → "Create Campaign"). */
+function actionLabel(toolName: string): string {
+  if (!toolName) return "Proposed action";
+  return toolName
     .replace(/[_-]+/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -66,25 +66,21 @@ export function ConfirmCard({
       <div className={styles.head}>
         <span className={styles.badge}>⚡ Proposed write</span>
         <Chip className={styles.actionType} truncate>
-          {actionLabel(request.action_type)}
+          {actionLabel(request.tool_name)}
         </Chip>
       </div>
 
-      {request.tool_name ? (
-        <dl className={styles.args}>
-          {Object.entries(request.proposed).map(([key, value]) => (
-            <div key={key} className={styles.arg}>
-              <dt>{key}</dt>
-              <dd>
-                {request.targets?.[key] && <span className={styles.target}>{request.targets[key]}</span>}
-                <span className={request.targets?.[key] ? styles.argId : undefined}>{argText(value)}</span>
-              </dd>
-            </div>
-          ))}
-        </dl>
-      ) : (
-        <div className={styles.description}>{request.description}</div>
-      )}
+      <dl className={styles.args}>
+        {Object.entries(request.proposed).map(([key, value]) => (
+          <div key={key} className={styles.arg}>
+            <dt>{key}</dt>
+            <dd>
+              {request.targets?.[key] && <span className={styles.target}>{request.targets[key]}</span>}
+              <span className={request.targets?.[key] ? styles.argId : undefined}>{argText(value)}</span>
+            </dd>
+          </div>
+        ))}
+      </dl>
       {request.preview && <div className={styles.preview}>{request.preview}</div>}
       {request.destructive && (
         <div className={styles.warning}>
@@ -124,14 +120,7 @@ export function ConfirmCard({
         <div className={styles.resolved}>
           {state.status === "executed" && (
             <span className={styles.resolvedOk}>
-              ✓{" "}
-              {state.link ? (
-                <a href={state.link} className={styles.resolvedLink}>
-                  {state.summary}
-                </a>
-              ) : (
-                state.summary
-              )}
+              ✓ {state.summary}
             </span>
           )}
           {state.status === "cancelled" && (

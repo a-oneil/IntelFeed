@@ -356,24 +356,23 @@ async def stage_tool_call(
     conversation_id: uuid.UUID | str | None,
     tool_name: str,
     args: dict,
-    db: AsyncSession | None = None,
-    turn_id: uuid.UUID | str | None = None,
+    db: AsyncSession,
+    turn_id: uuid.UUID | str,
 ) -> str:
     """Hold a write for the user's confirmation; returns its action id.
 
-    With ``db``, the staged row also names the records the call's ids point at
-    and, for a delete, what it will delete, so the confirm card can say so.
+    The staged row also names the records the call's ids point at and, for a
+    delete, what it will delete, so the confirm card can show them.
     """
     from app.services.redis_client import get_redis
 
     targets: dict[str, str] = {}
     preview: str | None = None
-    if db is not None:
-        try:
-            targets = await name_targets(db, args)
-            preview = await preview_call(db, tool_name, args, user_id)
-        except Exception as e:  # the card still shows the raw call
-            logger.warning("could not describe staged %s: %s", tool_name, e)
+    try:
+        targets = await name_targets(db, args)
+        preview = await preview_call(db, tool_name, args, user_id)
+    except Exception as e:  # the card still shows the raw call
+        logger.warning("could not describe staged %s: %s", tool_name, e)
 
     action_id = str(uuid.uuid4())
     r = await get_redis()
@@ -393,10 +392,9 @@ async def stage_tool_call(
         ),
         ex=STAGED_TTL_SECONDS,
     )
-    if turn_id:
-        list_key = f"{_TURN_KEY_PREFIX}{turn_id}"
-        await r.rpush(list_key, action_id)
-        await r.expire(list_key, STAGED_TTL_SECONDS)
+    list_key = f"{_TURN_KEY_PREFIX}{turn_id}"
+    await r.rpush(list_key, action_id)
+    await r.expire(list_key, STAGED_TTL_SECONDS)
     return action_id
 
 
@@ -440,14 +438,13 @@ async def take_staged(turn_id: uuid.UUID | str, user_id: uuid.UUID) -> list[dict
 
 
 async def execute_isolated(db: AsyncSession, name: str, args: dict, user_id: uuid.UUID) -> str:
-    """Run one tool inside a savepoint, so a failure undoes that tool's work only.
+    """Run one tool inside a savepoint, so a failure undoes only that tool's work.
 
-    A failed handler leaves the transaction aborted. Rolling the whole session
-    back would also expire everything the caller loaded in it (the copilot's
-    conversation and user), and its later lazy loads fail in async: the turn
-    goes unsaved and its staged writes never reach a confirm card. A tool that
-    returns an error also keeps none of what it flushed. A handler that
-    commits itself closes the savepoint; then there is nothing left to undo.
+    Without it, a failed tool would force a rollback of the whole session.
+    That also throws away what the caller loaded (the copilot's conversation
+    and user), so the turn would not be saved and its staged writes would
+    never reach a confirm card. A tool that returns an error keeps none of its
+    changes. If the tool commits by itself, the savepoint is already closed.
     """
     savepoint = await db.begin_nested()
     result = await execute_tool(name, args, db, user_id)
@@ -465,9 +462,11 @@ async def execute_isolated(db: AsyncSession, name: str, args: dict, user_id: uui
 class ToolGate:
     """The executor an in-process tool loop calls, bound to one user and one turn.
 
+    ``conversation_id`` is where a confirmed call's result is noted;
+    ``turn_id`` is the copilot turn whose cards its staged calls become.
     ``offered`` is what the model was shown. ``reachable`` (registry
     definitions) is what ``find_tools`` / ``call_tool`` may reach, when those
-    two were offered; it defaults to the offered tools.
+    two were offered.
     """
 
     def __init__(
@@ -478,17 +477,17 @@ class ToolGate:
         role: str,
         offered: Iterable[str],
         conversation_id: uuid.UUID | str | None,
+        turn_id: uuid.UUID | str,
         auto_approve: frozenset[str] = frozenset(),
         reachable: list[dict] | None = None,
-        turn_id: uuid.UUID | str | None = None,
     ) -> None:
         self.db = db
         self.user_id = user_id
         self.role = role
         self.offered = frozenset(offered)
         self.conversation_id = conversation_id
-        # The staging list this turn's calls go on; the conversation when unset.
-        self.turn_id = turn_id or conversation_id
+        # The staging list this turn's calls go on (see take_staged).
+        self.turn_id = turn_id
         self.auto_approve = auto_approve
         self.reachable = reachable or []
         self.reachable_names = frozenset(d["name"] for d in self.reachable) | (self.offered - {FIND_TOOLS, CALL_TOOL})
@@ -552,8 +551,8 @@ class UnattendedGate:
         refusal = check_call(name, args, role=self.role, offered=self.offered)
         if refusal:
             return json.dumps({"error": refusal})
-        # In a savepoint: a failure must not discard run_task's pending work
-        # (force mode's mark-not-current update) or its AIResult write.
+        # In a savepoint, so a failing tool doesn't undo the task's own
+        # unsaved work or stop it from saving its result.
         return await execute_isolated(self.db, name, args, self.user_id)
 
 

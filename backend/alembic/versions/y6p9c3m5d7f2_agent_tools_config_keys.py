@@ -1,10 +1,10 @@
 """AI task assignments: ``ollama_tools`` / ``ollama_tools_read_only`` become ``agent_tools`` / ``agent_tools_read_only``.
 
-Tool lists now apply to every provider with an in-process tool loop (Ollama,
-the Anthropic API, OpenAI-compatible), so the keys lose the provider name.
+The tool lists apply to every provider with an in-process tool loop (Ollama,
+the Anthropic API, OpenAI-compatible), so the keys don't name a provider.
 Both tables that hold an assignment config are rewritten: the instance's
 ``ai_task_assignments`` and people's own ``user_ai_routes``. A row that
-already has the new key keeps it. The code still reads the old names.
+already has the new key keeps it. The code reads only the new names.
 
 Downgrade moves the keys back.
 

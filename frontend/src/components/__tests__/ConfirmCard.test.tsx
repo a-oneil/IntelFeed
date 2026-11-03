@@ -5,9 +5,7 @@ import { ConfirmCard } from "../ConfirmCard";
 
 const request = {
   action_id: "a1",
-  action_type: "delete_feed",
   tool_name: "delete_feed",
-  description: "Delete feed (feed_id=f1)",
   proposed: { feed_id: "f1", reason: { why: "stale" } },
   targets: { feed_id: "feed 'Krebs on Security'" },
   preview: "Are you sure you want to delete this feed? · entry count: 412",
@@ -31,16 +29,17 @@ describe("ConfirmCard", () => {
     expect(onConfirm).toHaveBeenCalledOnce();
   });
 
-  it("keeps the description for a legacy proposal and no warning for an ordinary write", () => {
+  it("shows an ordinary write without a warning", () => {
     render(
       <ConfirmCard
-        request={{ action_id: "a2", action_type: "create_campaign", description: "Create a campaign", proposed: {} }}
+        request={{ action_id: "a2", tool_name: "create_campaign", proposed: { name: "Op Lantern" } }}
         state={{ status: "pending" }}
         onConfirm={vi.fn()}
         onCancel={vi.fn()}
       />
     );
-    expect(screen.getByText("Create a campaign")).toBeInTheDocument();
+    expect(screen.getByText("Create Campaign")).toBeInTheDocument();
+    expect(screen.getByText("Op Lantern")).toBeInTheDocument();
     expect(screen.queryByText(/deletes data/)).not.toBeInTheDocument();
   });
 });

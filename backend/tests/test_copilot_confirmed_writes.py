@@ -27,8 +27,9 @@ async def _campaigns(db_session, name: str) -> int:
     return await db_session.scalar(select(func.count()).select_from(Campaign).where(Campaign.name == name))
 
 
-def _propose_headers(user: User, conversation_id: uuid.UUID) -> dict:
-    return {"Authorization": f"Bearer {create_agent_token(user.id, 300, conversation_id=conversation_id)}"}
+def _propose_headers(user: User, turn_id: uuid.UUID) -> dict:
+    token = create_agent_token(user.id, 300, conversation_id=uuid.uuid4(), turn_id=turn_id)
+    return {"Authorization": f"Bearer {token}"}
 
 
 # ------------------------------------------------- /api/tools/execute (the CLI)
@@ -36,17 +37,17 @@ def _propose_headers(user: User, conversation_id: uuid.UUID) -> dict:
 
 @pytest.mark.asyncio
 async def test_propose_token_stages_a_write_without_running_it(client: AsyncClient, test_user: User, db_session):
-    conversation_id = uuid.uuid4()
+    turn_id = uuid.uuid4()
     name = f"proposed-{uuid.uuid4().hex[:8]}"
     resp = await client.post(
         "/api/tools/execute",
         json={"tool_name": "create_campaign", "args": {"name": name}},
-        headers=_propose_headers(test_user, conversation_id),
+        headers=_propose_headers(test_user, turn_id),
     )
     assert resp.status_code == 200, resp.text
     assert json.loads(resp.json()["result"])["status"] == "awaiting_confirmation"
     assert await _campaigns(db_session, name) == 0
-    staged = await take_staged(conversation_id, test_user.id)
+    staged = await take_staged(turn_id, test_user.id)
     assert [(s["tool_name"], s["args"]) for s in staged] == [("create_campaign", {"name": name})]
 
 
@@ -62,20 +63,24 @@ async def test_propose_token_still_runs_reads(client: AsyncClient, test_user: Us
 
 @pytest.mark.asyncio
 async def test_propose_token_never_reaches_an_admin_tool_for_a_non_admin(client: AsyncClient, test_user: User):
-    conversation_id = uuid.uuid4()
+    turn_id = uuid.uuid4()
     resp = await client.post(
         "/api/tools/execute",
         json={"tool_name": "merge_entities", "args": {}},
-        headers=_propose_headers(test_user, conversation_id),
+        headers=_propose_headers(test_user, turn_id),
     )
     assert resp.status_code == 403
-    assert await take_staged(conversation_id, test_user.id) == []
+    assert await take_staged(turn_id, test_user.id) == []
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("propose", [False, True])
 async def test_agent_tokens_may_not_carry_a_confirmation_token(client: AsyncClient, admin_user: User, propose: bool):
-    token = create_agent_token(admin_user.id, 300, conversation_id=uuid.uuid4() if propose else None)
+    token = (
+        create_agent_token(admin_user.id, 300, conversation_id=uuid.uuid4(), turn_id=uuid.uuid4())
+        if propose
+        else create_agent_token(admin_user.id, 300)
+    )
     resp = await client.post(
         "/api/tools/execute",
         json={"tool_name": "delete_feed", "args": {"feed_id": str(uuid.uuid4()), "confirmation_token": "x"}},
@@ -92,7 +97,12 @@ async def test_agent_tokens_may_not_carry_a_confirmation_token(client: AsyncClie
 async def test_confirm_runs_the_staged_call_once(client: AsyncClient, auth_headers, test_user: User, db_session):
     name = f"confirmed-{uuid.uuid4().hex[:8]}"
     action_id = await stage_tool_call(
-        user_id=test_user.id, conversation_id=None, tool_name="create_campaign", args={"name": name}
+        db=db_session,
+        turn_id=uuid.uuid4(),
+        user_id=test_user.id,
+        conversation_id=None,
+        tool_name="create_campaign",
+        args={"name": name},
     )
     first = await client.post(
         "/api/ai/copilot/confirm", json={"action_id": action_id, "approved": True}, headers=auth_headers
@@ -106,9 +116,37 @@ async def test_confirm_runs_the_staged_call_once(client: AsyncClient, auth_heade
 
 
 @pytest.mark.asyncio
-async def test_confirm_belongs_to_the_user_who_was_asked(client: AsyncClient, admin_headers, test_user: User):
+async def test_a_second_approval_in_flight_is_refused(client: AsyncClient, auth_headers, test_user: User, db_session):
+    from app.services.redis_client import get_redis
+
     action_id = await stage_tool_call(
-        user_id=test_user.id, conversation_id=None, tool_name="create_campaign", args={"name": "not yours"}
+        db=db_session,
+        turn_id=uuid.uuid4(),
+        user_id=test_user.id,
+        conversation_id=None,
+        tool_name="create_campaign",
+        args={"name": "claimed-elsewhere"},
+    )
+    r = await get_redis()
+    await r.set(f"{STAGED_KEY_PREFIX}{action_id}:claim", "1", ex=60)  # another approval is running
+    resp = await client.post(
+        "/api/ai/copilot/confirm", json={"action_id": action_id, "approved": True}, headers=auth_headers
+    )
+    assert resp.status_code == 409
+    await r.delete(f"{STAGED_KEY_PREFIX}{action_id}", f"{STAGED_KEY_PREFIX}{action_id}:claim")
+
+
+@pytest.mark.asyncio
+async def test_confirm_belongs_to_the_user_who_was_asked(
+    client: AsyncClient, admin_headers, test_user: User, db_session
+):
+    action_id = await stage_tool_call(
+        db=db_session,
+        turn_id=uuid.uuid4(),
+        user_id=test_user.id,
+        conversation_id=None,
+        tool_name="create_campaign",
+        args={"name": "not yours"},
     )
     resp = await client.post(
         "/api/ai/copilot/confirm", json={"action_id": action_id, "approved": True}, headers=admin_headers
@@ -117,9 +155,16 @@ async def test_confirm_belongs_to_the_user_who_was_asked(client: AsyncClient, ad
 
 
 @pytest.mark.asyncio
-async def test_confirm_rechecks_admin_tools(client: AsyncClient, auth_headers, test_user: User):
+async def test_confirm_rechecks_admin_tools(client: AsyncClient, auth_headers, test_user: User, db_session):
     # Staged while the user was an admin, say; they aren't now.
-    action_id = await stage_tool_call(user_id=test_user.id, conversation_id=None, tool_name="merge_entities", args={})
+    action_id = await stage_tool_call(
+        db=db_session,
+        turn_id=uuid.uuid4(),
+        user_id=test_user.id,
+        conversation_id=None,
+        tool_name="merge_entities",
+        args={},
+    )
     resp = await client.post(
         "/api/ai/copilot/confirm", json={"action_id": action_id, "approved": True}, headers=auth_headers
     )
@@ -127,9 +172,14 @@ async def test_confirm_rechecks_admin_tools(client: AsyncClient, auth_headers, t
 
 
 @pytest.mark.asyncio
-async def test_destructive_calls_cannot_be_edited(client: AsyncClient, admin_headers, admin_user: User):
+async def test_destructive_calls_cannot_be_edited(client: AsyncClient, admin_headers, admin_user: User, db_session):
     action_id = await stage_tool_call(
-        user_id=admin_user.id, conversation_id=None, tool_name="delete_feed", args={"feed_id": str(uuid.uuid4())}
+        db=db_session,
+        turn_id=uuid.uuid4(),
+        user_id=admin_user.id,
+        conversation_id=None,
+        tool_name="delete_feed",
+        args={"feed_id": str(uuid.uuid4())},
     )
     resp = await client.post(
         "/api/ai/copilot/confirm",
@@ -265,19 +315,20 @@ async def test_a_staged_delete_names_what_it_deletes(test_user: User, db_session
     campaign = Campaign(created_by=test_user.id, name="Operation Lantern", status="active", tlp_marking="TLP:GREEN")
     db_session.add(campaign)
     await db_session.flush()
-    conversation_id = uuid.uuid4()
+    turn_id = uuid.uuid4()
     g = ToolGate(
         db=db_session,
         user_id=test_user.id,
         role=test_user.role,
         offered=["delete_campaign"],
-        conversation_id=conversation_id,
+        conversation_id=uuid.uuid4(),
+        turn_id=turn_id,
     )
 
     reply = json.loads(await g("delete_campaign", {"campaign_id": str(campaign.id)}))
 
     assert reply["status"] == "awaiting_confirmation"
-    (row,) = await take_staged(conversation_id, test_user.id)
+    (row,) = await take_staged(turn_id, test_user.id)
     assert row["targets"] == {"campaign_id": "campaign 'Operation Lantern'"}
     assert "delete" in row["preview"].lower()
     # Staging only previewed it.

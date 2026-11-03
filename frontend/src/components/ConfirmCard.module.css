@@ -46,11 +46,6 @@
   background: none;
 }
 
-.description {
-  color: var(--text-primary);
-  word-break: break-word;
-}
-
 .args {
   margin: 0;
   display: flex;
@@ -157,11 +152,6 @@
 
 .resolvedOk {
   color: var(--success);
-}
-
-.resolvedLink {
-  color: var(--success);
-  text-decoration: underline;
 }
 
 .resolvedMuted {

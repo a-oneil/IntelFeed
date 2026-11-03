@@ -676,10 +676,9 @@ export interface CopilotContext {
  */
 export interface CopilotConfirmRequest {
   action_id: string;
-  action_type: string;
-  /** The registry tool that will run; absent for a legacy fenced proposal. */
-  tool_name?: string;
-  description: string;
+  /** The registry tool that will run. */
+  tool_name: string;
+  /** Its exact arguments. */
   proposed: Record<string, unknown>;
   /** What each id-holding argument names, e.g. { feed_id: "feed 'Krebs'" }. */
   targets?: Record<string, string>;
@@ -692,7 +691,7 @@ export interface CopilotConfirmRequest {
 /** Response from POST /api/ai/copilot/confirm. */
 export interface CopilotConfirmResponse {
   status: "executed" | "cancelled" | "error";
-  result?: { summary: string; link?: string };
+  result?: { summary: string; tool_name: string };
   message?: string;
 }
 
@@ -736,7 +735,7 @@ export interface StreamCopilotOptions {
  *   - {type:"chunk", text}                                        → onChunk
  *   - {type:"tool_call", id, name, args}                          → onToolCall
  *   - {type:"tool_result", id, status, summary}                   → onToolResult
- *   - {type:"confirm_request", action_id, action_type, ...}       → onConfirmRequest
+ *   - {type:"confirm_request", action_id, tool_name, proposed, ...} → onConfirmRequest
  *   - {type:"done", conversation_id}                              → onDone
  *   - {type:"error", message}                                     → onError
  *
@@ -832,9 +831,7 @@ export async function streamCopilotChat(
             case "confirm_request":
               options.onConfirmRequest?.({
                 action_id: String(data.action_id ?? ""),
-                action_type: String(data.action_type ?? ""),
-                tool_name: typeof data.tool_name === "string" ? data.tool_name : undefined,
-                description: String(data.description ?? ""),
+                tool_name: String(data.tool_name ?? ""),
                 proposed: (data.proposed ?? {}) as Record<string, unknown>,
                 targets: (data.targets ?? {}) as Record<string, string>,
                 preview: typeof data.preview === "string" ? data.preview : null,

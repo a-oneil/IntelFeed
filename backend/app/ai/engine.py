@@ -1051,11 +1051,10 @@ async def run_task(
 
             # Read-only by default (safe). A task that must mutate (apply-mode
             # maintenance) opts in via assignment config ``agent_tools_read_only:
-            # false`` plus an explicit ``agent_tools`` allowlist. (The ``ollama_``
-            # spellings are the keys' old names, still read.) Read-only also
+            # false`` plus an explicit ``agent_tools`` allowlist. Read-only also
             # leaves out the reads that store results (extractions, run_ai_task).
-            read_only = bool(config.get("agent_tools_read_only", config.get("ollama_tools_read_only", True)))
-            tool_names = config.get("agent_tools", config.get("ollama_tools"))
+            read_only = bool(config.get("agent_tools_read_only", True))
+            tool_names = config.get("agent_tools")
 
             # The task runs AS ``user_id``, so a regular user's task gets that
             # user's privileges: no admin tool is offered or run for them.

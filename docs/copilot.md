@@ -103,7 +103,7 @@ Each `data:` frame is one JSON object:
 {"type": "chunk", "text": ...}
 {"type": "tool_call", "id", "name", "args"}
 {"type": "tool_result", "id", "status", "summary"}
-{"type": "confirm_request", "action_id", "action_type", "tool_name", "description", "proposed", "destructive"}
+{"type": "confirm_request", "action_id", "tool_name", "proposed", "targets", "preview", "destructive"}
 {"type": "error", "message": ...}
 {"type": "done", "conversation_id": <uuid>, "answered_by": {...}}
 ```
@@ -120,7 +120,7 @@ When the provider is not the Claude Code CLI, its tool loop runs **inside the ap
 
 All three get the same tools and run every call through the same `ToolGate` (see [the tool layer](#the-tool-layer-one-gate-for-every-provider)). `_copilot_tool_plan` (`backend/app/api/copilot.py`) builds them:
 
-- **Shown directly:** the everyday reads and writes, `DEFAULT_COPILOT_TOOLS` plus `DEFAULT_COPILOT_LOCAL_WRITE_TOOLS` (`backend/app/tools/__init__.py`), and two helpers, `find_tools` and `call_tool`.
+- **Shown directly:** the everyday reads and writes, `DEFAULT_COPILOT_TOOLS` plus `DEFAULT_COPILOT_WRITE_TOOLS` (`backend/app/tools/__init__.py`), and two helpers, `find_tools` and `call_tool`.
 - **Reachable through the helpers:** every other registry tool the user may run. `find_tools` lists or searches them and returns their arguments; `call_tool` runs one through the same checks as a directly shown tool.
 
 Sending the whole registry instead would cost about 26k tokens a round, swamp a local model, and break OpenAI, which refuses more than 128 tools in one request. The MCP server uses the same idea for the CLI. An assignment's `agent_tools` key (Prompt Workspace → Routing panel) limits the copilot to exactly those tools, with no helpers. Tool traces stream to the dock the same way as with the CLI.
@@ -154,7 +154,7 @@ Either way the endpoint handles events the same way, because the worker relays `
 
 `run_copilot_stream` (`backend/app/workers/copilot_tasks.py:115`; soft limit 300 s, hard limit 360 s) has no business logic. It runs `ClaudeCodeProvider.stream_agent` and pushes each event onto the list `copilot:stream:{run_id}`, then an `__end__` or `__error__` marker. A list (not pub/sub) means no events are lost if the api subscribes late or falls behind. The list expires after 300 s (`_STREAM_TTL_SECONDS`, `backend/app/workers/copilot_tasks.py:40`) so abandoned runs clean themselves up. Even if the task crashes, it pushes an error marker (`_emergency_terminate`, `backend/app/workers/copilot_tasks.py:160`), so the api never waits forever.
 
-The api reads the list with BLPOP (`_iter_worker_events`, `backend/app/api/copilot.py:469`). If nothing arrives for the CLI timeout plus 60 seconds (180 + 60 when no timeout is set), the turn fails with "Copilot worker produced no output".
+The api reads the list with BLPOP (`_iter_worker_events`, `backend/app/api/copilot.py:365`). If nothing arrives for the CLI timeout plus 60 seconds (180 + 60 when no timeout is set), the turn fails with "Copilot worker produced no output".
 
 ### The `ai` queue
 
@@ -205,8 +205,6 @@ A staged write is stored in Redis at `copilot:action:{action_id}` for **900 seco
 - A claim key (`copilot:action:{id}:claim`, 900 s, as long as the staged call can live) lets only one approval run at a time, so a double click, two tabs or a slow tool cannot run it twice; a second approval gets 409. After claiming, the call must still exist: a click that lands just after another approval finished gets 404, not a second run.
 - `run_confirmed` runs the tool as the user who clicked, re-checking `ADMIN_TOOLS` against their role at that moment. A tool with a two-step token flow (the seven deletes: `delete_entity`, `delete_feed`, `delete_campaign`, `delete_automation_rule`, `delete_detection_rule`, `delete_intel_report`, `delete_requirement`; `confirmation_token_tools` finds them by their schema) gets its token here, server-side: the click is the confirmation.
 - On success, a `✓ Done: <summary>. Result: …` message is appended to the conversation. If the tool returns an error, the staged call is kept so you can retry.
-
-**The older action fence.** A copilot prompt edited before writes became tool calls may still tell the model to end its reply with a ` ```intelfeed-action ` JSON block. The endpoint still honours it: `_FenceSplitter` holds the fence back from the browser, `_parse_action_block` accepts `create_campaign` and `add_note` (`_SUPPORTED_ACTION_TYPES`), and confirming runs `_ACTION_HANDLERS`. The default prompt no longer asks for the fence; reset a customised copilot prompt to pick up the tool-based instructions.
 
 ---
 
@@ -317,12 +315,12 @@ Celery results share Redis with the copilot, so they expire after one hour (`res
 |---|---|---|
 | `copilot_worker_dispatch` | `backend/app/config.py:477` | `true` (default): run the CLI in `celery-worker-ai`. `false`: run it in the api. The Anthropic API, OpenAI-compatible and Ollama always run in the api |
 | `allowed_tools`, `timeout_seconds` | Copilot assignment config (Settings → AI Configuration) | `["IntelFeed"]`, 240 s |
-| `agent_tools` | Copilot assignment config (Prompt Workspace → Routing) | Limits the copilot on the Anthropic API, OpenAI-compatible and Ollama to exactly these tools. Unset (default): the everyday tools plus `find_tools` / `call_tool` for the rest. `ollama_tools` is its old name and still works |
+| `agent_tools` | Copilot assignment config (Prompt Workspace → Routing) | Limits the copilot on the Anthropic API, OpenAI-compatible and Ollama to exactly these tools. Unset (default): the everyday tools plus `find_tools` / `call_tool` for the rest |
 | `copilot_auto_approve_tools` | **Skip Confirm for**, the copilot's page in the Prompt Workspace | Writes that run without the click. Empty (default): every write waits for Confirm. Admin tools and deletes always wait |
 | Tool calling (`tools_enabled`) | An `openai_compatible` provider's Configure panel | On by default. Off: that provider answers without tools |
 | History | `_MAX_HISTORY_MESSAGES` | Last 20 messages sent as `conversation_history` |
 | Pinned articles | `_PINNED_ENTRY_MAX_CHARS`, `_PINNED_MULTI_MAX_ENTRIES`, `_PINNED_MULTI_MAX_CHARS` | 15,000 characters for one article; 8 articles at 4,000 each when several are pinned |
-| Pending-action lifetime | `_PENDING_TTL_SECONDS` | 900 s |
+| Staged-call lifetime | `STAGED_TTL_SECONDS` (`backend/app/tools/gate.py`) | 900 s |
 | Worker stream lifetime | `_STREAM_TTL_SECONDS` | 300 s for an unread `copilot:stream:{run_id}` list |
 | Task time limits | `run_copilot_stream` | Soft 300 s, hard 360 s |
 | BLPOP wait | `copilot_stream` | CLI timeout + 60 s |
@@ -336,11 +334,10 @@ Celery results share Redis with the copilot, so they expire after one hour (`res
 
 ## Test coverage
 
-- `backend/tests/test_copilot_tool_gate.py` (no database): non-admins are never offered or allowed an admin tool, no model sees or may send a `confirmation_token`, a tool that wasn't offered is refused, writes are staged and only run on confirm, the auto-approve list never covers admin tools, and the Anthropic and OpenAI-compatible loops run all of that through the gate.
-- `backend/tests/test_copilot_confirmed_writes.py`: the CLI's `propose` token stages writes over `/api/tools/execute`, confirm runs a staged call once and only for its owner, re-checks admin tools, refuses edits to destructive calls, and a whole copilot turn on each in-process provider type stages its write and runs it on confirm.
-- `backend/tests/test_copilot_confirm_claim.py`: a proposed action runs once, however many approvals arrive.
+- `backend/tests/test_copilot_tool_gate.py` (no database): what a model is offered and what the gate refuses, staging, `find_tools` / `call_tool`, auto-approve limits, savepoints, the claim, per-turn staging, and the Anthropic and OpenAI-compatible tool loops (tool results, web search, the last round at the tool budget, cache-aware cost).
+- `backend/tests/test_copilot_confirmed_writes.py`: the CLI's `propose` token over `/api/tools/execute`; confirm runs a call once, only for its owner, re-checks admin tools and won't edit a destructive one; a whole copilot turn with a stand-in model stages its write and keeps working after a tool fails; a staged delete names what it deletes; background tasks get read tools through the gate.
 - `backend/tests/test_user_ai_providers.py`: `/config` reporting whose key answers, the Required refusal, and a streamed turn counting toward the person's cap.
 - `backend/tests/test_ai_allowance.py`: the site allowance on `/stream`.
 - Nearby: `test_ai_providers.py` (providers), `test_ai_tasks.py` and `test_ai_prompts.py` (task and prompt seeding, including `copilot`), `test_rate_limiter.py` (the `ai` bucket), `test_ollama_provider.py`, `test_claude_code_confinement.py` (the CLI's tool confinement and agent token).
 
-The legacy fence splitter and the worker relay have no direct tests yet.
+The worker relay has no direct tests yet.

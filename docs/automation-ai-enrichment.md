@@ -299,7 +299,12 @@ There are four provider types (`backend/app/ai/providers/`):
 | `ollama` | `OllamaProvider` | An Ollama server (`base_url`, default `http://localhost:11434`) | Yes, a native `/api/chat` tool loop over the backend tool registry |
 | `openai_compatible` | `OpenAICompatibleProvider` | Any `/v1/chat/completions` server: OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter, Groq. `base_url` is required | Yes, a `tools` / `tool_calls` loop, unless the row sets `tools_enabled: false` |
 
-Some tasks only work with tools. `TOOL_REQUIRED_TASKS` (`copilot`, `entity_enrichment_research`) and `provider_type_supports_tools` in `backend/app/ai/capabilities.py` stop you from assigning those tasks to a provider that cannot run tools: today that is only an `openai_compatible` row with tool calling turned off. Onboarding also keeps `entity_enrichment_research`, which works by web search, on a provider that has it: the Claude Code CLI or the Anthropic API, which gets Anthropic's server-side web search when the assignment's `allowed_tools` lists `WebSearch` (`WEB_SEARCH_TASKS` in `capabilities.py`). Background agentic tasks get read-only tools, without the reads that store results (`extract_*`, `run_ai_task`, `generate_detection_rules`), through `UnattendedGate`: a non-admin's task never reaches an admin tool, and no model can supply a delete's confirmation token. Only the copilot proposes writes, and the user confirms each one (see [copilot.md](copilot.md#the-tool-layer-one-gate-for-every-provider)).
+Some tasks only work with tools: `copilot` and `entity_enrichment_research` (`TOOL_REQUIRED_TASKS` in `backend/app/ai/capabilities.py`).
+
+- **Where they can run.** Any provider that runs tools (`provider_type_supports_tools`). The only one that doesn't is an `openai_compatible` provider with tool calling turned off, and assigning one of these tasks to it is refused.
+- **Web search.** `entity_enrichment_research` works by searching the web, so onboarding only routes it to the Claude Code CLI or the Anthropic API. The Anthropic API uses Anthropic's own web search when the assignment's `allowed_tools` lists `WebSearch` (`WEB_SEARCH_TASKS`).
+- **Background tasks only read.** They run through `UnattendedGate` (`backend/app/tools/gate.py`) with read tools only, and not the reads that store results (`extract_*`, `run_ai_task`, `generate_detection_rules`). A non-admin's task never reaches an admin tool, and no model can supply a delete's confirmation token.
+- **Only the copilot changes data**, and the user confirms each change (see [copilot.md](copilot.md#the-tool-layer-one-gate-for-every-provider)).
 
 Useful `config` keys by type (provider row, overridable per assignment):
 
@@ -307,7 +312,7 @@ Useful `config` keys by type (provider row, overridable per assignment):
 - `claude_code`: `cli_path`, `cli_retries`, `allowed_tools`, `max_budget_usd`, `extra_args`, `mcp_server_path`, `agent_api_url`.
 - `ollama`: `default_model`, `keep_alive`, `model_overrides`.
 - `openai_compatible`: `default_model`, `model_overrides`, `model_filter`, `extra_headers`, `embedding_dimensions`, `pricing` (`input_per_mtok`, `output_per_mtok`), `tools_enabled` (default `true`).
-- Agentic tasks on `claude`, `ollama` or `openai_compatible`, per assignment: `agent_tools` (the tool allowlist) and `agent_tools_read_only` (default `true`). `ollama_tools` / `ollama_tools_read_only` are their old names and still work.
+- Agentic tasks on `claude`, `ollama` or `openai_compatible`, per assignment: `agent_tools` (the tool allowlist) and `agent_tools_read_only` (default `true`).
 
 ### Model Configuration
 

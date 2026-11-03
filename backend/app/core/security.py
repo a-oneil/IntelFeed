@@ -74,10 +74,12 @@ def create_agent_token(
 ) -> str:
     """A short-lived token for one agent run on ``user_id``'s behalf.
 
-    Read-only by default. With ``conversation_id`` it is a ``propose`` token:
-    a write it asks for is staged on that copilot conversation for the user to
-    confirm, never run (see app.tools.gate).
+    Read-only by default. With ``conversation_id`` it is a ``propose`` token
+    for one copilot turn (``turn_id``, required then): a write it asks for is
+    staged on that turn for the user to confirm, never run (see app.tools.gate).
     """
+    if conversation_id and not turn_id:
+        raise ValueError("a propose token needs the copilot turn it belongs to")
     now = datetime.now(UTC)
     payload = {
         "sub": str(user_id),
@@ -89,8 +91,7 @@ def create_agent_token(
     }
     if conversation_id:
         payload["conversation_id"] = str(conversation_id)
-        # The copilot turn whose confirm cards its staged writes belong to.
-        payload["turn_id"] = str(turn_id or conversation_id)
+        payload["turn_id"] = str(turn_id)
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
@@ -263,14 +264,12 @@ async def get_tool_caller(
         return ToolCaller(user=user)
     scope = payload.get("scope")
     conversation_id = payload.get("conversation_id")
-    if scope != AGENT_SCOPE_PROPOSE or not conversation_id:
+    turn_id = payload.get("turn_id")
+    if scope != AGENT_SCOPE_PROPOSE or not conversation_id or not turn_id:
         # Anything but a well-formed propose token is read-only.
         return ToolCaller(user=user, agent_scope=AGENT_SCOPE_READ)
     return ToolCaller(
-        user=user,
-        agent_scope=AGENT_SCOPE_PROPOSE,
-        conversation_id=str(conversation_id),
-        turn_id=str(payload.get("turn_id") or conversation_id),
+        user=user, agent_scope=AGENT_SCOPE_PROPOSE, conversation_id=str(conversation_id), turn_id=str(turn_id)
     )
 
 

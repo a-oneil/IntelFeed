@@ -1157,13 +1157,13 @@ AI results are saved per target. `target_type` is, for example, `entry`, `daily_
 
 #### AI Copilot (Global)
 
-The copilot is the chat assistant that can look up platform data. See [copilot.md](copilot.md).
+The copilot is the chat assistant that looks up platform data and proposes changes you confirm. See [copilot.md](copilot.md).
 
 | Method | Path | Access | What it does |
 | --- | --- | --- | --- |
 | GET | `/api/ai/copilot/config` | User | Which provider would answer you, and why a turn would be refused |
 | POST | `/api/ai/copilot/stream` | User | Stream an answer over SSE. Each turn is saved to a conversation |
-| POST | `/api/ai/copilot/confirm` | User | Carry out or cancel an action the copilot proposed (`create_campaign` or `add_note` only) |
+| POST | `/api/ai/copilot/confirm` | User | Run or cancel a tool call the copilot staged for you to confirm |
 | GET | `/api/ai/conversations/` | User | Your conversations (no message bodies) |
 | POST | `/api/ai/conversations/` | User | Start one |
 | GET | `/api/ai/conversations/{conversation_id}` | User | One conversation with its messages |

@@ -360,15 +360,11 @@ export function CopilotDockPanel() {
             [req.action_id]: {
               status: "executed",
               summary: data.result?.summary ?? "Done.",
-              link: data.result?.link,
             },
           }));
           // Surface the outcome as an assistant message in the thread.
           if (data.result?.summary) {
-            const link = data.result.link;
-            const content = link
-              ? `[${data.result.summary}](${link})`
-              : data.result.summary;
+            const content = data.result.summary;
             setMessages((prev) => [
               ...prev,
               { role: "assistant", content },

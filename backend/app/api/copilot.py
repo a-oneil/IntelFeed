@@ -47,27 +47,8 @@ router = APIRouter()
 # context window / latency budget. Matches the P0 "last ~20 messages" guidance.
 _MAX_HISTORY_MESSAGES = 20
 
-# Sentinel that opens the proposed-action fence. When the model wants to write,
-# it ends its reply with a ```intelfeed-action fenced block. We hold back a
-# rolling tail of the text stream so this marker never reaches the client, then
-# capture the JSON action after it for the confirm flow.
-_ACTION_FENCE = "```intelfeed-action"
-# How much trailing text to keep unflushed so a fence split across deltas is
-# still detectable. Must be >= len(_ACTION_FENCE).
-_HOLDBACK = len(_ACTION_FENCE)
-
-# Redis key + TTL for a pending, awaiting-confirmation action. Shared with the
-# tool gate, which stages tool calls under the same prefix.
-from app.tools.gate import STAGED_KEY_PREFIX as _PENDING_KEY_PREFIX  # noqa: E402
-from app.tools.gate import STAGED_TTL_SECONDS as _PENDING_TTL_SECONDS  # noqa: E402
-
-# Action types the legacy fence can propose (a copilot prompt edited before
-# writes became tool calls still asks for the fence). Anything else is
-# rejected at confirm time.
-_SUPPORTED_ACTION_TYPES = ("create_campaign", "add_note")
-
-from app.tools import DEFAULT_COPILOT_LOCAL_WRITE_TOOLS, DEFAULT_COPILOT_TOOLS  # noqa: E402
-from app.tools.gate import auto_approvable_tools  # noqa: E402
+from app.tools import DEFAULT_COPILOT_TOOLS, DEFAULT_COPILOT_WRITE_TOOLS  # noqa: E402
+from app.tools.gate import STAGED_KEY_PREFIX, STAGED_TTL_SECONDS, auto_approvable_tools  # noqa: E402
 
 
 def _default_copilot_tools() -> list[str]:
@@ -78,12 +59,12 @@ def _default_copilot_tools() -> list[str]:
     registry's schemas (~26k tokens) would swamp a local model, and OpenAI
     refuses more than 128 tools in one request.
     """
-    return [*DEFAULT_COPILOT_TOOLS, *DEFAULT_COPILOT_LOCAL_WRITE_TOOLS]
+    return [*DEFAULT_COPILOT_TOOLS, *DEFAULT_COPILOT_WRITE_TOOLS]
 
 
 def _copilot_tool_override(config: dict) -> list[str] | None:
-    """The assignment's ``agent_tools`` (or its old name ``ollama_tools``): exactly these, nothing more."""
-    override = config.get("agent_tools") or config.get("ollama_tools")
+    """The assignment's ``agent_tools``: exactly these, nothing more."""
+    override = config.get("agent_tools")
     return list(override) if override else None
 
 
@@ -376,92 +357,6 @@ def _scope_from_context(ctx: CopilotContext | None) -> tuple[str, str | None]:
     return "global", None
 
 
-def _parse_action_block(captured: str) -> dict | None:
-    """Parse the JSON inside a captured ```intelfeed-action fence.
-
-    ``captured`` is everything after the ``_ACTION_FENCE`` marker (the closing
-    ```` ``` ```` may or may not be present). Returns the parsed action dict on
-    success (must have a supported ``type`` and a ``params`` object), else None.
-    """
-    body = captured
-    # Drop a leading newline after the fence marker and strip a trailing ``` .
-    body = body.strip()
-    if body.startswith("```"):  # shouldn't happen, but be defensive
-        body = body[3:]
-    # Cut at the closing fence if present.
-    if "```" in body:
-        body = body.split("```", 1)[0]
-    body = body.strip()
-    if not body:
-        return None
-    try:
-        action = json.loads(body)
-    except json.JSONDecodeError:
-        logger.warning("copilot: could not parse action block JSON: %s", body[:300])
-        return None
-    if not isinstance(action, dict):
-        return None
-    atype = action.get("type")
-    params = action.get("params")
-    if atype not in _SUPPORTED_ACTION_TYPES or not isinstance(params, dict):
-        logger.warning("copilot: unsupported/malformed action proposed: %s", str(action)[:300])
-        return None
-    return action
-
-
-class _FenceSplitter:
-    """Incremental splitter that withholds the ```intelfeed-action fence.
-
-    Feed it text deltas via :meth:`feed`, which returns the text that is SAFE to
-    forward to the client (i.e. cannot be part of the fence marker). A rolling
-    tail of ``_HOLDBACK`` chars is always kept back until we know it's not the
-    start of the fence. Once the fence marker is seen, forwarding stops and all
-    subsequent text is accumulated into :attr:`captured` for action parsing.
-    """
-
-    def __init__(self) -> None:
-        self._buf = ""  # unflushed tail (potential fence prefix)
-        self.fence_seen = False
-        self.captured = ""  # text after the fence marker
-
-    def feed(self, text: str) -> str:
-        if self.fence_seen:
-            self.captured += text
-            return ""
-        self._buf += text
-        idx = self._buf.find(_ACTION_FENCE)
-        if idx != -1:
-            # Fence found: everything before it is visible; the rest is captured.
-            visible = self._buf[:idx]
-            self.captured += self._buf[idx + len(_ACTION_FENCE) :]
-            self._buf = ""
-            self.fence_seen = True
-            return visible
-        # No full fence yet. Flush everything except a trailing window that could
-        # be the beginning of the fence marker.
-        keep = 0
-        max_prefix = min(len(self._buf), _HOLDBACK)
-        for n in range(max_prefix, 0, -1):
-            if _ACTION_FENCE.startswith(self._buf[-n:]):
-                keep = n
-                break
-        if keep:
-            visible = self._buf[:-keep]
-            self._buf = self._buf[-keep:]
-        else:
-            visible = self._buf
-            self._buf = ""
-        return visible
-
-    def flush(self) -> str:
-        """Return any remaining buffered text (fence never appeared)."""
-        if self.fence_seen:
-            return ""
-        out = self._buf
-        self._buf = ""
-        return out
-
-
 # Redis list namespace the copilot worker RPUSHes streamed events onto. Must
 # match _STREAM_KEY_PREFIX in app/workers/copilot_tasks.py.
 _WORKER_STREAM_PREFIX = "copilot:stream:"
@@ -663,9 +558,7 @@ async def copilot_stream(
     model = resolved.model_name
 
     async def generate():
-        # ``assistant_parts`` collects only the VISIBLE text (what the client
-        # sees / what we persist). The proposed-action fence is withheld by the
-        # splitter and never lands here, so the stored assistant message is clean.
+        # The answer text, as streamed to the client and saved.
         assistant_parts: list[str] = []
         tool_events: list[dict] = []
         errored: str | None = None
@@ -675,7 +568,6 @@ async def copilot_stream(
         turn_usage: dict | None = None
         turn_cost: Decimal | None = None
         turn_started = time.monotonic()
-        splitter = _FenceSplitter()
         ledgered = False
 
         async def _ledger(error: str | None) -> None:
@@ -746,12 +638,11 @@ async def copilot_stream(
                 await db.rollback()
 
         def _emit_text(text: str) -> str | None:
-            """Route a text delta through the fence splitter; return SSE json or None."""
-            visible = splitter.feed(text)
-            if visible:
-                assistant_parts.append(visible)
-                return json.dumps({"type": "chunk", "text": visible})
-            return None
+            """Record a text delta; return its SSE json, or None when empty."""
+            if not text:
+                return None
+            assistant_parts.append(text)
+            return json.dumps({"type": "chunk", "text": text})
 
         # Effective per-call timeout (shared by the CLI and Ollama agent paths).
         cli_timeout = float(timeout_seconds) if timeout_seconds else None
@@ -905,23 +796,9 @@ async def copilot_stream(
                 except Exception as e:  # never break the stream over it
                     logger.warning("copilot could not reload %s after a tool rollback: %s", type(loaded).__name__, e)
 
-            # Flush any held-back tail that never turned out to be a fence.
-            tail = splitter.flush()
-            if tail:
-                assistant_parts.append(tail)
-                yield {"data": json.dumps({"type": "chunk", "text": tail})}
-
-            # If the model proposed an action, parse it and stage it in Redis for the
-            # confirm endpoint. Failure to parse degrades to no proposal (the visible
-            # answer still persists).
-            pending_action: dict | None = None
-            if splitter.fence_seen:
-                pending_action = _parse_action_block(splitter.captured)
-
             # Persist the turn: append the user question + the assembled assistant
             # answer. JSONB reassignment + flag_modified so SQLAlchemy detects the
-            # mutation (mirrors ai_conversations.py). The raw action block is NOT
-            # included — only the visible prose.
+            # mutation (mirrors ai_conversations.py).
             answer = "".join(assistant_parts).strip()
             try:
                 new_messages = list(conv.messages or [])
@@ -943,49 +820,11 @@ async def copilot_stream(
                 logger.error("copilot failed to persist conversation %s: %s", conversation_id, e)
                 await db.rollback()
 
-            # Bill the turn (see _ledger). Done before the action is staged and the
-            # footer sent, so the footer can carry the cost.
+            # Bill the turn (see _ledger). Done before the footer is sent, so the
+            # footer can carry the cost.
             if answer or turn_usage or errored:
                 await _ledger(errored)
             ledgered = True
-
-            # Stage the proposed action in Redis and emit a confirm_request BEFORE
-            # done, so the client can render a confirm prompt.
-            if pending_action is not None:
-                action_id = str(uuid.uuid4())
-                summary = str(pending_action.get("summary") or "").strip()
-                params = pending_action.get("params") or {}
-                action_type = pending_action.get("type")
-                try:
-                    from app.services.redis_client import get_redis
-
-                    r = await get_redis()
-                    await r.set(
-                        f"{_PENDING_KEY_PREFIX}{action_id}",
-                        json.dumps(
-                            {
-                                "user_id": str(user.id),
-                                "conversation_id": str(conversation_id),
-                                "action_type": action_type,
-                                "params": params,
-                                "summary": summary,
-                            }
-                        ),
-                        ex=_PENDING_TTL_SECONDS,
-                    )
-                    yield {
-                        "data": json.dumps(
-                            {
-                                "type": "confirm_request",
-                                "action_id": action_id,
-                                "action_type": action_type,
-                                "description": summary,
-                                "proposed": params,
-                            }
-                        )
-                    }
-                except Exception as e:  # staging failure shouldn't crash the stream
-                    logger.error("copilot failed to stage pending action: %s", e)
 
             # Writes the model asked for through tools, staged by the gate (in
             # this process, or by /api/tools/execute for the CLI's propose
@@ -1048,9 +887,7 @@ def _confirm_request_event(row: dict) -> dict:
     return {
         "type": "confirm_request",
         "action_id": row["action_id"],
-        "action_type": tool_name,
         "tool_name": tool_name,
-        "description": row.get("summary") or tool_name,
         "proposed": row.get("args") or {},
         # What the ids in ``proposed`` name, and a delete's own summary.
         "targets": row.get("targets") or {},
@@ -1075,96 +912,6 @@ class CopilotConfirmRequest(BaseModel):
     )
 
 
-async def _execute_create_campaign(db: AsyncSession, user: User, params: dict) -> dict:
-    """Create a campaign via the same model logic the campaigns API uses."""
-    from app.models.campaign import Campaign
-
-    name = (params.get("name") or "").strip()
-    if not name:
-        raise AppError(code="bad_request", message="Campaign name is required", status_code=400)
-    status = params.get("status") or "active"
-    if status not in ("active", "monitoring", "closed", "historical"):
-        status = "active"
-    campaign = Campaign(
-        created_by=user.id,
-        name=name[:255],
-        description=params.get("description"),
-        status=status,
-        tlp_marking="TLP:GREEN",
-    )
-    db.add(campaign)
-    await db.flush()
-    await db.refresh(campaign)
-    link = f"/workbench/campaign/{campaign.id}"
-    return {
-        "summary": f"Created campaign **{name}** — {link}",
-        "link": link,
-        "name": name,
-    }
-
-
-async def _execute_add_note(db: AsyncSession, user: User, params: dict) -> dict:
-    """Add a note to an entry or an entity, reusing the notes models."""
-    target = (params.get("target") or "").strip().lower()
-    target_id_raw = params.get("target_id")
-    content = (params.get("content") or "").strip()
-    if not content:
-        raise AppError(code="bad_request", message="Note content is required", status_code=400)
-    if not target_id_raw:
-        raise AppError(code="bad_request", message="target_id is required", status_code=400)
-    try:
-        target_id = uuid.UUID(str(target_id_raw))
-    except (ValueError, AttributeError):
-        raise AppError(code="bad_request", message="target_id is not a valid id", status_code=400)
-
-    if target == "entry":
-        from app.models.note import Note
-        from app.services.markdown import render_markdown
-
-        title = content.splitlines()[0][:120] if content else "Note"
-        note = Note(
-            created_by=user.id,
-            entry_id=target_id,
-            title=title,
-            content_markdown=content,
-            content_html=render_markdown(content),
-            tags=[],
-        )
-        db.add(note)
-        await db.flush()
-        return {"summary": "Added note to the article.", "link": None}
-
-    if target == "entity":
-        from app.models.entity_note import EntityNote
-
-        entity_type = (params.get("entity_type") or "").strip().lower()
-        if entity_type not in ("threat_actor", "malware", "cve", "ttp", "campaign", "vendor", "product"):
-            raise AppError(
-                code="bad_request",
-                message="entity_type must be one of threat_actor, malware, cve, ttp, campaign, vendor, product",
-                status_code=400,
-            )
-        note = EntityNote(
-            entity_type=entity_type,
-            entity_id=target_id,
-            user_id=user.id,
-            content=content,
-        )
-        db.add(note)
-        await db.flush()
-        return {"summary": f"Added note to the {entity_type.replace('_', ' ')}.", "link": None}
-
-    raise AppError(code="bad_request", message="target must be 'entry' or 'entity'", status_code=400)
-
-
-# Dispatch table: action_type -> async handler(db, user, params) -> result dict.
-# Extend here to support new confirmable write actions.
-_ACTION_HANDLERS = {
-    "create_campaign": _execute_create_campaign,
-    "add_note": _execute_add_note,
-}
-
-
 async def _claim(r, key: str) -> str:
     """Take the one-at-a-time claim on a staged action; returns the claim key.
 
@@ -1174,7 +921,7 @@ async def _claim(r, key: str) -> str:
     another approval finished and deleted it would otherwise run it twice.
     """
     claim_key = f"{key}:claim"
-    if not await r.set(claim_key, "1", nx=True, ex=_PENDING_TTL_SECONDS):
+    if not await r.set(claim_key, "1", nx=True, ex=STAGED_TTL_SECONDS):
         raise AppError(code="conflict", message="This action is already being confirmed", status_code=409)
     if not await r.exists(key):
         await r.delete(claim_key)
@@ -1205,21 +952,52 @@ async def _append_conversation_note(
         logger.warning("copilot confirm: failed to append conversation message: %s", e)
 
 
-async def _confirm_tool_call(db: AsyncSession, user: User, key: str, pending: dict, edited_args: dict | None) -> dict:
-    """Run a tool call the gate staged, as the user who clicked Confirm."""
+@router.post("/confirm")
+async def copilot_confirm(
+    body: CopilotConfirmRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run (or cancel) a tool call the copilot staged for this user's confirmation.
+
+    Only the user it was staged for can confirm it. It runs as that user, with
+    their role checked again now (``run_confirmed``). ``edited_params``
+    replaces the arguments, except on a destructive call, which is confirmed
+    as shown or cancelled. On success a line is added to the conversation, so
+    the model sees the result on the next turn. On an error the staged call is
+    kept for a retry.
+    """
     from app.services.redis_client import get_redis
     from app.tools.gate import run_confirmed
 
-    tool_name = pending["tool_name"]
-    if edited_args is not None and _is_destructive(tool_name):
-        # The card shows exactly what will be deleted or changed for everyone;
-        # approve that or cancel it.
-        return {"status": "error", "message": "This change can't be edited. Confirm it as shown or cancel it."}
-    args = edited_args if edited_args is not None else (pending.get("args") or {})
-
+    key = f"{STAGED_KEY_PREFIX}{body.action_id}"
     r = await get_redis()
-    claim_key = await _claim(r, key)
+    raw_pending = await r.get(key)
+    if not raw_pending:
+        raise AppError(
+            code="not_found",
+            message="This proposed action has expired or does not exist. Ask the copilot again.",
+            status_code=404,
+        )
+    try:
+        pending = json.loads(raw_pending)
+    except json.JSONDecodeError:
+        await r.delete(key)
+        return {"status": "error", "message": "Stored action was corrupt; discarded."}
 
+    if pending.get("user_id") != str(user.id):
+        raise AppError(code="not_found", message="Proposed action not found", status_code=404)
+
+    if not body.approved:
+        await r.delete(key)
+        return {"status": "cancelled"}
+
+    tool_name = pending["tool_name"]
+    if body.edited_params is not None and _is_destructive(tool_name):
+        return {"status": "error", "message": "This change can't be edited. Confirm it as shown or cancel it."}
+    args = body.edited_params if body.edited_params is not None else (pending.get("args") or {})
+
+    claim_key = await _claim(r, key)
     try:
         raw = await run_confirmed(db, user_id=user.id, role=user.role, tool_name=tool_name, args=args)
     except Exception as e:
@@ -1232,98 +1010,19 @@ async def _confirm_tool_call(db: AsyncSession, user: User, key: str, pending: di
     except json.JSONDecodeError:
         result = raw
     if isinstance(result, dict) and result.get("error"):
-        # Keep the staged call so the user can retry (with edited args).
         if not db.sync_session.is_active:
             await db.rollback()
         await r.delete(claim_key)
         return {"status": "error", "message": str(result["error"])[:500]}
 
     summary = f"Done: {pending.get('summary') or tool_name}"
-    preview = " ".join(raw.split())[:300]
     await _append_conversation_note(
         db,
         user,
         pending.get("conversation_id"),
-        f"✓ {summary}. Result: {preview}",
+        f"✓ {summary}. Result: {' '.join(raw.split())[:300]}",
         {"action_executed": tool_name},
     )
     await db.commit()
     await r.delete(key, claim_key)
-    return {"status": "executed", "result": {"summary": summary, "link": None, "tool_name": tool_name}}
-
-
-@router.post("/confirm")
-async def copilot_confirm(
-    body: CopilotConfirmRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Execute (or cancel) a copilot-proposed write action.
-
-    The action was staged in Redis by the /stream endpoint. We verify ownership,
-    and — if approved — execute it via the existing service/model layer (never
-    the skill CLI), append a success message to the conversation, and return the
-    result. Approving with ``edited_params`` overrides the proposed params.
-    """
-    from app.services.redis_client import get_redis
-
-    key = f"{_PENDING_KEY_PREFIX}{body.action_id}"
-    r = await get_redis()
-    raw = await r.get(key)
-    if not raw:
-        # TTL-expired or unknown id.
-        raise AppError(
-            code="not_found",
-            message="This proposed action has expired or does not exist. Ask the copilot again.",
-            status_code=404,
-        )
-    try:
-        pending = json.loads(raw)
-    except json.JSONDecodeError:
-        await r.delete(key)
-        return {"status": "error", "message": "Stored action was corrupt; discarded."}
-
-    # Ownership check — a pending action is private to the user who proposed it.
-    if pending.get("user_id") != str(user.id):
-        raise AppError(code="not_found", message="Proposed action not found", status_code=404)
-
-    if not body.approved:
-        await r.delete(key)
-        return {"status": "cancelled"}
-
-    if pending.get("tool_name"):
-        return await _confirm_tool_call(db, user, key, pending, body.edited_params)
-
-    action_type = pending.get("action_type")
-    params = body.edited_params if body.edited_params is not None else (pending.get("params") or {})
-    handler = _ACTION_HANDLERS.get(action_type)
-    if handler is None:
-        await r.delete(key)
-        return {"status": "error", "message": f"Unsupported action type: {action_type}"}
-
-    # One approval runs at a time: a double click or two tabs must not create
-    # the campaign twice. The claim outlives no attempt (released below on
-    # failure, so a retry with edited params works) and expires on its own.
-    claim_key = await _claim(r, key)
-
-    try:
-        result = await handler(db, user, params)
-    except AppError as e:
-        # Keep the key so the user can retry with edited params.
-        await r.delete(claim_key)
-        return {"status": "error", "message": e.message}
-    except Exception as e:
-        logger.error("copilot confirm: %s handler failed: %s", action_type, e)
-        await db.rollback()
-        await r.delete(claim_key)
-        return {"status": "error", "message": f"Failed to execute action: {e}"}
-
-    # Append a success message to the conversation this action came from.
-    await _append_conversation_note(
-        db, user, pending.get("conversation_id"), f"✓ {result.get('summary')}", {"action_executed": action_type}
-    )
-
-    await db.commit()
-    await r.delete(key, claim_key)
-
-    return {"status": "executed", "result": result}
+    return {"status": "executed", "result": {"summary": summary, "tool_name": tool_name}}

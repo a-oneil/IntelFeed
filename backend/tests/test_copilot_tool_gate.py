@@ -112,6 +112,7 @@ def _gate(role="user", offered=None, auto_approve=frozenset()):
         role=role,
         offered=names,
         conversation_id=uuid.uuid4(),
+        turn_id=uuid.uuid4(),
         auto_approve=auto_approve,
     )
 
@@ -171,11 +172,11 @@ async def test_writes_are_staged_not_run(fake_redis, ran):
     result = json.loads(await g("create_note", {"title": "t", "content": "c"}))
     assert result["status"] == "awaiting_confirmation"
     assert ran == []
-    staged = await gate.take_staged(g.conversation_id, g.user_id)
+    staged = await gate.take_staged(g.turn_id, g.user_id)
     assert [(s["tool_name"], s["args"]) for s in staged] == [("create_note", {"title": "t", "content": "c"})]
     assert staged[0]["action_id"] == result["action_id"]
     # Taking empties the list; another user's staged call is never handed over.
-    assert await gate.take_staged(g.conversation_id, g.user_id) == []
+    assert await gate.take_staged(g.turn_id, g.user_id) == []
 
 
 @pytest.mark.asyncio
@@ -386,7 +387,7 @@ async def test_openai_loop_runs_reads_and_stages_writes(monkeypatch, fake_redis,
     events = [ev async for ev in provider.stream_agent(prompt="q", tools=tools, tool_executor=g)]
 
     assert ran == [("search_entries", {"query": "x"})]
-    assert [s["tool_name"] for s in await gate.take_staged(g.conversation_id, g.user_id)] == ["create_note"]
+    assert [s["tool_name"] for s in await gate.take_staged(g.turn_id, g.user_id)] == ["create_note"]
     assert bodies[0]["tools"] and bodies[1]["messages"][-1] == {
         "role": "tool",
         "tool_call_id": "c2",
@@ -493,9 +494,6 @@ def test_an_override_offers_exactly_its_tools():
 
     direct, reachable = _copilot_tool_plan("user", {"agent_tools": ["search_entries", "merge_entities"]})
     assert [d["name"] for d in direct] == ["search_entries"] == [d["name"] for d in reachable]
-    # The old key still works.
-    direct, _ = _copilot_tool_plan("user", {"ollama_tools": ["get_cve"]})
-    assert [d["name"] for d in direct] == ["get_cve"]
 
 
 @pytest.mark.asyncio
@@ -526,7 +524,7 @@ async def test_call_tool_goes_through_the_same_gate(fake_redis, ran):
     assert "error" in nested
     # Staging the delete ran only its harmless first step (no token), for the card's preview.
     assert ran == [("get_feeds", {"limit": 1}), ("delete_detection_rule", {"rule_id": "r"})]
-    (row,) = await gate.take_staged(g.conversation_id, g.user_id)
+    (row,) = await gate.take_staged(g.turn_id, g.user_id)
     assert row["tool_name"] == "delete_detection_rule" and row["preview"]
 
 

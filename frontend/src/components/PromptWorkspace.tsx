@@ -1407,7 +1407,7 @@ const IN_PROCESS_TOOL_TYPES = new Set(["ollama", "claude", "openai_compatible"])
 /**
  * Per-task tool allowlist for agentic tasks on a provider with an in-process
  * tool loop (Ollama, Anthropic API, OpenAI-compatible). Stored as the
- * assignment config's `agent_tools` key (`ollama_tools` is its old name).
+ * assignment config's `agent_tools` key.
  * When unset, the copilot is shown a curated set and reaches every other tool
  * the user may run through find_tools/call_tool; a custom list limits it to
  * exactly those tools. Other agentic tasks get every read-only tool. The
@@ -1445,7 +1445,7 @@ function AgentToolsRow({
     return offerable.map((t) => t.name);
   }, [isCopilot, copilotCfg, offerable]);
 
-  const override = (assignment?.config?.agent_tools ?? assignment?.config?.ollama_tools) as string[] | undefined;
+  const override = assignment?.config?.agent_tools as string[] | undefined;
   const effective = override && override.length > 0 ? override : defaultNames;
 
   const [expanded, setExpanded] = useState(false);
@@ -1522,7 +1522,6 @@ function AgentToolsRow({
               title={selected.size === 0 ? "Select at least one tool" : undefined}
               onClick={() => {
                 const cfg: Record<string, unknown> = { ...assignment!.config, agent_tools: [...selected].sort() };
-                delete cfg.ollama_tools;
                 saveConfig(cfg);
                 setExpanded(false);
               }}
@@ -1535,7 +1534,6 @@ function AgentToolsRow({
               onClick={() => {
                 const cfg: Record<string, unknown> = { ...assignment!.config };
                 delete cfg.agent_tools;
-                delete cfg.ollama_tools;
                 saveConfig(cfg);
                 setExpanded(false);
               }}
