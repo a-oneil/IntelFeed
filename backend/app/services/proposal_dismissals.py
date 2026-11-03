@@ -224,7 +224,8 @@ async def settle_gone_entity(
     Deletes every pending proposal about it (both logs) and every pending
     proposal that points at it (a merge into it, a vendor link to it, an alias
     clash with it). A merge into it is moved to ``successor`` (the merge
-    keeper) instead, when that is a different entity of the same type.
+    keeper) instead, when that is a different entity of the same type. Its
+    held autolink matches move to ``successor``, or are deleted.
     Does nothing while the entity still exists, unless ``gone`` says the
     caller just deleted it (types the adjudicator has no model for).
     Applied rows stay as history. Flushes first, so the caller's own row,
@@ -239,6 +240,11 @@ async def settle_gone_entity(
         if model is None or (await db.execute(select(model.id).where(model.id == entity_id))).first() is not None:
             return 0
     n = await clear_entity_proposals(db, entity_type, entity_id)
+    # Held autolink matches aren't proposals (not counted), but must not keep
+    # pointing at the gone id: Link on one would fail.
+    from app.intelligence.autolink_reconcile import move_held_matches
+
+    await move_held_matches(db, entity_type, entity_id, successor)
 
     sid = str(entity_id)
     rows = (

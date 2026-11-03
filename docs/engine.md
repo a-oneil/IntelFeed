@@ -116,11 +116,11 @@ Result: `autolink` ∥ `observables` ∥ `extract` (full mode, with detection ru
 
 Diagram: [diagrams/engine-pipeline-execution.md](diagrams/engine-pipeline-execution.md)
 
-`dispatch_entry_pipeline()` (`backend/app/workers/feed_tasks.py:305`) builds each entry's Celery work from the registry:
+`dispatch_entry_pipeline()` (`backend/app/workers/feed_tasks.py:337`) builds each entry's Celery work from the registry:
 
 1. **Parallel header.** One task per enabled `parallel` stage. With a plan, the plan decides; without one, everything runs except `extract`, which follows `run_extraction`. If a plan turns off every parallel stage, `autolink` is added back so the chord still has a header and the later stages still run.
 2. **Translate first.** For feeds with `auto_translate` in `adapter_config`, `translate_entry_task` is chained before the chord, so every later stage sees the translated text. It never raises; it returns a status string.
-3. **Post stages.** When the header finishes, `entry_post_processing` (`backend/app/workers/feed_tasks.py:263`) starts a second chord: `cooccurrence`, `correlation` and `requirements`, with `score` as its callback. Plans only affect the parallel header; post and final stages always run.
+3. **Post stages.** When the header finishes, `entry_post_processing` (`backend/app/workers/feed_tasks.py:295`) starts a second chord: `cooccurrence`, `correlation` and `requirements`, with `score` as its callback. Plans only affect the parallel header; post and final stages always run.
 4. **Score.** `score_entry_task` runs once the co-occurrence edges, correlation events and requirement matches exist, because those are signal inputs.
 5. **Side stages.** `automate` is queued from the fetch loop for each new entry. `enrich` is queued when an entity is created.
 6. **AI analysis.** `score_entry_task` ends by calling `enqueue_entry_analysis` (`backend/app/services/entry_analysis.py`). It checks, in order: the global `ai_one_pass_enabled` switch, an existing request, a task assignment, the feed's AI policy, the junk gate, and echo reuse. It then writes the entry's `ai_analysis_requests` row. Feed-policy skips are recorded (`skipped_feed_ai`, `skipped_feed_none`) and re-checked by the 30-minute sweep once the feed allows AI. The analysis itself runs on the `ai` queue and writes no pipeline run, so the console's **analyze** column is drawn from that row. See [automation-ai-enrichment.md](automation-ai-enrichment.md#one-pass-entry-analysis-engine-phase-4).

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueries, type UseQueryResult } from "@tanstack/react-query";
 import api from "@/api/client";
 
 /**
@@ -88,5 +88,57 @@ export function useEntityContext(entityType: string, entityId: string) {
     // Supplementary: a failure hides the panel rather than toasting on every visit.
     meta: { silenceToast: true },
     staleTime: 60_000,
+  });
+}
+
+/** An enrichment value the entity table can show as a column (GET /entities/{type}/context-columns). */
+export interface ContextColumn {
+  /** `ctx:<source_type>:<key>` — the list endpoint's sort_by value and filter parameter. */
+  id: string;
+  source_type: string;
+  source_label: string;
+  key: string;
+  label: string;
+  display: "fact" | "badge" | "chips";
+}
+
+export function useContextColumns(entityType: string) {
+  return useQuery({
+    queryKey: ["context-columns", entityType],
+    queryFn: async () => {
+      const { data } = await api.get<ContextColumn[]>(`/entities/${entityType}/context-columns`);
+      return data;
+    },
+    enabled: !!entityType,
+    meta: { silenceToast: true },
+    staleTime: 5 * 60_000,
+  });
+}
+
+type ContextValues = Record<string, Record<string, unknown>>;
+
+/** Module-level so useQueries keeps the merged map's identity until a page changes. */
+function mergeContextValues(results: UseQueryResult<ContextValues>[]): ContextValues {
+  return Object.assign({}, ...results.map((r) => r.data ?? {}));
+}
+
+/**
+ * `{entity_id: {column_id: value}}` for a paged table's rows; rows with nothing
+ * are absent. One request per page of ids, so a page is fetched once as it
+ * loads and earlier pages stay cached, however far the table scrolls.
+ */
+export function useContextValues(entityType: string, pages: string[][], enabled: boolean) {
+  return useQueries({
+    queries: pages.map((ids) => ({
+      queryKey: ["context-values", entityType, ids.join(",")],
+      queryFn: async () => {
+        const { data } = await api.post<ContextValues>(`/entities/${entityType}/context-values`, { ids });
+        return data;
+      },
+      enabled: enabled && !!entityType && ids.length > 0,
+      meta: { silenceToast: true },
+      staleTime: 60_000,
+    })),
+    combine: mergeContextValues,
   });
 }

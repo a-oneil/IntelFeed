@@ -3,9 +3,9 @@
   align-items: center;
   gap: 6px;
   appearance: none;
-  border: 1px solid var(--danger);
-  background: var(--danger);
-  color: var(--danger-fg);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
   border-radius: var(--r-md);
   padding: 3px 10px;
   font: inherit;
@@ -14,8 +14,8 @@
   cursor: pointer;
 }
 .btn:hover {
-  background: color-mix(in srgb, var(--danger) 85%, var(--text-primary));
-  border-color: color-mix(in srgb, var(--danger) 85%, var(--text-primary));
+  background: color-mix(in srgb, var(--accent) 85%, var(--text-primary));
+  border-color: color-mix(in srgb, var(--accent) 85%, var(--text-primary));
 }
 .btn:disabled {
   opacity: 0.6;

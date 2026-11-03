@@ -685,6 +685,14 @@ The panel's Refresh and "Enrich now" buttons name every source in `sources` in `
 
 In public read-only mode a visitor never sees a source whose `egress` is `shares_ioc` or whose license has `commercial_ok = False`, and gets a 404 for an entity the visitor filter hides.
 
+#### Context columns in the entity tables
+
+The `fact`, `badge` and `chips` outputs also show as columns in the workbench entity tables (threat actors, malware, tools, vendors, CVEs, techniques, observables), hidden until picked in the Columns menu (`backend/app/enrichment/context_columns.py`). Each column is named `ctx:<source_type>:<key>`, for example `ctx:epss:epss`.
+
+- `GET /api/entities/{entity_type}/context-columns` lists the columns of each enabled source, by the same visitor rule as the panel.
+- `POST /api/entities/{entity_type}/context-values` with `{"ids": [...]}` returns `{entity_id: {column: value}}`, at most 1000 ids per request. The table sends one request per page of 100 rows as it loads, as it does for relationship signals, so every row it scrolls to fills in.
+- The type's list endpoint sorts on a column with `sort_by=ctx:…` (rows with no value last, either direction; lists sort by length first) and filters with `ctx:…=<filter>`: text matches anywhere in the value; `>N`, `>=N`, `<N`, `<=N`, `=N` compare numbers, or a list's length; any other operand compares as text, so `>2025-06` works on ISO dates; `*` means has a value and `!` means has none. A column the user can't see is a 400.
+
 When an entity is merged into another of its type, its context rows move to the survivor with it (`rehome_context`, `backend/app/enrichment/context.py`), one source at a time: a source that already has rows on the survivor keeps its own. Reclassified into another type, the rows are dropped and the next lookup fills them.
 
 `prune-entity-context` (maintenance, daily 02:45 UTC, `prune_entity_context` in `backend/app/workers/maintenance.py`) deletes rows that expired more than 30 days ago and rows whose entity no longer exists, and withdraws relation claims whose entity no longer exists, by the same rules as a source's withdrawal, so their connections go with them. It belongs to no source, so it is a maintenance job rather than one in a manifest.

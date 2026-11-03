@@ -82,13 +82,13 @@ The autolinker matches text against a dictionary of every known entity name and 
 
 **Keeping workers in sync.** Each worker process holds its own copy. The vocabulary's version is a hash of its contents, published to Redis under `intelfeed:autolinker:vocab_version`. Before a scan, `_ensure_vocabulary()` compares its local version with Redis and rebuilds on a mismatch. The `refresh-autolinker-vocabulary` job rebuilds every 30 minutes, and denying a name or curating extractions rebuilds at once. A brand-new entity therefore starts matching new articles within 30 minutes.
 
-**The scan** (`scan_text()`, `backend/app/intelligence/autolinker.py:929`), per paragraph:
+**The scan** (`scan_text()`, `backend/app/intelligence/autolinker.py:946`), per paragraph:
 
 1. Match the lowercased text against every name and alias.
 2. Drop matches that sit inside a longer word ("APT" inside "RAPT", "RTM" inside "RTMP" or `RTM_NEWLINK`) or inside a longer matched name ("Korea" inside "North Korea").
 3. Short single words (alphabetic, up to `autolinker_ambiguous_name_max_length`, default 10) must be written the way the name is: an acronym in capitals, a mixed-case name exactly ("SynAck", not "Synack"), any other word with a capital first letter. A name written in lower case on purpose, such as the npm package "axios", matches lower-case text; capitalised mid-sentence ("reported by Axios") it is something else. For actor, malware, country and mitigation names, a short word is also dropped if it appears more than `autolinker_ambiguous_max_occurrences` (default 3) times in the entry.
 4. A name of several words must have its first real word cased as in the name: "push security" is not Push Security, and "the COM object" is not The Com.
-5. Each match is then judged in its sentence (`_occurrence_verdict()`, `backend/app/intelligence/autolinker.py:868`). It is dropped when it is:
+5. Each match is then judged in its sentence (`_occurrence_verdict()`, `backend/app/intelligence/autolinker.py:883`). It is dropped when it is:
    - inside a "Related:" / "Read more:" headline, at the start of a line or run into the body (Dark Reading), since that headline is another article's. IDs in it are skipped too;
    - part of a code or file token: a dotted package id (`com.apple.…`), a hyphenated compound with a capital or digit after the hyphen ("X-Agent-Secret", "Proton-J"; "-linked" and "-based" only describe the name), or a capitalised name written in lower case inside a file name or path (`push security-audit.yml`, `id-ed25519`);
    - a number used as a number, for a name made only of digits ("PID: 764", "port 764", "1,764", "764 seconds");
@@ -104,7 +104,7 @@ The autolinker matches text against a dictionary of every known entity name and 
 
 ### Phase 3: Junction Record Storage
 
-`store_autolink_matches()` (`backend/app/intelligence/autolinker.py:1183`) writes one junction row per entity, with:
+`store_autolink_matches()` (`backend/app/intelligence/autolinker.py:1200`) writes one junction row per entity, with:
 
 - `confidence` — the match's confidence scaled by the feed's reliability rating (see [Confidence weighting](#confidence-weighting-and-reliability-rating))
 - `source = "auto_link"` (TTP links store `source_text = "auto_link:T1234"` instead)
@@ -154,7 +154,7 @@ The capital-letter rule cannot tell "Royal" the ransomware from "Royal Navy", or
 - **Which words.** `is_provisional_form()` (`backend/app/intelligence/autolinker.py:194`) marks a single alphabetic word that appears in the bundled list of about 31,000 common English words (`backend/app/intelligence/data/common_english_words.txt`). Examples: "royal", "inc", "hive", "medusa". Coined names such as "Emotet" or "LockBit" link at once. This applies to actors, malware, tools and countries. Countries use a short list of their own instead (`AMBIGUOUS_COUNTRY_WORDS`: Chad, China, Georgia, Guinea, Jersey, Jordan, Niger, Panama, Turkey, Chile, Cuba). Vendors and products always link at once.
 - **Other held matches.** The context rules hold a few more kinds of match the same way (step 6 of the scan): one-word names inside a longer capitalised name, names made only of digits, actor names with initials, and actor or malware names a vendor or product also uses.
 - **Holding.** If every occurrence of an entity in the article is held, the match goes to `pending_autolink_matches` instead of a junction table. Held matches are invisible to correlation, scoring, counts and the UI. One non-dictionary name (the alias "Royal Ransomware", say) turns the whole match into a normal link.
-- **Confirming.** When the one-pass AI analysis lands, `reconcile_pending_autolinks()` (`backend/app/intelligence/autolink_reconcile.py:59`) promotes held entities whose name or alias the AI also extracted. Promotion goes through the normal store path. The rest are rejected with a `FalsePositiveRecord` (`extraction_source = "ai_reconcile"`).
+- **Confirming.** When the one-pass AI analysis lands, `reconcile_pending_autolinks()` (`backend/app/intelligence/autolink_reconcile.py:74`) promotes held entities whose name or alias the AI also extracted. Promotion goes through the normal store path. The rest are rejected with a `FalsePositiveRecord` (`extraction_source = "ai_reconcile"`).
 - **Feeds without AI.** `entry_will_get_ai_analysis()` (`backend/app/services/ai_eligibility.py:41`) checks the instance switch `ai_one_pass_enabled`, the feed's `ai_analysis_enabled`, and that the feed's mode is not `none`. If the entry will never be analysed, nothing could confirm a held match, so these matches are dropped. They are counted in daily Redis keys (`autolink:pending_dropped_ai_off:<YYYYMMDD>`), and the Engine's Autolinking view shows the 30-day total.
 - **Expiry.** Some entries never get an AI pass (junk-gated, out of budget). `prune_engine_tables` deletes unresolved held rows after 14 days and resolved ones after `engine_run_retention_days` (default 30).
 - **Review by hand.** Engine → Review → Held links (`GET /api/entity-links/pending`, `POST /api/entity-links/pending/resolve`).
@@ -630,7 +630,7 @@ Use for personal or non-security feeds, test feeds, or to quiet a feed while you
 
 ### Confidence weighting and reliability rating
 
-`_weighted_confidence()` (`backend/app/intelligence/autolinker.py:1111`) scales each autolink's confidence by the feed's reliability rating. A canonical-name match starts at 0.9 and an alias at 0.5. The result is multiplied by the feed weight (`reliability_to_weight()`, `backend/app/intelligence/autolinker.py:235`):
+`_weighted_confidence()` (`backend/app/intelligence/autolinker.py:1128`) scales each autolink's confidence by the feed's reliability rating. A canonical-name match starts at 0.9 and an alias at 0.5. The result is multiplied by the feed weight (`reliability_to_weight()`, `backend/app/intelligence/autolinker.py:235`):
 
 | Rating | A | B | C | D | E | F | unrated |
 |---|---|---|---|---|---|---|---|
@@ -653,8 +653,8 @@ Then it is bucketed: ≥ 0.7 high, ≥ 0.4 medium, else low. So "APT29" on an A-
 
 ### Operational notes
 
-- Changing a feed's mode only affects new entries. To re-process old ones, use the rescan endpoints or `autolink_batch()` (`backend/app/intelligence/autolinker.py:1584`), which commits every 100 entries.
-- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1857`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the case and context rules applied, and confidence scaled by feed reliability. The pending tier does not apply, so a match ingest would hold is not linked.
+- Changing a feed's mode only affects new entries. To re-process old ones, use the rescan endpoints or `autolink_batch()` (`backend/app/intelligence/autolinker.py:1601`), which commits every 100 entries.
+- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1874`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the case and context rules applied, and confidence scaled by feed reliability. The pending tier does not apply, so a match ingest would hold is not linked.
 
 ### None of this uses AI
 

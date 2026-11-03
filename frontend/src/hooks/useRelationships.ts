@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueries, useMutation, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import api from "@/api/client";
 import type {
   EntityRelationship,
@@ -132,18 +132,29 @@ export interface RelationshipSignals {
 /** Batched relationship signals for table columns — one request per loaded page.
  * POST body, not query params: the id list grows with every infinite-scroll page
  * and overflows the server's request-line limit (414) as a GET. */
-export function useRelationshipSignals(entityType: string | undefined, ids: string[]) {
-  return useQuery({
-    queryKey: ["relationship-signals", entityType, ids.join(",")],
-    queryFn: async () => {
-      const { data } = await api.post<Record<string, RelationshipSignals>>(
-        `/entity-relationships/signals/${entityType}`,
-        { ids },
-      );
-      return data;
-    },
-    enabled: !!entityType && ids.length > 0,
-    staleTime: 60_000,
+type SignalsById = Record<string, RelationshipSignals>;
+
+/** Module-level so useQueries keeps the merged map's identity until a page changes. */
+function mergeSignals(results: UseQueryResult<SignalsById>[]): SignalsById {
+  return Object.assign({}, ...results.map((r) => r.data ?? {}));
+}
+
+/**
+ * Signals for a paged table: one request per page of ids, so a page is fetched
+ * once as it loads and earlier pages stay cached, however far the table scrolls.
+ */
+export function useRelationshipSignals(entityType: string | undefined, pages: string[][]) {
+  return useQueries({
+    queries: pages.map((ids) => ({
+      queryKey: ["relationship-signals", entityType, ids.join(",")],
+      queryFn: async () => {
+        const { data } = await api.post<SignalsById>(`/entity-relationships/signals/${entityType}`, { ids });
+        return data;
+      },
+      enabled: !!entityType && ids.length > 0,
+      staleTime: 60_000,
+    })),
+    combine: mergeSignals,
   });
 }
 

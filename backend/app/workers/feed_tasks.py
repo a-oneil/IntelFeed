@@ -183,6 +183,16 @@ def _looks_blocked(response) -> bool:
     return False
 
 
+def _connection_refused_by_server(error: Exception) -> bool:
+    """An httpx failure that a different TLS fingerprint might get past: the
+    server hung up, reset the read, stalled the read, or refused the TLS
+    handshake. A DNS failure or a connect timeout means the host is down for
+    every client, so those are not retried."""
+    if isinstance(error, (httpx.RemoteProtocolError, httpx.ReadError, httpx.ReadTimeout)):
+        return True
+    return isinstance(error, httpx.ConnectError) and "ssl" in str(error).lower()
+
+
 async def _curl_get_feed(url: str, headers: dict[str, str]):
     """GET through curl_cffi impersonating Chrome. The impersonation sets its
     own User-Agent to match the TLS fingerprint it presents, so ours is
@@ -211,7 +221,29 @@ async def _get_feed_response(feed: Feed, client: httpx.AsyncClient, headers: dic
         return await _curl_get_feed(feed.url, headers)
 
     if first == CLIENT_HTTPX:
-        response = await attempt(first)  # httpx errors propagate as before
+        try:
+            response = await attempt(first)
+        except httpx.HTTPError as e:
+            # A bot wall that drops the connection instead of answering
+            # (SiteGround's anti-bot, Akamai on sophos.com) never shows a
+            # status to judge, so retry those failures with curl_cffi too.
+            # The original error stands when curl does no better.
+            if not _connection_refused_by_server(e):
+                raise
+            try:
+                retry = await attempt(second)
+            except Exception as curl_error:
+                logger.info("Feed %s: httpx failed (%s), curl_cffi too (%s)", feed.id, e, curl_error)
+                raise e from None
+            if retry.status_code in (200, 304):
+                logger.info(
+                    "Feed %s: httpx failed (%s), curl_cffi got %s; using it from now on", feed.id, e, retry.status_code
+                )
+                remember_client(feed, second)
+                return retry
+            if _looks_blocked(retry):
+                raise
+            return retry
         if not _looks_blocked(response):
             return response
     else:

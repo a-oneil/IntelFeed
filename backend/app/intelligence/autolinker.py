@@ -597,8 +597,15 @@ _NUMBER_UNITS = frozenset(
 # A country alias in demonym form ("Persian", "Portuguese") next to one of these
 # is a language, not the country.
 _LANGUAGE_BEFORE = frozenset(
-    {"fluent", "native", "speak", "speaks", "spoke", "spoken", "speaking", "translate", "translated", "written"}
-)
+    {
+        "fluent", "native", "simplified", "speak", "speaks", "spoke", "spoken", "speaking",
+        "traditional", "translate", "translated", "written",
+    }
+)  # fmt: skip
+# A country name after one of these is a different place: "North Korea",
+# "North America", "Latin American", "South Sudan". Not "Eastern"/"northern":
+# "eastern Ukraine" is Ukraine.
+_PLACE_PREFIXES = frozenset({"North", "South", "Central", "Latin"})
 _LANGUAGE_AFTER = frozenset(
     {
         "alphabet", "dialect", "keyboard", "language", "languages", "locale", "name",
@@ -824,6 +831,13 @@ def _language_context(text: str, start: int, end: int, entry: VocabEntry) -> boo
     return False
 
 
+def _after_place_prefix(text: str, start: int) -> bool:
+    """True for a country name that is the tail of a longer place name
+    ("North Korea", "Latin American")."""
+    before = _token_before(text, start)
+    return bool(before) and _bare_word(before[0]) in _PLACE_PREFIXES
+
+
 def _in_name_run(text: str, start: int, end: int, entry: VocabEntry, headline: bool) -> bool:
     """True when a one-word name sits inside a longer capitalised name:
     "NVIDIA Inception", "Quasar Framework", "WWHF Deadwood", "SOC Teams",
@@ -911,7 +925,9 @@ def _occurrence_verdict(
         ):
             return _DROP
 
-    if entry.entity_type == "country" and _language_context(text, start, end, entry):
+    if entry.entity_type == "country" and (
+        _language_context(text, start, end, entry) or _after_place_prefix(text, start)
+    ):
         return _DROP
 
     if _in_name_run(text, start, end, entry, headline):

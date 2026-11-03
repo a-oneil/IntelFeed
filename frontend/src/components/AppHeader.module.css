@@ -175,10 +175,10 @@
 }
 .engine_err,
 .engine_err:hover {
-  color: var(--danger);
+  color: var(--accent);
 }
 .engine_stopped,
 .engine_stopped:hover {
-  color: var(--danger-fg);
-  background: var(--danger);
+  color: var(--accent-text);
+  background: var(--accent);
 }

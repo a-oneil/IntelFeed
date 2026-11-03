@@ -28,6 +28,9 @@ from app.core.public_access import viewer_is_anonymous
 from app.core.security import get_admin_user, get_current_user, get_entry_viewer, get_viewer
 from app.database import get_db
 from app.enrichment.capec import capec_names
+from app.enrichment.context_columns import SORT_DOC as CTX_SORT_DOC
+from app.enrichment.context_columns import SORT_PATTERN as CTX_SORT
+from app.enrichment.context_columns import context_filters, context_query
 from app.intelligence.cve import extract_and_store_cves
 from app.intelligence.detection import (
     ENTITY_RULE_TYPES,
@@ -265,18 +268,20 @@ async def list_ttps(
     tactic: str | None = Query(None, description="Exact ATT&CK tactic filter (e.g. 'initial-access')"),
     sort_by: str = Query(
         "article_count",
-        pattern="^(technique_id|technique_name|tactic|article_count|first_seen_at|last_seen_at|linked_count)$",
-        description="Sort column; linked_count sorts by non-rejected entity-relationship count",
+        pattern=f"^(technique_id|technique_name|tactic|article_count|first_seen_at|last_seen_at|linked_count|{CTX_SORT})$",
+        description="Sort column; linked_count sorts by non-rejected entity-relationship count" + CTX_SORT_DOC,
     ),
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
+    ctx: dict[str, str] = Depends(context_filters),
     user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated catalog of known MITRE ATT&CK techniques with search, tactic filter, and sorting."""
-    query = select(TTP)
-    count_q = select(func.count()).select_from(TTP)
+    ctx_where, ctx_sort = await context_query(db, TTP, "ttp", user, sort_by, ctx)
+    query = select(TTP).where(*ctx_where)
+    count_q = select(func.count()).select_from(TTP).where(*ctx_where)
     if search:
         pattern = f"%{search}%"
         search_filter = or_(
@@ -290,12 +295,16 @@ async def list_ttps(
         count_q = count_q.where(TTP.tactic == tactic)
 
     total = (await db.execute(count_q)).scalar() or 0
-    if sort_by == "linked_count":
+    if ctx_sort is not None:
+        sort_expr = ctx_sort
+    elif sort_by == "linked_count":
         sort_expr = _linked_count_subquery(TTP, "ttp")
     else:
         col = getattr(TTP, sort_by)
         sort_expr = func.lower(col) if sort_by == "technique_name" else col
     order = sort_expr.asc() if sort_order == "asc" else sort_expr.desc()
+    if ctx_sort is not None:
+        order = order.nullslast()  # entities with no value last, either direction
     result = await db.execute(query.order_by(order).limit(limit).offset(offset))
     items = [_ttp_to_response(t) for t in result.scalars().all()]
     return PaginatedResponse(items=items, total=total, limit=limit, offset=offset, has_more=(offset + limit) < total)
@@ -426,16 +435,18 @@ async def list_cves(
     kev_only: bool = Query(False, description="Only CVEs in the CISA Known Exploited Vulnerabilities catalog"),
     sort_by: str = Query(
         "first_seen_at",
-        pattern="^(cve_id|severity|cvss_score|exploit_availability|article_count|first_seen_at|updated_at|epss_score|is_kev|risk_tier|linked_count)$",
-        description="Sort column; risk_tier uses tier rank with EPSS as tiebreaker",
+        pattern=f"^(cve_id|severity|cvss_score|exploit_availability|article_count|first_seen_at|updated_at|epss_score|is_kev|risk_tier|linked_count|{CTX_SORT})$",
+        description="Sort column; risk_tier uses tier rank with EPSS as tiebreaker" + CTX_SORT_DOC,
     ),
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
+    ctx: dict[str, str] = Depends(context_filters),
     user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated CVE list with search, severity and KEV filters, and sorting including EPSS/risk-tier columns."""
+    ctx_where, ctx_sort = await context_query(db, CVE, "cve", user, sort_by, ctx)
     # Compute article_count via subquery since CVE model doesn't store it
     article_count_sq = (
         select(func.count(EntryCVE.entry_id))
@@ -445,8 +456,8 @@ async def list_cves(
         .label("article_count")
     )
 
-    query = select(CVE, article_count_sq)
-    count_q = select(func.count()).select_from(CVE)
+    query = select(CVE, article_count_sq).where(*ctx_where)
+    count_q = select(func.count()).select_from(CVE).where(*ctx_where)
     if search:
         pattern = f"%{search}%"
         search_filter = or_(
@@ -464,7 +475,9 @@ async def list_cves(
 
     total = (await db.execute(count_q)).scalar() or 0
 
-    if sort_by == "article_count":
+    if ctx_sort is not None:
+        order = [(ctx_sort.asc() if sort_order == "asc" else ctx_sort.desc()).nullslast()]
+    elif sort_by == "article_count":
         order = [article_count_sq.asc() if sort_order == "asc" else article_count_sq.desc()]
     elif sort_by == "linked_count":
         lc = _linked_count_subquery(CVE, "cve")
@@ -573,18 +586,20 @@ async def list_threat_actors(
     search: str | None = Query(None, description="Case-insensitive match on actor name or whole-word alias"),
     sort_by: str = Query(
         "article_count",
-        pattern="^(name|country|motivation|article_count|last_seen_at|linked_count)$",
-        description="Sort column; linked_count sorts by non-rejected entity-relationship count",
+        pattern=f"^(name|country|motivation|article_count|last_seen_at|linked_count|{CTX_SORT})$",
+        description="Sort column; linked_count sorts by non-rejected entity-relationship count" + CTX_SORT_DOC,
     ),
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
+    ctx: dict[str, str] = Depends(context_filters),
     user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated threat-actor list with name/alias search and sorting."""
-    query = select(ThreatActor)
-    count_q = select(func.count()).select_from(ThreatActor)
+    ctx_where, ctx_sort = await context_query(db, ThreatActor, "threat_actor", user, sort_by, ctx)
+    query = select(ThreatActor).where(*ctx_where)
+    count_q = select(func.count()).select_from(ThreatActor).where(*ctx_where)
     if search:
         pattern = f"%{search}%"
         alias_pattern = rf"\y{re.escape(search)}\y"
@@ -595,12 +610,16 @@ async def list_threat_actors(
         query = query.where(search_filter)
         count_q = count_q.where(search_filter)
     total = (await db.execute(count_q)).scalar() or 0
-    if sort_by == "linked_count":
+    if ctx_sort is not None:
+        sort_expr = ctx_sort
+    elif sort_by == "linked_count":
         sort_expr = _linked_count_subquery(ThreatActor, "threat_actor")
     else:
         col = getattr(ThreatActor, sort_by)
         sort_expr = func.lower(col) if sort_by == "name" else col
     order = sort_expr.asc() if sort_order == "asc" else sort_expr.desc()
+    if ctx_sort is not None:
+        order = order.nullslast()  # entities with no value last, either direction
     result = await db.execute(query.order_by(order).limit(limit).offset(offset))
     items = result.scalars().all()
     return PaginatedResponse(items=items, total=total, limit=limit, offset=offset, has_more=(offset + limit) < total)
@@ -669,18 +688,20 @@ async def list_malware(
     malware_type: str | None = Query(None, description="Exact malware type filter (e.g. 'ransomware')"),
     sort_by: str = Query(
         "article_count",
-        pattern="^(name|malware_type|article_count|last_seen_at|linked_count)$",
-        description="Sort column; linked_count sorts by non-rejected entity-relationship count",
+        pattern=f"^(name|malware_type|article_count|last_seen_at|linked_count|{CTX_SORT})$",
+        description="Sort column; linked_count sorts by non-rejected entity-relationship count" + CTX_SORT_DOC,
     ),
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
+    ctx: dict[str, str] = Depends(context_filters),
     user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated malware-family list with name/alias search, type filter, and sorting."""
-    query = select(MalwareFamily)
-    count_q = select(func.count()).select_from(MalwareFamily)
+    ctx_where, ctx_sort = await context_query(db, MalwareFamily, "malware", user, sort_by, ctx)
+    query = select(MalwareFamily).where(*ctx_where)
+    count_q = select(func.count()).select_from(MalwareFamily).where(*ctx_where)
     if search:
         pattern = f"%{search}%"
         alias_pattern = rf"\y{re.escape(search)}\y"
@@ -695,12 +716,16 @@ async def list_malware(
         count_q = count_q.where(MalwareFamily.malware_type == malware_type)
 
     total = (await db.execute(count_q)).scalar() or 0
-    if sort_by == "linked_count":
+    if ctx_sort is not None:
+        sort_expr = ctx_sort
+    elif sort_by == "linked_count":
         sort_expr = _linked_count_subquery(MalwareFamily, "malware")
     else:
         col = getattr(MalwareFamily, sort_by)
         sort_expr = func.lower(col) if sort_by == "name" else col
     order = sort_expr.asc() if sort_order == "asc" else sort_expr.desc()
+    if ctx_sort is not None:
+        order = order.nullslast()  # entities with no value last, either direction
     result = await db.execute(query.order_by(order).limit(limit).offset(offset))
     items = result.scalars().all()
     return PaginatedResponse(items=items, total=total, limit=limit, offset=offset, has_more=(offset + limit) < total)
@@ -5079,17 +5104,20 @@ async def list_observables(
     include_denied: bool = Query(False, description="Include analyst-denied values (hidden by default)"),
     sort_by: str = Query(
         "last_seen_at",
-        pattern="^(value|kind|current_confidence|sighting_count|first_seen_at|last_seen_at|linked_count|report_count|feed_source_count)$",
-        description="Sort column; linked_count sorts by non-rejected entity-relationship count (attribution claims)",
+        pattern=f"^(value|kind|current_confidence|sighting_count|first_seen_at|last_seen_at|linked_count|report_count|feed_source_count|{CTX_SORT})$",
+        description="Sort column; linked_count sorts by non-rejected entity-relationship count (attribution claims)"
+        + CTX_SORT_DOC,
     ),
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
+    ctx: dict[str, str] = Depends(context_filters),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated observable ledger with kind/role/lifecycle filters."""
-    base_q = select(Observable)
+    ctx_where, ctx_sort = await context_query(db, Observable, "observable", user, sort_by, ctx)
+    base_q = select(Observable).where(*ctx_where)
     if not include_denied:
         base_q = base_q.where(Observable.is_denied.is_(False))
     if search:
@@ -5122,10 +5150,15 @@ async def list_observables(
 
     total = (await db.execute(select(func.count()).select_from(base_q.subquery()))).scalar_one()
     # linked_count = the shared workbench "Linked" column (attribution claims).
-    sort_col = (
-        _linked_count_subquery(Observable, "observable") if sort_by == "linked_count" else getattr(Observable, sort_by)
-    )
+    if ctx_sort is not None:
+        sort_col = ctx_sort
+    elif sort_by == "linked_count":
+        sort_col = _linked_count_subquery(Observable, "observable")
+    else:
+        sort_col = getattr(Observable, sort_by)
     order = sort_col.asc() if sort_order == "asc" else sort_col.desc()
+    if ctx_sort is not None:
+        order = order.nullslast()  # entities with no value last, either direction
     result = await db.execute(base_q.order_by(order, Observable.id.asc()).limit(limit).offset(offset))
     items = [_observable_to_response(o) for o in result.scalars().all()]
     return PaginatedResponse(items=items, total=total, limit=limit, offset=offset, has_more=(offset + limit) < total)
@@ -6198,17 +6231,19 @@ async def list_tools(
     tool_type: str | None = Query(None, description="Exact tool type filter (e.g. 'c2', 'credential_theft')"),
     sort_by: str = Query(
         "name",
-        pattern="^(name|tool_type|article_count|first_seen_at|last_seen_at|linked_count)$",
-        description="Sort column; linked_count sorts by non-rejected entity-relationship count",
+        pattern=f"^(name|tool_type|article_count|first_seen_at|last_seen_at|linked_count|{CTX_SORT})$",
+        description="Sort column; linked_count sorts by non-rejected entity-relationship count" + CTX_SORT_DOC,
     ),
     sort_order: str = Query("asc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
+    ctx: dict[str, str] = Depends(context_filters),
     user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated tool list with name/alias search, type filter, and sorting."""
-    base_q = select(Tool)
+    ctx_where, ctx_sort = await context_query(db, Tool, "tool", user, sort_by, ctx)
+    base_q = select(Tool).where(*ctx_where)
     if search:
         pattern = f"%{search}%"
         alias_pattern = rf"\y{re.escape(search)}\y"
@@ -6222,12 +6257,16 @@ async def list_tools(
         base_q = base_q.where(Tool.tool_type == tool_type)
     total_result = await db.execute(select(func.count()).select_from(base_q.subquery()))
     total = total_result.scalar_one()
-    if sort_by == "linked_count":
+    if ctx_sort is not None:
+        sort_expr = ctx_sort
+    elif sort_by == "linked_count":
         sort_expr = _linked_count_subquery(Tool, "tool")
     else:
         col = getattr(Tool, sort_by)
         sort_expr = func.lower(col) if sort_by == "name" else col
     order = sort_expr.asc() if sort_order == "asc" else sort_expr.desc()
+    if ctx_sort is not None:
+        order = order.nullslast()  # entities with no value last, either direction
     result = await db.execute(base_q.order_by(order).offset(offset).limit(limit))
     items = [_tool_to_response(t) for t in result.scalars()]
     return PaginatedResponse(items=items, total=total, limit=limit, offset=offset, has_more=(offset + limit) < total)
@@ -6295,17 +6334,19 @@ async def list_vendors(
     vendor_type: str | None = Query(None, description="Exact vendor type filter"),
     sort_by: str = Query(
         "name",
-        pattern="^(name|vendor_type|article_count|first_seen_at|last_seen_at|linked_count)$",
-        description="Sort column; linked_count sorts by non-rejected entity-relationship count",
+        pattern=f"^(name|vendor_type|article_count|first_seen_at|last_seen_at|linked_count|{CTX_SORT})$",
+        description="Sort column; linked_count sorts by non-rejected entity-relationship count" + CTX_SORT_DOC,
     ),
     sort_order: str = Query("asc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
+    ctx: dict[str, str] = Depends(context_filters),
     user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated vendor list with name/alias search, type filter, and sorting."""
-    base_q = select(Vendor)
+    ctx_where, ctx_sort = await context_query(db, Vendor, "vendor", user, sort_by, ctx)
+    base_q = select(Vendor).where(*ctx_where)
     if search:
         pattern = f"%{search}%"
         alias_pattern = rf"\y{re.escape(search)}\y"
@@ -6319,12 +6360,16 @@ async def list_vendors(
         base_q = base_q.where(Vendor.vendor_type == vendor_type)
     total_result = await db.execute(select(func.count()).select_from(base_q.subquery()))
     total = total_result.scalar_one()
-    if sort_by == "linked_count":
+    if ctx_sort is not None:
+        sort_expr = ctx_sort
+    elif sort_by == "linked_count":
         sort_expr = _linked_count_subquery(Vendor, "vendor")
     else:
         col = getattr(Vendor, sort_by)
         sort_expr = func.lower(col) if sort_by == "name" else col
     order = sort_expr.asc() if sort_order == "asc" else sort_expr.desc()
+    if ctx_sort is not None:
+        order = order.nullslast()  # entities with no value last, either direction
     result = await db.execute(base_q.order_by(order).offset(offset).limit(limit))
     items = [_vendor_to_response(v) for v in result.scalars()]
     return PaginatedResponse(items=items, total=total, limit=limit, offset=offset, has_more=(offset + limit) < total)

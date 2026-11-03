@@ -226,7 +226,10 @@ The steps, in order:
 4. **Bot walls.** If the answer is a 403, or a 429/503 whose body looks like
    a challenge page, the worker tries once more with **curl_cffi**, which
    imitates Chrome's network fingerprint. Some publishers (CISA, for example)
-   refuse Python's TLS handshake whatever the headers. Whichever client gets a
+   refuse Python's TLS handshake whatever the headers. Others hang up instead
+   of answering (SiteGround's anti-bot, Akamai on sophos.com): a dropped
+   connection, a reset or stalled read, or a refused TLS handshake gets the
+   same retry. A DNS failure or connect timeout does not, since the host is down. Whichever client gets a
    200 or 304 is remembered in `adapter_config.fetch_health.client`, and later
    polls start with it. Blocks by IP address can't be worked around this way.
 5. **YouTube retries.** YouTube's feed sometimes answers 404 or 5xx for no

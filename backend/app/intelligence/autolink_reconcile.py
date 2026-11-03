@@ -56,21 +56,27 @@ def _payload_names(parsed: dict, keys: tuple[str, ...]) -> set[str]:
     return names
 
 
-async def reconcile_pending_autolinks(db: AsyncSession, entry_id: uuid.UUID, parsed: dict) -> dict:
-    """Promote or reject unresolved pending matches for an entry. Returns counts."""
-    from app.intelligence.autolinker import store_autolink_matches
+def _held_models() -> dict:
+    """The entity types the autolinker holds matches for, and their models."""
     from app.models.country import Country
     from app.models.malware_family import MalwareFamily
-    from app.models.pending_autolink import PendingAutolinkMatch
     from app.models.threat_actor import ThreatActor
     from app.models.tool import Tool
 
-    entity_models = {
+    return {
         "threat_actor": ThreatActor,
         "malware": MalwareFamily,
         "tool": Tool,
         "country": Country,
     }
+
+
+async def reconcile_pending_autolinks(db: AsyncSession, entry_id: uuid.UUID, parsed: dict) -> dict:
+    """Promote or reject unresolved pending matches for an entry. Returns counts."""
+    from app.intelligence.autolinker import store_autolink_matches
+    from app.models.pending_autolink import PendingAutolinkMatch
+
+    entity_models = _held_models()
 
     rows = (
         (
@@ -171,8 +177,17 @@ async def resolve_pending_manually(db: AsyncSession, rows: list, promote: bool, 
 
     now = datetime.now(UTC)
     counts = {"promoted": 0, "rejected": 0}
+    entity_models = _held_models()
     for row in rows:
         if row.resolved_at is not None:
+            continue
+        model = entity_models.get(row.entity_type)
+        if model is None or await db.get(model, row.entity_id) is None:
+            # Entity deleted/merged/converted since the scan: nothing to link,
+            # and no false-positive verdict against an id that no longer exists.
+            row.resolution = "rejected"
+            row.resolved_at = now
+            counts["rejected"] += 1
             continue
         if promote:
             match = {
@@ -212,3 +227,59 @@ async def resolve_pending_manually(db: AsyncSession, rows: list, promote: bool, 
         row.resolved_at = now
     await db.flush()
     return counts
+
+
+async def move_held_matches(
+    db: AsyncSession,
+    entity_type: str,
+    entity_id: uuid.UUID,
+    successor: tuple[str, uuid.UUID] | None = None,
+) -> int:
+    """Carry an entity's unresolved held matches over to the entity that
+    replaced it (merge keeper, or its converted self), or delete them when
+    nothing did. Called when the entity is deleted, merged away or converted,
+    so a held row never points at an id that no longer exists. A row is
+    deleted instead when the successor can't hold matches or already has one
+    for that article. Returns the rows moved or deleted."""
+    from sqlalchemy import delete
+
+    from app.models.pending_autolink import PendingAutolinkMatch
+
+    open_rows = (
+        (
+            await db.execute(
+                select(PendingAutolinkMatch).where(
+                    PendingAutolinkMatch.entity_type == entity_type,
+                    PendingAutolinkMatch.entity_id == entity_id,
+                    PendingAutolinkMatch.resolved_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not open_rows:
+        return 0
+    model = _held_models().get(successor[0]) if successor else None
+    keeper = await db.get(model, successor[1]) if model else None
+    if keeper is None:
+        await db.execute(delete(PendingAutolinkMatch).where(PendingAutolinkMatch.id.in_([r.id for r in open_rows])))
+        return len(open_rows)
+    taken = set(
+        (
+            await db.execute(
+                select(PendingAutolinkMatch.entry_id).where(
+                    PendingAutolinkMatch.entity_type == successor[0],
+                    PendingAutolinkMatch.entity_id == successor[1],
+                    PendingAutolinkMatch.entry_id.in_([r.entry_id for r in open_rows]),
+                )
+            )
+        ).scalars()
+    )
+    for row in open_rows:
+        if row.entry_id in taken:
+            await db.delete(row)
+            continue
+        row.entity_type, row.entity_id, row.canonical_name = successor[0], successor[1], keeper.name
+    await db.flush()
+    return len(open_rows)

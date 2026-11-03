@@ -91,7 +91,8 @@ Exceptions:
 - reviewed read-only POSTs that take ids or text and store nothing: `/api/entries/intel-counts`,
   `/api/entries/resolve-names`, `/api/intelligence/resolve-names`,
   `/api/glossary/detect` and `/api/autolink/scan` (body up to 16 KB), and
-  `/api/entity-relationships/signals/{entity_type}` (up to 48 KB, for the
+  `/api/entity-relationships/signals/{entity_type}` and
+  `/api/entities/{entity_type}/context-values` (up to 48 KB each, for the
   entity tables' id lists).
 
 In the browser, `api/client.ts` drops visitor writes with one "This view is
@@ -124,7 +125,9 @@ listener filters every ORM query for visitors:
   (`GET /api/entities/{entity_type}/{entity_id}/context`) leaves out every
   source that sends an observable's value to a third party (`egress =
   shares_ioc`) or whose license bars commercial use (`commercial_ok = False`),
-  and lists no unavailable sources.
+  and lists no unavailable sources. The entity tables' context columns
+  (`context-columns`, `context-values`, `ctx:` sort and filters) follow the
+  same rule.
 
 These filters apply only to ORM SQL, so a request's session must start empty:
 `session.get()` can answer from its cache without a query.

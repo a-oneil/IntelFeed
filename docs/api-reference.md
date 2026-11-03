@@ -251,6 +251,8 @@ All paths below start with `/api` unless shown otherwise. `{id}`-style names are
 | GET | `/api/feeds/{feed_id}/entries` | Visitor | The feed's articles, cursor-paged like `GET /api/entries` |
 | POST | `/api/feeds/{feed_id}/refresh` | User | Fetch the feed now (queued) |
 | POST | `/api/feeds/{feed_id}/resume` | Admin | Turn back on a feed the health check paused, and clear its failure count |
+| POST | `/api/feeds/{feed_id}/pause` | Admin | Stop polling a feed for everyone (the PUT `is_active` toggle pauses only your own subscription) |
+| POST | `/api/feeds/{feed_id}/remove` | Admin | Unsubscribe every reader and stop polling; entries stay (DELETE without `purge` unsubscribes only you) |
 | GET | `/api/feeds/health` | User | Counts of healthy, stale, erroring and disabled feeds |
 | GET | `/api/feeds/health/failing` | User | Feeds failing `threshold` times in a row (default 5). High-value feeds (rated A/B) come first |
 | GET | `/api/feeds/{feed_id}/analytics` | User | Source reliability numbers for one feed |

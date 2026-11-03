@@ -53,6 +53,8 @@ VISITOR_ROUTES = frozenset(
     GET /api/engine/entities/{entity_type}/{entity_id}/whats-new
     GET /api/entities/{entity_type}/{entity_id}/attack-layer
     GET /api/entities/{entity_type}/{entity_id}/attack-techniques
+    GET /api/entities/{entity_type}/context-columns
+    POST /api/entities/{entity_type}/context-values
     GET /api/entities/{entity_type}/{entity_id}/context
     GET /api/entities/{entity_type}/{entity_id}/glance
     GET /api/entities/{entity_type}/{entity_id}/entries-window
