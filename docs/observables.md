@@ -95,7 +95,7 @@ Host rules (`_plausible_cmdline`, `_plausible_path_atom`, and the branches of `v
 
 (Talos, Unit 42, Huntress, Datadog and Bitdefender put IOCs at the end of 20,000–80,000-character articles.)
 
-The seeded `entry_analysis` assignment has a 10,000-token output budget (`backend/app/ai/prompts/defaults.py`). `parse_ai_json()` (`backend/app/ai/engine.py:161`) repairs bad backslash escapes small models write in Windows paths.
+The seeded `entry_analysis` assignment has a 10,000-token output budget (`backend/app/ai/prompts/defaults.py`). `parse_ai_json()` (`backend/app/ai/engine.py:179`) repairs bad backslash escapes small models write in Windows paths.
 
 ## Shadow, capture, and the per-kind list
 

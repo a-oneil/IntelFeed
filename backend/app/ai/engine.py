@@ -32,6 +32,21 @@ from app.models.user_ai_route import UserAIPreferences, UserAIRoute
 
 logger = logging.getLogger(__name__)
 
+
+def provider_runs_tools(provider_model: AIProviderModel, config: dict | None = None) -> bool:
+    """Whether this provider runs tools for a call, with the assignment's config layered on.
+
+    ``tools_enabled`` may be set on the provider row or on one assignment;
+    the provider instance sees both (``_get_provider_instance`` merges them),
+    so every check about tools must too.
+    """
+    from app.ai.capabilities import provider_type_supports_tools
+
+    return provider_type_supports_tools(
+        provider_model.provider_type, {**(provider_model.config or {}), **(config or {})}
+    )
+
+
 # Provider types whose tool loop runs in this process over an injected executor.
 _IN_PROCESS_TOOL_TYPES = frozenset({"ollama", "claude", "openai_compatible"})
 
@@ -1027,7 +1042,7 @@ async def run_task(
         # The CLI's WebSearch has an Anthropic API equivalent, run on
         # Anthropic's side (entity_enrichment_research needs it).
         complete_kwargs["web_search"] = True
-    if provider_model.provider_type in _IN_PROCESS_TOOL_TYPES and provider_model.supports_tools:
+    if provider_model.provider_type in _IN_PROCESS_TOOL_TYPES and provider_runs_tools(provider_model, config):
         from app.ai.capabilities import task_requires_tools
 
         if task_requires_tools(task_name):

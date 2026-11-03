@@ -286,7 +286,12 @@ class ClaudeCodeProvider(AIProvider):
         return path
 
     def _mcp_config(
-        self, agent_user_id: uuid.UUID | None, ttl_seconds: float, *, conversation_id: uuid.UUID | None = None
+        self,
+        agent_user_id: uuid.UUID | None,
+        ttl_seconds: float,
+        *,
+        conversation_id: uuid.UUID | None = None,
+        turn_id: uuid.UUID | None = None,
     ) -> str | None:
         """--mcp-config JSON for the IntelFeed server, or None when it cannot run.
 
@@ -309,7 +314,9 @@ class ClaudeCodeProvider(AIProvider):
 
         env = {
             "INTELFEED_API_URL": self.agent_api_url,
-            "INTELFEED_TOKEN": create_agent_token(agent_user_id, ttl_seconds, conversation_id=conversation_id),
+            "INTELFEED_TOKEN": create_agent_token(
+                agent_user_id, ttl_seconds, conversation_id=conversation_id, turn_id=turn_id
+            ),
             # Claude reads far more than the small local models the server's
             # 7k default was sized for.
             "INTELFEED_MCP_RESULT_CHARS": "20000",
@@ -785,6 +792,7 @@ class ClaudeCodeProvider(AIProvider):
         env: dict[str, str] | None = None,
         agent_user_id: uuid.UUID | None = None,
         agent_conversation_id: uuid.UUID | None = None,
+        agent_turn_id: uuid.UUID | None = None,
     ) -> AsyncGenerator[dict, None]:
         """Run one agent turn via the CLI and yield typed streaming events.
 
@@ -812,7 +820,9 @@ class ClaudeCodeProvider(AIProvider):
         effective_tools = allowed_tools if allowed_tools is not None else self.allowed_tools
         mcp_config = None
         if self._effective_plan(effective_tools, flags).intelfeed:
-            mcp_config = self._mcp_config(agent_user_id, effective_timeout + 120, conversation_id=agent_conversation_id)
+            mcp_config = self._mcp_config(
+                agent_user_id, effective_timeout + 120, conversation_id=agent_conversation_id, turn_id=agent_turn_id
+            )
         argv = self._build_stream_argv(cli, model, system, allowed_tools, flags, mcp_config=mcp_config)
 
         # A scrubbed environment plus the caller's overlay; see _scrubbed_env.

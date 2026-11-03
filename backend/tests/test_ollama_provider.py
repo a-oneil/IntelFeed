@@ -464,10 +464,12 @@ async def test_stream_agent_tool_iteration_cap(monkeypatch):
             tool_executor=executor,
         )
     ]
-    # 3 iterations, each one tool call; ends with a done (no final text).
+    # 3 iterations, each one tool call; ends with a note, not a blank answer, then done.
+    from app.ai.agent_loop import TOOL_BUDGET_NOTE
+
     assert calls == 3
     assert events[-1]["kind"] == "done"
-    assert "text" not in [e["kind"] for e in events]
+    assert [e["text"] for e in events if e["kind"] == "text"] == [TOOL_BUDGET_NOTE]
 
 
 @pytest.mark.asyncio

@@ -125,6 +125,8 @@ All three get the same tools and run every call through the same `ToolGate` (see
 
 Sending the whole registry instead would cost about 26k tokens a round, swamp a local model, and break OpenAI, which refuses more than 128 tools in one request. The MCP server uses the same idea for the CLI. An assignment's `agent_tools` key (Prompt Workspace → Routing panel) limits the copilot to exactly those tools, with no helpers. Tool traces stream to the dock the same way as with the CLI.
 
+A turn has a tool budget (`max_tool_iterations`, default 8 rounds). When it runs out, the Anthropic and OpenAI-compatible loops run one more round with tools off and ask the model to answer from what it found; Ollama ends with a note. A turn never ends blank. A provider's `tools_enabled` can be set on the provider row or on one assignment; `provider_runs_tools` (`backend/app/ai/engine.py`) reads both, like the provider does.
+
 A provider with tool calling turned off streams plain text. The dock's header says "no tools", and the footer says "tools unavailable on this key" when it was the person's own key.
 
 ---
@@ -150,7 +152,7 @@ Either way the endpoint handles events the same way, because the worker relays `
 
 ### The Redis relay
 
-`run_copilot_stream` (`backend/app/workers/copilot_tasks.py:115`; soft limit 300 s, hard limit 360 s) has no business logic. It runs `ClaudeCodeProvider.stream_agent` and pushes each event onto the list `copilot:stream:{run_id}`, then an `__end__` or `__error__` marker. A list (not pub/sub) means no events are lost if the api subscribes late or falls behind. The list expires after 300 s (`_STREAM_TTL_SECONDS`, `backend/app/workers/copilot_tasks.py:40`) so abandoned runs clean themselves up. Even if the task crashes, it pushes an error marker (`_emergency_terminate`, `backend/app/workers/copilot_tasks.py:152`), so the api never waits forever.
+`run_copilot_stream` (`backend/app/workers/copilot_tasks.py:115`; soft limit 300 s, hard limit 360 s) has no business logic. It runs `ClaudeCodeProvider.stream_agent` and pushes each event onto the list `copilot:stream:{run_id}`, then an `__end__` or `__error__` marker. A list (not pub/sub) means no events are lost if the api subscribes late or falls behind. The list expires after 300 s (`_STREAM_TTL_SECONDS`, `backend/app/workers/copilot_tasks.py:40`) so abandoned runs clean themselves up. Even if the task crashes, it pushes an error marker (`_emergency_terminate`, `backend/app/workers/copilot_tasks.py:160`), so the api never waits forever.
 
 The api reads the list with BLPOP (`_iter_worker_events`, `backend/app/api/copilot.py:469`). If nothing arrives for the CLI timeout plus 60 seconds (180 + 60 when no timeout is set), the turn fails with "Copilot worker produced no output".
 
@@ -160,7 +162,7 @@ All AI-calling Celery tasks are routed to the `ai` queue (`task_routes` in `back
 
 ### The CLI invocation
 
-`stream_agent` (`backend/app/ai/providers/claude_code_provider.py:777`) runs `claude -p --output-format stream-json --verbose --include-partial-messages` (`_build_stream_argv`, `backend/app/ai/providers/claude_code_provider.py:717`), passes the system prompt with `--append-system-prompt`, and adds the confinement flags described in [the tool layer](#the-tool-layer-one-gate-for-every-provider). `_map_stream_event` (`backend/app/ai/providers/claude_code_provider.py:905`) turns the CLI's output into events: text deltas become `text`, `tool_use` blocks become `tool_call` (sent once the arguments are complete), and `tool_result` blocks become `tool_result` with a 200-character summary. A quota or rate-limit message raises `QuotaExhaustedError` (`backend/app/ai/providers/claude_code_provider.py:40`), with a best guess at the reset time.
+`stream_agent` (`backend/app/ai/providers/claude_code_provider.py:784`) runs `claude -p --output-format stream-json --verbose --include-partial-messages` (`_build_stream_argv`, `backend/app/ai/providers/claude_code_provider.py:724`), passes the system prompt with `--append-system-prompt`, and adds the confinement flags described in [the tool layer](#the-tool-layer-one-gate-for-every-provider). `_map_stream_event` (`backend/app/ai/providers/claude_code_provider.py:915`) turns the CLI's output into events: text deltas become `text`, `tool_use` blocks become `tool_call` (sent once the arguments are complete), and `tool_result` blocks become `tool_result` with a 200-character summary. A quota or rate-limit message raises `QuotaExhaustedError` (`backend/app/ai/providers/claude_code_provider.py:40`), with a best guess at the reset time.
 
 ---
 
@@ -194,13 +196,13 @@ Writes the CLI stages are saved against the conversation, so the copilot collect
 
 ## Confirmed writes: staging and the confirm endpoint
 
-A staged write is stored in Redis at `copilot:action:{action_id}` for **900 seconds** (`STAGED_TTL_SECONDS` in `backend/app/tools/gate.py`) with the user, the conversation, the tool and its arguments. The conversation keeps a list of what it staged (`copilot:staged:{conversation_id}`). After the model finishes, `copilot_stream` takes that list (`take_staged`) and sends one `confirm_request` per write, oldest first, before `done`. Each carries `tool_name`, the exact `proposed` arguments, `targets`, `preview` and `destructive` (a delete with a token flow, or an admin tool). An id alone would let a planted instruction slip in a different record, so staging names them: `targets` maps each id-holding argument to the record it points at (`name_targets`, e.g. `campaign 'Operation Lantern'`; personal notes are never named), and for a delete `preview` is the tool's own harmless first step, such as how many entries go with a feed. The card shows both.
+A staged write is stored in Redis at `copilot:action:{action_id}` for **900 seconds** (`STAGED_TTL_SECONDS` in `backend/app/tools/gate.py`) with the user, the conversation, the tool and its arguments. Each copilot turn keeps a list of what it staged (`copilot:staged:{turn_id}`; the CLI's propose token carries the turn). After the model finishes, `copilot_stream` takes that turn's list (`take_staged`) and sends one `confirm_request` per write, oldest first, before `done`. Each carries `tool_name`, the exact `proposed` arguments, `targets`, `preview` and `destructive` (a delete with a token flow, or an admin tool). An id alone would let a planted instruction slip in a different record, so staging names them: `targets` maps each id-holding argument to the record it points at (`name_targets`, e.g. `campaign 'Operation Lantern'`; personal notes are never named), and for a delete `preview` is the tool's own harmless first step, such as how many entries go with a feed. The card shows both.
 
 `POST /api/ai/copilot/confirm` (`copilot_confirm`, `backend/app/api/copilot.py`) then runs or cancels it:
 
 - The stored call must belong to the caller (404 otherwise, and 404 once it has expired).
 - `edited_params` may replace the arguments, except on a destructive call: that one is confirmed as shown or cancelled.
-- A claim key (`copilot:action:{id}:claim`, 60 s) lets only one approval run at a time, so a double click or two tabs cannot run it twice; a second approval gets 409.
+- A claim key (`copilot:action:{id}:claim`, 900 s, as long as the staged call can live) lets only one approval run at a time, so a double click, two tabs or a slow tool cannot run it twice; a second approval gets 409. After claiming, the call must still exist: a click that lands just after another approval finished gets 404, not a second run.
 - `run_confirmed` runs the tool as the user who clicked, re-checking `ADMIN_TOOLS` against their role at that moment. A tool with a two-step token flow (the seven deletes: `delete_entity`, `delete_feed`, `delete_campaign`, `delete_automation_rule`, `delete_detection_rule`, `delete_intel_report`, `delete_requirement`; `confirmation_token_tools` finds them by their schema) gets its token here, server-side: the click is the confirmation.
 - On success, a `✓ Done: <summary>. Result: …` message is appended to the conversation. If the tool returns an error, the staged call is kept so you can retry.
 
@@ -286,7 +288,7 @@ Session states, stored at `copilot:auth:session:{id}` for 15 minutes: `starting 
 
 Each copilot turn writes one `AIResult` row (`target_type="conversation"`, `target_id` = the conversation id), including turns that fail or are abandoned mid-stream. On the CLI the dollar figure is **notional**: the CLI's final `result` event reports token usage and a `total_cost_usd`, which `ClaudeCodeProvider` reads (`_extract_usage`) and passes along in the `done` event. Under a flat-rate subscription that figure is what the usage *would* cost at API prices, not a real charge. The real limit is the subscription's rate limits, which show up as `QuotaExhaustedError` pauses. `tokens_input` includes cache tokens; the raw breakdown is in `parsed_result.usage`.
 
-With other providers the row is priced from the stream's reported usage (`last_stream_usage`), or from the cost table when there are tokens but no dollar figure. Every row records `caller_kind="user"`, the person's `user_id`, and `key_owner_id` when their own key answered. That is what the monthly cap, the site allowance and the By-user table count.
+With other providers the row is priced from the stream's reported usage (`last_stream_usage`), or from the cost table when there are tokens but no dollar figure. The Anthropic tool loop prices its own turn from that table at Anthropic's cache rates: cached input at 10% of the input rate and cache writes at 125%. Every round re-sends the cached system prompt and tool list, so pricing them as fresh input would overstate a turn several times. `tokens_input` still counts every input token. Every row records `caller_kind="user"`, the person's `user_id`, and `key_owner_id` when their own key answered. That is what the monthly cap, the site allowance and the By-user table count.
 
 ---
 

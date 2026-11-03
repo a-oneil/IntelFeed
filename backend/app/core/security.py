@@ -65,7 +65,13 @@ AGENT_SCOPE_READ = "read"
 AGENT_SCOPE_PROPOSE = "propose"
 
 
-def create_agent_token(user_id: uuid.UUID, ttl_seconds: float, *, conversation_id: uuid.UUID | None = None) -> str:
+def create_agent_token(
+    user_id: uuid.UUID,
+    ttl_seconds: float,
+    *,
+    conversation_id: uuid.UUID | None = None,
+    turn_id: uuid.UUID | None = None,
+) -> str:
     """A short-lived token for one agent run on ``user_id``'s behalf.
 
     Read-only by default. With ``conversation_id`` it is a ``propose`` token:
@@ -83,6 +89,8 @@ def create_agent_token(user_id: uuid.UUID, ttl_seconds: float, *, conversation_i
     }
     if conversation_id:
         payload["conversation_id"] = str(conversation_id)
+        # The copilot turn whose confirm cards its staged writes belong to.
+        payload["turn_id"] = str(turn_id or conversation_id)
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
@@ -234,6 +242,7 @@ class ToolCaller:
     user: User
     agent_scope: str | None = None
     conversation_id: str | None = None
+    turn_id: str | None = None
 
     @property
     def is_agent(self) -> bool:
@@ -257,7 +266,12 @@ async def get_tool_caller(
     if scope != AGENT_SCOPE_PROPOSE or not conversation_id:
         # Anything but a well-formed propose token is read-only.
         return ToolCaller(user=user, agent_scope=AGENT_SCOPE_READ)
-    return ToolCaller(user=user, agent_scope=AGENT_SCOPE_PROPOSE, conversation_id=str(conversation_id))
+    return ToolCaller(
+        user=user,
+        agent_scope=AGENT_SCOPE_PROPOSE,
+        conversation_id=str(conversation_id),
+        turn_id=str(payload.get("turn_id") or conversation_id),
+    )
 
 
 async def _user_from_payload(payload: dict, db: AsyncSession) -> User:

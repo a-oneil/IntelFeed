@@ -26,6 +26,15 @@ ToolExecutor = Callable[[str, dict], Awaitable[str]]
 # without answering must not loop forever.
 DEFAULT_MAX_TOOL_ITERATIONS = 8
 
+# When the tool budget is spent, one last round runs with tools off and this
+# note, so the turn ends with an answer rather than nothing.
+FINAL_ROUND_NOTE = (
+    "You have used all your tool calls for this turn. Answer now from what you have found, "
+    "and say what you could not check."
+)
+# Said instead, when even that last round came back empty.
+TOOL_BUDGET_NOTE = "_[Stopped after the tool-call limit for one turn without an answer. Ask again more narrowly.]_"
+
 # Cap on one tool result fed back to the model, so a huge payload can't crowd
 # out the system prompt and the question.
 TOOL_RESULT_MAX_CHARS = 30_000
@@ -140,8 +149,9 @@ async def complete_with_agent(
         tokens_input += final.tokens_input
         tokens_output += final.tokens_output
         resolved_model = final.model or resolved_model
-        if cost is not None or final.cost_usd is not None:
-            cost = (cost or 0.0) + (final.cost_usd or 0.0)
+        # A part with no price makes the whole unknown: the engine then prices
+        # every token from its table, rather than half the call going unbilled.
+        cost = cost + final.cost_usd if cost is not None and final.cost_usd is not None else None
 
     return AIResponse(
         content=content,

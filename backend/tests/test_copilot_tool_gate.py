@@ -47,6 +47,9 @@ class FakeRedis:
     async def lrange(self, key, start, end):
         return list(self.lists.get(key, []))
 
+    async def exists(self, key):
+        return int(key in self.kv)
+
     async def delete(self, *keys):
         for k in keys:
             self.kv.pop(k, None)
@@ -622,3 +625,150 @@ async def test_a_failing_tool_rolls_back_only_its_savepoint(monkeypatch):
     await gate.execute_isolated(db, "get_feeds", {}, uuid.uuid4())
     assert [sp.done for sp in db.savepoints] == ["rollback", "commit"]
     assert db.full_rollbacks == 0
+
+
+# ------------------------------------------------- deferred review items
+
+
+@pytest.mark.asyncio
+async def test_a_click_after_the_action_ran_is_refused_not_rerun(fake_redis):
+    from app.api.copilot import _claim
+    from app.core.exceptions import AppError
+
+    key = "copilot:action:a1"
+    await fake_redis.set(key, "{}")
+    claim = await _claim(fake_redis, key)
+    with pytest.raises(AppError) as busy:
+        await _claim(fake_redis, key)
+    assert busy.value.status_code == 409
+    # The first approval finishes and removes both keys; a late click finds nothing to run.
+    await fake_redis.delete(key, claim)
+    with pytest.raises(AppError) as gone:
+        await _claim(fake_redis, key)
+    assert gone.value.status_code == 404
+    assert f"{key}:claim" not in fake_redis.kv
+
+
+@pytest.mark.asyncio
+async def test_staged_calls_belong_to_their_turn(fake_redis, ran):
+    conversation_id, turn_a, turn_b = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    user_id = uuid.uuid4()
+    for turn in (turn_a, turn_b):
+        g = gate.ToolGate(
+            db=_Session(),
+            user_id=user_id,
+            role="user",
+            offered=["create_note"],
+            conversation_id=conversation_id,
+            turn_id=turn,
+        )
+        await g("create_note", {"title": str(turn)})
+    # Turn A was abandoned (never collected); turn B sees only its own call.
+    (row,) = await gate.take_staged(turn_b, user_id)
+    assert row["args"] == {"title": str(turn_b)} and row["conversation_id"] == str(conversation_id)
+
+
+def test_propose_token_carries_its_turn():
+    from app.core.security import create_agent_token, decode_token
+
+    conversation_id, turn_id = uuid.uuid4(), uuid.uuid4()
+    payload = decode_token(create_agent_token(uuid.uuid4(), 60, conversation_id=conversation_id, turn_id=turn_id))
+    assert payload["scope"] == "propose" and payload["turn_id"] == str(turn_id)
+
+
+def test_tools_enabled_on_an_assignment_counts():
+    from app.ai.engine import provider_runs_tools
+    from app.models.ai_provider import AIProvider
+
+    row = AIProvider(name="x", provider_type="openai_compatible", config={})
+    assert provider_runs_tools(row, {}) is True
+    assert provider_runs_tools(row, {"tools_enabled": False}) is False
+    assert provider_runs_tools(AIProvider(name="c", provider_type="claude", config={}), {"tools_enabled": False})
+
+
+@pytest.mark.asyncio
+async def test_anthropic_loop_answers_after_the_tool_budget(fake_redis, ran):
+    def calls_a_tool(i):
+        return SimpleNamespace(
+            content=[_block(type="tool_use", id=f"t{i}", name="search_entries", input={})],
+            stop_reason="tool_use",
+            usage=_usage(),
+        )
+
+    answer = SimpleNamespace(
+        content=[_block(type="text", text="Best I can say.")], stop_reason="end_turn", usage=_usage()
+    )
+    provider, messages = _claude_with([(calls_a_tool(0), []), (answer, ["Best I can say."])])
+    provider.config["max_tool_iterations"] = 1
+    tools = provider.render_tools(gate.model_tool_definitions(role="user", names=["search_entries"]))
+    events = [e async for e in provider.stream_agent(prompt="q", tools=tools, tool_executor=_gate())]
+
+    final = messages.requests[-1]
+    assert final["tool_choice"] == {"type": "none"}
+    assert final["messages"][-1]["content"][-1]["type"] == "text"  # the wrap-up note after the tool results
+    assert "".join(e["text"] for e in events if e["kind"] == "text") == "Best I can say."
+
+
+@pytest.mark.asyncio
+async def test_anthropic_cost_prices_cached_input_at_cache_rates():
+    usage = SimpleNamespace(
+        input_tokens=1_000, output_tokens=1_000, cache_read_input_tokens=100_000, cache_creation_input_tokens=0
+    )
+    answer = SimpleNamespace(content=[_block(type="text", text="ok")], stop_reason="end_turn", usage=usage)
+    provider, _ = _claude_with([(answer, ["ok"])])
+    done = [e async for e in provider.stream_agent(prompt="q", model="claude-sonnet-4-6")][-1]
+    # 1k fresh + 100k cached at 10% = 11k input at $3/M, plus 1k output at $15/M.
+    assert done["usage"]["total_cost_usd"] == pytest.approx(0.033 + 0.015)
+    assert done["usage"]["tokens_input"] == 101_000
+
+
+@pytest.mark.asyncio
+async def test_openai_loop_pairs_calls_without_ids_and_wraps_up(monkeypatch, fake_redis, ran):
+    bodies: list[dict] = []
+    replies = [
+        _chat(
+            {"content": "", "tool_calls": [{"function": {"name": "search_entries", "arguments": "{}"}}]},
+            finish="tool_calls",
+        ),
+        _chat({"content": "Summary from what I found."}),
+    ]
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json=replies.pop(0))
+
+    _mock_httpx(monkeypatch, handler)
+    provider = OpenAICompatibleProvider(
+        base_url="https://api.openai.com/v1", config={"default_model": "gpt-x", "max_tool_iterations": 1}
+    )
+    tools = provider.render_tools(gate.model_tool_definitions(role="user", names=["search_entries"]))
+    events = [e async for e in provider.stream_agent(prompt="q", tools=tools, tool_executor=_gate())]
+
+    sent = bodies[1]["messages"]
+    assistant = next(m for m in sent if m["role"] == "assistant")
+    tool_msg = next(m for m in sent if m["role"] == "tool")
+    assert assistant["tool_calls"][0]["id"] == tool_msg["tool_call_id"]
+    assert bodies[1]["tool_choice"] == "none" and sent[-1]["role"] == "user"
+    assert "".join(e["text"] for e in events if e["kind"] == "text") == "Summary from what I found."
+
+
+@pytest.mark.asyncio
+async def test_openai_only_the_first_request_can_mean_no_tools(monkeypatch, fake_redis, ran):
+    replies = [
+        httpx.Response(
+            200,
+            json=_chat(
+                {
+                    "content": "",
+                    "tool_calls": [{"id": "c1", "function": {"name": "search_entries", "arguments": "{}"}}],
+                },
+                finish="tool_calls",
+            ),
+        ),
+        httpx.Response(400, json={"error": "invalid tool message ordering"}),
+    ]
+    _mock_httpx(monkeypatch, lambda request: replies.pop(0))
+    provider = OpenAICompatibleProvider(base_url="https://api.openai.com/v1", config={"default_model": "gpt-x"})
+    tools = provider.render_tools(gate.model_tool_definitions(role="user", names=["search_entries"]))
+    with pytest.raises(httpx.HTTPStatusError):
+        [e async for e in provider.stream_agent(prompt="q", tools=tools, tool_executor=_gate())]

@@ -42,6 +42,8 @@ from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
 
 from app.ai.agent_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
+    FINAL_ROUND_NOTE,
+    TOOL_BUDGET_NOTE,
     ToolExecutor,
     clip_tool_result,
     complete_with_agent,
@@ -63,6 +65,19 @@ WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_use
 # Server-tool blocks in a reply, replayed verbatim on the next request.
 _SERVER_BLOCK_TYPES = frozenset({"server_tool_use", "web_search_tool_result"})
 OAUTH_TOKEN_PREFIX = "sk-ant-oat"
+
+
+def _cache_aware_cost(model: str, uncached: int, cache_read: int, cache_write: int, output: int) -> float:
+    """Dollar cost from the engine's price table, at Anthropic's cache rates.
+
+    A cache read bills at 10% of the input rate and a cache write at 125%. The
+    tool loop re-sends the cached system prompt and tool list every round, so
+    pricing those reads as fresh input would overstate a turn several times.
+    """
+    from app.ai.engine import _estimate_cost
+
+    billable_input = uncached + cache_read * 0.1 + cache_write * 1.25
+    return float(_estimate_cost(model, round(billable_input), output))
 
 
 def _parse_retry_after(headers: object) -> None:
@@ -363,11 +378,12 @@ class ClaudeProvider(AIProvider):
 
         Text streams as it arrives; each ``tool_use`` block is run through
         ``tool_executor`` and its result sent back, until the model answers
-        without calling a tool or the iteration cap is hit. ``web_search``
+        without calling a tool. When the iteration cap is hit, one last round
+        runs with tools off so the turn still ends with an answer. ``web_search``
         adds Anthropic's server-side search, whose long turns can pause
         (``pause_turn``) and are resumed as they are. Event shapes are the
-        ones in app.ai.agent_loop. Cost is left to the engine's token table
-        (``total_cost_usd`` None).
+        ones in app.ai.agent_loop. ``total_cost_usd`` comes from the engine's
+        price table at Anthropic's cache rates.
         """
         del temperature, heartbeat_label
         client = self._build_client()
@@ -386,19 +402,40 @@ class ClaudeProvider(AIProvider):
         if offered:
             kwargs["tools"] = self._cached_tools(offered)
 
-        tokens_input = 0
+        tokens_input = 0  # every input token, cached or not (what the cap and dashboard count)
+        uncached = 0
+        cache_read = 0
+        cache_write = 0
         tokens_output = 0
 
         def _done() -> dict:
             return {
                 "kind": "done",
-                "usage": {"tokens_input": tokens_input, "tokens_output": tokens_output, "total_cost_usd": None},
+                "usage": {
+                    "tokens_input": tokens_input,
+                    "tokens_output": tokens_output,
+                    "cache_read_input_tokens": cache_read,
+                    "cache_creation_input_tokens": cache_write,
+                    "total_cost_usd": _cache_aware_cost(model, uncached, cache_read, cache_write, tokens_output),
+                },
             }
 
-        for _ in range(max_iterations):
+        # One round past the budget: tools off, so the turn ends with an answer.
+        for iteration in range(max_iterations + 1):
+            wrap_up = iteration == max_iterations
+            round_kwargs = kwargs
+            if wrap_up:
+                last = messages[-1]
+                if last["role"] == "user" and isinstance(last["content"], list):
+                    last["content"].append({"type": "text", "text": FINAL_ROUND_NOTE})
+                else:
+                    messages.append({"role": "user", "content": FINAL_ROUND_NOTE})
+                if "tools" in kwargs:
+                    # The history's tool calls still need the tools list.
+                    round_kwargs = {**kwargs, "tool_choice": {"type": "none"}}
             emitted_text = False
             try:
-                async with client.messages.stream(messages=messages, **kwargs) as stream:
+                async with client.messages.stream(messages=messages, **round_kwargs) as stream:
                     async for text in stream.text_stream:
                         if text:
                             emitted_text = True
@@ -409,13 +446,18 @@ class ClaudeProvider(AIProvider):
                 raise QuotaExhaustedError(str(e)[:500], reset_at=_parse_retry_after(headers))
 
             usage = final.usage
-            # Cached input is still input: a dollar cap must see it.
-            tokens_input += (
-                (usage.input_tokens or 0)
-                + (getattr(usage, "cache_read_input_tokens", 0) or 0)
-                + (getattr(usage, "cache_creation_input_tokens", 0) or 0)
-            )
+            uncached += usage.input_tokens or 0
+            cache_read += getattr(usage, "cache_read_input_tokens", 0) or 0
+            cache_write += getattr(usage, "cache_creation_input_tokens", 0) or 0
+            tokens_input = uncached + cache_read + cache_write
             tokens_output += usage.output_tokens or 0
+
+            if wrap_up:
+                if not emitted_text:
+                    yield {"kind": "text", "text": TOOL_BUDGET_NOTE}
+                logger.warning("claude agent loop hit max_iterations=%d", max_iterations)
+                yield _done()
+                return
 
             if final.stop_reason == "pause_turn":
                 # A long server-side search turn: send it back to carry on.
@@ -448,7 +490,6 @@ class ClaudeProvider(AIProvider):
                 )
             messages.append({"role": "user", "content": results})
 
-        logger.warning("claude agent loop hit max_iterations=%d without a final answer", max_iterations)
         yield _done()
 
     async def check_health(self) -> bool:

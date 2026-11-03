@@ -510,7 +510,7 @@ async def copilot_config(
     OAuth session, so the banner must not show.
     """
     from app.ai.caller import Caller
-    from app.ai.engine import UserKeyRequired, resolve_assignment
+    from app.ai.engine import UserKeyRequired, provider_runs_tools, resolve_assignment
 
     unconfigured = {
         "configured": False,
@@ -555,7 +555,7 @@ async def copilot_config(
         # answers without tools, and the dock says that too.
         "source": resolved.source,
         "model": resolved.model_name,
-        "supports_tools": provider_model.supports_tools,
+        "supports_tools": provider_runs_tools(provider_model, resolved.config),
         "fallback_reason": resolved.fallback_reason,
         "refused": None,
     }
@@ -585,6 +585,7 @@ async def copilot_stream(
         _get_provider_instance,
         attribution_fields,
         get_active_prompt_versioned,
+        provider_runs_tools,
         render_prompt,
         resolve_assignment,
     )
@@ -595,6 +596,9 @@ async def copilot_stream(
 
     ctx = body.context
     read_only_turn = bool(ctx and ctx.read_only)
+    # Staged writes are collected per turn, so one this request never got to
+    # collect (the client left) can't surface as a card on a later turn.
+    turn_id = uuid.uuid4()
 
     # Resolve the copilot task -> provider: the person's own key when one
     # applies, else the site assignment (seeded to the claude_code provider
@@ -782,6 +786,7 @@ async def copilot_stream(
                                 "provider_config": config,
                                 "agent_user_id": str(user.id),
                                 "agent_conversation_id": None if read_only_turn else str(conversation_id),
+                                "agent_turn_id": str(turn_id),
                             },
                             queue="ai",
                         )
@@ -802,6 +807,7 @@ async def copilot_stream(
                             heartbeat_label="copilot stream",
                             agent_user_id=user.id,
                             agent_conversation_id=None if read_only_turn else conversation_id,
+                            agent_turn_id=turn_id,
                         )
                 elif getattr(provider, "supports_tools", False) and hasattr(provider, "stream_agent"):
                     # In-process tool loop (Anthropic API, OpenAI-compatible,
@@ -822,6 +828,7 @@ async def copilot_stream(
                         conversation_id=conversation_id,
                         auto_approve=auto_approve_tools(),
                         reachable=reachable,
+                        turn_id=turn_id,
                     )
                     # NB: conversation history is already rendered into the prompt via
                     # the copilot template's ``conversation_history`` variable (same as
@@ -986,7 +993,7 @@ async def copilot_stream(
             try:
                 from app.tools.gate import take_staged
 
-                for row in await take_staged(conversation_id, user.id):
+                for row in await take_staged(turn_id, user.id):
                     yield {"data": json.dumps(_confirm_request_event(row))}
             except Exception as e:  # a lost card is a missed write, not a broken stream
                 logger.error("copilot failed to collect staged tool calls: %s", e)
@@ -1002,7 +1009,7 @@ async def copilot_stream(
                 "model": model,
                 "cost_usd": float(turn_cost) if turn_cost is not None else None,
                 "fallback_reason": resolved.fallback_reason,
-                "supports_tools": provider_model.supports_tools,
+                "supports_tools": provider_runs_tools(provider_model, resolved.config),
             }
             yield {
                 "data": json.dumps(
@@ -1158,6 +1165,23 @@ _ACTION_HANDLERS = {
 }
 
 
+async def _claim(r, key: str) -> str:
+    """Take the one-at-a-time claim on a staged action; returns the claim key.
+
+    The claim lives as long as the action can (a confirmed tool may run for
+    minutes; a short claim would let a second click run it again). After
+    taking it, the action must still exist: a click that lands just after
+    another approval finished and deleted it would otherwise run it twice.
+    """
+    claim_key = f"{key}:claim"
+    if not await r.set(claim_key, "1", nx=True, ex=_PENDING_TTL_SECONDS):
+        raise AppError(code="conflict", message="This action is already being confirmed", status_code=409)
+    if not await r.exists(key):
+        await r.delete(claim_key)
+        raise AppError(code="not_found", message="This action was already confirmed or has expired.", status_code=404)
+    return claim_key
+
+
 async def _append_conversation_note(
     db: AsyncSession, user: User, conversation_id: str | None, content: str, meta: dict
 ) -> None:
@@ -1194,9 +1218,7 @@ async def _confirm_tool_call(db: AsyncSession, user: User, key: str, pending: di
     args = edited_args if edited_args is not None else (pending.get("args") or {})
 
     r = await get_redis()
-    claim_key = f"{key}:claim"
-    if not await r.set(claim_key, "1", nx=True, ex=60):
-        raise AppError(code="conflict", message="This action is already being confirmed", status_code=409)
+    claim_key = await _claim(r, key)
 
     try:
         raw = await run_confirmed(db, user_id=user.id, role=user.role, tool_name=tool_name, args=args)
@@ -1282,9 +1304,7 @@ async def copilot_confirm(
     # One approval runs at a time: a double click or two tabs must not create
     # the campaign twice. The claim outlives no attempt (released below on
     # failure, so a retry with edited params works) and expires on its own.
-    claim_key = f"{key}:claim"
-    if not await r.set(claim_key, "1", nx=True, ex=60):
-        raise AppError(code="conflict", message="This action is already being confirmed", status_code=409)
+    claim_key = await _claim(r, key)
 
     try:
         result = await handler(db, user, params)

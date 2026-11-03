@@ -61,6 +61,7 @@ async def execute_tool_endpoint(
                         tool_name=name,
                         args=request.args,
                         db=db,
+                        turn_id=caller.turn_id,
                     )
                     return ToolExecuteResponse(result=staged_reply(action_id, name))
             elif name in MUTATING_TOOLS:

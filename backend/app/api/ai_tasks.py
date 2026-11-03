@@ -307,7 +307,8 @@ async def upsert_task_assignment(
     if not provider:
         raise AppError(code="not_found", message="Provider not found", status_code=404)
 
-    if task_requires_tools(task.name) and not provider_type_supports_tools(provider.provider_type, provider.config):
+    effective = {**(provider.config or {}), **(body.config or {})}
+    if task_requires_tools(task.name) and not provider_type_supports_tools(provider.provider_type, effective):
         raise AppError(
             code="provider_incompatible",
             message=(

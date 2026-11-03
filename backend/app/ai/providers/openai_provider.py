@@ -76,6 +76,8 @@ import httpx
 
 from app.ai.agent_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
+    FINAL_ROUND_NOTE,
+    TOOL_BUDGET_NOTE,
     ToolExecutor,
     clip_tool_result,
     coerce_args,
@@ -511,12 +513,24 @@ class OpenAICompatibleProvider(AIProvider):
             }
 
         async with httpx.AsyncClient(timeout=timeout, headers=self._headers()) as client:
-            for iteration in range(max_iterations):
+            # One round past the budget: tools off, so the turn ends with an answer.
+            for iteration in range(max_iterations + 1):
+                wrap_up = iteration == max_iterations
+                if wrap_up:
+                    messages.append({"role": "user", "content": FINAL_ROUND_NOTE})
                 body = {**payload, "messages": messages}
                 if effective_tools:
                     body["tools"] = effective_tools
+                    if wrap_up:
+                        body["tool_choice"] = "none"
                 resp = await client.post(f"{self.base_url}/chat/completions", json=body)
-                if effective_tools and self._rejects_tools(resp):
+                if wrap_up and resp.status_code == 400 and "tool_choice" in body:
+                    # A server without tool_choice: the history's tool calls still need the tools list.
+                    body.pop("tool_choice")
+                    resp = await client.post(f"{self.base_url}/chat/completions", json=body)
+                if iteration == 0 and effective_tools and self._rejects_tools(resp):
+                    # Only the first request can say "no tools here": later ones
+                    # carry tool history, and their errors are about other things.
                     logger.warning(
                         "%s rejected tools (%s); answering this turn without them", self.base_url, resp.text[:200]
                     )
@@ -539,28 +553,37 @@ class OpenAICompatibleProvider(AIProvider):
                 content = message.get("content") or ""
                 tool_calls = message.get("tool_calls") or []
 
-                if not tool_calls or not effective_tools:
+                if not tool_calls or not effective_tools or wrap_up:
                     if content:
                         yield {"kind": "text", "text": content}
+                    elif wrap_up:
+                        yield {"kind": "text", "text": TOOL_BUDGET_NOTE}
                     if choice.get("finish_reason") == "length":
                         yield {"kind": "text", "text": "\n\n_[answer truncated — model hit its output limit]_"}
+                    if wrap_up:
+                        logger.warning("%s agent loop hit max_iterations=%d", self.base_url, max_iterations)
                     yield _done()
                     return
 
                 if content.strip():
                     yield {"kind": "text", "text": content.rstrip() + "\n\n"}
+                # A server may leave out a call's id; give it one, and use the
+                # same one in the replayed call and its result, or they don't pair.
+                tool_calls = [
+                    {**tc, "id": tc.get("id") or f"call-{iteration}-{n}", "type": tc.get("type") or "function"}
+                    for n, tc in enumerate(tool_calls)
+                ]
                 messages.append({"role": "assistant", "content": content or None, "tool_calls": tool_calls})
-                for n, tc in enumerate(tool_calls):
+                for tc in tool_calls:
                     fn = tc.get("function") or {}
                     name = fn.get("name") or ""
                     args = coerce_args(fn.get("arguments"))
-                    call_id = tc.get("id") or f"call-{iteration}-{n}"
+                    call_id = tc["id"]
                     yield {"kind": "tool_call", "id": call_id, "name": name, "args": args}
                     status, result = await run_tool(tool_executor, name, args)
                     yield {"kind": "tool_result", "id": call_id, "status": status, "summary": summarize_result(result)}
                     messages.append({"role": "tool", "tool_call_id": call_id, "content": clip_tool_result(result)})
 
-        logger.warning("%s agent loop hit max_iterations=%d without a final answer", self.base_url, max_iterations)
         yield _done()
 
     async def embed(self, texts: list[str], model: str) -> list[list[float]]:

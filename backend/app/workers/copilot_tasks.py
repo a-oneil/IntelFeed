@@ -58,6 +58,7 @@ async def _run_async(
     env: dict[str, str] | None,
     agent_user_id: str | None = None,
     agent_conversation_id: str | None = None,
+    agent_turn_id: str | None = None,
 ) -> int:
     """Run one CLI agent turn and push every event onto the run's Redis list.
 
@@ -93,6 +94,7 @@ async def _run_async(
                 env=env,
                 agent_user_id=uuid.UUID(agent_user_id) if agent_user_id else None,
                 agent_conversation_id=uuid.UUID(agent_conversation_id) if agent_conversation_id else None,
+                agent_turn_id=uuid.UUID(agent_turn_id) if agent_turn_id else None,
             ):
                 await _push(ev)
                 forwarded += 1
@@ -126,6 +128,7 @@ def run_copilot_stream(
     env: dict[str, str] | None = None,
     agent_user_id: str | None = None,
     agent_conversation_id: str | None = None,
+    agent_turn_id: str | None = None,
 ) -> dict:
     """Entry point invoked on the ``ai`` queue. See module docstring."""
     try:
@@ -141,6 +144,7 @@ def run_copilot_stream(
                 env=env,
                 agent_user_id=agent_user_id,
                 agent_conversation_id=agent_conversation_id,
+                agent_turn_id=agent_turn_id,
             )
         )
         return {"status": "ok", "run_id": run_id, "events": forwarded}

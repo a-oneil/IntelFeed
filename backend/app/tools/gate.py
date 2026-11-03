@@ -43,10 +43,12 @@ logger = logging.getLogger(__name__)
 
 CONFIRMATION_TOKEN_PARAM = "confirmation_token"
 
-# Redis: one key per staged call, plus a list per conversation so the copilot
-# can collect what a turn staged, whichever process ran the model.
+# Redis: one key per staged call, plus a list per copilot turn so the copilot
+# can collect what that turn staged, whichever process ran the model. Per
+# turn, not per conversation: a turn the client abandoned leaves its calls to
+# expire rather than turn up as cards on the next one.
 STAGED_KEY_PREFIX = "copilot:action:"
-_CONVERSATION_KEY_PREFIX = "copilot:staged:"
+_TURN_KEY_PREFIX = "copilot:staged:"
 STAGED_TTL_SECONDS = 900
 
 # Roles that may run admin tools. ``system`` is the non-loginable account
@@ -355,6 +357,7 @@ async def stage_tool_call(
     tool_name: str,
     args: dict,
     db: AsyncSession | None = None,
+    turn_id: uuid.UUID | str | None = None,
 ) -> str:
     """Hold a write for the user's confirmation; returns its action id.
 
@@ -390,8 +393,8 @@ async def stage_tool_call(
         ),
         ex=STAGED_TTL_SECONDS,
     )
-    if conversation_id:
-        list_key = f"{_CONVERSATION_KEY_PREFIX}{conversation_id}"
+    if turn_id:
+        list_key = f"{_TURN_KEY_PREFIX}{turn_id}"
         await r.rpush(list_key, action_id)
         await r.expire(list_key, STAGED_TTL_SECONDS)
     return action_id
@@ -412,12 +415,12 @@ def staged_reply(action_id: str, name: str) -> str:
     )
 
 
-async def take_staged(conversation_id: uuid.UUID | str, user_id: uuid.UUID) -> list[dict]:
-    """The calls staged for this conversation since the last take, oldest first."""
+async def take_staged(turn_id: uuid.UUID | str, user_id: uuid.UUID) -> list[dict]:
+    """The calls one copilot turn staged, oldest first."""
     from app.services.redis_client import get_redis
 
     r = await get_redis()
-    list_key = f"{_CONVERSATION_KEY_PREFIX}{conversation_id}"
+    list_key = f"{_TURN_KEY_PREFIX}{turn_id}"
     ids = await r.lrange(list_key, 0, -1)
     if ids:
         await r.delete(list_key)
@@ -477,12 +480,15 @@ class ToolGate:
         conversation_id: uuid.UUID | str | None,
         auto_approve: frozenset[str] = frozenset(),
         reachable: list[dict] | None = None,
+        turn_id: uuid.UUID | str | None = None,
     ) -> None:
         self.db = db
         self.user_id = user_id
         self.role = role
         self.offered = frozenset(offered)
         self.conversation_id = conversation_id
+        # The staging list this turn's calls go on; the conversation when unset.
+        self.turn_id = turn_id or conversation_id
         self.auto_approve = auto_approve
         self.reachable = reachable or []
         self.reachable_names = frozenset(d["name"] for d in self.reachable) | (self.offered - {FIND_TOOLS, CALL_TOOL})
@@ -510,7 +516,12 @@ class ToolGate:
             return json.dumps({"error": refusal})
         if needs_confirmation(name) and name not in self.auto_approve:
             action_id = await stage_tool_call(
-                user_id=self.user_id, conversation_id=self.conversation_id, tool_name=name, args=args, db=self.db
+                user_id=self.user_id,
+                conversation_id=self.conversation_id,
+                tool_name=name,
+                args=args,
+                db=self.db,
+                turn_id=self.turn_id,
             )
             return staged_reply(action_id, name)
         result = await execute_isolated(self.db, name, args, self.user_id)
