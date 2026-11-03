@@ -798,8 +798,9 @@ Proposed fixes to entity data wait in review queues. Every route here is Admin. 
 
 | Method | Path | What it does |
 | --- | --- | --- |
-| GET | `/api/admin/hygiene/feed` | Every proposal from both logs, newest first (`entity_type` + `entity_id` narrow it to one entity) |
+| GET | `/api/admin/hygiene/feed` | Every proposal from both logs, newest first (`entity_type` + `entity_id` narrow it to one entity). `context=true` adds each row's article text around the match (at most 320 characters); the Review tab asks for it on one entity's rows |
 | GET | `/api/admin/hygiene/review-groups` | Every pending proposal, one row per entity, with what each kind wants done |
+| POST | `/api/admin/hygiene/decisions` | Decide many proposals in one call: `[{id: "<source>:<log_id>", decision: "apply" \| "dismiss" \| "reclassify:<type>"}]`, one result per row. A row an earlier decision already closed comes back `settled`; an apply with nothing left to do comes back `resolved` |
 | POST | `/api/admin/hygiene/review-groups/dismiss` | Settle each entity's row the leave-it-alone way and stop the proposals coming back |
 | POST | `/api/admin/hygiene/scan-duplicates` | Run the duplicate review now; its Merge proposals land in the queue |
 | GET | `/api/admin/hygiene/stats` | Queue counts and the adjudicate stage's mode |
@@ -829,7 +830,7 @@ Proposed fixes to entity data wait in review queues. Every route here is Admin. 
 | POST | `/api/admin/hygiene/alias-collision/{log_id}/apply` | Remove the clashing alias |
 | POST | `/api/admin/hygiene/scan-vendor-autolink` | Propose vendors for products with none |
 | POST | `/api/admin/hygiene/vendor-autolink/{log_id}/apply` | Set the proposed vendor |
-| POST | `/api/admin/hygiene/scan-id-hygiene` | Find malformed TTP and CVE ids and withdrawn CVEs |
+| POST | `/api/admin/hygiene/scan-id-hygiene` | Find malformed TTP and CVE ids, CVE ids that can't be real (sequence too long or zero-padded), and withdrawn CVEs |
 | POST | `/api/admin/hygiene/id-hygiene/{log_id}/apply` | Apply one id fix |
 
 #### AI-Created Entities (Admin)

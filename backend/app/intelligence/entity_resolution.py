@@ -15,7 +15,7 @@ Flags (system_settings-overridable via ``settings.get``):
       Phase 1 matcher: normalized exact matching via entity_alias_index.
       Safe — it can only *prevent* duplicate creations.
 
-  entity_creation_gates  ('off' | 'shadow' | 'on', default 'shadow')
+  entity_creation_gates  ('off' | 'shadow' | 'on', default 'on' in config.py; 'shadow' only when the setting is missing)
       Phase 2 gates. shadow = log the would-block/would-hold decision to
       EntityMaintenanceLog and still create; on = enforce.
 
@@ -325,7 +325,8 @@ _CLI_FLAG_RE = re.compile(r"^--?\S")
 _FUNC_CALL_RE = re.compile(r"[A-Za-z0-9_\]]\([^)]*\)")
 _ACRONYM_PARENS_RE = re.compile(r"\s\([A-Z0-9/]{1,6}\)")
 _SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)+$")
-_TECHNIQUE_ID_RE = re.compile(r"^T\d{4}(\.\d{3})?$", re.IGNORECASE)
+# ATT&CK technique ids are T0xxx (ICS) and T1xxx; "T9000" is a backdoor, not a technique
+_TECHNIQUE_ID_RE = re.compile(r"^T[01]\d{3}(\.\d{3})?$", re.IGNORECASE)
 _TECHNIQUE_PHRASES = frozenset(
     {
         "dll sideloading",
@@ -509,6 +510,514 @@ def is_tool_concept_name(name: str) -> bool:
     return normalize_entity_name(name or "", "tool").norm_exact in _TOOL_CONCEPT_NORMS
 
 
+# --- Non-entity names (2026-11) ----------------------------------------------
+# Every junk row deleted in the 2026-11 Review-queue triage was an AI extraction
+# that filed a concept as a tool, malware family, actor or product: protocols,
+# cipher names, install commands, code tokens, OS APIs, product categories and
+# technique names. None names a thing anyone wields or a group anyone tracks,
+# and once one is a row the autolinker tags it on every article that uses the
+# word. See planning/review-queue-finish.md.
+#
+# Curated lists, not patterns, wherever a pattern would also catch real names
+# (AutoIt and AutoHotkey look like the AutoConfig code tokens). Matching is on
+# the folded name, plus the folded name without a trailing "s" for plurals.
+# Real tools quoted by name (PowerShell, cmd, Mimikatz, Impacket) are never on
+# these lists, and an existing row always resolves before the gates run.
+
+_ACTOR_MALWARE_TOOL = frozenset({"threat_actor", "malware", "tool"})
+_WITH_PRODUCT = _ACTOR_MALWARE_TOOL | {"product"}
+
+# (reason slug, entity types it applies to, names). Protocols leave products
+# alone: WebRTC, Kerberos and Model Context Protocol are reasonable products.
+_NON_ENTITY_CLASSES: tuple[tuple[str, frozenset[str], tuple[str, ...]], ...] = (
+    (
+        "protocol",
+        _ACTOR_MALWARE_TOOL,
+        (
+            "WebRTC",
+            "WebSocket",
+            "WebSockets",
+            "OpenID Connect",
+            "OIDC",
+            "OAuth",
+            "OAuth 2.0",
+            "OAuth2",
+            "SAML",
+            "JWT",
+            "JSON Web Token",
+            "Kerberos",
+            "NTLM",
+            "LDAP",
+            "Modbus",
+            "Modbus TCP",
+            "EtherNet/IP",
+            "DNP3",
+            "BACnet",
+            "OPC UA",
+            "Profinet",
+            "S7comm",
+            "MQTT",
+            "SCTP",
+            "SFTP",
+            "UPnP",
+            "VXLAN",
+            "SOCKS",
+            "SOCKS5",
+            "SNMP",
+            "SMTP",
+            "IMAP",
+            "QUIC",
+            "gRPC",
+            "ICMP",
+            "TCP",
+            "UDP",
+            "IPsec",
+            "GRE",
+            "GRE tunnels",
+            "BGP",
+            "DHCP",
+            "LLMNR",
+            "NetBIOS",
+            "WebDAV",
+            "WebAuthn",
+            "FIDO2",
+            "HTTP",
+            "HTTPS",
+            "HTTP/2",
+            "DNS",
+            "DNS over HTTPS",
+            "TLS",
+            "SSL",
+        ),
+    ),
+    (
+        "crypto_algorithm",
+        _WITH_PRODUCT,
+        (
+            "SHA-1",
+            "SHA-256",
+            "SHA-384",
+            "SHA-512",
+            "SHA-3",
+            "MD4",
+            "MD5",
+            "AES",
+            "AES-128",
+            "AES-256",
+            "AES-GCM",
+            "RSA",
+            "RSA-2048",
+            "RSA-4096",
+            "ChaCha20",
+            "ChaCha20-Poly1305",
+            "XChaCha20",
+            "XChaCha20-Poly1305",
+            "Salsa20",
+            "Poly1305",
+            "Ed25519",
+            "X25519",
+            "Curve25519",
+            "ECDSA",
+            "ECDH",
+            "Diffie-Hellman",
+            "HMAC",
+            "PBKDF2",
+            "Argon2",
+            "3DES",
+            "DES",
+            "RC4",
+            "Blowfish",
+            "XOR",
+            "Base64",
+        ),
+    ),
+    (
+        "code_token",
+        _WITH_PRODUCT,
+        (
+            # Hugging Face transformers loader classes.
+            "AutoMap",
+            "AutoConfig",
+            "AutoModel",
+            "AutoModelForCausalLM",
+            "AutoTokenizer",
+            "AutoProcessor",
+        ),
+    ),
+    (
+        "os_api",
+        _WITH_PRODUCT,
+        (
+            # Win32 / native API calls
+            "BitBlt",
+            "CreateProcess",
+            "CreateProcessAsUser",
+            "CreateRemoteThread",
+            "CreateThread",
+            "CreateFile",
+            "DeleteFile",
+            "WriteFile",
+            "ReadFile",
+            "ReadDirectoryChanges",
+            "ReadDirectoryChangesW",
+            "VirtualAlloc",
+            "VirtualAllocEx",
+            "VirtualProtect",
+            "WriteProcessMemory",
+            "ReadProcessMemory",
+            "LoadLibrary",
+            "GetProcAddress",
+            "OpenProcess",
+            "SetWindowsHookEx",
+            "MiniDumpWriteDump",
+            "ShellExecute",
+            "ShellExecuteEx",
+            "WinExec",
+            "QueueUserAPC",
+            "SetThreadContext",
+            "NtCreateThreadEx",
+            "NtQuerySystemInformation",
+            "NtAllocateVirtualMemory",
+            "NtWriteVirtualMemory",
+            "NtMapViewOfSection",
+            "RtlCreateUserThread",
+            "GetAsyncKeyState",
+            "URLDownloadToFile",
+            "IsDebuggerPresent",
+            "DeviceIoControl",
+            "CreateToolhelp32Snapshot",
+            "AdjustTokenPrivileges",
+            "DuplicateTokenEx",
+            "ImpersonateLoggedOnUser",
+            "AppDomainManager",
+            "AMSI",
+            "ETW",
+            # Linux / macOS kernel features
+            "ptrace",
+            "inotify",
+            "fanotify",
+            "FSEvents",
+            "Landlock",
+            "NFQUEUE",
+            "netfilter",
+            "seccomp",
+            "eBPF",
+            "cBPF",
+            "cBPF JIT",
+            "System V shared memory",
+            "shared memory",
+        ),
+    ),
+    (
+        "category_phrase",
+        _WITH_PRODUCT,
+        (
+            "SIEM",
+            "SOAR",
+            "EDR",
+            "XDR",
+            "EDR/XDR",
+            "MDR",
+            "NDR",
+            "ZTNA",
+            "SASE",
+            "CASB",
+            "DLP",
+            "IDS",
+            "IPS",
+            "IDS/IPS",
+            "WAF",
+            "NGFW",
+            "firewall",
+            "next-generation firewall",
+            "VPN",
+            "antivirus",
+            "anti-virus",
+            "SSO",
+            "single sign-on",
+            "MFA",
+            "2FA",
+            "multi-factor authentication",
+            "password manager",
+            "reflective loader",
+            "web shell",
+            "PHP web shell",
+            "ASP web shell",
+            "JSP web shell",
+            "TLS backdoor",
+            "phishing kit",
+            "phishing-as-a-service",
+            "PhaaS",
+            "RaaS",
+            "ransomware-as-a-service",
+            "MaaS",
+            "malware-as-a-service",
+            "C2",
+            "C2 server",
+            "C2 framework",
+            "command and control",
+            "port scanner",
+            "network scanner",
+            "vulnerability scanner",
+            "RMM",
+            "RMM tool",
+            "remote monitoring and management",
+            "AI assistant",
+            "AI agent",
+            "AI model",
+            "LLM",
+            "large language model",
+            "chatbot",
+            "OpenAI models",
+            "Anthropic models",
+            "Google models",
+            "Gemini models",
+            "content inspection",
+            "real-time monitoring",
+            "threat intelligence",
+            "threat intelligence platform",
+            "PLC",
+            "programmable logic controller",
+            "SCADA",
+            "HMI",
+        ),
+    ),
+    (
+        # Mainstream software named as affected or abused, filed as a tool or an
+        # actor ("Windows" with 12k links, "Telegram", "Claude"). The product
+        # guard in resolve_entity_creation only catches these when a product row
+        # already exists; products stay allowed.
+        "platform",
+        _ACTOR_MALWARE_TOOL,
+        (
+            "Windows",
+            "Microsoft Windows",
+            "macOS",
+            "Mac OS X",
+            "OS X",
+            "iOS",
+            "iPadOS",
+            "Android",
+            "Android OS",
+            "Linux",
+            "Ubuntu",
+            "Debian",
+            "ChromeOS",
+            "Chrome OS",
+            "Telegram",
+            "Telegram Messenger",
+            "WhatsApp",
+            "Slack",
+            "Discord",
+            "Microsoft Teams",
+            "Skype",
+            "WeChat",
+            "Claude",
+            "ChatGPT",
+            "Gemini",
+            "WordPress",
+            "Drupal",
+            "Joomla",
+            "JavaScript",
+            "TypeScript",
+            "Microsoft 365",
+            "Office 365",
+            "Google Workspace",
+            "Microsoft Purview",
+            "Purview",
+            "Google Chrome",
+            "Firefox",
+            "Safari",
+            "Microsoft Edge",
+        ),
+    ),
+    (
+        "technique_term",
+        _WITH_PRODUCT,
+        (
+            "BYOVD",
+            "Bring Your Own Vulnerable Driver",
+            "Bring Your Own Vulnerable Driver (BYOVD)",
+            "LLMjacking",
+            "DNS tunneling",
+            "DNS tunnelling",
+            "digital skimming",
+            "web skimming",
+            "HVNC",
+            "hidden VNC",
+            "process injection",
+            "DLL hijacking",
+            "DLL search order hijacking",
+            "credential dumping",
+            "pass-the-hash",
+            "pass-the-ticket",
+            "Kerberoasting",
+            "AS-REP roasting",
+            "golden ticket",
+            "silver ticket",
+            "DCSync",
+            "password spraying",
+            "MFA fatigue",
+            "MFA bombing",
+            "typosquatting",
+            "dependency confusion",
+            "watering hole",
+            "spear phishing",
+            "spearphishing",
+            "callback phishing",
+            "malvertising",
+            "SEO poisoning",
+            "cryptojacking",
+            "living off the land",
+            "adversary-in-the-middle",
+            "supply chain attack",
+            *sorted(_TECHNIQUE_PHRASES),
+        ),
+    ),
+)
+
+# folded name -> (reason, types). First class listed wins on a duplicate.
+_NON_ENTITY_INDEX: dict[str, tuple[str, frozenset[str]]] = {}
+for _reason, _types, _names in _NON_ENTITY_CLASSES:
+    for _n in _names:
+        _NON_ENTITY_INDEX.setdefault(_fold(_n), (_reason, _types))
+
+# "CreateProcess API", "the ptrace syscall": the trailing word is not part of
+# the name. Stripped before the os_api lookup only.
+_API_SUFFIXES = frozenset({"api", "apis", "function", "functions", "syscall", "syscalls", "call", "calls"})
+# Win32 A/W/Ex variants: CreateProcessW, LoadLibraryExA.
+_WIN32_VARIANT_RE = re.compile(r"(?:ex)?[aw]$|ex$")
+
+# Install and checkout lines: "npm install", "pip install unsloth", "uv tool
+# install", "git clone". A package-manager or VCS binary followed by one of its
+# subcommands (or a flag). The binaries alone ("git", "pip", "curl") still pass.
+_CMD_BINARIES = frozenset(
+    "npm pnpm yarn bun pip pip3 pipx uv poetry conda mamba gem cargo go apt apt-get yum dnf zypper "
+    "apk brew choco winget scoop git docker podman kubectl helm curl wget composer dotnet nuget".split()
+)
+_CMD_VERBS = frozenset(
+    "install uninstall add remove i clone checkout pull push fetch commit run exec tool build get init "
+    "ci update upgrade publish login download".split()
+)
+_CMD_RUNNERS = frozenset({"npx", "uvx", "bunx", "pnpx"})
+_CMD_PREFIXES = frozenset({"sudo", "$", "#", ">"})
+
+# Config flags and constants: trust_remote_code=True, --opt=1, CAP_NET_ADMIN,
+# PROCESS_ALL_ACCESS. An all-caps snake constant is never a group or a product;
+# malware is held to the known constant prefixes because a few families are
+# written in caps with underscores.
+_ASSIGNMENT_RE = re.compile(r"\S=")
+_CAPS_CONSTANT_RE = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$")
+_KNOWN_CONSTANT_RE = re.compile(
+    r"^(?:CAP|SE|PROCESS|THREAD|TOKEN|FILE|GENERIC|PAGE|MEM|PROT|MAP|SYS|IOCTL|HKEY|WM|SW|O)_[A-Z0-9_]+$"
+)
+_HEX_LITERAL_RE = re.compile(r"^0x[0-9a-f]+$", re.IGNORECASE)
+_DIGITS_ONLY_RE = re.compile(r"^\d+$")
+# Numeric names that really are tracked groups. "764" is the FBI-tracked
+# extortion network, "7777" the Quad7 botnet; an existing row resolves before the gate anyway, this
+# keeps a fresh install able to create it.
+_NUMERIC_ACTOR_ALLOWLIST = frozenset({"764", "7777"})
+
+# Descriptions of an actor rather than its name: "China-nexus", "North
+# Korea-linked group", "Russia-aligned cluster", "Iran-based actors".
+_ACTOR_ATTRIBUTION_RE = re.compile(
+    r"^(?:[a-z]+ ){0,2}[a-z]+ (?:nexus|linked|aligned|affiliated|sponsored|backed|speaking|based|attributed|origin)"
+    r"(?: (?:threat |state |apt |cyber )?(?:actors?|groups?|apts?|clusters?|hackers?|operators?|operations?|"
+    r"campaigns?|entit(?:y|ies)|intrusion sets?|adversar(?:y|ies)|gangs?|crews?|units?|activity))?$"
+)
+# "Russian submarine operation", "Chinese espionage campaign": a nationality
+# adjective, a few common words and an activity noun, with no name in it.
+_DEMONYMS = frozenset(
+    "american british chinese russian iranian israeli korean north south ukrainian belarusian indian "
+    "pakistani turkish vietnamese syrian palestinian lebanese saudi emirati qatari egyptian nigerian "
+    "brazilian mexican german french dutch polish romanian serbian hungarian kazakh uzbek moldovan "
+    "georgian armenian azerbaijani afghan prc dprk".split()
+)
+_ACTIVITY_NOUNS = frozenset(
+    "operation operations campaign campaigns activity activities program programme effort efforts "
+    "cluster clusters unit units".split()
+)
+
+
+# Every slug non_entity_reason() can return. The purge script uses it to treat
+# rows these rules flag as needing a read before they are deleted.
+NON_ENTITY_REASONS = frozenset(
+    {c[0] for c in _NON_ENTITY_CLASSES}
+    | {"shell_command", "code_token", "mitre_technique", "numeric_literal", "attribution_descriptor"}
+)
+
+
+def _command_line(name: str) -> bool:
+    words = name.split()
+    while words and words[0].lower() in _CMD_PREFIXES:
+        words = words[1:]
+    if len(words) < 2:
+        return False
+    head, second = words[0].lower(), words[1].lower()
+    if head in _CMD_RUNNERS:
+        return True
+    return head in _CMD_BINARIES and (second in _CMD_VERBS or second.startswith("-"))
+
+
+def _curated_hit(entity_type: str, name: str) -> str | None:
+    key = _fold(name)
+    if not key:
+        return None
+    for form in (key, key[:-1] if key.endswith("s") else None):
+        hit = _NON_ENTITY_INDEX.get(form) if form else None
+        if hit and entity_type in hit[1]:
+            return hit[0]
+    # "CreateProcess API", "CreateProcessW", "the ptrace syscall".
+    toks = _tokens(name)
+    while toks and toks[0] in _LEADING_ARTICLES:
+        toks = toks[1:]
+    if len(toks) > 1 and toks[-1] in _API_SUFFIXES:
+        toks = toks[:-1]
+    stem = _fold(" ".join(toks))
+    for form in (stem, _WIN32_VARIANT_RE.sub("", stem)):
+        hit = _NON_ENTITY_INDEX.get(form)
+        if hit and hit[0] == "os_api" and entity_type in hit[1]:
+            return "os_api"
+    return None
+
+
+def non_entity_reason(entity_type: str, name: str) -> str | None:
+    """Return a reason slug when ``name`` is a concept, command, code token or
+    description that must never become an ``entity_type`` row, else None.
+
+    Pure function. Applies to threat actors, malware, tools and products;
+    vendors and countries are never checked."""
+    if entity_type not in _WITH_PRODUCT:
+        return None
+    stripped = (name or "").strip()
+    if not stripped:
+        return None
+    curated = _curated_hit(entity_type, stripped)
+    if curated:
+        return curated
+    if _command_line(stripped):
+        return "shell_command"
+    if _ASSIGNMENT_RE.search(stripped) or _KNOWN_CONSTANT_RE.match(stripped):
+        return "code_token"
+    if entity_type != "malware" and _CAPS_CONSTANT_RE.match(stripped):
+        return "code_token"
+    if _TECHNIQUE_ID_RE.match(stripped):
+        return "mitre_technique"
+    if _HEX_LITERAL_RE.match(stripped):
+        return "numeric_literal"
+    if entity_type == "threat_actor":
+        if _DIGITS_ONLY_RE.match(stripped) and stripped not in _NUMERIC_ACTOR_ALLOWLIST:
+            return "numeric_literal"
+        toks = _tokens(stripped)
+        while len(toks) > 1 and toks[0] in _LEADING_ARTICLES:
+            toks = toks[1:]
+        if _ACTOR_ATTRIBUTION_RE.match(" ".join(toks)):
+            return "attribution_descriptor"
+        if len(toks) >= 2 and toks[0] in _DEMONYMS and toks[-1] in _ACTIVITY_NOUNS:
+            return "attribution_descriptor"
+    return None
+
+
 def _shared_junk_reason(name: str, norm: NormalizedName) -> str | None:
     if len(norm.norm_exact) < 3:
         return "too_short"
@@ -607,7 +1116,8 @@ def generic_name_reason(entity_type: str, name: str, norm: NormalizedName | None
     if entity_type != "country" and is_region_name(name):
         return "region_name"
     check = _TYPE_JUNK_CHECKS.get(entity_type)
-    return check(name) if check else None
+    reason = check(name) if check else None
+    return reason or non_entity_reason(entity_type, name)
 
 
 async def _country_named(db: AsyncSession, name: str) -> str | None:
@@ -749,7 +1259,7 @@ def normalized_match_enabled() -> bool:
 
 
 def gates_mode() -> str:
-    """'off' | 'shadow' | 'on' (default shadow)."""
+    """'off' | 'shadow' | 'on' (shadow when the setting is missing)."""
     val = str(settings.get("entity_creation_gates") or "shadow").lower()
     return val if val in {"off", "shadow", "on"} else "shadow"
 

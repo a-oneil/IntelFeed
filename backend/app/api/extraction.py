@@ -152,6 +152,12 @@ async def _duplicate_map(db: AsyncSession, types: list[str]) -> dict[str, tuple[
                      AND a.normalized_name % b.normalized_name
                     WHERE a.created_via = 'ai_extraction'
                       AND similarity(a.normalized_name, b.normalized_name) >= 0.62
+                      -- same letters, different digits: Storm-3068 / Storm-3069, KillSecurity 2.0 / 3.0
+                      AND NOT (
+                        regexp_replace(lower(a.name), '[^a-z]', '', 'g')
+                          = regexp_replace(lower(b.name), '[^a-z]', '', 'g')
+                        AND regexp_replace(a.name, '[^0-9]', '', 'g') <> regexp_replace(b.name, '[^0-9]', '', 'g')
+                      )
                       AND NOT EXISTS (
                         SELECT 1 FROM proposal_dismissals d
                         WHERE d.kind = 'not_duplicate' AND d.entity_type = :etype

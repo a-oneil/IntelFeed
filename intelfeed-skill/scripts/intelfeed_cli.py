@@ -113,6 +113,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "create_share_link",
         "create_threat_actor",
         "create_webhook_preset",
+        "decide_proposals",
         "delete_automation_rule",
         "delete_campaign",
         "delete_detection_rule",
@@ -143,6 +144,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "link_entities",
         "mark_all_read",
         "mark_entry_read",
+        "merge_entities",
         "merge_malware",
         "merge_products",
         "merge_threat_actors",
@@ -153,6 +155,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "reclassify_entity",
         "refresh_feed",
         "reject_relationship",
+        "remove_entity_aliases",
         "remove_from_campaign",
         "remove_requirement_match",
         "report_false_positive",
@@ -999,6 +1002,23 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "decide_proposals": {
+        "description": (
+            "Apply a reviewed batch of Review-queue decisions in one call (POST "
+            "/admin/hygiene/decisions). Each decision is {id: '<source>:<log_id>', decision: 'apply' "
+            "| 'dismiss' | 'reclassify:<entity_type>'}. apply runs the row's own applier; dismiss "
+            "deletes it (a reclassify dismissal covers the entity and stops new filings); reclassify "
+            "converts the entity and closes every proposal about it. Duplicates settle server-side: a "
+            "row an earlier decision closed comes back 'settled'; an apply whose outcome is already "
+            "reached comes back 'resolved'. Returns one result per decision plus counts. Admin only."
+        ),
+        "params": {
+            "decisions": {
+                "type": 'list[dict]',
+                "required": True,
+            },
+        },
+    },
     "delete_automation_rule": {
         "description": (
             "Delete an automation rule permanently. REQUIRES user confirmation. First call returns a "
@@ -1056,14 +1076,15 @@ TOOLS: dict[str, dict] = {
         "description": (
             "Delete a record: feed, entry, note, detection rule, campaign, automation rule, "
             "intelligence requirement, intel report, tag, or any intelligence entity (threat actor, "
-            "malware, CVE, TTP, country, tool, vendor, product, mitigation, observable). Intelligence "
-            "entities get the same cleanup as the API delete endpoints: entry links and entity "
-            "relationships are removed and the search-index document is dropped. No tombstone is "
-            "written \u2014 the autolinker/extraction pipeline may re-create the entity from future "
-            "articles; use the false-positive workflow if the name must stay gone (an observable's "
-            "equivalent is the never-capture tombstone). REQUIRES user confirmation. First call "
-            "returns a confirmation prompt \u2014 present it to the user. Only call again with the "
-            "confirmation_token after the user explicitly approves."
+            "malware, CVE, TTP, country, tool, vendor, product, mitigation, observable), by id or, "
+            "for an intelligence entity, by name. Intelligence entities get the same cleanup as the "
+            "API delete endpoints: entry links, entity relationships and pending Review proposals are "
+            "removed and the search-index document is dropped. No tombstone is written \u2014 the "
+            "autolinker/extraction pipeline may re-create the entity from future articles; use the "
+            "false-positive workflow if the name must stay gone (an observable's equivalent is the "
+            "never-capture tombstone). REQUIRES user confirmation. First call returns a confirmation "
+            "prompt \u2014 present it to the user. Only call again with the confirmation_token after the "
+            "user explicitly approves."
         ),
         "params": {
             "entity_type": {
@@ -1093,7 +1114,11 @@ TOOLS: dict[str, dict] = {
             },
             "entity_id": {
                 "type": 'str',
-                "required": True,
+                "default": None,
+            },
+            "name": {
+                "type": 'str',
+                "default": None,
             },
             "confirmation_token": {
                 "type": 'str',
@@ -2319,6 +2344,46 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "get_review_rows": {
+        "description": (
+            "The pending proposals behind one Review group (or every pending row matching the "
+            "filters), newest first. Each row has its id ('<source>:<log_id>', what decide_proposals "
+            "takes), action, subject, reason, payload, and `context`: the article text around the "
+            "match, so the article needn't be fetched. Admin only."
+        ),
+        "params": {
+            "entity_type": {
+                "type": 'str',
+                "default": None,
+            },
+            "entity_id": {
+                "type": 'str',
+                "default": None,
+            },
+            "action": {
+                "type": 'str',
+                "default": None,
+            },
+            "origin": {
+                "type": 'str',
+                "default": None,
+                "enum": ['adjudicator', 'merge_review', 'scan'],
+            },
+            "domain": {
+                "type": 'str',
+                "default": None,
+                "enum": ['links', 'entities', 'relationships'],
+            },
+            "limit": {
+                "type": 'int',
+                "default": 200,
+            },
+            "offset": {
+                "type": 'int',
+                "default": 0,
+            },
+        },
+    },
     "get_search_facets": {
         "description": (
             "Get available search facets: feed types (feed count per type), categories (feed count "
@@ -3045,6 +3110,48 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "list_review_groups": {
+        "description": (
+            "The Engine \u203a Review queue: every pending hygiene proposal (both logs) folded one row per "
+            "entity, most proposals first. Each group gives the entity, its proposal count, per-kind "
+            "counts (e.g. shadow_remove, adjudication_reclassify), proposed target types, merge "
+            "targets, origin, the newest row's subject and reason, matched forms and a sample entry. "
+            "Read a group's rows with get_review_rows; decide them with decide_proposals. "
+            "`total`/`proposals` are the queue size. Admin only."
+        ),
+        "params": {
+            "q": {
+                "type": 'str',
+                "default": None,
+            },
+            "entity_type": {
+                "type": 'str',
+                "default": None,
+            },
+            "action": {
+                "type": 'str',
+                "default": None,
+            },
+            "domain": {
+                "type": 'str',
+                "default": None,
+                "enum": ['links', 'entities', 'relationships'],
+            },
+            "origin": {
+                "type": 'str',
+                "default": None,
+                "enum": ['adjudicator', 'merge_review', 'scan'],
+            },
+            "limit": {
+                "type": 'int',
+                "default": 50,
+            },
+            "offset": {
+                "type": 'int',
+                "default": 0,
+            },
+        },
+    },
     "list_saved_searches": {
         "description": (
             "List this user's saved searches with unread/total entry counts. Counts come from a "
@@ -3157,6 +3264,30 @@ TOOLS: dict[str, dict] = {
             "read": {
                 "type": 'bool',
                 "default": None,
+            },
+        },
+    },
+    "merge_entities": {
+        "description": (
+            "Merge duplicate entities of one type into a keeper, by name or id (POST "
+            "/entities/{type}/merge): entry links move to the keeper, the merged names and aliases "
+            "become keeper aliases, and the merged entities are deleted along with their pending "
+            "Review proposals (a merge proposal into one of them moves to the keeper). Names match "
+            "the entity name first, then a unique alias. Admin only."
+        ),
+        "params": {
+            "entity_type": {
+                "type": 'str',
+                "required": True,
+                "enum": ['threat_actor', 'malware', 'country', 'tool', 'vendor', 'product'],
+            },
+            "keeper": {
+                "type": 'str',
+                "required": True,
+            },
+            "merge": {
+                "type": 'list[str]',
+                "required": True,
             },
         },
     },
@@ -3428,10 +3559,12 @@ TOOLS: dict[str, dict] = {
             "type \u2014 e.g. a malware that's actually a tool, or a product mistakenly stored as a "
             "vendor. Supports malware / product / threat_actor / tool / vendor. If target_id is "
             "given, the source is merged into that existing entity in the target type; if omitted, a "
-            "new entity is created in target_type by copying name/aliases/description. Type-specific "
-            "fields (motivation, malware_type, vendor_id, tool_type, etc.) are NOT carried across \u2014 "
-            "fix them after with update_entity_profile. Use mode='shadow' to log without acting; "
-            "always include reasoning."
+            "new entity is created in target_type by copying name/aliases/description, unless "
+            "target_type already has an entity of the same name, which it is merged into. Name the "
+            "source by source_id or source_name (and the target by target_id or target_name). "
+            "Type-specific fields (motivation, malware_type, vendor_id, tool_type, etc.) are NOT "
+            "carried across \u2014 fix them after with update_entity_profile. The source's pending Review "
+            "proposals are closed. Use mode='shadow' to log without acting; always include reasoning."
         ),
         "params": {
             "source_type": {
@@ -3441,7 +3574,11 @@ TOOLS: dict[str, dict] = {
             },
             "source_id": {
                 "type": 'str',
-                "required": True,
+                "default": None,
+            },
+            "source_name": {
+                "type": 'str',
+                "default": None,
             },
             "target_type": {
                 "type": 'str',
@@ -3449,6 +3586,10 @@ TOOLS: dict[str, dict] = {
                 "enum": ['malware', 'product', 'threat_actor', 'tool', 'vendor'],
             },
             "target_id": {
+                "type": 'str',
+                "default": None,
+            },
+            "target_name": {
                 "type": 'str',
                 "default": None,
             },
@@ -3494,6 +3635,28 @@ TOOLS: dict[str, dict] = {
         "params": {
             "relationship_id": {
                 "type": 'str',
+                "required": True,
+            },
+        },
+    },
+    "remove_entity_aliases": {
+        "description": (
+            "Remove aliases from an entity, by entity name or id. Entries linked only through a "
+            "removed alias are unlinked and the stored article count is recounted (the same path as "
+            "editing aliases on the profile). Alias matching is case-insensitive. Admin only."
+        ),
+        "params": {
+            "entity_type": {
+                "type": 'str',
+                "required": True,
+                "enum": ['threat_actor', 'malware', 'country', 'tool', 'vendor', 'product'],
+            },
+            "entity": {
+                "type": 'str',
+                "required": True,
+            },
+            "aliases": {
+                "type": 'list[str]',
                 "required": True,
             },
         },

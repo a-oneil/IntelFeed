@@ -515,3 +515,53 @@ async def test_merge_repoints_relationships(db_session, test_threat_actor, malwa
     assert survivor.source_id == test_threat_actor.id
     assert set(survivor.evidence_entry_ids) == {e1, e2}
     assert survivor.confidence == "probable"  # stronger confidence survives the merge
+
+
+async def test_cooccurrence_needs_one_statement_not_a_list_or_a_headline(db_session, test_feed):
+    """Typed co-occurrence edges come only from a paragraph that reads as one
+    statement: not a cross-paragraph co-mention, not a "Related:" headline,
+    not a roundup line naming five or more entities."""
+    from app.models.cve import CVE, EntryCVE
+    from app.models.entry import Entry
+    from app.models.malware_family import EntryMalware, MalwareFamily
+    from app.models.threat_actor import EntryThreatActor, ThreatActor
+
+    actors = [ThreatActor(name=f"Actor{i}{uuid.uuid4().hex[:4]}") for i in range(4)]
+    cve = CVE(cve_id=f"CVE-2026-{uuid.uuid4().int % 90000 + 10000}")
+    loader = MalwareFamily(name=f"Loader{uuid.uuid4().hex[:4]}")
+    db_session.add_all([*actors, cve, loader])
+    await db_session.flush()
+
+    def entry(text):
+        return Entry(
+            feed_id=test_feed.id,
+            title="t",
+            guid=f"g-{uuid.uuid4()}",
+            url=f"https://e.example/{uuid.uuid4()}",
+            content_text=text,
+        )
+
+    # Title is paragraph 0 (no summary): the body is 1, the "Related:" headline 2.
+    headline = entry("Actor exploits the flaw.\n\nRelated: Another actor and that CVE")
+    # Paragraph 1 names four actors and a CVE: a digest line.
+    digest = entry("This week: four groups and one CVE.")
+    stated = entry("The actor exploited the CVE.")
+    db_session.add_all([headline, digest, stated])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            EntryThreatActor(entry_id=headline.id, threat_actor_id=actors[0].id, paragraph_indices=[2]),
+            EntryCVE(entry_id=headline.id, cve_id=cve.id, paragraph_indices=[1, 2]),
+            *(EntryThreatActor(entry_id=digest.id, threat_actor_id=a.id, paragraph_indices=[1]) for a in actors),
+            EntryCVE(entry_id=digest.id, cve_id=cve.id, paragraph_indices=[1]),
+            EntryThreatActor(entry_id=stated.id, threat_actor_id=actors[0].id, paragraph_indices=[1]),
+            EntryCVE(entry_id=stated.id, cve_id=cve.id, paragraph_indices=[1]),
+            # Cross-paragraph and position-less mentions relate nothing.
+            EntryMalware(entry_id=stated.id, malware_family_id=loader.id, paragraph_indices=None),
+        ]
+    )
+    await db_session.flush()
+
+    assert await create_cooccurrence_relationships(db_session, headline.id) == 0
+    assert await create_cooccurrence_relationships(db_session, digest.id) == 0
+    assert await create_cooccurrence_relationships(db_session, stated.id) == 1

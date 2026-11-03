@@ -93,10 +93,13 @@ def test_scan_coined_name_never_provisional(pending_tier_on):
 def test_scan_pending_tier_disabled(monkeypatch):
     monkeypatch.setattr(autolinker_mod, "pending_tier_enabled", lambda: False)
     _build_and_activate(malware=[_make_malware("Royal")])
-    matches = scan_text("Cyber vulnerability sweep picks up Royal Navy drones.")
+    matches = scan_text("Cyber vulnerability sweep picks up Royal ransomware drops.")
     royal = [m for m in matches if m["canonical_name"] == "Royal"]
     assert len(royal) == 1
     assert royal[0]["provisional"] is False
+    # Inside a longer name ("Royal Navy") the context is doubtful: with no AI
+    # to ask, it is dropped rather than linked.
+    assert not [m for m in scan_text("The Royal Navy flew drones.") if m["canonical_name"] == "Royal"]
 
 
 # ── Store diversion + reconcile ─────────────────────────────────────
@@ -307,7 +310,7 @@ async def test_instance_ai_off_links_instantly(db_session, entry, royal_malware,
     vocab_malware = MagicMock(id=royal_malware.id, aliases=[])
     vocab_malware.name = "Royal"
     _build_and_activate(malware=[vocab_malware])
-    matches = scan_text("Cyber vulnerability sweep picks up Royal Navy drones.")
+    matches = scan_text("The sweep picks up Royal samples on two hosts.")
     assert matches and matches[0]["provisional"] is False
 
     stored = await store_autolink_matches(db_session, entry.id, matches)

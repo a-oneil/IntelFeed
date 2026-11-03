@@ -13,7 +13,10 @@ Three checks, the same ones the live gate runs, in this order:
 
     denylist      the name (or an alias) is on the analyst do-not-recreate list
     generic       ``generic_name_reason`` says so (head-noun phrases, regions,
-                  AV strings, filenames, CVE ids, code symbols ...)
+                  AV strings, filenames, CVE ids, code symbols, and the
+                  non-entity rules: protocols, cipher names, install
+                  commands, code tokens, OS APIs, categories, technique
+                  names, attribution descriptors, number-only actors)
     country       the name is a catalogue country, alias or demonym
 
 Deletion goes through the review queues' own path
@@ -23,17 +26,23 @@ its names are denylisted so the pipeline never re-creates it. Nothing is
 re-linked: a phrase like "the threat actor" carries no intelligence to keep.
 
 Run inside the api container (scripts/ is read-only in prod, so the CSV goes
-to /tmp there — the path is printed):
+to /tmp there — the path is printed). A dry run is the default; nothing is
+deleted without ``--apply``:
 
     docker compose -f docker-compose.prod.yml exec -T api \\
-        python scripts/maintenance/purge_generic_entities.py --dry-run
+        python scripts/maintenance/purge_generic_entities.py
+
+    # only rows a given rule flags (reason slugs, comma-separated)
+    docker compose -f docker-compose.prod.yml exec -T api \\
+        python scripts/maintenance/purge_generic_entities.py \\
+        --only protocol,shell_command,code_token,os_api
 
     docker compose -f docker-compose.prod.yml exec -T api \\
         python scripts/maintenance/purge_generic_entities.py \\
         --apply --plan /tmp/generic_entities.csv
 
 CSV columns: ``action`` is the only one meant to be edited.
-    action          delete (default) | skip
+    action          delete (default) | skip | review
     entity_type     threat_actor | malware | tool | vendor | product
     entity_id
     name
@@ -44,7 +53,11 @@ CSV columns: ``action`` is the only one meant to be edited.
 
 Rows with many entry links are still defaulted to ``delete`` — a junk
 phrase is junk however often it was matched — but ``--min-entries`` lists
-them first in the report so they are the ones you read.
+them first in the report so they are the ones you read. The exception is a
+heavily linked row flagged by a non-entity rule (``NON_ENTITY_REASONS``):
+it defaults to ``review``, which ``--apply`` skips, because a concept with
+hundreds of links (WebRTC, Kerberos) may be better reclassified to a product
+than deleted. Change it to ``delete`` to remove it.
 """
 
 import argparse
@@ -61,6 +74,7 @@ from app.database import async_session
 from app.intelligence.autolinker import refresh_vocabulary
 from app.intelligence.correlation import ENTITY_CONFIG
 from app.intelligence.entity_resolution import (
+    NON_ENTITY_REASONS,
     RESOLVED_MODELS,
     _country_named,
     _denylist_hit,
@@ -106,7 +120,19 @@ async def _reason(db, entity_type: str, entity) -> str | None:
     return None
 
 
-async def scan(csv_path: str, min_entries: int) -> None:
+def reason_slug(reason: str) -> str:
+    """'generic:protocol' -> 'protocol'; 'country:Iran' -> 'country'; 'denylist' -> 'denylist'."""
+    head, _, tail = reason.partition(":")
+    return tail if head == "generic" else head
+
+
+def default_action(reason: str, entries: int, min_entries: int) -> str:
+    if reason_slug(reason) in NON_ENTITY_REASONS and entries >= min_entries:
+        return "review"
+    return "delete"
+
+
+async def scan(csv_path: str, min_entries: int, only: set[str] | None = None) -> None:
     rows: list[dict] = []
     async with async_session() as db:
         for entity_type in TYPES:
@@ -115,7 +141,7 @@ async def scan(csv_path: str, min_entries: int) -> None:
             entities = (await db.execute(select(model).order_by(model.name))).scalars().all()
             for entity in entities:
                 reason = await _reason(db, entity_type, entity)
-                if reason is None:
+                if reason is None or (only and reason_slug(reason) not in only):
                     continue
                 entries = (
                     await db.execute(select(func.count()).select_from(junction).where(fk_col == entity.id))
@@ -136,7 +162,7 @@ async def scan(csv_path: str, min_entries: int) -> None:
                 ).scalar_one()
                 rows.append(
                     {
-                        "action": "delete",
+                        "action": default_action(reason, int(entries), min_entries),
                         "entity_type": entity_type,
                         "entity_id": str(entity.id),
                         "name": entity.name,
@@ -165,7 +191,10 @@ async def scan(csv_path: str, min_entries: int) -> None:
     if heavy:
         print(f"\nrows with >= {min_entries} entry links (read these first):")
         for r in heavy[:40]:
-            print(f"  {r['entries']:6}  {r['entity_type']:13} {r['name']!r:45} {r['reason']}")
+            print(f"  {r['entries']:6}  {r['entity_type']:13} {r['name']!r:45} {r['reason']:28} {r['action']}")
+    review = sum(1 for r in rows if r["action"] == "review")
+    if review:
+        print(f"\n{review} rows default to action=review (heavily linked, non-entity rule): set delete or skip.")
     print("\nReview the CSV (set action=skip to keep a row), then re-run with --apply --plan <csv>.")
 
 
@@ -195,19 +224,24 @@ async def apply(plan_path: str) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    mode = ap.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--dry-run", action="store_true", help="Scan the catalogs and write the review CSV.")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--dry-run", action="store_true", help="Scan the catalogs and write the review CSV (default).")
     mode.add_argument("--apply", action="store_true", help="Execute a reviewed plan CSV.")
     ap.add_argument("--csv", help="Where the dry run writes its plan (default scripts/out/, or /tmp when read-only).")
     ap.add_argument("--plan", help="Reviewed CSV to execute with --apply.")
     ap.add_argument("--min-entries", type=int, default=20, help="Report rows with at least this many links first.")
+    ap.add_argument(
+        "--only",
+        help="Comma-separated reason slugs to keep (e.g. protocol,shell_command,denylist,country). Dry run only.",
+    )
     args = ap.parse_args()
     if args.apply:
         if not args.plan:
             ap.error("--apply needs --plan <csv>")
         asyncio.run(apply(args.plan))
     else:
-        asyncio.run(scan(_csv_path(args.csv), args.min_entries))
+        only = {s.strip() for s in args.only.split(",") if s.strip()} if args.only else None
+        asyncio.run(scan(_csv_path(args.csv), args.min_entries, only))
 
 
 if __name__ == "__main__":

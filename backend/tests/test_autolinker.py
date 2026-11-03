@@ -139,6 +139,8 @@ def test_word_boundary_validation():
     assert not _is_word_boundary("helloAPT29 world", 5, 10)  # No left boundary
     assert not _is_word_boundary("hello APT29world", 6, 11)  # No right boundary
     assert _is_word_boundary("APT29", 0, 5)  # Start/end of string
+    assert not _is_word_boundary("RTM_NEWLINK", 0, 3)  # code identifier
+    assert not _is_word_boundary("nft_meta", 0, 3)
 
 
 def test_word_boundary_prevents_partial_match():
@@ -152,6 +154,61 @@ def test_word_boundary_prevents_partial_match():
     # "HIVE" as standalone should match
     matches = scan_text("The HIVE ransomware encrypted all files.")
     assert len([m for m in matches if m["entity_type"] == "threat_actor"]) == 1
+
+
+def test_lowercase_dotted_package_id_is_not_a_mention():
+    actor = _make_actor("The Com")
+    _build_and_activate(actors=[actor])
+
+    # A macOS bundle id / Java package path is code, not the group.
+    assert not scan_text("Running as root, it loads the com.apple.screensharing agent.")
+    # The group written as a name still matches, even before a full stop.
+    matches = scan_text("Researchers tied the attack to The Com. Arrests followed.")
+    assert len([m for m in matches if m["entity_type"] == "threat_actor"]) == 1
+
+
+def test_short_acronym_and_mixed_case_forms_match_their_own_casing():
+    trap = _make_malware("TRAP")
+    ios = _make_malware("iOS")
+    _build_and_activate(malware=[trap, ios])
+
+    def names(text):
+        return {m["canonical_name"] for m in scan_text(text) if m["entity_type"] == "malware"}
+
+    assert names("The kernel hit a page-fault trap. Digitization Trap, a book.") == set()
+    assert names("Proofpoint TRAP pulled the email back.") == {"TRAP"}
+    assert names("Cisco IOS XE is affected.") == set()
+    assert names("The iOS update fixes it.") == {"iOS"}
+
+
+def test_a_name_inside_a_longer_name_is_not_matched():
+    korea = _make_actor("Korea")
+    north = _make_actor("North Korea")
+    _build_and_activate(actors=[korea, north])
+
+    found = {m["canonical_name"] for m in scan_text("North Korea's hackers struck again.")}
+    assert found == {"North Korea"}
+    found = {m["canonical_name"] for m in scan_text("Korea and North Korea both issued warnings.")}
+    assert found == {"Korea", "North Korea"}  # a separate mention still counts
+
+
+def test_a_name_inside_a_longer_name_of_another_type_still_counts():
+    # the vendor-in-product case ("Microsoft" in "Microsoft Exchange"), with types the helper builds
+    actor = _make_actor("Sandworm")
+    malware = _make_malware("Sandworm Loader")
+    _build_and_activate(actors=[actor], malware=[malware])
+
+    found = {(m["entity_type"], m["canonical_name"]) for m in scan_text("Sandworm Loader was seen again.")}
+    assert found == {("threat_actor", "Sandworm"), ("malware", "Sandworm Loader")}
+
+
+def test_single_dotted_segment_still_matches():
+    malware = _make_malware("Lumma7")
+    _build_and_activate(malware=[malware])
+
+    # "lumma7.exe" is one segment: the file is the malware, keep the match.
+    matches = scan_text("The dropper wrote lumma7.exe to disk.")
+    assert len([m for m in matches if m["entity_type"] == "malware"]) == 1
 
 
 def test_word_boundary_prevents_partial_alias_match():

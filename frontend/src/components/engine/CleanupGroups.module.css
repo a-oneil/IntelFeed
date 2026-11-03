@@ -70,6 +70,14 @@
   color: var(--text-secondary);
 }
 
+/* the type · count line under an entity's name */
+.entMeta {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
 .expand {
   appearance: none;
   background: none;

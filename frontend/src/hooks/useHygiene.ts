@@ -129,6 +129,8 @@ export interface FeedRow {
   origin: ProposalOrigin | null;
   /** What applying it changes (the Review tab's Domain facet). */
   domain: ProposalDomain;
+  /** The article text around the match (bounded), when the row has an article. */
+  context?: string | null;
 }
 
 export type ProposalOrigin = "adjudicator" | "merge_review" | "scan";
@@ -244,6 +246,8 @@ export function useHygieneFeed(filters: FeedFilters, opts: { enabled?: boolean }
       if (filters.orphaned) params.orphaned = "true";
       if (filters.entity_type) params.entity_type = filters.entity_type;
       if (filters.entity_id) params.entity_id = filters.entity_id;
+      // one entity's rows: small enough to carry the article snippet
+      if (filters.entity_id) params.context = "true";
       const { data } = await api.get<FeedResponse>("/admin/hygiene/feed", { params });
       return data;
     },

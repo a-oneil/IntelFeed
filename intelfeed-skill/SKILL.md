@@ -288,7 +288,7 @@ Answer platform questions from the docs, not from memory.
 
 ## Available Tools
 
-187 tools. Names in **bold** are the CLI tool names. `⚠` marks a tool that needs an **admin** account; `🔒` marks one that runs a **confirmation-token flow** — the first call returns a prompt and a token, which you must show the user and only re-send after they explicitly approve.
+196 tools. Names in **bold** are the CLI tool names. `⚠` marks a tool that needs an **admin** account; `🔒` marks one that runs a **confirmation-token flow** — the first call returns a prompt and a token, which you must show the user and only re-send after they explicitly approve.
 
 Everything that creates, changes or deletes data is refused outright when `INTELFEED_READ_ONLY` is set on the environment — that gate is in the CLI itself, not in your instructions.
 
@@ -508,7 +508,7 @@ Trigger types: `on_new_entry`, `on_keyword_match`, `on_cve_detected`, `on_correl
 
 These persist entities as a side effect, so they are gated as writes in read-only mode.
 
-### Curation & Hygiene (14 tools)
+### Curation & Hygiene (17 tools)
 
 Entry→entity autolinks (edges) and entity→entity relationships (claims) are separate layers — these tools work the edges, the claims ledger, and the AI-extraction review queue.
 
@@ -526,8 +526,11 @@ Entry→entity autolinks (edges) and entity→entity relationships (claims) are 
 - **delete_relationship** — Hard-delete a relationship. Prefer `reject_relationship` when the claim is wrong (relationship_id)
 - **get_hygiene_feed** ⚠ — Chronological merge of link-validator and entity-maintenance logs (action, source, mode, review, pending, since, limit, offset)
 - **get_hygiene_stats** ⚠ — Hygiene counters: operating modes (shadow/apply) and pending advisories
+- **list_review_groups** ⚠ — The Engine › Review queue, one row per entity with its proposal counts by kind (q, entity_type, action, domain, origin, limit, offset)
+- **get_review_rows** ⚠ — The pending proposals behind a Review group, each with its id, reason and a context snippet from the article (entity_type, entity_id, action, origin, domain, limit, offset)
+- **decide_proposals** ⚠ — Apply up to 1000 Review decisions in one call: `{id, decision: apply|dismiss|reclassify:<type>}`; duplicates settle server-side (decisions)
 
-### Entity Writes & Merges (12 tools)
+### Entity Writes & Merges (14 tools)
 
 - **create_threat_actor** — Create an actor; the entity resolver folds it into an existing one on a name/alias hit (name, aliases, description, country, motivation)
 - **create_malware** — Same for a malware family (name, aliases, description, malware_type)
@@ -539,8 +542,10 @@ Entry→entity autolinks (edges) and entity→entity relationships (claims) are 
 - **merge_tools** ⚠ — Same, for tools
 - **merge_vendors** ⚠ — Same, for vendors
 - **merge_products** ⚠ — Same, for products
-- **reclassify_entity** ⚠ — Move an entity to a different type (a "malware" that is really a tool, a product filed as a vendor) (source_type, source_id, target_type, target_id, mode, …)
-- **delete_entity** ⚠🔒 — Delete any record: feed, entry, note, rule, campaign, automation rule, PIR, report, tag or intelligence entity (entity_type, entity_id, confirmation_token)
+- **merge_entities** ⚠ — Merge duplicates of any one type into a keeper, by name or id; merged names become aliases (entity_type, keeper, merge)
+- **remove_entity_aliases** ⚠ — Drop aliases by entity name or id; entries linked only through them are unlinked and the count recounted (entity_type, entity, aliases)
+- **reclassify_entity** ⚠ — Move an entity to a different type (a "malware" that is really a tool, a product filed as a vendor), by id or name; with no target it merges into the same-named entity of the target type (source_type, source_id, source_name, target_type, target_id, target_name, mode, …)
+- **delete_entity** ⚠🔒 — Delete any record: feed, entry, note, rule, campaign, automation rule, PIR, report, tag or intelligence entity, by id or name (entity_type, entity_id, name, confirmation_token)
 
 Always dry-run a merge with `mode='shadow'` first and always pass `reasoning` — it is written into the audit trail.
 

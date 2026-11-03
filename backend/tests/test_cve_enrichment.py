@@ -72,6 +72,37 @@ def test_extract_cve_ids_empty():
     assert extract_cve_ids("No CVEs mentioned in this text at all.") == []
 
 
+def test_extract_cve_ids_drops_glued_cvss_score():
+    # A table's CVE and CVSS columns run together by HTML stripping.
+    text = "CVE-2026-10384910.0 Critical CVE-2026-887798.7 High CVE-2026-1027649 and CVE-2026-102764 in prose"
+    assert set(extract_cve_ids(text)) == {"CVE-2026-103849", "CVE-2026-88779", "CVE-2026-102764"}
+
+
+def test_extract_cve_ids_rejects_implausible_sequences():
+    text = "CVE-2026-10384910 CVE-2024-012345 CVE-2017-1000117 CVE-2024-0001 CVE-2025-1234567"
+    assert set(extract_cve_ids(text)) == {"CVE-2017-1000117", "CVE-2024-0001", "CVE-2025-1234567"}
+
+
+def test_is_plausible_cve_id():
+    from app.intelligence.cve import is_plausible_cve_id
+
+    assert is_plausible_cve_id("CVE-2024-3400")
+    assert is_plausible_cve_id("CVE-2021-44228")
+    assert is_plausible_cve_id("CVE-2017-1000117")
+    assert not is_plausible_cve_id("CVE-2026-10384910")
+    assert not is_plausible_cve_id("CVE-2024-012345")
+    assert not is_plausible_cve_id("CVE-2024-12")
+
+
+def test_glued_score_prefixes():
+    from app.intelligence.cve import glued_score_prefixes
+
+    assert glued_score_prefixes("CVE-2026-1027649") == ["CVE-2026-102764"]
+    assert glued_score_prefixes("CVE-2026-1038410") == ["CVE-2026-103841", "CVE-2026-10384"]
+    assert glued_score_prefixes("CVE-2017-1000117") == []
+    assert glued_score_prefixes("CVE-2024-21762") == []
+
+
 # --- NVD enrichment tests ---
 
 
@@ -269,3 +300,20 @@ def test_iter_epss_csv_skips_malformed_rows():
 def test_iter_epss_csv_empty():
     assert list(iter_epss_csv("")) == []
     assert list(iter_epss_csv("#comment only\n")) == []
+
+
+@pytest.mark.asyncio
+async def test_store_skips_seven_digit_id_whose_prefix_is_stored(db_session):
+    """CVE-2026-1027649 is CVE-2026-102764 with a CVSS 9 glued on."""
+    import uuid
+
+    from sqlalchemy import select
+
+    from app.intelligence.cve import extract_and_store_cves
+    from app.models.cve import CVE
+
+    db_session.add(CVE(cve_id="CVE-2026-102764"))
+    await db_session.flush()
+    stored = await extract_and_store_cves(db_session, uuid.uuid4(), "| CVE-2026-1027649 | Critical |", enrich=False)
+    assert stored == []
+    assert (await db_session.execute(select(CVE).where(CVE.cve_id == "CVE-2026-1027649"))).scalar_one_or_none() is None

@@ -255,6 +255,7 @@ function ProposalRow({
       <td className={styles.detail}>
         <span className={styles.subject}>{row.subject ?? "—"}</span>
         {row.reason && <span className={styles.reason}>{row.reason}</span>}
+        {row.context && <span className={styles.reason}>“{row.context}”</span>}
         <LinkChips links={row.links ?? []} />
       </td>
       <td className={styles.when}>{formatDateTime(row.when)}</td>
@@ -556,7 +557,7 @@ export function ProposalsQueue({
         let targets: FeedRow[];
         if (g.entity_id) {
           const { data } = await api.get<FeedResponse>("/admin/hygiene/feed", {
-            params: { pending: "true", entity_type: g.entity_type, entity_id: g.entity_id, limit: 200 },
+            params: { pending: "true", entity_type: g.entity_type, entity_id: g.entity_id, limit: 200, context: "true" },
           });
           targets = data.rows.filter((r) => !UNLINK_KINDS.has(r.action) && !RECLASSIFY_KINDS.has(r.action));
           // One entity merges once: the most-proposed target's row, applied
@@ -858,10 +859,10 @@ export function ProposalsQueue({
                             {!g.exists && <span className={cg.gone}>gone</span>}
                           </button>
                         ) : (
-                          <span className={styles.muted}>{g.entity_type === "relationship" ? "relationship" : g.name || g.entity_type}</span>
+                          <span className={styles.muted}>{g.name || g.entity_type}</span>
                         )}
-                        <span className={cg.meta}>
-                          {g.entity_id ? getEntityLabel(g.entity_type) : ""}
+                        <span className={cg.entMeta}>
+                          {g.entity_type === "relationship" ? "Relationship" : g.entity_id ? getEntityLabel(g.entity_type) : ""}
                           {g.linked !== null && g.linked !== undefined ? ` · ${g.linked.toLocaleString()} article${g.linked === 1 ? "" : "s"}` : ""}
                         </span>
                       </td>

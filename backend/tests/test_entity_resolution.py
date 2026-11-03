@@ -322,7 +322,7 @@ def test_tool_semantic_gates_allow_real_tools(name):
         "Cobalt Strike",
         "Metasploit",
         "Node.js",
-        "Bring Your Own Vulnerable Driver (BYOVD)",  # acronym-in-parens is a real name shape
+        "Remote Server Administration Tools (RSAT)",  # acronym-in-parens is a real name shape
         "PowerShell",
         "Tycoon 2FA",
     ],

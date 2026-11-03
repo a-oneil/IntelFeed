@@ -20,6 +20,7 @@ from app.models.entity_maintenance import EntityMaintenanceLog
 from app.models.entry import Entry
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.pending_autolink import PendingAutolinkMatch
+from app.models.threat_actor import ThreatActor
 from app.models.tool import EntryTool, Tool
 
 pytestmark = pytest.mark.asyncio
@@ -185,9 +186,24 @@ async def test_apply_group_converts_and_clears_every_suggestion(client, admin_he
     assert await db_session.get(MalwareFamily, mid) is None
 
 
+async def test_names_that_differ_only_in_digits_are_not_duplicates(client, admin_headers, db_session):
+    # Storm-3068 / Storm-3069 are two tracked clusters; a version bump is a variant
+    db_session.add_all(
+        [
+            ThreatActor(name="Storm-3068", created_via="ai_extraction"),
+            ThreatActor(name="Storm-3069", created_via="ai_extraction"),
+            Tool(name="KillSecurity 2.0", created_via="ai_extraction"),
+            Tool(name="KillSecurity 3.0", created_via="ai_extraction"),
+        ]
+    )
+    await db_session.commit()
+    stats = (await client.get("/api/engine/extraction/stats?window=all", headers=admin_headers)).json()
+    assert stats["likely_duplicates"] == 0
+
+
 async def test_not_duplicate_drops_the_pair(client, admin_headers, db_session):
-    a = Tool(name="KillSecurity 2.0", created_via="ai_extraction")
-    b = Tool(name="KillSecurity 3.0", created_via="ai_extraction")
+    a = Tool(name="Cobalt Strike", created_via="ai_extraction")
+    b = Tool(name="CobaltStrike", created_via="ai_extraction")
     db_session.add_all([a, b])
     await db_session.flush()
     await db_session.commit()
@@ -450,6 +466,7 @@ async def test_review_groups_fold_every_kind_per_entity(client, admin_headers, d
 
     edge = next(g for g in body["groups"] if g["entity_type"] == "relationship")
     assert edge["entity_id"] == str(edge_id) and edge["subject"] == "Demote: Everest uses Linuxish"
+    assert edge["name"] == "Everest uses Linuxish"  # an edge group is named by its claim
     assert edge["exists"] is True and edge["row_ids"] == []  # a pseudo type is never assumed gone
 
     # Facets narrow the same way the flat feed does.
@@ -463,7 +480,8 @@ async def test_review_groups_fold_every_kind_per_entity(client, admin_headers, d
     ).json()
     assert [g["name"] for g in recl["groups"]] == ["Everest"]
     found = (await client.get("/api/admin/hygiene/review-groups?q=linux", headers=admin_headers)).json()
-    assert [g["name"] for g in found["groups"]] == ["Linuxish"]
+    # the edge's claim names Linuxish too, so a name search finds its proposals
+    assert [g["name"] for g in found["groups"]] == ["Linuxish", "Everest uses Linuxish"]
     adj = (await client.get("/api/admin/hygiene/review-groups?origin=adjudicator", headers=admin_headers)).json()
     assert {g["name"] for g in adj["groups"]} == {"Everest", py["name"], edge["name"]}
     assert next(g for g in adj["groups"] if g["name"] == "Everest")["proposals"] == 1

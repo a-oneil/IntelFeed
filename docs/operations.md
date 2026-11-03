@@ -594,6 +594,39 @@ docker compose -f docker-compose.prod.yml exec redis redis-cli -a "$REDIS_PASSWO
 
 `$REDIS_PASSWORD` isn't in your shell by default; paste it from `.env` or run `set -a; . ./.env; set +a`.
 
+#### 8. Entity data is wrong after a rule change
+
+**Symptom:** a profile shows far more articles than it links, a graph shows edges from "Related:" lines or roundups, the Review queue's auto-applied removals took out good links, or older articles read as glued text ("powerSource", an IP running into the next one).
+
+**Fix:** four repair scripts. Each is a dry run unless you add `--apply`, prints a summary, and is safe to run again. CSVs go to `/tmp` in the container (`scripts/` is read-only in prod); copy them out with `docker compose cp`.
+
+```bash
+D="docker compose -f docker-compose.prod.yml exec -T api python scripts/maintenance"
+
+# Stored article counts vs. the links that exist (all types, or --type/--entity)
+$D/recount_article_counts.py
+$D/recount_article_counts.py --apply
+
+# Co-occurrence edges whose articles no longer pass the same-paragraph rule
+$D/sweep_cooccurrence_edges.py                 # writes the plan CSV
+$D/sweep_cooccurrence_edges.py --apply         # keep the CSV: it is the undo
+$D/sweep_cooccurrence_edges.py --undo /tmp/cooccurrence_sweep.csv --apply
+
+# Removals the adjudicate stage applied on its own that match known-bad patterns
+$D/audit_auto_removals.py --since 2026-10-08   # review CSV, restore=y prefilled
+$D/audit_auto_removals.py --restore /tmp/auto_removals.csv --apply
+
+# Article text stored before html_to_text separated blocks and table cells
+$D/rederive_content_text.py --since 2026-01-01
+$D/rederive_content_text.py --apply --rerun    # --rerun re-queues the link stages
+```
+
+- `recount_article_counts.py` counts each entity's linked articles and writes that number where the stored one differs. It re-indexes the changed entities in search and clears the cached graphs. Observables are left to the nightly counter job.
+- `sweep_cooccurrence_edges.py` checks each article behind a `co_occurrence` edge: both names in one body paragraph, not boilerplate, fewer than five entities in it, with a recorded position. Articles that fail are dropped from the edge's evidence. An edge with none left is rejected, the same as the Reject button. A trimmed `probable` edge that no longer meets the promotion rule goes back to `possible`. Articles the adjudicate stage kept the edge on always stay. No other edge source is touched.
+- `audit_auto_removals.py` lists applied removals that are sector links, legitimate or defensive tools, TTPs from a detection rule's ATT&CK tags or an article's ATT&CK table, hashes from an indicator table, and removals whose reason calls the entity legitimate, a victim or the publisher. `--restore` puts back the rows marked `y` through the same Restore the Review queue uses.
+- `rederive_content_text.py` rebuilds each article's text from its stored HTML and keeps the Transcript or Image OCR text added after it. It writes only rows where the change is whitespace alone and updates search. `content_hash` stays as it is, so duplicate detection does not shift. `--rerun` queues autolink, observables, extract and co-occurrence for the changed articles (no AI, no automation rules).
+- Run `rederive_content_text.py --rerun` first, then `sweep_cooccurrence_edges.py` and `recount_article_counts.py`, so they see the new links.
+
 ### Useful Commands
 
 **Containers:**
