@@ -34,7 +34,7 @@ A database value that equals the default does nothing useful, and it stops you g
 |---|---|---|
 | `CONFIGURABLE_KEYS` | `backend/app/services/system_settings.py:26` | Which keys the UI can edit, and each value's type |
 | `SETTING_METADATA` | `backend/app/services/system_settings.py:216` | Label, description and group shown in the UI |
-| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1393` | Moves engine keys into the group of the Engine panel that owns them |
+| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1403` | Moves engine keys into the group of the Engine panel that owns them |
 | `SECRET_KEYS` | `system_settings.py:14` | Encrypted in the database, hidden on read |
 | `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Which Engine screen shows each group; drives the Engine settings search |
 | `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:67` | Single keys that live somewhere other than their group's screen |
@@ -77,7 +77,7 @@ An observable is an indicator of compromise (IOC), such as an IP address, domain
 | `observables_codeblock_skip_categories` | csv, `Security Advisories,Government / CERT` | Feed categories whose code blocks never produce host-type candidates, because bulletins use code blocks for plain text. Detection-rule repositories are always skipped. |
 | `observables_publisher_ioc_enabled` | bool, `true` | When an article links to an IOC file in a known publisher repository (Cisco Talos, Bitdefender, Datadog), fetch it and record its indicators on the article. |
 | `observables_publisher_ioc_max_values` | int, `2000` | Most indicators taken from one IOC file. |
-| `observables_ai_capture_kinds` | csv, `ipv4,ipv6,domain,url,uri_path,email,ja3,ja4,cert_fingerprint,md5,sha1,sha256,script` | In `capture` mode, only these kinds become observables directly. Other kinds the AI reports stay as candidates an analyst can promote. Add host kinds (`cmdline`, `path`, `registry`, `scheduled_task`, `service_name`, `mutex`, `named_pipe`, `user_agent`, `http_header`) once `scripts/dev/eval_observable_extraction.py` shows they are accurate. |
+| `observables_ai_capture_kinds` | csv, `ipv4,ipv6,domain,url,email,ja3,ja4,cert_fingerprint,md5,sha1,sha256,script` | In `capture` mode, only these kinds become observables directly. Other kinds the AI reports stay as candidates an analyst can promote. `uri_path` is left off: most of the AI's paths are the vulnerable product's own routes (`/wp-admin/admin-ajax.php`) that match normal traffic. Add host kinds (`cmdline`, `path`, `registry`, `scheduled_task`, `service_name`, `mutex`, `named_pipe`, `user_agent`, `http_header`) once `scripts/dev/eval_observable_extraction.py` shows they are accurate. |
 | `observables_ai_capture_mode` | `shadow` \| `capture`, default `capture` | `shadow`: indicators the AI confirms stay as candidates for review. `capture`: they become observables directly. |
 | `observables_decay_enabled` | bool, `true` | Lowers confidence in network indicators over time: half-life 30 days for IPs, 60 for URLs, 90 for domains. Hashes and host artifacts never decay. A new sighting resets the clock. Job `decay-observable-confidence`, daily 02:20 UTC. |
 
@@ -123,7 +123,8 @@ Each article gets one AI call, `entry_analysis`, that extracts everything at onc
 | `ai_analysis_content_max_chars` | int, `12000` | Characters of article text sent to the AI. Longer articles send the start plus the indicator section (see `observables_analysis_tail_reserve`). |
 | `ai_use_batches` | bool, `true` | Use the Anthropic Message Batches API (half price) when the provider is Anthropic. Other providers get one call per article. |
 | `ai_est_cost_per_request` | float, `0.0024` | Estimated cost per article, used to fit a batch inside the daily budget. Set it near zero for local models such as Ollama. |
-| `ai_tool_evidence_required` | bool, `true` | Only save an extracted **tool** when the AI names who used it and quotes the sentence that shows it. This stops every mention of a tool like `certutil` becoming an entity. |
+| `ai_tool_evidence_required` | bool, `true` | Only save an extracted **tool** when the AI names who used it and quotes the sentence that shows it. This stops every mention of a tool like `certutil` becoming an entity. A new tool is only created when that sentence names it and the user is an attacker; defender software links to an existing row but is not created. |
+| `ai_entity_evidence_required` | bool, `true` | Only create a new **threat actor** or **malware family** when the AI quotes a sentence naming it as the attacker or the malicious software. Without one, the name still links to an entity that exists. Turn off if the model stops filling the field. |
 
 ### Entity creation guardrails
 

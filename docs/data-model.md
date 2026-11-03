@@ -248,7 +248,7 @@ Table `mitigations`: MITRE ATT&CK mitigations.
 Linked to TTPs through `ttp_mitigations`.
 
 #### Tool
-Table `tools`: any named software. That includes attack tools, defensive tools, ordinary software, online services and AI models.
+Table `tools`: any named software. That includes attack tools, defensive tools, ordinary software, online services and AI models. The AI only creates new rows for software an attacker uses; the other kinds come from imports and analysts, and the AI links to them once they exist.
 - `name` (String 255, unique), `aliases`, `normalized_name`, `description`, `mitre_id`
 - `tool_type` (indexed) — one of `TOOL_TYPES` in `models/tool.py`. Free text is mapped onto the list when written, and the original string is kept in `metadata_["raw_tool_type"]`.
 - `platforms` (Text[]), `malpedia_url`, `github_url`

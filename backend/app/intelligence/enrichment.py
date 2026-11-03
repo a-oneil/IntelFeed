@@ -17,6 +17,7 @@ from app.intelligence.entity_dedup import (
 )
 from app.intelligence.entity_resolution import (
     coerce_malware_type,
+    evidence_names,
     gate_aliases,
     resolve_entity_creation,
 )
@@ -49,6 +50,12 @@ async def _resolve_country_id(db: AsyncSession, country_name: str | None) -> uui
     )
     row = result.scalar_one_or_none()
     return row
+
+
+async def _entity_evidence_required(db: AsyncSession) -> bool:
+    from app.services.system_settings import get_setting
+
+    return bool(await get_setting("ai_entity_evidence_required", db))
 
 
 def _ai_status(result: dict | None) -> tuple[str, str | None]:
@@ -370,6 +377,7 @@ async def store_threat_actors(
     entry_analysis fan-out (services/entry_analysis.py).
     """
     stored: list[tuple[ThreatActor, bool]] = []
+    require_evidence = await _entity_evidence_required(db)
     for actor_data in actors_data:
         name = actor_data.get("name", "").strip()
         if not name:
@@ -377,8 +385,17 @@ async def store_threat_actors(
 
         # Resolver: exact + normalized matching, cross-type tombstones, and the
         # creation/alias gates (planning/entity-creation-guardrails.md) in one place.
+        # Without a quoted sentence naming the group, an existing actor still
+        # links but no new one is created.
         decision = await resolve_entity_creation(
-            db, "threat_actor", name, actor_data.get("aliases"), source="ai", entry_id=entry_id
+            db,
+            "threat_actor",
+            name,
+            actor_data.get("aliases"),
+            source="ai",
+            entry_id=entry_id,
+            link_only=require_evidence
+            and not evidence_names(actor_data.get("evidence"), name, actor_data.get("aliases")),
         )
         if decision.action == "tombstone":
             tombstone = decision.tombstone
@@ -528,6 +545,7 @@ async def store_malware(
 ) -> list[tuple[MalwareFamily, bool]]:
     """Persist AI-extracted malware families + entry links (shared with entry_analysis)."""
     stored: list[tuple[MalwareFamily, bool]] = []
+    require_evidence = await _entity_evidence_required(db)
     for malware_data in malware_data_list:
         name = malware_data.get("name", "").strip()
         if not name:
@@ -536,7 +554,14 @@ async def store_malware(
         # Resolver: exact + normalized matching, cross-type tombstones, and the
         # creation/alias gates (planning/entity-creation-guardrails.md) in one place.
         decision = await resolve_entity_creation(
-            db, "malware", name, malware_data.get("aliases"), source="ai", entry_id=entry_id
+            db,
+            "malware",
+            name,
+            malware_data.get("aliases"),
+            source="ai",
+            entry_id=entry_id,
+            link_only=require_evidence
+            and not evidence_names(malware_data.get("evidence"), name, malware_data.get("aliases")),
         )
         if decision.action == "tombstone":
             tombstone = decision.tombstone

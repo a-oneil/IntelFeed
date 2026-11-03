@@ -1802,8 +1802,11 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 
 **Rules:**
 - Extract ONLY what the article actually states. Never invent entities, IDs, or relationships.
-- `threat_actors`: named adversary groups (APT29, Scattered Spider). 
+- `threat_actors`: named adversary groups (APT29, Scattered Spider).
+	- `evidence` — the exact sentence, copied VERBATIM, that names the group as the one attacking, claiming an attack, or being attributed one. A sentence where the name is a researcher, a vendor, a victim, or a political or military body is not evidence: leave that name out.
 	- **DO NOT**: extract vendors, researchers, or victim companies as threat actors
+	- **DO NOT**: extract security research teams and threat intel units ("Team82", "watchTowr", "Team Cymru"), the people who found or reported a bug, or a leak-site post's victim
+	- **DO NOT**: extract political parties, militias or armies that the article does not describe running cyber operations
 	- **DO NOT**: extract countries or countries aliases as threat actors - countries are their own entity type
 	- **Naming** — `name` is the group's canonical identifier; every other form it is called goes in `aliases`. Four cases:
 		- Proper group name, no designator → `name` is that name. Extract it normally (Famous Chollima, Scattered Spider, Lazarus Group).
@@ -1817,8 +1820,11 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 		- Yemen Cell
 		- the North Korean 
 		- Chinese espionage group
-- `malware`: named malware families/strains. 
+- `malware`: named malware families/strains.
 	- Be strict with what you or the article calls malware - use context in the article to determine if its actually malware.
+	- `evidence` — the exact sentence, copied VERBATIM, that names the family as malicious software (what it is or what it does). No such sentence means no malware item.
+	- **DO NOT**: extract the file, package or plugin names in an IoC table (npm/PyPI/RubyGems packages, `shell.war`, fake plugin names): those are indicators, not families
+	- **DO NOT**: extract vulnerability nicknames (Spring4Shell, PHP2Shell, SessionReaper) — they are bugs, not malware
 	- **DO NOT**: extract generic terms ("a trojan", "ransomware", "backdoors")
 	- **DO NOT**: extract legitimate software.
 	- **DO NOT**: extract CVE IDs as malware
@@ -1830,9 +1836,9 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 		- web shells
 		- backdoors
 		- PyYAML deserialization payload
-- `tools`: software deliberately WIELDED to conduct or defend against intrusions — offensive/dual-use (Cobalt Strike, Mimikatz, Sliver, Impacket, BloodHound, Rubeus) and defensive/security tooling (Velociraptor, YARA, Volatility). Distinct from malware families.
+- `tools`: software deliberately WIELDED in an intrusion — offensive/dual-use (Cobalt Strike, Mimikatz, Sliver, Impacket, BloodHound, Rubeus) and legitimate software an attacker abuses (AnyDesk, rclone, certutil). Distinct from malware families. Defensive tooling (Velociraptor, YARA, Volatility) may be listed only with `wielded_by` "the defender"; it is linked when the catalogue already has it and never added as a new tool.
 	- **THE TEST — answer it before you extract anything.** For every candidate you must fill two fields:
-		- `wielded_by` — WHO operates it in this article: the named actor, the malware, "the attacker", or "the defender"/"responders". If no one in the article operates it, there is no tool: drop it.
+		- `wielded_by` — WHO operates it in this article: the named actor, the malware, "the attacker", or "the defender"/"responders". If no one in the article operates it, there is no tool: drop it. Security products, vendor platforms and research or analysis tools the article only describes, sells or reviews have no operator in an intrusion: drop them.
 		- `evidence` — the exact sentence showing that operator USING it. Not a sentence that merely names the software, lists it among affected products, or says it has a vulnerability. Copy the sentence VERBATIM.
 		- If you cannot fill both from the article's own words, **do not include the item at all.** An empty `evidence` is not an acceptable answer — omitting the tool is.
 	- Vulnerability advisories, CVE listings, patch notes and dependency updates describe software that is BROKEN, not software being wielded. Such articles almost always have an empty tools list, no matter how many product names they contain.
@@ -1879,6 +1885,7 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 
 **Observables (the "iocs" list) — exact-match atoms a defender can search telemetry for:**
 - Every value must appear in the article text (defanged or not). Never build one: an organisation's name is not its domain ("Aave" is not aave.com), and a victim's or exchange's site is not attacker infrastructure.
+- Public services the malware merely contacts are not indicators: STUN and NTP servers, DNS resolvers, IP-lookup sites, blockchain RPC endpoints, CDN edge addresses. Neither is anything on a reference page — a detection rule, a test catalogue (Atomic Red Team), a driver or binary database (LOLDrivers, LOOBins): its values are examples, not sightings.
 - Victims are not indicators. Leave out the targets of an attack, even when the article lists them like indicators: a DDoS botnet's target list (DDoSia, NoName057(16)), a victim device's or victim server's IP, a hacked or defaced victim site (fbijobs.gov), a breached company's domain. A compromised legitimate site counts only for the attacker-planted page or file on it that served the attack (the full URL), never for the site itself.
 - NETWORK kinds (ipv4, ipv6, domain, url, uri_path, email, ja3, ja4, cert_fingerprint) and HASH kinds (md5, sha1, sha256): report a value ONLY when the article presents it as attacker infrastructure or attack material — C2 addresses, malicious domains/URLs, implant check-in or exploit URI paths, malware file hashes, phishing sender addresses, TLS client or certificate fingerprints. `uri_path` is the path (+ query template) without the host, when the author presents it as the implant's endpoint.
 - HOST kinds — the behavioral observables a write-up quotes from the intrusion:
@@ -1979,9 +1986,10 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
                             "aliases": {"type": "array", "items": {"type": "string"}},
                             "country": {"type": "string"},
                             "motivation": {"type": "string", "enum": _MOTIVATION_ENUM},
+                            "evidence": {"type": "string"},
                             "confidence": {"type": "string"},
                         },
-                        "required": ["name", "aliases", "country", "motivation", "confidence"],
+                        "required": ["name", "aliases", "country", "motivation", "evidence", "confidence"],
                     },
                 },
                 "malware": {
@@ -1993,9 +2001,10 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
                             "aliases": {"type": "array", "items": {"type": "string"}},
                             "malware_type": {"type": "string"},
                             "associated_actors": {"type": "array", "items": {"type": "string"}},
+                            "evidence": {"type": "string"},
                             "confidence": {"type": "string"},
                         },
-                        "required": ["name", "aliases", "malware_type", "associated_actors", "confidence"],
+                        "required": ["name", "aliases", "malware_type", "associated_actors", "evidence", "confidence"],
                     },
                 },
                 "tools": {
@@ -2226,14 +2235,16 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
         "variables": ["entry.title", "entry.feed_title", "entry.content_text", "manifest_block", "item_count"],
         "default_system_template": """You are a senior cyber-threat-intelligence analyst REVIEWING another analyst's work. An automated pass has already read one security article and written structured records for it: entity links, newly created catalogue entities, relationship claims and indicators. You get the same article and a list of those records, one per line with an item_id. For each item decide whether it is right. You create nothing; you only judge what is there.
 
-RETURN ONLY THE ITEMS YOU WOULD CHANGE. Every item_id you leave out of the verdicts list is kept exactly as it is, which is the right outcome for most of them — a clean review on a well-extracted article returns verdicts for its edges and nothing else. Do not echo back the links and iocs you agree with: a list with one line per item wastes the response budget and gets truncated on a long article, which throws the whole review away.
+RETURN ONLY THE ITEMS YOU WOULD CHANGE. Every item_id you leave out of the verdicts list is kept exactly as it is, which is the right outcome for most of them — a clean review on a well-extracted article returns verdicts for its edges and NEW entities and nothing else. Do not echo back the links and iocs you agree with: a list with one line per item wastes the response budget and gets truncated on a long article, which throws the whole review away.
 
-ONE EXCEPTION: every `edge:` item needs a verdict, keep or demote. A keep on an edge is a positive claim that this article asserts the relationship, and it is counted as corroboration — three of them promote the relationship to confirmed. So answer on every edge, and never keep one you have not checked against its evidence sentence; if you are unsure the article asserts it, demote it. There are at most ten edges in a list.
+TWO EXCEPTIONS:
+  - Every `edge:` item needs a verdict, keep or demote. A keep on an edge is a positive claim that this article asserts the relationship, and it is counted as corroboration — three of them promote the relationship to confirmed. So answer on every edge, and never keep one you have not checked against its evidence sentence; if you are unsure the article asserts it, demote it. There are at most ten edges in a list.
+  - Every link marked "NEW, created by this article" needs a verdict: keep, veto or merge. The automated pass just added that entity to the catalogue on the strength of this one article, so silence is not good enough — say whether it should exist.
 
 WHAT A LINK MEANS
   A link says only that this article is about, or meaningfully involves, the entity. It is NOT a claim that the entity is an adversary. The catalogue deliberately holds defenders and bystanders too:
   - vendor / product: the company or software the article is about, patches, or reports as affected. A vendor is a company that makes products — never a catch-all for "not an adversary": a government body, alliance, person, criminal group or command-line tool is not a vendor.
-  - tool: software someone in the article operates, attacker or defender (Cobalt Strike, PowerShell abused by malware, Sysmon, VirusTotal, Microsoft Defender). Being legitimate or defensive is never a reason to remove a tool link. Commercial platforms and services (SharePoint, Slack, Microsoft Graph) are products; reclassify them to product.
+  - tool: software someone in the article operates, attacker or defender (Cobalt Strike, PowerShell abused by malware, Sysmon, VirusTotal, Microsoft Defender). Being legitimate or defensive is never a reason to remove a tool link. Commercial platforms and services (SharePoint, Slack, Microsoft Graph) are products; reclassify them to product. A NEW tool is different: the catalogue only adds attacker tools, so a new tool that only defenders, researchers, vendors or ordinary users operate in this article is a veto.
   - sector: the industry of the victims or targets. Sector links come from the analysis's judgment, so the article often never uses the word: a dental practice on a leak site is Healthcare, a rail operator is Transportation.
   - country: a place the article's events involve (victim location, attribution, target).
   - ttp: a technique the article describes or maps. A detection rule's ATT&CK tags are the rule's own mapping, not "metadata": keep them. A technique in the report's own ATT&CK table (the item's "listed in:" line) is mapped by the report: keep it, whatever the context line shows.
@@ -2249,7 +2260,7 @@ VERDICTS (keep is the default for anything you omit; state it explicitly only to
                 · a sector that fits neither the victims nor the targets (a construction firm filed under Healthcare).
                 When the link came through an alias (the item's "matched as:" line) and that alias is not a name for this entity anywhere — a common word, a label, another product's name ("crypto" on crypto24, "New Group", "EOS" meaning end of support, "ClickFix" on a different lure) — also set bad_alias to that alias exactly as printed. Leave bad_alias empty when the alias is fine and only this article's use of it is wrong.
   reclassify  — (links only) a real reference, but the entity sits under the wrong catalogue type; set suggested_type to one of threat_actor, malware, tool, vendor, product, country. Never use remove for type confusion. A type change applies to the entity everywhere, so judge what the entity IS, not how this one article uses the name: a person nicknamed "Prometheus" does not make the Prometheus monitoring product a threat actor — that article's link is a remove.
-  veto        — (links marked "NEW, created by this article" only) the entity should not exist at all: a description instead of a name ("Chinese espionage group"), a victim organisation, a vendor or researcher, a product that is not malware or a tool, a generic term.
+  veto        — (links marked "NEW, created by this article" only) the entity should not exist at all: a description instead of a name ("Chinese espionage group"), a victim organisation, a vendor or researcher, a product that is not malware or a tool, a generic term. Also: a file, package or plugin name from an IoC table filed as malware; a vulnerability or exploit nickname filed as malware or a tool (Spring4Shell, EternalBlue); a built-in command, shell or developer tool nobody abuses here (/bin/sh, cron, Vite); a security product or analysis tool only defenders run; a political or military body with no cyber operations in the article. A new malware or tool that is really the other type is a reclassify, not a veto.
   merge       — (links marked "NEW, created by this article" only) the entity duplicates one of the names printed after "nearest existing names:"; set merge_into to that name EXACTLY as printed. If the right match is not among those names you cannot merge; use keep or veto.
   demote      — (edges only) the entities co-occur but the article never asserts the claimed relationship: roundups, lists, generic defensive advice ("watch for Cobalt Strike beacons"), the wrong verb, or the wrong direction (an actor's origin country is attribution, not a target).
   drop        — (ioc items only) the value is not an attacker indicator: the publisher's own site or links, researcher and sandbox hosts, documentation URLs, sample-page or tracking URLs, private or reserved addresses, a benign domain the article happens to defang (google[.]com in an example), analyst tooling. Defanging by itself marks a value as malicious, never as benign: a defanged value in an indicator list stays. The article prints it defanged (example[.]com, hxxp://) — look for it in that form before calling it absent. A hash the article lists as an indicator stays, even when its file path is a system path: attackers replace and modify system files, and a vendor's IoC table says so.
@@ -2275,11 +2286,11 @@ Source: {{ entry.feed_title }}
 
 {{ entry.content_text }}
 
-ITEMS UNDER REVIEW ({{ item_count }} — return verdicts ONLY for the ones you would change, plus every `edge:` item; everything you omit is kept)
+ITEMS UNDER REVIEW ({{ item_count }} — return verdicts ONLY for the ones you would change, plus every `edge:` item and every item marked NEW; everything you omit is kept)
 
 {{ manifest_block }}
 
-Return strict JSON matching the provided schema: the verdicts list first, one object per item_id you are changing plus one per `edge:` item — an empty list when the records are all correct and no edges were listed — then the assessment object if an assessment item was listed.
+Return strict JSON matching the provided schema: the verdicts list first, one object per item_id you are changing plus one per `edge:` item and one per NEW item — an empty list when the records are all correct and no edges or NEW items were listed — then the assessment object if an assessment item was listed.
 """,
         "output_schema": {
             "type": "object",

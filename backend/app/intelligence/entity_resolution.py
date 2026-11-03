@@ -246,7 +246,17 @@ def cve_shaped_name(name: str) -> bool:
     return bool(_CVE_ID_RE.match(stripped) or _CVE_IN_NAME_RE.search(stripped))
 
 
-_ACTOR_VAGUE_RE = re.compile(r"\b(unknown|unnamed|unidentified|unattributed|suspected|alleged)\b")
+_ACTOR_VAGUE_RE = re.compile(r"\b(unknown|unnamed|unidentified|unattributed|suspected|alleged|mysterious)\b")
+# "Chinese spies", "Iranian forces", "China APT", "Russian government
+# cyberspies": a nationality or country, then only generic nouns. Names with a
+# real word in them still pass ("Iranian Cyber Army", "North Korean IT workers").
+_NATION_TOKENS = frozenset(
+    "chinese russian iranian korean north ukrainian belarusian israeli china russia iran korea dprk prc".split()
+)
+_NATION_GENERIC_TOKENS = frozenset(
+    "handlers forces spies cyberspies apt apts hackers espionage group groups actor actors government state "
+    "threat military intelligence operatives agents".split()
+)
 # Head noun with only nationality/qualifier adjectives before it.
 _ACTOR_QUALIFIER = (
     r"(?:iranian|russian|chinese|north[- ]korean|dprk|israeli|ukrainian|indian|pakistani|turkish|"
@@ -309,9 +319,29 @@ _MALWARE_GENERIC_TOKENS = (
 
 _FILENAME_RE = re.compile(
     r"\.(exe|dll|sys|app|bin|scr|ocx|js|ps1|vbs|php|aspx|asp|jsp|lua|txt|msi|pkg|py|bat|cmd|jar|"
-    r"apk|dmg|hta|iso|img|vhd|lnk|docm?|xlsm?|zip|rar|7z|sh|elf|deb|rpm)$",
+    r"apk|dmg|hta|iso|img|vhd|lnk|docm?|xlsm?|zip|rar|7z|sh|elf|deb|rpm|"
+    r"war|class|dex|tmp|dat|rb|rtf|service|out)$",
     re.IGNORECASE,
 )
+# Dotfiles (".x11d") are dropped implant files, never a family's name.
+_DOTFILE_RE = re.compile(r"^\.\w")
+# IoC-table package names: lowercase words joined by hyphens ("btree-range-store",
+# "cdn-img-fetch", "bot-linux-amd64"). Malware only: real tools are often named
+# this way (git-dumper, ligolo-ng, pip-audit). Families are written as names.
+_HYPHEN_PACKAGE_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)+$")
+# Vulnerability nicknames and exploit descriptions: Spring4Shell, PHP2Shell,
+# "Kaltura mwEmbed RCE". A bug is a CVE, not a family, tool or group.
+_VULN_NICKNAME_RE = re.compile(r"[a-z0-9][24]shell$|\b(?:rce|lpe|xss|sqli|ssrf)\b", re.IGNORECASE)
+# Words that make a name a description: "Malicious ScreenConnect clients",
+# "Exodus Patched Installer", "Wallet-Draining Code".
+_DESCRIPTION_TOKENS = frozenset({"malicious", "embedded", "patched", "draining"})
+# "Infostealer-type malware", "Rust-based backdoors": a generic word or a
+# language before -type/-based. S-Type and Mis-Type are real families.
+_GENERIC_COMPOUND_RE = re.compile(r"\b([a-z]+)-(?:type|based)\b", re.IGNORECASE)
+# A possessive ("Turla's RPC backdoor") or a parenthesised lowercase gloss
+# ("Gemini AI assistant (malicious extension)") is a sentence, not a name.
+_POSSESSIVE_RE = re.compile(r"\w['’]s\b")
+_LOWER_GLOSS_RE = re.compile(r"\([a-z][a-z ]+\)")
 _AV_PREFIX_RE = re.compile(
     r"^(win32|win64|w32|w64|w97m|x97m|msil|js|vbs|html|hta|linux|osx|macos|android|elf|ransom|"
     r"trojan|troj|worm|backdoor|adware|riskware|hacktool|heur|pua|pup|mal|generic|gen)[./!:]",
@@ -390,6 +420,15 @@ _VERSION_IN_NAME_RE = re.compile(r"(?:^|\s)v?\d+\.\d+[\w.]*(?:\s|$)")
 # (Node.js, Next.js, Vue.js). The evidence gate catches junk .js filenames.
 _SCRIPT_FILE_RE = re.compile(r"\.(ps1|py|sh|go|rb|php|jsp|aspx?|bin|class|jar|pl|lua|vbs|bat|cmd|hta)$", re.I)
 _BINARY_FILE_RE = re.compile(r"\.(exe|dll|sys|ocx|scr)$", re.IGNORECASE)
+# Absolute paths ("/bin/sh", "/dev/kvm", "C:\ProgramData\...") and URL
+# routes ("/j_security_check") are artefacts or observables, never a tool.
+_ABS_PATH_RE = re.compile(r"^(?:/|\\|[A-Za-z]:\\)")
+# A plural category noun at the end makes a phrase, not a name: "VPN
+# software", "remote desktop sessions", "email authentication protocols".
+_TOOL_CATEGORY_TAIL = frozenset(
+    "platforms sessions procedures protocols workflows modules primitives tooling software templates "
+    "logging controls policies".split()
+)
 
 # Signed Windows binaries the prompt's LOLBAS carve-out is meant to admit.
 # Anything else with a binary extension is a sideload target or crash artefact.
@@ -508,6 +547,45 @@ DUAL_USE_TOOL_NAMES = frozenset(
 def is_tool_concept_name(name: str) -> bool:
     """True when ``name`` is a concept word that must never be a tool."""
     return normalize_entity_name(name or "", "tool").norm_exact in _TOOL_CONCEPT_NORMS
+
+
+# --- Evidence doors (2026-11) --------------------------------------------------
+# The 2026-11-02 vet of every AI-created entity found the model's evidence
+# sentences are real quotes; the junk came from what they quote. A defender
+# running Ghidra or FakeNet-NG passed the tool door because it asked only that
+# someone operates the software. New tools are attacker tools; defender
+# software still links to a catalogue row that already exists.
+_DEFENDER_RE = re.compile(
+    r"\b(?:defenders?|responders?|incident response|analysts?|researchers?|investigators?|"
+    r"security teams?|blue teams?|soc|admins?|administrators?|it teams?|vendors?|customers?|users?|"
+    r"organi[sz]ations?|enterprises?|developers?|maintainers?)\b",
+    re.IGNORECASE,
+)
+_ATTACKER_RE = re.compile(
+    r"\b(?:attackers?|threat actors?|actors?|adversar(?:y|ies)|operators?|hackers?|intruders?|"
+    r"criminals?|cybercriminals?|gangs?|groups?|apt|malware|ransomware|affiliates?|campaign)\b",
+    re.IGNORECASE,
+)
+
+
+def defender_operated(wielded_by: str | None) -> bool:
+    """True when ``wielded_by`` names only defenders, researchers, vendors or
+    users. A named actor or malware ("Lazarus", "XWorm") is never a defender,
+    and neither is any phrase that also names an attacker."""
+    text = (wielded_by or "").strip()
+    if not text:
+        return False
+    return bool(_DEFENDER_RE.search(text)) and not _ATTACKER_RE.search(text)
+
+
+def evidence_names(evidence: str | None, name: str, aliases: list[str] | None = None) -> bool:
+    """True when the quoted evidence sentence mentions the entity by its name or
+    an alias (case and punctuation folded). A sentence about something else is
+    not evidence for this name."""
+    sentence = _fold(evidence or "")
+    if not sentence:
+        return False
+    return any((form := _fold(n)) and form in sentence for n in [name, *(aliases or [])])
 
 
 # --- Non-entity names (2026-11) ----------------------------------------------
@@ -897,8 +975,12 @@ _CMD_BINARIES = frozenset(
 )
 _CMD_VERBS = frozenset(
     "install uninstall add remove i clone checkout pull push fetch commit run exec tool build get init "
-    "ci update upgrade publish login download".split()
+    "ci update upgrade publish login download status config reset submodule log diff stash".split()
 )
+# Admin CLIs whose bare name is fine but any subcommand makes a command line:
+# "aws s3 sync", "net user", "reg add". Matched only when written lowercase,
+# so products ("AWS Lambda", "SC Media") never hit it.
+_ADMIN_CLIS = frozenset("aws gcloud az reg net sc schtasks wmic".split())
 _CMD_RUNNERS = frozenset({"npx", "uvx", "bunx", "pnpx"})
 _CMD_PREFIXES = frozenset({"sudo", "$", "#", ">"})
 
@@ -954,7 +1036,10 @@ def _command_line(name: str) -> bool:
     if len(words) < 2:
         return False
     head, second = words[0].lower(), words[1].lower()
-    if head in _CMD_RUNNERS:
+    if head in _CMD_RUNNERS or words[0] in _ADMIN_CLIS:
+        return True
+    # A lowercase binary followed by flags anywhere: "gzip -d -c", "git status --short".
+    if words[0].islower() and any(w.startswith("-") and len(w) > 1 for w in words[1:]):
         return True
     return head in _CMD_BINARIES and (second in _CMD_VERBS or second.startswith("-"))
 
@@ -1030,6 +1115,17 @@ def _shared_junk_reason(name: str, norm: NormalizedName) -> str | None:
     return None
 
 
+def _description_reason(name: str, possessive: bool = True) -> str | None:
+    """Shared by actors, malware and tools: a vulnerability nickname, or a name
+    that reads as a sentence (a possessive, a lowercase gloss in parentheses).
+    Actors skip the possessive test: "People's Liberation Army" is a name."""
+    if _VULN_NICKNAME_RE.search(name):
+        return "vulnerability_nickname"
+    if (possessive and _POSSESSIVE_RE.search(name)) or _LOWER_GLOSS_RE.search(name):
+        return "description_phrase"
+    return None
+
+
 def _actor_junk_reason(name: str) -> str | None:
     toks = _tokens(name)
     while len(toks) > 1 and toks[0] in _LEADING_ARTICLES:
@@ -1041,9 +1137,15 @@ def _actor_junk_reason(name: str) -> str | None:
         return "generic_head_noun"
     if _ACTOR_DESCRIPTOR_RE.match(lowered):
         return "pure_descriptor"
+    if len(toks) >= 2 and toks[0] in _NATION_TOKENS and all(t in _NATION_GENERIC_TOKENS for t in toks[1:]):
+        return "pure_descriptor"
     if _FILENAME_RE.search(name.strip()):
         return "filename"
-    return None
+    # "ArcaneDoor campaign": the campaign, not the group. "Operation X" is how
+    # several real groups are tracked, so only the trailing word counts.
+    if len(toks) >= 2 and toks[-1] in ("campaign", "campaigns"):
+        return "campaign_name"
+    return _description_reason(name, possessive=False)
 
 
 def _malware_junk_reason(name: str) -> str | None:
@@ -1052,7 +1154,7 @@ def _malware_junk_reason(name: str) -> str | None:
         if _AV_PREFIX_RE.match(stripped) or _FILENAME_RE.search(stripped):
             return "av_detection_string" if _AV_PREFIX_RE.match(stripped) else "filename"
         return "path_shape"
-    if _FILENAME_RE.search(stripped):
+    if _FILENAME_RE.search(stripped) or _DOTFILE_RE.match(stripped):
         return "filename"
     if _AV_PREFIX_RE.match(stripped):
         return "av_detection_string"
@@ -1061,7 +1163,13 @@ def _malware_junk_reason(name: str) -> str | None:
     toks = _tokens(name)
     if toks and all(t in _MALWARE_GENERIC_TOKENS for t in toks):
         return "generic_type_phrase"
-    return None
+    if _HYPHEN_PACKAGE_RE.match(stripped):
+        return "package_name"
+    if any(t in _DESCRIPTION_TOKENS for t in toks) or any(
+        m.lower() in _MALWARE_GENERIC_TOKENS for m in _GENERIC_COMPOUND_RE.findall(stripped)
+    ):
+        return "description_phrase"
+    return _description_reason(stripped)
 
 
 def _tool_junk_reason(name: str) -> str | None:
@@ -1095,7 +1203,18 @@ def _tool_junk_reason(name: str) -> str | None:
         return "package_name"
     if _VERSION_IN_NAME_RE.search(stripped):
         return "versioned_release"
-    return None
+    if _ABS_PATH_RE.match(stripped):
+        return "path_shape"
+    toks = _tokens(stripped)
+    words = stripped.split()
+    if len(toks) >= 2 and toks[-1] in _TOOL_CATEGORY_TAIL:
+        return "category_phrase"
+    # "comprehensive audit logging", "linux kernel primitives": three or more
+    # lowercase dictionary words. Tool names carry a capital, digit or symbol.
+    # Command lines ("pip install unsloth") fall through to shell_command.
+    if len(words) >= 3 and all(w.isalpha() and w.islower() for w in words) and not _command_line(stripped):
+        return "description_phrase"
+    return _description_reason(stripped)
 
 
 _TYPE_JUNK_CHECKS = {

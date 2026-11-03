@@ -496,6 +496,20 @@ def test_validate_matrix_and_defaults():
     assert stats["unknown"] == 1
 
 
+def test_validate_counts_new_entities_the_reviewer_skipped():
+    """Every entity this article minted needs a verdict; one left out is a keep
+    but shows in the stats, so a model that ignores the rule is visible."""
+    items = [
+        _item("link:threat_actor:answered", minted=True),
+        _item("link:malware:skipped", minted=True, entity_type="malware"),
+        _item("link:tool:established"),
+    ]
+    result = {"verdicts": [{"item_id": "link:threat_actor:answered", "verdict": "keep", "confidence": "high"}]}
+    verdicts, stats = _validate_verdicts(result, items)
+    assert stats["new_unanswered"] == 1
+    assert all(v.verdict == "keep" for v in verdicts)
+
+
 def test_validate_merge_to_unlisted_name_is_keep_and_duplicates_void_all():
     item = _item(
         "link:threat_actor:b",
@@ -1877,9 +1891,12 @@ def test_the_prompt_still_demands_a_verdict_on_every_edge():
 
     task = next(t for t in SYSTEM_TASKS if t["name"] == "entry_adjudication")
     system = task["default_system_template"]
-    assert "ONE EXCEPTION: every `edge:` item needs a verdict, keep or demote." in system
+    assert "Every `edge:` item needs a verdict, keep or demote." in system
     assert "counted as corroboration" in system
     assert "`edge:` item" in task["default_prompt_template"]
+    # New entities too: silence is not a verdict on something just minted.
+    assert 'Every link marked "NEW, created by this article" needs a verdict' in system
+    assert "every item marked NEW" in task["default_prompt_template"]
 
 
 @pytest.mark.asyncio

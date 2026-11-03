@@ -14,6 +14,8 @@ from sqlalchemy import func, select
 from app.config import settings
 from app.intelligence.entity_resolution import (
     NON_ENTITY_REASONS,
+    defender_operated,
+    evidence_names,
     gate_aliases,
     generic_name_reason,
     non_entity_reason,
@@ -301,6 +303,122 @@ REAL_PRODUCTS = [
 @pytest.mark.parametrize("name", REAL_PRODUCTS)
 def test_real_products_pass(name):
     assert generic_name_reason("product", name) is None
+
+
+# ---------------------------------------------------------------------------
+# Shape gates from the 2026-11-02 vet of every AI-created entity
+# (planning/new-entities/2026-11-02). Each junk name was minted on prod.
+# ---------------------------------------------------------------------------
+
+SHAPE_JUNK = [
+    # IoC-table files and packages filed as malware
+    ("malware", "shell.war", "filename"),
+    ("malware", "DnsCommandBeacon.class", "filename"),
+    ("malware", "tc9.dex", "filename"),
+    ("malware", "zimlog.service", "filename"),
+    ("malware", ".x11d", "filename"),
+    ("malware", "btree-range-store", "package_name"),
+    ("malware", "cdn-img-fetch", "package_name"),
+    ("malware", "bot-linux-amd64", "package_name"),
+    # vulnerability nicknames
+    ("malware", "PHP2Shell", "vulnerability_nickname"),
+    ("malware", "Spring4Shell", "vulnerability_nickname"),
+    ("malware", "Kaltura mwEmbed RCE", "vulnerability_nickname"),
+    ("tool", "React2Shell", "vulnerability_nickname"),
+    # descriptions used as names
+    ("malware", "Rust-based backdoors", "description_phrase"),
+    ("malware", "Infostealer-type malware", "description_phrase"),
+    ("malware", "Malicious ScreenConnect clients", "description_phrase"),
+    ("malware", "Exodus Patched Installer", "description_phrase"),
+    ("malware", "Turla's RPC backdoor", "description_phrase"),
+    ("malware", "Gemini AI assistant (malicious extension)", "description_phrase"),
+    ("malware", "Rust loader (embedded)", "description_phrase"),
+    # actors: nationality plus generic nouns, campaigns
+    ("threat_actor", "Chinese spies", "pure_descriptor"),
+    ("threat_actor", "Iranian forces", "pure_descriptor"),
+    ("threat_actor", "China APT", "pure_descriptor"),
+    ("threat_actor", "Russian government cyberspies", "pure_descriptor"),
+    ("threat_actor", "mysterious threat actor", "vague_qualifier"),
+    ("threat_actor", "ArcaneDoor campaign", "campaign_name"),
+    # tools: paths, commands, category phrases
+    ("tool", "/bin/sh", "path_shape"),
+    ("tool", "/j_security_check", "path_shape"),
+    ("tool", "C:\\ProgramData\\Veeam\\Endpoint\\Svc.VeeamEndpointBackup.log", "path_shape"),
+    ("tool", "aws s3 sync", "shell_command"),
+    ("tool", "net user", "shell_command"),
+    ("tool", "gzip -d -c", "shell_command"),
+    ("tool", "git status --short", "shell_command"),
+    ("tool", "VPN software", "category_phrase"),
+    ("tool", "remote desktop sessions", "category_phrase"),
+    ("tool", "email authentication protocols", "category_phrase"),
+    ("tool", "comprehensive audit logging", "category_phrase"),
+    ("tool", "vendor payment verification procedures", "category_phrase"),
+]
+
+
+@pytest.mark.parametrize(("entity_type", "name", "reason"), SHAPE_JUNK)
+def test_shape_gates_block_vetted_junk(entity_type, name, reason):
+    assert generic_name_reason(entity_type, name) == reason
+
+
+SHAPE_REAL = [
+    # families whose names look like the junk shapes
+    ("malware", "S-Type"),
+    ("malware", "Mis-Type"),
+    ("malware", "cook.pth"),
+    ("malware", "More_eggs"),
+    ("malware", "Log4j"),
+    # actors with a nationality, a possessive or "Operation" in the name
+    ("threat_actor", "People's Liberation Army"),
+    ("threat_actor", "Iranian Cyber Army"),
+    ("threat_actor", "North Korean IT workers"),
+    ("threat_actor", "Operation Aurora"),
+    ("threat_actor", "@Exvicy"),
+    # tools named like packages or commands
+    ("tool", "git-dumper"),
+    ("tool", "ligolo-ng"),
+    ("tool", "net"),
+    ("tool", "aws"),
+    ("tool", "certutil"),
+    ("tool", "Invoke-Mimikatz"),
+    ("tool", "Brute Ratel C4"),
+    ("tool", "John the Ripper"),
+    # products the command rule must leave alone
+    ("product", "AWS Lambda"),
+    ("product", "Azure Kubernetes Service"),
+]
+
+
+@pytest.mark.parametrize(("entity_type", "name"), SHAPE_REAL)
+def test_shape_gates_leave_real_names_alone(entity_type, name):
+    assert generic_name_reason(entity_type, name) is None
+
+
+@pytest.mark.parametrize(
+    ("wielded_by", "defender"),
+    [
+        ("the defender", True),
+        ("incident responders", True),
+        ("Kaspersky researchers", True),
+        ("security teams", True),
+        ("Windows users", True),
+        ("the attacker", False),
+        ("APT29", False),
+        ("XWorm malware", False),
+        ("attackers posing as IT administrators", False),
+        ("", False),
+    ],
+)
+def test_defender_operated(wielded_by, defender):
+    assert defender_operated(wielded_by) is defender
+
+
+def test_evidence_names_the_entity_by_name_or_alias():
+    assert evidence_names("APT29 deployed Cobalt-Strike beacons.", "Cobalt Strike")
+    assert evidence_names("The group, tracked as UNC2452, ran it.", "APT29", ["UNC2452"])
+    assert not evidence_names("APT29 ran SweepScan across the subnet.", "FreshKit")
+    assert not evidence_names("", "Lazarus Group")
+    assert not evidence_names(None, "Lazarus Group")
 
 
 # ---------------------------------------------------------------------------

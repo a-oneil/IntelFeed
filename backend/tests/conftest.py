@@ -108,6 +108,20 @@ def _single_tenant_feed_visibility(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_actor_malware_evidence_gate(monkeypatch):
+    """Run the suite with the actor/malware evidence door open.
+
+    ``ai_entity_evidence_required`` ships on: a new actor or malware family
+    needs an evidence sentence naming it. Most tests build analysis payloads
+    with just a name to exercise something else (relationships, resolution,
+    tombstones). The evidence tests switch it back on themselves.
+    """
+    from app.config import settings as env_settings
+
+    monkeypatch.setattr(env_settings, "ai_entity_evidence_required", False)
+
+
+@pytest.fixture(autouse=True)
 def _fresh_settings_cache():
     """Forget the in-process system_settings cache between tests.
 

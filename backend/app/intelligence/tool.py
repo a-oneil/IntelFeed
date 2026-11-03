@@ -11,6 +11,8 @@ from app.ai.engine import run_task
 from app.intelligence.entity_dedup import link_entry_to_entity
 from app.intelligence.entity_resolution import (
     coerce_tool_type,
+    defender_operated,
+    evidence_names,
     gate_aliases,
     resolve_entity_creation,
 )
@@ -91,11 +93,21 @@ async def store_tools(
             dropped_no_evidence += 1
             continue
 
+        # Only attacker tools are created. Software that just defenders,
+        # researchers or users operate, or whose evidence sentence is about
+        # something else, still links to an existing row but mints nothing.
+        may_create = allow_create
+        if evidence_required and (
+            defender_operated(tool_data.get("wielded_by"))
+            or not evidence_names(tool_data.get("evidence"), name, tool_data.get("aliases"))
+        ):
+            may_create = False
+
         # Resolver: exact + normalized matching, cross-type tombstones, and the
         # creation gates — F13 code-artifact/technique/physical-object names
         # never become tools (planning/entity-creation-guardrails.md).
         decision = await resolve_entity_creation(
-            db, "tool", name, tool_data.get("aliases"), source="ai", entry_id=entry_id, link_only=not allow_create
+            db, "tool", name, tool_data.get("aliases"), source="ai", entry_id=entry_id, link_only=not may_create
         )
         if decision.action == "tombstone":
             tombstone = decision.tombstone

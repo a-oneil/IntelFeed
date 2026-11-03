@@ -138,12 +138,6 @@
     },
     {
       "kind": "domain",
-      "value": "ramiltonsfinance.azurewebsites.neti",
-      "role": "",
-      "note": ""
-    },
-    {
-      "kind": "domain",
       "value": "ramiltons-finance.azurewebsites.net",
       "role": "",
       "note": ""
@@ -151,18 +145,6 @@
     {
       "kind": "url",
       "value": "https://docspace-y4cumb.onlyoffice.com/storage/files/root/folder_3602000/file_3601577/v1/content.zip[...]",
-      "role": "",
-      "note": ""
-    },
-    {
-      "kind": "url",
-      "value": "https://app[redacted].live/meeting/edcdba624ddb43c2a1dcf334aa493068",
-      "role": "",
-      "note": ""
-    },
-    {
-      "kind": "url",
-      "value": "https://docspace-twpf0e.onlyoffice.com/storage/files/root/folder_3765000/file_3764519/v1/content.zip?filename=remote.[REDACTED].zip",
       "role": "",
       "note": ""
     },
@@ -246,6 +228,21 @@
     }
   ],
   "optional": [
+    {
+      "kind": "domain",
+      "value": "ramiltonsfinance.azurewebsites.neti",
+      "note": "the article's typo for azurewebsites.net: no such suffix, so not a searchable domain"
+    },
+    {
+      "kind": "url",
+      "value": "https://app[redacted].live/meeting/edcdba624ddb43c2a1dcf334aa493068",
+      "note": "redacted in the article: not an exact value"
+    },
+    {
+      "kind": "url",
+      "value": "https://docspace-twpf0e.onlyoffice.com/storage/files/root/folder_3765000/file_3764519/v1/content.zip?filename=remote.[REDACTED].zip",
+      "note": "redacted in the article: not an exact value"
+    },
     {
       "kind": "url",
       "value": "https://[redacted].live/meeting/edcdba624ddb43c2a1dcf334aa493068",
