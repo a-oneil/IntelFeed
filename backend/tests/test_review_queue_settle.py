@@ -231,9 +231,11 @@ def _held(entity_type, entity_id, entry, name):
     )
 
 
-async def _held_rows(db, entry):
+async def _held_rows(db, entry_id):
+    # Takes the id, not the Entry: the tests expire the session first, and an
+    # expired attribute would lazy-load outside the greenlet (MissingGreenlet).
     return (
-        (await db.execute(select(PendingAutolinkMatch).where(PendingAutolinkMatch.entry_id == entry.id)))
+        (await db.execute(select(PendingAutolinkMatch).where(PendingAutolinkMatch.entry_id == entry_id)))
         .scalars()
         .all()
     )
@@ -246,6 +248,7 @@ async def test_converting_an_entity_moves_its_held_matches(client, admin_headers
     await db_session.flush()
     e = await _entry(db_session, test_feed, "SHELBYC2 also deployed a tunneling utility called Blackwood.")
     db_session.add(_held("malware", blackwood.id, e, "Blackwood"))
+    entry_id = e.id
     await db_session.commit()
 
     resp = await client.post(
@@ -255,7 +258,7 @@ async def test_converting_an_entity_moves_its_held_matches(client, admin_headers
     )
     assert resp.status_code == 200, resp.text
     db_session.expire_all()
-    [row] = await _held_rows(db_session, e)
+    [row] = await _held_rows(db_session, entry_id)
     assert (row.entity_type, str(row.entity_id), row.resolved_at) == ("tool", resp.json()["id"], None)
 
     resp = await client.post(
@@ -273,6 +276,7 @@ async def test_merging_into_a_keeper_with_its_own_held_match_drops_the_copy(
     await db_session.flush()
     e = await _entry(db_session, test_feed, "Royal hit a hospital.")
     db_session.add_all([_held("malware", keeper.id, e, "Royal"), _held("malware", loser.id, e, "Royal")])
+    entry_id, keeper_id = e.id, keeper.id
     await db_session.commit()
 
     resp = await client.post(
@@ -282,7 +286,7 @@ async def test_merging_into_a_keeper_with_its_own_held_match_drops_the_copy(
     )
     assert resp.status_code == 200, resp.text
     db_session.expire_all()
-    assert [r.entity_id for r in await _held_rows(db_session, e)] == [keeper.id]
+    assert [r.entity_id for r in await _held_rows(db_session, entry_id)] == [keeper_id]
 
 
 @pytest.mark.asyncio
@@ -292,12 +296,13 @@ async def test_deleting_an_entity_deletes_its_held_matches(client, admin_headers
     await db_session.flush()
     e = await _entry(db_session, test_feed, "Jaguar Land Rover lost a month of production.")
     db_session.add(_held("malware", jaguar.id, e, "Jaguar"))
+    entry_id = e.id
     await db_session.commit()
 
     resp = await client.delete(f"/api/entities/malware/{jaguar.id}", headers=admin_headers)
     assert resp.status_code == 204, resp.text
     db_session.expire_all()
-    assert await _held_rows(db_session, e) == []
+    assert await _held_rows(db_session, entry_id) == []
 
 
 @pytest.mark.asyncio
