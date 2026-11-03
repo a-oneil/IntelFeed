@@ -32,6 +32,24 @@ from app.models.user_ai_route import UserAIPreferences, UserAIRoute
 
 logger = logging.getLogger(__name__)
 
+
+def provider_runs_tools(provider_model: AIProviderModel, config: dict | None = None) -> bool:
+    """Whether this provider runs tools for a call, with the assignment's config layered on.
+
+    ``tools_enabled`` may be set on the provider row or on one assignment;
+    the provider instance sees both (``_get_provider_instance`` merges them),
+    so every check about tools must too.
+    """
+    from app.ai.capabilities import provider_type_supports_tools
+
+    return provider_type_supports_tools(
+        provider_model.provider_type, {**(provider_model.config or {}), **(config or {})}
+    )
+
+
+# Provider types whose tool loop runs in this process over an injected executor.
+_IN_PROCESS_TOOL_TYPES = frozenset({"ollama", "claude", "openai_compatible"})
+
 # Cost per 1M tokens (input/output) — approximate defaults
 COST_TABLE: dict[str, tuple[float, float]] = {
     "claude-opus-4-6": (15.0, 75.0),
@@ -1010,67 +1028,46 @@ async def run_task(
     # response is a lost analysis; extra budget costs nothing when unused.
     max_tokens = config.get("max_tokens", 16384 if task_name == "entry_analysis" else 8192)
 
-    # Agentic tool wiring for tool-capable non-CLI providers (Ollama). The
-    # Claude Code CLI reaches tools via its own subprocess (no injected executor
-    # needed); the Anthropic API and OpenAI-compatible providers are not
-    # tool-capable (v1). Only agentic tasks get tools — everything else stays
-    # a pure prompt→completion call.
+    # Agentic tool wiring. The Claude Code CLI reaches tools via its own
+    # subprocess (no injected executor needed); Ollama, the Anthropic API and
+    # OpenAI-compatible providers run an in-process loop over an injected
+    # executor. Only agentic tasks get tools — everything else stays a pure
+    # prompt→completion call.
     complete_kwargs: dict = {}
     if provider_model.provider_type == "claude_code":
         # Who the CLI's IntelFeed tools act for. The provider turns it into a
         # read-only agent token for that run; nothing else reaches the agent.
         complete_kwargs["agent_user_id"] = user_id
-    if provider_model.provider_type == "ollama":
+    if provider_model.provider_type == "claude" and "WebSearch" in (config.get("allowed_tools") or []):
+        # The CLI's WebSearch has an Anthropic API equivalent, run on
+        # Anthropic's side (entity_enrichment_research needs it).
+        complete_kwargs["web_search"] = True
+    if provider_model.provider_type in _IN_PROCESS_TOOL_TYPES and provider_runs_tools(provider_model, config):
         from app.ai.capabilities import task_requires_tools
 
         if task_requires_tools(task_name):
-            from app.tools import ADMIN_TOOLS, TOOL_DEFINITIONS, ollama_tool_specs, restrict_to_offered
-            from app.tools import execute_tool as _execute_tool
+            from app.models.user import User as _User
+            from app.tools.gate import UnattendedGate, anthropic_specs, function_specs, model_tool_definitions
 
             # Read-only by default (safe). A task that must mutate (apply-mode
-            # maintenance) opts in via assignment config ``ollama_tools_read_only:
-            # false`` plus an explicit ``ollama_tools`` allowlist.
-            read_only = bool(config.get("ollama_tools_read_only", True))
-            tool_names = config.get("ollama_tools")
+            # maintenance) opts in via assignment config ``agent_tools_read_only:
+            # false`` plus an explicit ``agent_tools`` allowlist. Read-only also
+            # leaves out the reads that store results (extractions, run_ai_task).
+            read_only = bool(config.get("agent_tools_read_only", True))
+            tool_names = config.get("agent_tools")
 
-            # The mutating opt-in must not become a side door around the gates
-            # /api/tools/execute enforces: an agentic task runs AS ``user_id``,
-            # so a regular user's task gets that user's privileges. Workers
-            # resolve to the non-loginable ``system`` account, which keeps them.
-            from app.models.user import User as _User
-
-            _role = (await db.execute(select(_User.role).where(_User.id == user_id))).scalar_one_or_none()
-            _privileged = _role in ("admin", "system")
-            if not _privileged:
-                # Don't even offer the gated ones. This has to run even when the
-                # assignment set no ``ollama_tools`` allowlist: ``None`` means
-                # "offer everything" to ollama_tool_specs, so short-circuiting on
-                # a falsy tool_names would hand a non-admin the full gated set
-                # whenever read_only is off. Materialize the registry and filter.
-                names = tool_names if tool_names is not None else [t["name"] for t in TOOL_DEFINITIONS]
-                tool_names = [n for n in names if n not in ADMIN_TOOLS]
-
-            async def _tool_executor(name: str, args: dict) -> str:
-                if name in ADMIN_TOOLS and not _privileged:
-                    # Also checked here, not just in the specs: a model can name
-                    # a tool that was never offered to it.
-                    return f'{{"error": "Tool \'{name}\' requires admin access"}}'
-                result = await _execute_tool(name, args, db, user_id)
-                # A failed handler ({"error": ...} result) can leave the session
-                # in a failed transaction (is_active False). Roll back ONLY then,
-                # so subsequent tool calls and run_task's AIResult persistence
-                # keep working — an unconditional rollback would discard pending
-                # work like force-mode's mark-not-current update.
-                if result.startswith('{"error"') and not db.sync_session.is_active:
-                    await db.rollback()
-                return result
-
-            # The executor runs only what was offered: without this, read_only
-            # and the allowlist shaped the specs but a privileged (system) run
-            # still executed any tool the model named, mutating ones included.
-            specs = ollama_tool_specs(tool_names, read_only=read_only)
-            complete_kwargs["tools"] = specs
-            complete_kwargs["tool_executor"] = restrict_to_offered(specs, _tool_executor)
+            # The task runs AS ``user_id``, so a regular user's task gets that
+            # user's privileges: no admin tool is offered or run for them.
+            # Workers resolve to the non-loginable ``system`` account, which
+            # keeps them. The gate also refuses anything not offered and any
+            # model-supplied confirmation_token (no delete without a person).
+            role = (await db.execute(select(_User.role).where(_User.id == user_id))).scalar_one_or_none() or "user"
+            defs = model_tool_definitions(role=role, names=tool_names or None, include_writes=not read_only)
+            render = anthropic_specs if provider_model.provider_type == "claude" else function_specs
+            complete_kwargs["tools"] = render(defs)
+            complete_kwargs["tool_executor"] = UnattendedGate(
+                db=db, user_id=user_id, role=role, offered=[d["name"] for d in defs]
+            )
 
     # Execute
     _t0 = _time.monotonic()

@@ -43,7 +43,7 @@ class AIProvider(Base):
     def supports_tools(self) -> bool:
         from app.ai.capabilities import provider_type_supports_tools
 
-        return provider_type_supports_tools(self.provider_type)
+        return provider_type_supports_tools(self.provider_type, self.config)
 
     @property
     def is_personal(self) -> bool:

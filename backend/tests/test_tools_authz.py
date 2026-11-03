@@ -6,6 +6,7 @@ non-admin callers, everything else runs under the caller's identity.
 """
 
 import json
+import uuid
 
 import pytest
 from httpx import AsyncClient
@@ -106,28 +107,30 @@ async def test_note_tool_respects_authorship(
 
 @pytest.mark.asyncio
 async def test_model_facing_executor_refuses_tools_it_was_not_offered():
-    """The Ollama tool loops (copilot, agentic engine tasks) show the model a
-    filtered spec list. A model can still name any registry tool in its reply,
+    """The in-process tool loops (copilot, agentic engine tasks) show the model a
+    filtered tool list. A model can still name any registry tool in its reply,
     because article text in its context asked it to or because the endpoint is
     hostile, so the executor must refuse anything outside the offered set."""
-    from app.tools import ollama_tool_specs, restrict_to_offered
+    import app.tools.gate as gate
 
     ran: list[str] = []
 
-    async def executor(name: str, args: dict) -> str:
+    async def isolated(db, name, args, user_id):
         ran.append(name)
         return "{}"
 
-    specs = ollama_tool_specs(["get_feeds", "delete_feed"], read_only=True)
-    offered = {s["function"]["name"] for s in specs}
-    assert offered == {"get_feeds"}, "read_only must drop the mutating tool from the specs"
+    defs = gate.model_tool_definitions(role="admin", names=["get_feeds", "delete_feed"], include_writes=False)
+    offered = [d["name"] for d in defs]
+    assert offered == ["get_feeds"], "read-only must drop the mutating tool from the offer"
 
-    guarded = restrict_to_offered(specs, executor)
-    assert await guarded("get_feeds", {}) == "{}"
-    refused = json.loads(await guarded("delete_feed", {"feed_id": "x", "confirm": True}))
-    assert "error" in refused
-    refused = json.loads(await guarded("merge_threat_actors", {}))
-    assert "error" in refused
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(gate, "execute_isolated", isolated)
+        guarded = gate.UnattendedGate(db=None, user_id=uuid.uuid4(), role="admin", offered=offered)
+        assert await guarded("get_feeds", {}) == "{}"
+        refused = json.loads(await guarded("delete_feed", {"feed_id": "x", "confirm": True}))
+        assert "error" in refused
+        refused = json.loads(await guarded("merge_threat_actors", {}))
+        assert "error" in refused
     assert ran == ["get_feeds"]
 
 

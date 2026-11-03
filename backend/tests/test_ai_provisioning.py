@@ -90,11 +90,23 @@ async def test_routing_assigns_every_compatible_task(db_session: AsyncSession, a
     assert all("embed" not in r.model_name for r in rows)
 
 
+async def _assigned_names(db_session: AsyncSession) -> set[str]:
+    assigned = {r.task_id for r in (await db_session.execute(select(AITaskAssignment))).scalars().all()}
+    return {t.name for t in (await db_session.execute(select(AITask))).scalars().all() if t.id in assigned}
+
+
 @pytest.mark.asyncio
 async def test_routing_leaves_agentic_tasks_on_a_tool_less_provider(db_session: AsyncSession, admin_user, system_tasks):
     """A chat-only provider running an agentic task returns tool-less output that
     reads like success — the research task reporting lookups it never made."""
-    provider = AIProvider(name="Claude", provider_type="claude", is_active=True, models=["claude-sonnet-4-6"])
+    provider = AIProvider(
+        name="LM Studio",
+        provider_type="openai_compatible",
+        base_url="http://localhost:1234/v1",
+        is_active=True,
+        models=["qwen3"],
+        config={"tools_enabled": False},
+    )
     db_session.add(provider)
     await db_session.flush()
 
@@ -103,12 +115,31 @@ async def test_routing_leaves_agentic_tasks_on_a_tool_less_provider(db_session: 
     assert "entity_enrichment_research" in routing.skipped_agentic
     assert "copilot" in routing.skipped_agentic
     assert "article_summary" in routing.assigned
-    names = {
-        t.name
-        for t in (await db_session.execute(select(AITask))).scalars().all()
-        if t.id in {r.task_id for r in (await db_session.execute(select(AITaskAssignment))).scalars().all()}
-    }
-    assert "entity_enrichment_research" not in names
+    assert "entity_enrichment_research" not in await _assigned_names(db_session)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider_type", "gets_research"),
+    [("claude", True), ("openai_compatible", False), ("ollama", False)],
+)
+async def test_routing_gives_web_research_only_to_a_provider_that_can_search(
+    db_session: AsyncSession, admin_user, system_tasks, provider_type, gets_research
+):
+    """Every tool loop can run the copilot; only the Anthropic API (like the CLI)
+    has web search, which the research task works by."""
+    provider = AIProvider(
+        name=provider_type, provider_type=provider_type, base_url="https://ai.example.com", is_active=True, models=["m"]
+    )
+    db_session.add(provider)
+    await db_session.flush()
+
+    routing = await route_tasks_to_provider(db_session, provider, created_by=admin_user.id, take_over=False)
+
+    names = await _assigned_names(db_session)
+    assert "copilot" in names
+    assert ("entity_enrichment_research" in names) is gets_research
+    assert ("entity_enrichment_research" in routing.skipped_agentic) is not gets_research
 
 
 @pytest.mark.asyncio

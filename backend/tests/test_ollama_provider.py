@@ -464,10 +464,12 @@ async def test_stream_agent_tool_iteration_cap(monkeypatch):
             tool_executor=executor,
         )
     ]
-    # 3 iterations, each one tool call; ends with a done (no final text).
+    # 3 iterations, each one tool call; ends with a note, not a blank answer, then done.
+    from app.ai.agent_loop import TOOL_BUDGET_NOTE
+
     assert calls == 3
     assert events[-1]["kind"] == "done"
-    assert "text" not in [e["kind"] for e in events]
+    assert [e["text"] for e in events if e["kind"] == "text"] == [TOOL_BUDGET_NOTE]
 
 
 @pytest.mark.asyncio
@@ -639,37 +641,22 @@ async def test_stream_agent_emits_intermediate_narration(monkeypatch):
     assert events[0]["text"] == "Let me look that up.\n\n"
 
 
-def test_ollama_tool_specs_shape_and_read_only():
-    from app.tools import MUTATING_TOOLS, ollama_tool_specs, read_only_tool_definitions
-
-    specs = ollama_tool_specs(read_only=True)
-    assert specs, "expected at least one read-only tool"
-    first = specs[0]
-    assert first["type"] == "function"
-    assert set(first["function"]) == {"name", "description", "parameters"}
-    assert first["function"]["parameters"]["type"] == "object"
-    # No mutating tool leaks into the read-only spec set.
-    names = {s["function"]["name"] for s in specs}
-    assert names.isdisjoint(MUTATING_TOOLS)
-    assert len(specs) == len(read_only_tool_definitions())
-
-    # Allowlist filtering narrows the set.
-    narrowed = ollama_tool_specs(["search_entries"], read_only=True)
-    assert [s["function"]["name"] for s in narrowed] == ["search_entries"]
-
-
-def test_copilot_default_ollama_tools_all_resolve():
+def test_copilot_default_tools_all_resolve():
     """Every curated copilot tool name must exist in the registry (drift guard).
 
-    ollama_tool_specs silently ignores unknown names, so a registry rename
-    would otherwise shrink the copilot's toolbox without any error.
+    The tool list silently ignores unknown names, so a registry rename would
+    otherwise shrink the copilot's toolbox without any error. The reads must
+    be reads and the writes writes: the gate stages only writes.
     """
-    from app.api.copilot import _DEFAULT_OLLAMA_TOOLS
-    from app.tools import ollama_tool_specs
+    from app.api.copilot import _default_copilot_tools
+    from app.tools import DEFAULT_COPILOT_TOOLS, DEFAULT_COPILOT_WRITE_TOOLS, MUTATING_TOOLS
+    from app.tools.gate import model_tool_definitions
 
-    specs = ollama_tool_specs(_DEFAULT_OLLAMA_TOOLS, read_only=True)
-    resolved = {s["function"]["name"] for s in specs}
-    assert resolved == set(_DEFAULT_OLLAMA_TOOLS)
+    names = _default_copilot_tools()
+    resolved = {d["name"] for d in model_tool_definitions(role="user", names=names)}
+    assert resolved == set(names)
+    assert not set(DEFAULT_COPILOT_TOOLS) & MUTATING_TOOLS
+    assert set(DEFAULT_COPILOT_WRITE_TOOLS) <= MUTATING_TOOLS
 
 
 @pytest.mark.asyncio

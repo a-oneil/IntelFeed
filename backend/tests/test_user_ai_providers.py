@@ -521,8 +521,8 @@ async def test_copilot_config_reports_whose_key_and_refusals(
     assert body["configured"] is True
     assert body["source"] == "user" and body["provider_name"] == "OpenRouter personal"
     assert body["model"] == "gpt-x"
-    # An openai_compatible key has no tool loop: the dock says so.
-    assert body["supports_tools"] is False
+    # An openai_compatible key runs tools unless its row turns them off.
+    assert body["supports_tools"] is True
 
     await _cap(db_session, test_user, "25")
     await _spend(db_session, task, my_key, test_user, "25.00")

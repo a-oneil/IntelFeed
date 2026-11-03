@@ -24,6 +24,16 @@ class AIProvider(ABC):
     # Must agree with app.ai.capabilities.TOOL_CAPABLE_PROVIDER_TYPES.
     supports_tools: ClassVar[bool] = False
 
+    def render_tools(self, defs: list[dict]) -> list[dict]:
+        """Registry tool definitions in this provider's wire shape.
+
+        Default is the OpenAI-style function list (Ollama, OpenAI-compatible);
+        the Anthropic API overrides it.
+        """
+        from app.tools.gate import function_specs
+
+        return function_specs(defs)
+
     def __init__(self, base_url: str | None = None, api_key: str | None = None, config: dict | None = None):
         self.base_url = base_url
         self.api_key = api_key

@@ -88,7 +88,7 @@ describe("the onboarding AI step", () => {
     expect(screen.getByText(/28 tasks now run on/)).toBeInTheDocument();
     expect(screen.getByText("qwen3.5:9b")).toBeInTheDocument();
     // Agentic tasks staying on the CLI is expected behaviour, so say so.
-    expect(screen.getByText(/2 agentic tasks stayed on the Claude Code CLI/)).toBeInTheDocument();
+    expect(screen.getByText(/2 agentic tasks stayed where they were/)).toBeInTheDocument();
   });
 
   it("surfaces the provider's own reason when it can't be reached", async () => {

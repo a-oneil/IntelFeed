@@ -1152,19 +1152,40 @@ async def test_upsert_tool_required_task_on_toolless_provider_rejected(
     client: AsyncClient,
     admin_headers: dict,
     tool_required_task: AITask,
-    ai_provider: AIProvider,
+    db_session,
 ):
-    """Assigning an agentic task to a tool-less provider (Anthropic API) returns 400."""
+    """Assigning an agentic task to a provider with tool calling turned off returns 400."""
+    provider = AIProvider(
+        name="LM Studio, no tools",
+        provider_type="openai_compatible",
+        base_url="http://localhost:1234/v1",
+        config={"tools_enabled": False},
+    )
+    db_session.add(provider)
+    await db_session.flush()
     resp = await client.put(
         f"/api/ai/tasks/{tool_required_task.id}/assignments",
-        json={
-            "provider_id": str(ai_provider.id),
-            "model_name": "claude-sonnet-4-6",
-        },
+        json={"provider_id": str(provider.id), "model_name": "qwen3"},
         headers=admin_headers,
     )
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "provider_incompatible"
+
+
+@pytest.mark.asyncio
+async def test_upsert_tool_required_task_on_anthropic_api_ok(
+    client: AsyncClient,
+    admin_headers: dict,
+    tool_required_task: AITask,
+    ai_provider: AIProvider,
+):
+    """The Anthropic API runs a tool-use loop, so agentic tasks may be assigned to it."""
+    resp = await client.put(
+        f"/api/ai/tasks/{tool_required_task.id}/assignments",
+        json={"provider_id": str(ai_provider.id), "model_name": "claude-sonnet-4-6"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200, resp.text
 
 
 @pytest.mark.asyncio

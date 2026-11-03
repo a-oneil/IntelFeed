@@ -32,6 +32,7 @@ import {
   useAgentTools,
 } from "@/hooks/useAI";
 import { useCopilotConfig } from "@/hooks/useCopilotAuth";
+import { useSystemSettings, useUpdateSystemSettings } from "@/hooks/useSystemSettings";
 import { useAutomationRules } from "@/hooks/useAutomation";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import { AI_VARIABLE_GROUPS } from "@/utils/aiVariables";
@@ -1397,15 +1398,22 @@ function TestBench({
   );
 }
 
-/* ─── Ollama agent tools ────────────────────────────────────────── */
+/* ─── Agent tools ───────────────────────────────────────────────── */
+
+/** Provider types whose tool loop runs in IntelFeed and reads this list. The
+ *  Claude CLI gets its tools from the MCP server instead. */
+const IN_PROCESS_TOOL_TYPES = new Set(["ollama", "claude", "openai_compatible"]);
 
 /**
- * Per-task tool allowlist for agentic tasks running on an Ollama provider.
- * Stored as the assignment config's `ollama_tools` key; when unset, the
- * copilot uses the backend's curated default and other agentic tasks get the
- * full read-only registry. Mutating tools are never offered here.
+ * Per-task tool allowlist for agentic tasks on a provider with an in-process
+ * tool loop (Ollama, Anthropic API, OpenAI-compatible). Stored as the
+ * assignment config's `agent_tools` key.
+ * When unset, the copilot is shown a curated set and reaches every other tool
+ * the user may run through find_tools/call_tool; a custom list limits it to
+ * exactly those tools. Other agentic tasks get every read-only tool. The
+ * copilot's write tools always wait for the user's Confirm.
  */
-function OllamaToolsRow({
+function AgentToolsRow({
   task,
   assignment,
   providers,
@@ -1416,22 +1424,28 @@ function OllamaToolsRow({
 }) {
   const upsertAssignment = useUpsertTaskAssignment();
   const provider = providers?.find((p) => p.id === assignment?.provider_id);
-  const isOllama = !!assignment && provider?.provider_type === "ollama";
-  const relevant = isOllama && !!task.requires_tools;
+  const providerType = provider?.provider_type ?? "";
+  const relevant = !!assignment && IN_PROCESS_TOOL_TYPES.has(providerType) && !!task.requires_tools;
+  const isCopilot = task.name === "copilot";
 
   const { data: toolDefs } = useAgentTools({ enabled: relevant });
   const { data: copilotCfg } = useCopilotConfig();
 
-  const readOnlyTools = useMemo(
-    () => (toolDefs ?? []).filter((t) => !t.mutating).sort((a, b) => a.name.localeCompare(b.name)),
-    [toolDefs]
+  // The copilot may propose writes (each confirmed by the user); other agentic
+  // tasks run unattended, so they are offered reads only.
+  const offerable = useMemo(
+    () =>
+      (toolDefs ?? [])
+        .filter((t) => isCopilot || !t.mutating)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [toolDefs, isCopilot]
   );
   const defaultNames = useMemo(() => {
-    if (task.name === "copilot") return copilotCfg?.default_ollama_tools ?? [];
-    return readOnlyTools.map((t) => t.name); // non-copilot agentic tasks default to all read-only
-  }, [task.name, copilotCfg, readOnlyTools]);
+    if (isCopilot) return copilotCfg?.default_tools ?? [];
+    return offerable.map((t) => t.name);
+  }, [isCopilot, copilotCfg, offerable]);
 
-  const override = assignment?.config?.ollama_tools as string[] | undefined;
+  const override = assignment?.config?.agent_tools as string[] | undefined;
   const effective = override && override.length > 0 ? override : defaultNames;
 
   const [expanded, setExpanded] = useState(false);
@@ -1446,8 +1460,8 @@ function OllamaToolsRow({
 
   const isDefault = !override || override.length === 0;
   const summary = isDefault
-    ? task.name === "copilot"
-      ? `Curated default (${defaultNames.length})`
+    ? isCopilot
+      ? `Curated default (${defaultNames.length}) + find/call for the rest`
       : `All read-only (${defaultNames.length})`
     : `Custom (${override.length})`;
 
@@ -1465,14 +1479,17 @@ function OllamaToolsRow({
   return (
     <div className={styles.settingRow}>
       <div className={styles.settingInfo}>
-        <div className={styles.settingLabel}>Agent tools (Ollama)</div>
+        <div className={styles.settingLabel}>Agent tools</div>
         <div className={styles.settingHint}>
           IntelFeed tools this task may call. Fewer tools = smaller context and better tool
-          selection on local models. Read-only tools only.
+          selection, especially on local models.
+          {isCopilot
+            ? " By default the copilot also reaches every other tool the person may use through find_tools/call_tool; a custom list limits it to exactly the tools you pick. Tools marked ✎ change data: the copilot only proposes them, and the person confirms each one. Admin-only tools are never offered to non-admins."
+            : " Read-only tools only."}
         </div>
         {expanded && (
           <div className={styles.toolsGrid}>
-            {readOnlyTools.map((t) => (
+            {offerable.map((t) => (
               <label key={t.name} className={styles.toolChk} title={t.description}>
                 <input
                   type="checkbox"
@@ -1486,7 +1503,10 @@ function OllamaToolsRow({
                     });
                   }}
                 />
-                <span>{t.name}</span>
+                <span>
+                  {t.name}
+                  {t.mutating ? " ✎" : ""}
+                </span>
               </label>
             ))}
           </div>
@@ -1501,7 +1521,7 @@ function OllamaToolsRow({
               disabled={selected.size === 0 || upsertAssignment.isPending}
               title={selected.size === 0 ? "Select at least one tool" : undefined}
               onClick={() => {
-                const cfg = { ...assignment!.config, ollama_tools: [...selected].sort() };
+                const cfg: Record<string, unknown> = { ...assignment!.config, agent_tools: [...selected].sort() };
                 saveConfig(cfg);
                 setExpanded(false);
               }}
@@ -1512,8 +1532,8 @@ function OllamaToolsRow({
               className={styles.toolsBtn}
               disabled={upsertAssignment.isPending}
               onClick={() => {
-                const cfg = { ...assignment!.config };
-                delete cfg.ollama_tools;
+                const cfg: Record<string, unknown> = { ...assignment!.config };
+                delete cfg.agent_tools;
                 saveConfig(cfg);
                 setExpanded(false);
               }}
@@ -1526,6 +1546,88 @@ function OllamaToolsRow({
           </>
         ) : (
           <button className={styles.toolsBtn} onClick={() => setExpanded(true)}>
+            Edit
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Copilot writes that run without the person clicking Confirm — the
+ * `copilot_auto_approve_tools` system setting. Empty by default. Only writes
+ * the backend says may skip the click are listed: never admin-only tools or
+ * deletes. Applies whichever provider answers, the Claude CLI included.
+ */
+function CopilotAutoApproveRow() {
+  const { data: copilotCfg } = useCopilotConfig();
+  const { data: settings } = useSystemSettings();
+  const updateSettings = useUpdateSystemSettings();
+  const candidates = copilotCfg?.auto_approvable_tools ?? [];
+  const stored = String(settings?.settings.copilot_auto_approve_tools?.value ?? "");
+  const current = useMemo(
+    () => new Set(stored.split(",").map((t) => t.trim()).filter(Boolean)),
+    [stored]
+  );
+  const [expanded, setExpanded] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(current);
+  useEffect(() => setSelected(current), [current]);
+
+  const chosen = candidates.filter((t) => current.has(t));
+  const summary = chosen.length === 0 ? "None: every change asks" : `${chosen.length} skip Confirm`;
+
+  return (
+    <div className={styles.settingRow}>
+      <div className={styles.settingInfo}>
+        <div className={styles.settingLabel}>Skip Confirm for</div>
+        <div className={styles.settingHint}>
+          Changes the copilot may make without the person clicking Confirm, on every provider. Pick
+          only low-risk ones (notes, tags, stars, watches): article text the copilot reads could ask
+          for them. Admin-only changes and deletes always ask.
+        </div>
+        {expanded && (
+          <div className={styles.toolsGrid}>
+            {candidates.map((name) => (
+              <label key={name} className={styles.toolChk}>
+                <input
+                  type="checkbox"
+                  checked={selected.has(name)}
+                  onChange={(e) => {
+                    setSelected((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(name);
+                      else next.delete(name);
+                      return next;
+                    });
+                  }}
+                />
+                <span>{name}</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className={styles.settingCtl}>
+        <span className={styles.settingHint}>{summary}</span>
+        {expanded ? (
+          <>
+            <button
+              className={styles.toolsBtn}
+              disabled={updateSettings.isPending}
+              onClick={() => {
+                updateSettings.mutate({ copilot_auto_approve_tools: [...selected].sort().join(",") });
+                setExpanded(false);
+              }}
+            >
+              Save
+            </button>
+            <button className={styles.toolsBtn} onClick={() => setExpanded(false)}>
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button className={styles.toolsBtn} onClick={() => setExpanded(true)} disabled={!settings}>
             Edit
           </button>
         )}
@@ -1639,7 +1741,8 @@ function RoutingPanel({
         </div>
       </div>
 
-      <OllamaToolsRow task={task} assignment={assignment} providers={providers} />
+      <AgentToolsRow task={task} assignment={assignment} providers={providers} />
+      {task.name === "copilot" && <CopilotAutoApproveRow />}
 
       <div className={styles.settingRow}>
         <div className={styles.settingInfo}>

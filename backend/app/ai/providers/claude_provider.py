@@ -19,6 +19,11 @@ Uses the official ``anthropic`` Python SDK (``AsyncAnthropic``) with:
   passed, it is forwarded to the SDK as
   ``output_config={"format": {"type": "json_schema", "schema": ...}}``.
 
+* Tools: ``stream_agent`` runs the Messages API tool-use loop with an
+  injected executor (the copilot passes app.tools.gate.ToolGate), and
+  ``complete(tools=..., tool_executor=...)`` collapses that loop for agentic
+  engine tasks. The tool list is cached along with the system prompt.
+
 Cache hit/miss token counts are surfaced via ``AIResponse.raw_response``
 under the keys ``cache_read_input_tokens`` and
 ``cache_creation_input_tokens`` for downstream observability without
@@ -29,10 +34,22 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import AsyncGenerator
+from typing import ClassVar
 
 import anthropic
 from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
 
+from app.ai.agent_loop import (
+    DEFAULT_MAX_TOOL_ITERATIONS,
+    FINAL_ROUND_NOTE,
+    TOOL_BUDGET_NOTE,
+    ToolExecutor,
+    clip_tool_result,
+    complete_with_agent,
+    run_tool,
+    summarize_result,
+)
 from app.ai.providers.base import AIProvider, AIResponse
 from app.ai.providers.claude_code_provider import QuotaExhaustedError
 from app.ai.providers.schema_utils import enforce_no_additional_properties as _enforce_no_additional_properties
@@ -40,7 +57,27 @@ from app.ai.providers.schema_utils import enforce_no_additional_properties as _e
 logger = logging.getLogger(__name__)
 
 OAUTH_BETA_HEADER = "oauth-2025-04-20"
+
+# Anthropic's server-side web search, offered when a task's assignment lists
+# WebSearch (entity_enrichment_research). It runs on Anthropic's side, like the
+# CLI's, so nothing is fetched from this host. Billed per search by Anthropic.
+WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_uses": 5}
+# Server-tool blocks in a reply, replayed verbatim on the next request.
+_SERVER_BLOCK_TYPES = frozenset({"server_tool_use", "web_search_tool_result"})
 OAUTH_TOKEN_PREFIX = "sk-ant-oat"
+
+
+def _cache_aware_cost(model: str, uncached: int, cache_read: int, cache_write: int, output: int) -> float:
+    """Dollar cost from the engine's price table, at Anthropic's cache rates.
+
+    A cache read bills at 10% of the input rate and a cache write at 125%. The
+    tool loop re-sends the cached system prompt and tool list every round, so
+    pricing those reads as fresh input would overstate a turn several times.
+    """
+    from app.ai.engine import _estimate_cost
+
+    billable_input = uncached + cache_read * 0.1 + cache_write * 1.25
+    return float(_estimate_cost(model, round(billable_input), output))
 
 
 def _parse_retry_after(headers: object) -> None:
@@ -58,6 +95,14 @@ def _parse_retry_after(headers: object) -> None:
 
 class ClaudeProvider(AIProvider):
     """Anthropic Claude API via the official Python SDK."""
+
+    # Must agree with capabilities.TOOL_CAPABLE_PROVIDER_TYPES.
+    supports_tools: ClassVar[bool] = True
+
+    def render_tools(self, defs: list[dict]) -> list[dict]:
+        from app.tools.gate import anthropic_specs
+
+        return anthropic_specs(defs)
 
     def __init__(
         self,
@@ -159,7 +204,25 @@ class ClaudeProvider(AIProvider):
         model: str = "claude-sonnet-4-6",
         timeout_seconds: float | None = None,
         heartbeat_label: str | None = None,
+        tools: list[dict] | None = None,
+        tool_executor: ToolExecutor | None = None,
+        web_search: bool = False,
     ) -> AIResponse:
+        if (tools and tool_executor is not None) or web_search:
+            # An agentic task: run the tool loop instead of answering blind.
+            return await complete_with_agent(
+                self,
+                prompt=prompt,
+                system=system,
+                model=model,
+                tools=tools,
+                tool_executor=tool_executor,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout_seconds=timeout_seconds,
+                response_format=response_format,
+                web_search=web_search,
+            )
         # timeout_seconds / heartbeat_label are claude_code-provider specific
         # (subprocess wait). Accepted here for interface compatibility, ignored
         # — the anthropic SDK applies its own per-request timeout.
@@ -272,6 +335,162 @@ class ClaudeProvider(AIProvider):
         except anthropic.RateLimitError as e:
             headers = e.response.headers if e.response else None
             raise QuotaExhaustedError(str(e)[:500], reset_at=_parse_retry_after(headers))
+
+    @staticmethod
+    def _cached_tools(tools: list[dict]) -> list[dict]:
+        """Mark the last tool cacheable: the tool list rarely changes between turns."""
+        if not tools:
+            return tools
+        return [*tools[:-1], {**tools[-1], "cache_control": {"type": "ephemeral"}}]
+
+    @staticmethod
+    def _assistant_blocks(message) -> list[dict]:
+        """The reply's blocks, replayed as the next request's assistant turn.
+
+        Text and tool_use are rebuilt clean; web search's server blocks go
+        back as the API sent them, since a search result must follow its call.
+        """
+        blocks: list[dict] = []
+        for block in message.content:
+            btype = getattr(block, "type", None)
+            if btype == "text" and block.text:
+                blocks.append({"type": "text", "text": block.text})
+            elif btype == "tool_use":
+                blocks.append({"type": "tool_use", "id": block.id, "name": block.name, "input": block.input or {}})
+            elif btype in _SERVER_BLOCK_TYPES:
+                blocks.append(block.model_dump(exclude_none=True))
+        return blocks
+
+    async def stream_agent(
+        self,
+        prompt: str,
+        system: str | None = None,
+        model: str | None = None,
+        tools: list[dict] | None = None,
+        tool_executor: ToolExecutor | None = None,
+        temperature: float = 0.0,
+        max_tokens: int = 4096,
+        timeout_seconds: float | None = None,
+        heartbeat_label: str | None = None,
+        web_search: bool = False,
+    ) -> AsyncGenerator[dict, None]:
+        """Run one agent turn over the Messages API, yielding typed events.
+
+        Text streams as it arrives; each ``tool_use`` block is run through
+        ``tool_executor`` and its result sent back, until the model answers
+        without calling a tool. When the iteration cap is hit, one last round
+        runs with tools off so the turn still ends with an answer. ``web_search``
+        adds Anthropic's server-side search, whose long turns can pause
+        (``pause_turn``) and are resumed as they are. Event shapes are the
+        ones in app.ai.agent_loop. ``total_cost_usd`` comes from the engine's
+        price table at Anthropic's cache rates.
+        """
+        del temperature, heartbeat_label
+        client = self._build_client()
+        if timeout_seconds:
+            client = client.with_options(timeout=timeout_seconds)
+        model = model or "claude-sonnet-4-6"
+        max_iterations = int(self.config.get("max_tool_iterations", DEFAULT_MAX_TOOL_ITERATIONS))
+        messages: list[dict] = [{"role": "user", "content": prompt}]
+        kwargs: dict = {"model": model, "max_tokens": max_tokens}
+        system_blocks = self._build_system(system)
+        if system_blocks is not None:
+            kwargs["system"] = system_blocks
+        offered: list[dict] = [WEB_SEARCH_TOOL] if web_search else []
+        if tools and tool_executor is not None:
+            offered += tools
+        if offered:
+            kwargs["tools"] = self._cached_tools(offered)
+
+        tokens_input = 0  # every input token, cached or not (what the cap and dashboard count)
+        uncached = 0
+        cache_read = 0
+        cache_write = 0
+        tokens_output = 0
+
+        def _done() -> dict:
+            return {
+                "kind": "done",
+                "usage": {
+                    "tokens_input": tokens_input,
+                    "tokens_output": tokens_output,
+                    "cache_read_input_tokens": cache_read,
+                    "cache_creation_input_tokens": cache_write,
+                    "total_cost_usd": _cache_aware_cost(model, uncached, cache_read, cache_write, tokens_output),
+                },
+            }
+
+        # One round past the budget: tools off, so the turn ends with an answer.
+        for iteration in range(max_iterations + 1):
+            wrap_up = iteration == max_iterations
+            round_kwargs = kwargs
+            if wrap_up:
+                last = messages[-1]
+                if last["role"] == "user" and isinstance(last["content"], list):
+                    last["content"].append({"type": "text", "text": FINAL_ROUND_NOTE})
+                else:
+                    messages.append({"role": "user", "content": FINAL_ROUND_NOTE})
+                if "tools" in kwargs:
+                    # The history's tool calls still need the tools list.
+                    round_kwargs = {**kwargs, "tool_choice": {"type": "none"}}
+            emitted_text = False
+            try:
+                async with client.messages.stream(messages=messages, **round_kwargs) as stream:
+                    async for text in stream.text_stream:
+                        if text:
+                            emitted_text = True
+                            yield {"kind": "text", "text": text}
+                    final = await stream.get_final_message()
+            except anthropic.RateLimitError as e:
+                headers = e.response.headers if e.response else None
+                raise QuotaExhaustedError(str(e)[:500], reset_at=_parse_retry_after(headers))
+
+            usage = final.usage
+            uncached += usage.input_tokens or 0
+            cache_read += getattr(usage, "cache_read_input_tokens", 0) or 0
+            cache_write += getattr(usage, "cache_creation_input_tokens", 0) or 0
+            tokens_input = uncached + cache_read + cache_write
+            tokens_output += usage.output_tokens or 0
+
+            if wrap_up:
+                if not emitted_text:
+                    yield {"kind": "text", "text": TOOL_BUDGET_NOTE}
+                logger.warning("claude agent loop hit max_iterations=%d", max_iterations)
+                yield _done()
+                return
+
+            if final.stop_reason == "pause_turn":
+                # A long server-side search turn: send it back to carry on.
+                messages.append({"role": "assistant", "content": self._assistant_blocks(final)})
+                continue
+
+            tool_uses = [b for b in final.content if getattr(b, "type", None) == "tool_use"]
+            if final.stop_reason != "tool_use" or not tool_uses or tool_executor is None:
+                if final.stop_reason == "max_tokens":
+                    yield {"kind": "text", "text": "\n\n_[answer truncated — model hit its output limit]_"}
+                yield _done()
+                return
+
+            if emitted_text:
+                yield {"kind": "text", "text": "\n\n"}
+            messages.append({"role": "assistant", "content": self._assistant_blocks(final)})
+            results: list[dict] = []
+            for block in tool_uses:
+                args = block.input if isinstance(block.input, dict) else {}
+                yield {"kind": "tool_call", "id": block.id, "name": block.name, "args": args}
+                status, result = await run_tool(tool_executor, block.name, args)
+                yield {"kind": "tool_result", "id": block.id, "status": status, "summary": summarize_result(result)}
+                results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": clip_tool_result(result),
+                        "is_error": status == "error",
+                    }
+                )
+            messages.append({"role": "user", "content": results})
+
+        yield _done()
 
     async def check_health(self) -> bool:
         if not self.api_key:

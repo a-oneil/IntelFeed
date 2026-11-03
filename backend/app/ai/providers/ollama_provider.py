@@ -68,6 +68,7 @@ from typing import ClassVar
 
 import httpx
 
+from app.ai.agent_loop import TOOL_BUDGET_NOTE
 from app.ai.providers.base import AIProvider, AIResponse
 from app.ai.providers.claude_code_provider import QuotaExhaustedError
 from app.ai.providers.schema_utils import enforce_required as _enforce_required_schema
@@ -466,8 +467,10 @@ class OllamaProvider(AIProvider):
                         )
                     messages.append({"role": "tool", "tool_name": name, "content": result_text})
 
-        # Iteration budget exhausted without a final answer.
+        # Iteration budget exhausted without a final answer: say so, rather
+        # than end the turn blank.
         logger.warning("ollama agent loop hit max_iterations=%d without a final answer", max_iterations)
+        yield {"kind": "text", "text": TOOL_BUDGET_NOTE}
         yield {
             "kind": "done",
             "usage": {

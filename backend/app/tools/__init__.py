@@ -24,7 +24,7 @@ TOOL_DEFINITIONS: list[dict] = []
 _TOOL_HANDLERS: dict[str, callable] = {}
 
 # Modules whose tools mutate state. Tools registered from these are flagged
-# ``mutating`` and excluded from the read-only tool set the copilot exposes.
+# ``mutating``: a model's call to one waits for the user's confirmation (app.tools.gate).
 _MUTATING_MODULES: frozenset[str] = frozenset({"app.tools.write", "app.tools.delete"})
 
 # Names of all registered mutating tools (populated as modules import below).
@@ -105,14 +105,29 @@ def _tool(name: str, description: str, input_schema: dict, mutating: bool | None
     return decorator
 
 
-# Default tool subset for the Ollama copilot. The full read-only registry (97
-# tools) serializes to ~6.6k tokens of schema per round — that bloats every
+# Reads the registry doesn't flag mutating that still store what they produce
+# (extractions, AI task results, generated rule drafts). The copilot treats them
+# as writes: they wait for the user's click. Mirrors PERSISTING_READ_TOOLS in
+# intelfeed-mcp/intelfeed_mcp.py, which keeps its own copy (it is stdlib-only).
+PERSISTING_READ_TOOLS: frozenset[str] = frozenset(
+    {
+        "extract_ttps",
+        "extract_cves",
+        "extract_threat_actors",
+        "extract_malware",
+        "run_ai_task",
+        "generate_detection_rules",
+    }
+)
+
+# Default read tools for the copilot on a local model (Ollama). The full
+# registry serializes to ~27k tokens of schema per round — that bloats every
 # request's context AND overwhelms local models' tool selection. This curated
 # set covers the copilot's actual workload (search, entity lookups, pivots,
-# landscape stats) at ~2k tokens. Override per-deployment via the copilot
-# assignment's ``ollama_tools`` config key (editable in the Prompt Workspace's
-# Routing panel when the task is assigned to an Ollama provider).
-DEFAULT_COPILOT_OLLAMA_TOOLS: list[str] = [
+# landscape stats) at ~2k tokens. Hosted providers (Anthropic API,
+# OpenAI-compatible) get the whole registry instead. Override per assignment
+# via the ``agent_tools`` config key (Prompt Workspace → Routing panel).
+DEFAULT_COPILOT_TOOLS: list[str] = [
     "search_entries",
     "search_entities",
     "search_unified",
@@ -132,60 +147,22 @@ DEFAULT_COPILOT_OLLAMA_TOOLS: list[str] = [
     "get_documentation_page",
 ]
 
-
-def read_only_tool_definitions() -> list[dict]:
-    """Tool definitions that do not mutate state (safe for the read-only copilot)."""
-    return [t for t in TOOL_DEFINITIONS if not t.get("mutating")]
-
-
-def ollama_tool_specs(names: list[str] | None = None, *, read_only: bool = True) -> list[dict]:
-    """Render tool definitions into Ollama ``/api/chat`` function-tool specs.
-
-    Ollama (OpenAI-compatible) expects
-    ``{"type": "function", "function": {"name", "description", "parameters"}}``
-    where ``parameters`` is a JSON Schema — which is exactly our stored
-    ``input_schema``.
-
-    ``names`` optionally restricts the set (an allowlist of tool names); unknown
-    names are ignored. ``read_only`` (default) drops mutating tools even if named.
-    """
-    allow = set(names) if names else None
-    specs: list[dict] = []
-    for t in TOOL_DEFINITIONS:
-        if read_only and t.get("mutating"):
-            continue
-        if allow is not None and t["name"] not in allow:
-            continue
-        specs.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": t["name"],
-                    "description": t["description"],
-                    "parameters": t["input_schema"],
-                },
-            }
-        )
-    return specs
-
-
-def restrict_to_offered(specs: list[dict], executor):
-    """Wrap a model-facing tool executor so it runs only the tools in ``specs``.
-
-    The spec list is what the model is shown, which is not by itself a
-    permission check: a model can name any registry tool in its reply, whether
-    because article text in its context told it to or because the "model" is a
-    hostile endpoint. Read-only and admin filtering is applied when building
-    ``specs``; this makes the executor honour the same set.
-    """
-    offered = frozenset(s["function"]["name"] for s in specs)
-
-    async def _guarded(name: str, args: dict) -> str:
-        if name not in offered:
-            return json.dumps({"error": f"Tool '{name}' is not available here"})
-        return await executor(name, args)
-
-    return _guarded
+# The everyday writes shown to the copilot alongside DEFAULT_COPILOT_TOOLS, on
+# every provider; the same list the MCP server's write_action allows. Each
+# still waits for the user's click unless it is on copilot_auto_approve_tools.
+DEFAULT_COPILOT_WRITE_TOOLS: list[str] = [
+    "create_note",
+    "create_entity_note",
+    "add_tag",
+    "star_entry",
+    "bookmark_entry",
+    "mark_entry_read",
+    "watch_entity",
+    "unwatch_entity",
+    "create_campaign",
+    "add_to_campaign",
+    "create_saved_search",
+]
 
 
 async def execute_tool(name: str, args: dict, db: AsyncSession, user_id: uuid.UUID) -> str:

@@ -668,3 +668,22 @@ def test_supplied_token_is_the_whole_credential(monkeypatch):
     assert client._access == "agent-token"
     with pytest.raises(m.ToolError, match="refused this session's token"):
         client._renew()
+
+
+def test_propose_mode_offers_every_write_through_write_action(monkeypatch):
+    """With the backend's propose token, write_action takes any registry write; the API stages it."""
+    monkeypatch.setattr(m, "PROPOSE_WRITES", True)
+    monkeypatch.setattr(m, "WRITES_ON", True)
+    server, fake = new_server({"delete_feed": {"status": "awaiting_confirmation"}})
+    write_tools = [t for t in server.tools if t["name"] == "write_action"]
+    assert len(write_tools) == 1 and "enum" not in write_tools[0]["inputSchema"]["properties"]["tool"]
+    assert "Confirm" in write_tools[0]["description"]
+
+    # Beyond the low-risk list: the server forwards it, the API decides (and stages).
+    assert "delete_feed" not in m.DEFAULT_WRITE_TOOLS
+    text, is_error = server.call("write_action", {"tool": "delete_feed", "args": {"feed_id": UUID_A}})
+    assert not is_error and "awaiting_confirmation" in text
+    assert fake.calls == [("delete_feed", {"feed_id": UUID_A})]
+    # Reads still go through call_tool, and write_action won't run one.
+    with pytest.raises(m.ToolError, match="call_tool"):
+        server.call("write_action", {"tool": "search_entries", "args": {}})

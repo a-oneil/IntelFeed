@@ -76,8 +76,12 @@ answer with no tool chips came from the model alone, not your data.
 **Ask Copilot** buttons open it focused on one thing. Remove the pill to ask
 about everything.
 
-**Writes need your OK.** Nothing is changed until you accept its confirmation
-card.
+**Changes need your OK.** The copilot can do most things you can do: make a
+campaign, add a note or tag, watch an entity, and (for admins) merge or delete.
+It only proposes them. Each change shows up as a card with the exact action and
+its details, and nothing happens until you click **Confirm**. Deletes and
+admin-only changes get a warning line. It never gets tools your account can't
+use.
 
 **Conversations** are saved. **History** reopens old ones. **Share** makes a
 public read-only link (see [Notes and sharing](notes-and-sharing.md#share-links)).
@@ -116,7 +120,9 @@ run on your key.
 
 Two things to know:
 
-- On some keys the copilot has no tools; the dock shows **no tools**.
+- The copilot has the same tools on your key as on the instance's. The one
+  exception is an OpenAI-compatible key with **Tool calling** turned off; the
+  dock then shows **no tools**.
 - Automation rules, share links and background processing never use your key,
   even under your name. Each result says who answered: your key, the instance,
   or a fallback and why.
@@ -144,8 +150,14 @@ assignment naming a provider and a model. The AI step in the onboarding tour
 tests the provider and assigns the tasks for you. After that, change
 assignments on the Providers tab.
 
-Tasks that use tools, such as the copilot, only run on a provider that supports
-tool calls. The onboarding step tells you which it couldn't move.
+Tasks that use tools, such as the copilot, run on any provider type: Claude
+Code, the Claude API, OpenAI-compatible and Ollama. An OpenAI-compatible
+provider has a **Tool calling** switch in its Configure panel; turn it off for a
+local server that handles tools badly, and those tasks can't be assigned to it.
+On the copilot's page in **Prompts**, **Skip Confirm for** picks low-risk
+changes, such as notes and tags, that run without the click. It is empty by
+default; deletes and admin-only changes always ask. The copilot on the
+documentation page only looks things up.
 
 On the Cost Dashboard, a copilot on a flat-rate sign-in shows what the tokens
 *would* cost at API prices, not a real charge. The real limit is the plan's

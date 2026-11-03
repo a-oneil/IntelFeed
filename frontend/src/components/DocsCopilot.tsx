@@ -108,7 +108,8 @@ export function DocsCopilot({ docSlug }: { docSlug?: string }) {
         {
           question: trimmed,
           conversationId,
-          context: { route: "/documentation", ...(docSlug ? { doc_slug: docSlug } : {}) },
+          // No confirm cards here, so ask for read tools only.
+          context: { route: "/documentation", read_only: true, ...(docSlug ? { doc_slug: docSlug } : {}) },
           onChunk: (text) => patchLast((m) => ({ ...m, content: m.content + text })),
           onToolCall: (call) =>
             patchLast((m) => ({

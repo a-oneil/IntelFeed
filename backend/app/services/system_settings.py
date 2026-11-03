@@ -181,6 +181,7 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "allow_user_ai_providers": bool,
     "require_user_ai_provider": bool,
     "user_ai_provider_types": str,
+    "copilot_auto_approve_tools": str,
     "user_ai_allow_private_endpoints": bool,
     "user_ai_daily_request_cap": int,
     "ai_analysis_content_max_chars": int,
@@ -645,6 +646,15 @@ SETTING_METADATA: dict[str, dict] = {
         "description": (
             "Comma-separated provider types people may register as their own: claude, openai_compatible, "
             "ollama. Claude Code can't be personal; it is one CLI sign-in for the whole instance."
+        ),
+        "group": "ai",
+    },
+    "copilot_auto_approve_tools": {
+        "label": "Copilot Writes Without Confirm",
+        "description": (
+            "Comma-separated copilot tools that change data but run without the person clicking Confirm, "
+            "e.g. create_note,add_tag,star_entry,bookmark_entry,watch_entity. Admin-only tools and deletes "
+            "always ask. Empty: every change waits for Confirm. Edited in the Prompt Workspace (Copilot)."
         ),
         "group": "ai",
     },

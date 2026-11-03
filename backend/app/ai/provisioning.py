@@ -20,7 +20,12 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.capabilities import provider_type_supports_tools, task_requires_tools
+from app.ai.capabilities import (
+    provider_type_supports_tools,
+    provider_type_supports_web_search,
+    task_requires_tools,
+    task_requires_web_search,
+)
 from app.ai.prompts.defaults import (
     DEFAULT_ASSIGNMENT_CONFIGS,
     DEFAULT_MODEL_ASSIGNMENTS,
@@ -119,14 +124,14 @@ async def route_tasks_to_provider(
     the only way an instance whose tasks were seeded onto the startup CLI
     provider can be moved onto a real one without 30 clicks.
 
-    Agentic tasks are never moved to a provider that cannot run tools, whichever
-    mode this is in.
+    Agentic tasks are never moved to a provider that cannot run tools, nor
+    web-research tasks to one with no web search, whichever mode this is in.
     """
     out = TaskRouting()
 
     tasks = (await db.execute(select(AITask).where(AITask.is_system.is_(True)))).scalars().all()
     existing = {a.task_id: a for a in (await db.execute(select(AITaskAssignment))).scalars().all()}
-    supports_tools = provider_type_supports_tools(provider.provider_type)
+    supports_tools = provider_type_supports_tools(provider.provider_type, provider.config)
     fixed_model = configured_model(provider)
 
     for task in tasks:
@@ -134,6 +139,9 @@ async def route_tasks_to_provider(
         if preferred is None or task.is_deprecated:
             continue
         if task_requires_tools(task.name) and not supports_tools:
+            out.skipped_agentic.append(task.name)
+            continue
+        if task_requires_web_search(task.name) and not provider_type_supports_web_search(provider.provider_type):
             out.skipped_agentic.append(task.name)
             continue
 

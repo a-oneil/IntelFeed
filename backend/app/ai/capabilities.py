@@ -1,11 +1,9 @@
 """Provider/task tool-capability model.
 
-Some AI tasks are agentic: they only produce their effect by calling tools
-(IntelFeed's read-only tools and web search on the Claude Code CLI). Providers
-that run a single-shot chat completion (Ollama, Anthropic API) have no tool
-execution path, so assigning an agentic task to them silently produces
-tool-less output — worst case the entity merge task reports merges that were
-never applied.
+Some AI tasks are agentic: they only produce their effect by calling tools.
+Assigning one to a provider with no tool path silently produces tool-less
+output — worst case the entity merge task reports merges that were never
+applied.
 
 This module is the single source of truth for both sides of that contract.
 It must stay free of app.* imports so ORM models, API routers, and workers
@@ -22,24 +20,46 @@ TOOL_REQUIRED_TASKS: frozenset[str] = frozenset(
     }
 )
 
-# Provider types whose runtime can execute tool calls. The Claude Code CLI is a
-# full agent harness; Ollama runs a native ``/api/chat`` function-calling loop
-# (OllamaProvider.stream_agent / complete with an injected in-process
-# tool_executor) against the backend tool registry.
-#
-# ``openai_compatible`` is deliberately NOT here yet: local OpenAI-compatible
-# servers (LM Studio, llama.cpp, vLLM) vary too much in tool-calling quality
-# for a blanket type-level capability. Tool support for it is tracked as a
-# follow-up behind a per-provider config opt-in, not a type-level flag.
-TOOL_CAPABLE_PROVIDER_TYPES: frozenset[str] = frozenset({"claude_code", "ollama"})
+# Provider types whose runtime can execute tool calls against the backend tool
+# registry. The Claude Code CLI is a full agent harness (IntelFeed tools over
+# MCP). The others run an in-process function-calling loop (``stream_agent``
+# with an injected tool executor): Ollama's ``/api/chat``, the Anthropic
+# Messages API, and ``/v1/chat/completions`` for OpenAI-compatible servers.
+TOOL_CAPABLE_PROVIDER_TYPES: frozenset[str] = frozenset({"claude_code", "ollama", "claude", "openai_compatible"})
+
+# Types whose tool calling a provider row can switch off with
+# ``config.tools_enabled = false``: OpenAI-compatible servers range from OpenAI
+# itself to local servers that handle tools badly or not at all.
+TOOLS_TOGGLEABLE_PROVIDER_TYPES: frozenset[str] = frozenset({"openai_compatible"})
+
+
+# Tasks whose job is web research (assignment ``allowed_tools`` names
+# WebSearch). The Claude Code CLI and the Anthropic API run web search on
+# Anthropic's side; the other loops have no search tool, so onboarding never
+# routes these tasks to them (an admin still can, by hand).
+WEB_SEARCH_TASKS: frozenset[str] = frozenset({"entity_enrichment_research"})
+WEB_SEARCH_PROVIDER_TYPES: frozenset[str] = frozenset({"claude_code", "claude"})
+
+
+def task_requires_web_search(task_name: str | None) -> bool:
+    return task_name in WEB_SEARCH_TASKS
+
+
+def provider_type_supports_web_search(provider_type: str | None) -> bool:
+    return provider_type in WEB_SEARCH_PROVIDER_TYPES
 
 
 def task_requires_tools(task_name: str | None) -> bool:
     return task_name in TOOL_REQUIRED_TASKS
 
 
-def provider_type_supports_tools(provider_type: str | None) -> bool:
-    return provider_type in TOOL_CAPABLE_PROVIDER_TYPES
+def provider_type_supports_tools(provider_type: str | None, config: dict | None = None) -> bool:
+    """Whether a provider (its type, and for some types its row config) runs tools."""
+    if provider_type not in TOOL_CAPABLE_PROVIDER_TYPES:
+        return False
+    if provider_type in TOOLS_TOGGLEABLE_PROVIDER_TYPES and (config or {}).get("tools_enabled") is False:
+        return False
+    return True
 
 
 # Tasks a person's own AI key may answer. One test decides membership: does

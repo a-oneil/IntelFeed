@@ -519,7 +519,7 @@ Tool pages (Workbench, Settings, Search, Automation) use `SidebarLayout` instead
 
 ### AI Copilot Dock
 
-`CopilotDockPanel` is a chat panel, mounted in `App.tsx` for signed-in users (`Cmd/Ctrl+Shift+K`). It talks to `/api/ai/copilot`, which streams answers and can look things up in IntelFeed with read-only tools. Two actions, create campaign and add note, run only after you confirm them. Conversations can be shared read-only at `/shared/copilot/:token`. Each turn is recorded as an `AIResult` with its token use, so it shows in the AI cost view. See [copilot.md](copilot.md).
+`CopilotDockPanel` is a chat panel, mounted in `App.tsx` for signed-in users (`Cmd/Ctrl+Shift+K`). It talks to `/api/ai/copilot`, which streams answers and uses IntelFeed's tools on every provider type, under the asking user's permissions. Reads run as the model asks; any change waits until the user clicks Confirm. Conversations can be shared read-only at `/shared/copilot/:token`. Each turn is recorded as an `AIResult` with its token use, so it shows in the AI cost view. See [copilot.md](copilot.md).
 
 ---
 

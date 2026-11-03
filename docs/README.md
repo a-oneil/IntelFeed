@@ -39,7 +39,7 @@ For a project overview and quickstart, see [`../readme.md`](../readme.md). To in
 | **[automation-ai-enrichment.md](automation-ai-enrichment.md)** | Automation rules (triggers, conditions, actions), the AI provider system, prompts, AI task assignments and the enrichment pipeline. |
 | **[engine.md](engine.md)** | Pipeline stages and plans (feed, then category, then global), signal-engine priority scoring, Radar triage, and the Settings → Engine console. |
 | **[engine-settings.md](engine-settings.md)** | Every runtime setting: what it does, its default, where it is edited, which scheduled job it drives, and which settings are env-only. |
-| **[copilot.md](copilot.md)** | The AI copilot: streaming with tool traces, the `ai`-queue worker, read-only tools, confirmed writes, saved and shared conversations, Claude sign-in and cost tracking. |
+| **[copilot.md](copilot.md)** | The AI copilot: streaming with tool traces, the `ai`-queue worker, tools on every provider, writes the user confirms, saved and shared conversations, Claude sign-in and cost tracking. |
 | **[workers-search-dashboards.md](workers-search-dashboards.md)** | The Celery workers and schedule, Meilisearch indexing and queries, and the widgets on the workbench Dashboard. |
 | **[frontend.md](frontend.md)** | The React app: routing, layouts, Zustand stores, TanStack Query, the Axios client, theming, components and testing. |
 | **[api-reference.md](api-reference.md)** | The REST API: every router and endpoint, auth, errors, pagination, rate limits and middleware. |

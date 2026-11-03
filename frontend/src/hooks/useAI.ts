@@ -664,24 +664,34 @@ export interface CopilotContext {
   route?: string;
   /** Documentation page being read — puts the copilot in docs mode. */
   doc_slug?: string;
+  /** Read tools only: for a surface that can't show confirm cards. */
+  read_only?: boolean;
 }
 
 /**
  * A pending "write-with-confirm" action proposed by the agent. Arrives on the
- * copilot stream (right before `done`) as a `confirm_request` event. The user
- * must approve/cancel it via {@link CopilotConfirmResponse}.
+ * copilot stream (right before `done`) as a `confirm_request` event, one per
+ * write the model asked for. Nothing has run: the user must approve/cancel it
+ * via {@link CopilotConfirmResponse}.
  */
 export interface CopilotConfirmRequest {
   action_id: string;
-  action_type: string;
-  description: string;
+  /** The registry tool that will run. */
+  tool_name: string;
+  /** Its exact arguments. */
   proposed: Record<string, unknown>;
+  /** What each id-holding argument names, e.g. { feed_id: "feed 'Krebs'" }. */
+  targets?: Record<string, string>;
+  /** A delete's own summary of what it will remove (its first, harmless call). */
+  preview?: string | null;
+  /** Deletes and admin-only changes: shown with a warning, never edited. */
+  destructive?: boolean;
 }
 
 /** Response from POST /api/ai/copilot/confirm. */
 export interface CopilotConfirmResponse {
   status: "executed" | "cancelled" | "error";
-  result?: { summary: string; link?: string };
+  result?: { summary: string; tool_name: string };
   message?: string;
 }
 
@@ -725,7 +735,7 @@ export interface StreamCopilotOptions {
  *   - {type:"chunk", text}                                        → onChunk
  *   - {type:"tool_call", id, name, args}                          → onToolCall
  *   - {type:"tool_result", id, status, summary}                   → onToolResult
- *   - {type:"confirm_request", action_id, action_type, ...}       → onConfirmRequest
+ *   - {type:"confirm_request", action_id, tool_name, proposed, ...} → onConfirmRequest
  *   - {type:"done", conversation_id}                              → onDone
  *   - {type:"error", message}                                     → onError
  *
@@ -821,9 +831,11 @@ export async function streamCopilotChat(
             case "confirm_request":
               options.onConfirmRequest?.({
                 action_id: String(data.action_id ?? ""),
-                action_type: String(data.action_type ?? ""),
-                description: String(data.description ?? ""),
+                tool_name: String(data.tool_name ?? ""),
                 proposed: (data.proposed ?? {}) as Record<string, unknown>,
+                targets: (data.targets ?? {}) as Record<string, string>,
+                preview: typeof data.preview === "string" ? data.preview : null,
+                destructive: data.destructive === true,
               });
               break;
             case "done":

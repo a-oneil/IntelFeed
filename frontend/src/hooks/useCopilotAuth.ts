@@ -44,18 +44,20 @@ export interface CopilotConfig {
   configured: boolean;
   provider_type: string | null;
   provider_name: string | null;
-  /** Curated tool subset used when the assignment has no ollama_tools override. */
-  default_ollama_tools?: string[];
+  /** Tools shown directly when the assignment sets no agent_tools; the rest stay reachable via find_tools/call_tool. */
+  default_tools?: string[];
+  /** Writes the "Skip Confirm for" setting may name: never admin-only tools or deletes. */
+  auto_approvable_tools?: string[];
   /**
    * The assignment's actual effective tool allowlist (override or default),
-   * or null when the provider is unrestricted (non-Ollama). Used to hide "/"
-   * commands in the dock whose backing tool isn't currently enabled.
+   * or null when the provider is unrestricted. Used to hide "/" commands in
+   * the dock whose backing tool isn't currently enabled.
    */
   enabled_tools?: string[] | null;
   /** Whose provider answers: a personal key ("user") or the instance's ("site"). */
   source?: "site" | "user" | null;
   model?: string | null;
-  /** False on a key without a tool loop (Claude API, openai_compatible). */
+  /** False on a provider with tool calling turned off. */
   supports_tools?: boolean;
   /** Set when the person has a key that can't answer and the instance's provider took over. */
   fallback_reason?: string | null;

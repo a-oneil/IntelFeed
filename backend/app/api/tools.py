@@ -9,9 +9,10 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import ToolCaller, get_tool_caller
+from app.core.security import AGENT_SCOPE_PROPOSE, ToolCaller, get_tool_caller
 from app.database import get_db
 from app.tools import ADMIN_TOOLS, MUTATING_TOOLS, TOOL_DEFINITIONS, execute_tool
+from app.tools.gate import auto_approve_tools, check_call, needs_confirmation, stage_tool_call, staged_reply
 
 router = APIRouter()
 
@@ -39,22 +40,44 @@ async def execute_tool_endpoint(
 
     Tools whose API equivalents are admin-gated require an admin caller —
     the registry must not be a side door around the API layer's gates. An
-    agent token (an AI run acting for a user) may only run read-only tools.
+    agent token (an AI run acting for a user) runs read tools; a ``read`` one
+    is refused anything that changes data, and a ``propose`` one gets that
+    change staged for the user's click in the copilot instead of run (the
+    same gate the in-process providers use, app.tools.gate). Neither may pass
+    a confirmation token: those stand for the user's yes, not a model's.
     """
     user = caller.user
-    if caller.read_only and request.tool_name in MUTATING_TOOLS:
+    name = request.tool_name
+    if caller.is_agent:
+        refusal = check_call(name, request.args, role=user.role, offered=None)
+        if refusal:
+            raise AppError(code="forbidden", message=refusal, status_code=403)
+        if needs_confirmation(name):
+            if caller.agent_scope == AGENT_SCOPE_PROPOSE:
+                if name not in auto_approve_tools():
+                    action_id = await stage_tool_call(
+                        user_id=user.id,
+                        conversation_id=caller.conversation_id,
+                        tool_name=name,
+                        args=request.args,
+                        db=db,
+                        turn_id=caller.turn_id,
+                    )
+                    return ToolExecuteResponse(result=staged_reply(action_id, name))
+            elif name in MUTATING_TOOLS:
+                # A read token keeps the storing reads (extractions) it always had.
+                raise AppError(
+                    code="forbidden",
+                    message=f"Tool '{name}' changes data; this credential is read-only",
+                    status_code=403,
+                )
+    if name in ADMIN_TOOLS and user.role != "admin":
         raise AppError(
             code="forbidden",
-            message=f"Tool '{request.tool_name}' changes data; this credential is read-only",
+            message=f"Tool '{name}' requires admin access",
             status_code=403,
         )
-    if request.tool_name in ADMIN_TOOLS and user.role != "admin":
-        raise AppError(
-            code="forbidden",
-            message=f"Tool '{request.tool_name}' requires admin access",
-            status_code=403,
-        )
-    result = await execute_tool(request.tool_name, request.args, db, user.id)
+    result = await execute_tool(name, request.args, db, user.id)
     return ToolExecuteResponse(result=result)
 
 
