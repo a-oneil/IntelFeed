@@ -454,6 +454,7 @@ async def test_concurrent_dispatchers_fire_slot_once(db_session: AsyncSession, t
     """
     import asyncio
     from contextlib import asynccontextmanager
+    from datetime import datetime
 
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -494,6 +495,11 @@ async def test_concurrent_dispatchers_fire_slot_once(db_session: AsyncSession, t
         return {"type": "send_notification", "status": "success"}
 
     monkeypatch.setattr(automation_tasks, "_execute_scheduled_notification", slow_notification)
+
+    # Pin the cron slot: if the two dispatchers straddle a minute boundary,
+    # "* * * * *" gives the second one a genuinely new slot and it fires again
+    slot = datetime.now(UTC).replace(second=0, microsecond=0)
+    monkeypatch.setattr(automation_tasks, "_prev_cron_fire", lambda cron_expr, now: slot)
 
     async def staggered_second_dispatcher():
         await asyncio.sleep(0.05)
