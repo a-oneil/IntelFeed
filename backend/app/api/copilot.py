@@ -24,6 +24,7 @@ from decimal import Decimal
 import anyio
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -886,6 +887,17 @@ async def copilot_stream(
                 errored = str(e)
                 logger.warning("copilot stream error: %s", e)
 
+            # Tools run in savepoints (app.tools.gate.execute_isolated), but a
+            # handler can still roll the whole session back, which expires
+            # what this turn loaded. Reload it before saving the turn, billing
+            # it and collecting its staged writes: a lazy load here fails.
+            for loaded in (conv, user, task, provider_model):
+                try:
+                    if sa_inspect(loaded).expired_attributes:
+                        await db.refresh(loaded)
+                except Exception as e:  # never break the stream over it
+                    logger.warning("copilot could not reload %s after a tool rollback: %s", type(loaded).__name__, e)
+
             # Flush any held-back tail that never turned out to be a fence.
             tail = splitter.flush()
             if tail:
@@ -1033,6 +1045,9 @@ def _confirm_request_event(row: dict) -> dict:
         "tool_name": tool_name,
         "description": row.get("summary") or tool_name,
         "proposed": row.get("args") or {},
+        # What the ids in ``proposed`` name, and a delete's own summary.
+        "targets": row.get("targets") or {},
+        "preview": row.get("preview"),
         "destructive": _is_destructive(tool_name),
     }
 

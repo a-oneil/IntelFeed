@@ -62,7 +62,7 @@ Both the assignment and the prompt are editable at **Settings → AI Configurati
 
 1. **Pick the provider**: `resolve_assignment(db, Caller.user(user.id), "copilot")`. This is where a turn can be refused before anything streams: 403 `user_ai_key_required` (personal keys are required, or the person turned off fallback and their key cannot answer; `details.reason` says why) or 429 `ai_allowance_exceeded` (the person used up today's `site_ai_user_daily_requests`).
 2. **Load or create the conversation.** A given `conversation_id` must belong to the caller (404 otherwise). A new conversation is titled from the first 60 characters of the question. Its scope comes from the context (`_scope_from_context`, `backend/app/api/copilot.py:361`): `entry`, `multi_entry`, `entity` (`scope_id = "{entity_type}:{entity_id}"`) or `global`.
-3. **Describe where the analyst is** (`_build_ambient_context`, `backend/app/api/copilot.py:306`) from the optional `CopilotContext` (`backend/app/api/copilot.py:101`). Each lookup is best effort; a failure just drops that line.
+3. **Describe where the analyst is** (`_build_ambient_context`, `backend/app/api/copilot.py:306`) from the optional `CopilotContext` (`backend/app/api/copilot.py:108`). Each lookup is best effort; a failure just drops that line.
 
    | Context field | What the model gets |
    |---|---|
@@ -175,7 +175,9 @@ Article text reaches the model's context through pinned articles, search results
 - **Skipping the click.** An admin can pick low-risk writes that run without it: **Skip Confirm for**, on the copilot's page in the Prompt Workspace (Settings → AI Configuration → Prompts). It stores the `copilot_auto_approve_tools` setting, empty by default. Only `auto_approvable_tools()` may be picked: never an admin tool, and never a two-step delete, whose first call deletes nothing.
 - **Read-only surfaces.** The documentation page's copilot (`DocsCopilot.tsx`) shows no confirm cards, so it sends `context.read_only: true` and is offered read tools only (and the CLI gets a `read` token).
 
-The in-process loops call `ToolGate` directly. The Claude CLI reaches the registry over HTTP, so `/api/tools/execute` (`backend/app/api/tools.py`) applies the same checks to its agent token.
+The in-process loops call `ToolGate` directly. The Claude CLI reaches the registry over HTTP, so `/api/tools/execute` (`backend/app/api/tools.py`) applies the same checks to its agent token. Agentic engine tasks, which run with nobody to click, use `UnattendedGate`: the same refusals, nothing staged, and read tools only unless the assignment opts in.
+
+Every tool runs inside a savepoint (`execute_isolated`). A tool that fails undoes only its own work, not the request's session. Otherwise the copilot would lose the conversation it loaded, and with it the saved turn and any confirm cards staged earlier in that turn.
 
 ### The Claude CLI
 
@@ -192,7 +194,7 @@ Writes the CLI stages are saved against the conversation, so the copilot collect
 
 ## Confirmed writes: staging and the confirm endpoint
 
-A staged write is stored in Redis at `copilot:action:{action_id}` for **900 seconds** (`STAGED_TTL_SECONDS` in `backend/app/tools/gate.py`) with the user, the conversation, the tool and its arguments. The conversation keeps a list of what it staged (`copilot:staged:{conversation_id}`). After the model finishes, `copilot_stream` takes that list (`take_staged`) and sends one `confirm_request` per write, oldest first, before `done`. Each carries `tool_name`, the exact `proposed` arguments, and `destructive` (a delete with a token flow, or an admin tool).
+A staged write is stored in Redis at `copilot:action:{action_id}` for **900 seconds** (`STAGED_TTL_SECONDS` in `backend/app/tools/gate.py`) with the user, the conversation, the tool and its arguments. The conversation keeps a list of what it staged (`copilot:staged:{conversation_id}`). After the model finishes, `copilot_stream` takes that list (`take_staged`) and sends one `confirm_request` per write, oldest first, before `done`. Each carries `tool_name`, the exact `proposed` arguments, `targets`, `preview` and `destructive` (a delete with a token flow, or an admin tool). An id alone would let a planted instruction slip in a different record, so staging names them: `targets` maps each id-holding argument to the record it points at (`name_targets`, e.g. `campaign 'Operation Lantern'`; personal notes are never named), and for a delete `preview` is the tool's own harmless first step, such as how many entries go with a feed. The card shows both.
 
 `POST /api/ai/copilot/confirm` (`copilot_confirm`, `backend/app/api/copilot.py`) then runs or cancels it:
 

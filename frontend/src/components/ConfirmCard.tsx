@@ -75,13 +75,17 @@ export function ConfirmCard({
           {Object.entries(request.proposed).map(([key, value]) => (
             <div key={key} className={styles.arg}>
               <dt>{key}</dt>
-              <dd>{argText(value)}</dd>
+              <dd>
+                {request.targets?.[key] && <span className={styles.target}>{request.targets[key]}</span>}
+                <span className={request.targets?.[key] ? styles.argId : undefined}>{argText(value)}</span>
+              </dd>
             </div>
           ))}
         </dl>
       ) : (
         <div className={styles.description}>{request.description}</div>
       )}
+      {request.preview && <div className={styles.preview}>{request.preview}</div>}
       {request.destructive && (
         <div className={styles.warning}>
           This deletes data or changes it for everyone. Check it before you confirm.

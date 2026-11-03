@@ -77,8 +77,22 @@ def ran(monkeypatch):
     return calls
 
 
+class _Savepoint:
+    def __init__(self):
+        self.is_active, self.done = True, None
+
+    async def rollback(self):
+        self.is_active, self.done = False, "rollback"
+
+    async def commit(self):
+        self.is_active, self.done = False, "commit"
+
+
 class _Session:
     sync_session = SimpleNamespace(is_active=True)
+
+    async def begin_nested(self):
+        return _Savepoint()
 
     async def commit(self):
         pass
@@ -223,7 +237,7 @@ async def test_confirmed_delete_gets_its_token_server_side(monkeypatch):
 
     monkeypatch.setattr(gate, "execute_tool", fake_execute)
     out = await gate.run_confirmed(
-        None, user_id=uuid.uuid4(), role="user", tool_name="delete_detection_rule", args={"rule_id": "r"}
+        _Session(), user_id=uuid.uuid4(), role="user", tool_name="delete_detection_rule", args={"rule_id": "r"}
     )
     assert json.loads(out) == {"deleted": True}
     assert calls == [{"rule_id": "r"}, {"rule_id": "r", "confirmation_token": "server-made"}]
@@ -232,7 +246,7 @@ async def test_confirmed_delete_gets_its_token_server_side(monkeypatch):
 @pytest.mark.asyncio
 async def test_confirmed_admin_tool_refused_for_non_admin(ran):
     out = json.loads(
-        await gate.run_confirmed(None, user_id=uuid.uuid4(), role="user", tool_name="merge_entities", args={})
+        await gate.run_confirmed(_Session(), user_id=uuid.uuid4(), role="user", tool_name="merge_entities", args={})
     )
     assert "admin" in out["error"] and ran == []
 
@@ -500,12 +514,17 @@ async def test_call_tool_goes_through_the_same_gate(fake_redis, ran):
     assert staged["status"] == "awaiting_confirmation"
     # Not reachable for a non-admin at all.
     assert "not available" in json.loads(await g(gate.CALL_TOOL, {"tool": "merge_entities", "args": {}}))["error"]
-    token = json.loads(await g(gate.CALL_TOOL, {"tool": "delete_feed", "args": {"confirmation_token": "x"}}))
-    assert "error" in token
+    # A non-admin delete, so the refusal is about the token, not the role.
+    token = json.loads(
+        await g(gate.CALL_TOOL, {"tool": "delete_detection_rule", "args": {"rule_id": "r", "confirmation_token": "x"}})
+    )
+    assert "confirmation_token" in token["error"]
     nested = json.loads(await g(gate.CALL_TOOL, {"tool": gate.CALL_TOOL, "args": {"tool": "get_feeds"}}))
     assert "error" in nested
-    assert ran == [("get_feeds", {"limit": 1})]
-    assert [s["tool_name"] for s in await gate.take_staged(g.conversation_id, g.user_id)] == ["delete_detection_rule"]
+    # Staging the delete ran only its harmless first step (no token), for the card's preview.
+    assert ran == [("get_feeds", {"limit": 1}), ("delete_detection_rule", {"rule_id": "r"})]
+    (row,) = await gate.take_staged(g.conversation_id, g.user_id)
+    assert row["tool_name"] == "delete_detection_rule" and row["preview"]
 
 
 def test_read_only_plan_has_no_writes():
@@ -553,3 +572,53 @@ def test_research_task_routing_rules():
     assert provider_type_supports_web_search("claude") and provider_type_supports_web_search("claude_code")
     assert not provider_type_supports_web_search("ollama")
     assert not provider_type_supports_web_search("openai_compatible")
+
+
+# ------------------------------------------------ engine (unattended) gate
+
+
+@pytest.mark.asyncio
+async def test_unattended_gate_keeps_the_copilot_refusals(monkeypatch, ran):
+    """Background agentic tasks have nobody to click Confirm: same refusals, no staging."""
+    defs = gate.model_tool_definitions(role="user", include_writes=False)
+    g = gate.UnattendedGate(db=_Session(), user_id=uuid.uuid4(), role="user", offered=[d["name"] for d in defs])
+
+    assert json.loads(await g("search_entries", {})) == {"ok": "search_entries"}
+    assert "not available" in json.loads(await g("create_note", {"title": "t"}))["error"]
+    assert "not available" in json.loads(await g("run_ai_task", {}))["error"]  # stores results
+    assert "not available" in json.loads(await g("merge_entities", {}))["error"]  # never offered to a user
+    # Even with writes opted in, a model can't confirm its own delete.
+    writes = gate.UnattendedGate(db=_Session(), user_id=uuid.uuid4(), role="system", offered=["delete_campaign"])
+    refused = json.loads(await writes("delete_campaign", {"campaign_id": "c", "confirmation_token": "t"}))
+    assert "confirmation_token" in refused["error"]
+    assert ran == [("search_entries", {})]
+
+
+class _NestingSession(_Session):
+    def __init__(self):
+        self.savepoints: list[_Savepoint] = []
+        self.full_rollbacks = 0
+
+    async def begin_nested(self):
+        sp = _Savepoint()
+        self.savepoints.append(sp)
+        return sp
+
+    async def rollback(self):
+        self.full_rollbacks += 1
+
+
+@pytest.mark.asyncio
+async def test_a_failing_tool_rolls_back_only_its_savepoint(monkeypatch):
+    """A whole-session rollback would expire the copilot's conversation and lose the turn."""
+    results = iter(['{"error": "boom"}', '{"ok": 1}'])
+
+    async def fake_execute(name, args, db, user_id):
+        return next(results)
+
+    monkeypatch.setattr(gate, "execute_tool", fake_execute)
+    db = _NestingSession()
+    await gate.execute_isolated(db, "get_feeds", {}, uuid.uuid4())
+    await gate.execute_isolated(db, "get_feeds", {}, uuid.uuid4())
+    assert [sp.done for sp in db.savepoints] == ["rollback", "commit"]
+    assert db.full_rollbacks == 0

@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 
 import app.ai.engine as engine
 from app.core.security import create_agent_token
+from app.models.ai_conversation import AIConversation
 from app.models.ai_provider import AIProvider
 from app.models.ai_task import AITask
 from app.models.ai_task_assignment import AITaskAssignment
@@ -81,7 +82,7 @@ async def test_agent_tokens_may_not_carry_a_confirmation_token(client: AsyncClie
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 403
-    assert "confirmation_token" in resp.json()["message"]
+    assert "confirmation_token" in resp.json()["error"]["message"]
 
 
 # ------------------------------------------------------- /api/ai/copilot/confirm
@@ -210,3 +211,115 @@ async def test_copilot_turn_stages_writes_on_every_in_process_provider(
     )
     assert done.json()["status"] == "executed", done.text
     assert await _campaigns(db_session, name) == 1
+
+
+# ------------------------------------------------- a failing tool mid-turn
+
+
+@pytest.mark.asyncio
+async def test_a_failing_tool_does_not_lose_the_turn_or_its_staged_writes(
+    client: AsyncClient, auth_headers, test_user: User, db_session, monkeypatch
+):
+    """A handler that aborts the transaction must not take the conversation and the cards with it."""
+    from sqlalchemy import text
+
+    import app.tools as tools
+
+    async def broken(db, user_id, **kw):
+        await db.execute(text("SELECT * FROM no_such_table"))
+
+    monkeypatch.setitem(tools._TOOL_HANDLERS, "get_feeds", broken)
+
+    provider = AIProvider(name="claude site", provider_type="claude", base_url="https://ai.example.com")
+    db_session.add(provider)
+    await db_session.flush()
+    task = AITask(name="copilot", display_name="Copilot", default_prompt_template="{{ question }}")
+    db_session.add(task)
+    await db_session.flush()
+    db_session.add(AITaskAssignment(task_id=task.id, provider_id=provider.id, model_name="m"))
+    await db_session.flush()
+
+    name = f"after-error-{uuid.uuid4().hex[:8]}"
+    stub = _ToolCallingStub(name)
+    monkeypatch.setattr(engine, "_get_provider_instance", lambda pm, **kw: stub)
+    resp = await client.post("/api/ai/copilot/stream", json={"question": "go"}, headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    frames = [json.loads(line[5:]) for line in resp.text.splitlines() if line.startswith("data:")]
+
+    assert "error" in json.loads(stub.results["read"])
+    assert [f["tool_name"] for f in frames if f["type"] == "confirm_request"] == ["create_campaign"]
+    done = next(f for f in frames if f["type"] == "done")
+    conv = (
+        await db_session.execute(select(AIConversation).where(AIConversation.id == uuid.UUID(done["conversation_id"])))
+    ).scalar_one()
+    assert conv.messages[-1]["content"] == "I proposed a campaign."
+
+
+# ------------------------------------------------- what a card names
+
+
+@pytest.mark.asyncio
+async def test_a_staged_delete_names_what_it_deletes(test_user: User, db_session):
+    from app.tools.gate import ToolGate
+
+    campaign = Campaign(created_by=test_user.id, name="Operation Lantern", status="active", tlp_marking="TLP:GREEN")
+    db_session.add(campaign)
+    await db_session.flush()
+    conversation_id = uuid.uuid4()
+    g = ToolGate(
+        db=db_session,
+        user_id=test_user.id,
+        role=test_user.role,
+        offered=["delete_campaign"],
+        conversation_id=conversation_id,
+    )
+
+    reply = json.loads(await g("delete_campaign", {"campaign_id": str(campaign.id)}))
+
+    assert reply["status"] == "awaiting_confirmation"
+    (row,) = await take_staged(conversation_id, test_user.id)
+    assert row["targets"] == {"campaign_id": "campaign 'Operation Lantern'"}
+    assert "delete" in row["preview"].lower()
+    # Staging only previewed it.
+    assert await _campaigns(db_session, "Operation Lantern") == 1
+
+
+# ------------------------------------------------- background agentic tasks
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider_type", ["claude", "openai_compatible", "ollama"])
+async def test_background_agentic_tasks_get_read_tools_through_the_gate(
+    db_session, test_user: User, monkeypatch, provider_type
+):
+    from app.ai.engine import run_task
+    from app.tools.gate import UnattendedGate, needs_confirmation
+
+    provider = AIProvider(name=provider_type, provider_type=provider_type, base_url="https://ai.example.com")
+    db_session.add(provider)
+    await db_session.flush()
+    task = AITask(name="entity_enrichment_research", display_name="Research", default_prompt_template="{{ text }}")
+    db_session.add(task)
+    await db_session.flush()
+    db_session.add(AITaskAssignment(task_id=task.id, provider_id=provider.id, model_name="m"))
+    await db_session.flush()
+
+    seen: dict = {}
+
+    class Stub:
+        async def complete(self, **kw):
+            seen.update(kw)
+            from app.ai.providers.base import AIResponse
+
+            return AIResponse(content="{}", raw_response={}, tokens_input=1, tokens_output=1, model="m", latency_ms=1)
+
+    monkeypatch.setattr(engine, "_get_provider_instance", lambda pm, **kw: Stub())
+    await run_task(db_session, test_user.id, task.name, variables={"text": "hi"})
+
+    names = [t.get("name") or t["function"]["name"] for t in seen["tools"]]
+    assert names and not [n for n in names if needs_confirmation(n)]
+    assert isinstance(seen["tool_executor"], UnattendedGate)
+    refused = json.loads(
+        await seen["tool_executor"]("delete_campaign", {"campaign_id": "c", "confirmation_token": "t"})
+    )
+    assert "error" in refused

@@ -248,11 +248,129 @@ def auto_approve_tools() -> frozenset[str]:
     return frozenset(names & set(auto_approvable_tools()))
 
 
+# Shared record types an id in a staged call may name, for the confirm card.
+# Notes are left out: they are personal, and a model could name someone else's.
+_LABELLED_TYPES = (
+    "threat_actor",
+    "malware",
+    "tool",
+    "vendor",
+    "product",
+    "cve",
+    "ttp",
+    "country",
+    "mitigation",
+    "observable",
+    "campaign",
+    "detection_rule",
+    "feed",
+    "entry",
+    "automation_rule",
+    "intelligence_requirement",
+    "intel_report",
+    "tag",
+)
+_MAX_LABELLED_IDS = 10
+
+
+def _ids_in(value) -> list[uuid.UUID]:
+    values = value if isinstance(value, list) else [value]
+    out = []
+    for v in values:
+        try:
+            out.append(uuid.UUID(str(v)))
+        except (ValueError, TypeError, AttributeError):
+            continue
+    return out
+
+
+async def name_targets(db: AsyncSession, args: dict) -> dict[str, str]:
+    """``{arg: "threat actor 'APT29'"}`` for each argument that holds record ids.
+
+    A confirm card that showed only ids would let a planted instruction slip
+    in a different one: the name is what the user actually checks.
+    """
+    from sqlalchemy import select
+
+    from app.tools.delete import _DELETABLE_ENTITIES, _load_model
+
+    labels: dict[str, str] = {}
+    seen = 0
+    for key, value in (args or {}).items():
+        names: list[str] = []
+        for eid in _ids_in(value):
+            if seen >= _MAX_LABELLED_IDS:
+                break
+            seen += 1
+            for etype in _LABELLED_TYPES:
+                model_path, display_name, _ = _DELETABLE_ENTITIES[etype]
+                Model = _load_model(model_path)
+                row = (await db.execute(select(Model).where(Model.id == eid))).scalar_one_or_none()
+                if row is None:
+                    continue
+                label = (
+                    getattr(row, "title", None)
+                    or getattr(row, "name", None)
+                    or getattr(row, "technique_name", None)
+                    or getattr(row, "cve_id", None)
+                    or getattr(row, "value", None)
+                )
+                names.append(f"{display_name} '{label}'" if label else display_name)
+                break
+            else:
+                names.append("not found")
+        if names:
+            labels[key] = ", ".join(names)
+    return labels
+
+
+async def preview_call(db: AsyncSession, tool_name: str, args: dict, user_id: uuid.UUID) -> str | None:
+    """For a two-step delete, what its first (harmless) call says it will delete."""
+    if tool_name not in confirmation_token_tools():
+        return None
+    raw = await execute_isolated(
+        db, tool_name, {k: v for k, v in args.items() if k != CONFIRMATION_TOKEN_PARAM}, user_id
+    )
+    try:
+        first = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(first, dict):
+        return None
+    if first.get("error"):
+        return f"Can't be done as proposed: {first['error']}"
+    skip = {CONFIRMATION_TOKEN_PARAM, "status", "message", "warning"}
+    facts = [
+        f"{k.replace('_', ' ')}: {v}"
+        for k, v in first.items()
+        if k not in skip and not k.endswith("_id") and isinstance(v, (str, int, float))
+    ]
+    return " · ".join(p for p in [str(first.get("message") or ""), *facts] if p) or None
+
+
 async def stage_tool_call(
-    *, user_id: uuid.UUID, conversation_id: uuid.UUID | str | None, tool_name: str, args: dict
+    *,
+    user_id: uuid.UUID,
+    conversation_id: uuid.UUID | str | None,
+    tool_name: str,
+    args: dict,
+    db: AsyncSession | None = None,
 ) -> str:
-    """Hold a write for the user's confirmation; returns its action id."""
+    """Hold a write for the user's confirmation; returns its action id.
+
+    With ``db``, the staged row also names the records the call's ids point at
+    and, for a delete, what it will delete, so the confirm card can say so.
+    """
     from app.services.redis_client import get_redis
+
+    targets: dict[str, str] = {}
+    preview: str | None = None
+    if db is not None:
+        try:
+            targets = await name_targets(db, args)
+            preview = await preview_call(db, tool_name, args, user_id)
+        except Exception as e:  # the card still shows the raw call
+            logger.warning("could not describe staged %s: %s", tool_name, e)
 
     action_id = str(uuid.uuid4())
     r = await get_redis()
@@ -265,6 +383,8 @@ async def stage_tool_call(
                 "tool_name": tool_name,
                 "args": args,
                 "summary": describe_call(tool_name, args),
+                "targets": targets,
+                "preview": preview,
             },
             default=str,
         ),
@@ -314,6 +434,29 @@ async def take_staged(conversation_id: uuid.UUID | str, user_id: uuid.UUID) -> l
             continue
         out.append({**row, "action_id": action_id})
     return out
+
+
+async def execute_isolated(db: AsyncSession, name: str, args: dict, user_id: uuid.UUID) -> str:
+    """Run one tool inside a savepoint, so a failure undoes that tool's work only.
+
+    A failed handler leaves the transaction aborted. Rolling the whole session
+    back would also expire everything the caller loaded in it (the copilot's
+    conversation and user), and its later lazy loads fail in async: the turn
+    goes unsaved and its staged writes never reach a confirm card. A tool that
+    returns an error also keeps none of what it flushed. A handler that
+    commits itself closes the savepoint; then there is nothing left to undo.
+    """
+    savepoint = await db.begin_nested()
+    result = await execute_tool(name, args, db, user_id)
+    failed = result.startswith('{"error"')
+    if savepoint.is_active:
+        if failed:
+            await savepoint.rollback()
+        else:
+            await savepoint.commit()
+    elif failed and not db.sync_session.is_active:
+        await db.rollback()
+    return result
 
 
 class ToolGate:
@@ -367,18 +510,40 @@ class ToolGate:
             return json.dumps({"error": refusal})
         if needs_confirmation(name) and name not in self.auto_approve:
             action_id = await stage_tool_call(
-                user_id=self.user_id, conversation_id=self.conversation_id, tool_name=name, args=args
+                user_id=self.user_id, conversation_id=self.conversation_id, tool_name=name, args=args, db=self.db
             )
             return staged_reply(action_id, name)
-        result = await execute_tool(name, args, self.db, self.user_id)
-        # A handler exception (execute_tool returns {"error": ...}) can leave the
-        # shared session in a failed transaction; roll back so later tool calls
-        # and the conversation write don't hit PendingRollbackError.
-        if result.startswith('{"error"') and not self.db.sync_session.is_active:
-            await self.db.rollback()
-        elif needs_confirmation(name):
+        result = await execute_isolated(self.db, name, args, self.user_id)
+        if needs_confirmation(name) and not result.startswith('{"error"'):
+            # An auto-approved write: keep it, whatever happens to the turn.
             await self.db.commit()
         return result
+
+
+class UnattendedGate:
+    """The executor for an agentic engine task, which runs with nobody to click Confirm.
+
+    So nothing is staged: what the task was offered is what it may run, and
+    the engine offers read tools only unless the assignment opts in
+    (``agent_tools_read_only: false``). The refusals are the same as
+    ToolGate's, so a model still can't run a tool it wasn't offered, reach an
+    admin tool for a non-admin, or confirm its own delete with a token.
+    """
+
+    def __init__(self, *, db: AsyncSession, user_id: uuid.UUID, role: str, offered: Iterable[str]) -> None:
+        self.db = db
+        self.user_id = user_id
+        self.role = role
+        self.offered = frozenset(offered)
+
+    async def __call__(self, name: str, args: dict) -> str:
+        args = args if isinstance(args, dict) else {}
+        refusal = check_call(name, args, role=self.role, offered=self.offered)
+        if refusal:
+            return json.dumps({"error": refusal})
+        # In a savepoint: a failure must not discard run_task's pending work
+        # (force mode's mark-not-current update) or its AIResult write.
+        return await execute_isolated(self.db, name, args, self.user_id)
 
 
 async def run_confirmed(db: AsyncSession, *, user_id: uuid.UUID, role: str, tool_name: str, args: dict) -> str:
@@ -392,7 +557,7 @@ async def run_confirmed(db: AsyncSession, *, user_id: uuid.UUID, role: str, tool
     refusal = check_call(tool_name, args, role=role, offered=None)
     if refusal:
         return json.dumps({"error": refusal})
-    result = await execute_tool(tool_name, args, db, user_id)
+    result = await execute_isolated(db, tool_name, args, user_id)
     if tool_name in confirmation_token_tools():
         try:
             first = json.loads(result)
@@ -400,5 +565,5 @@ async def run_confirmed(db: AsyncSession, *, user_id: uuid.UUID, role: str, tool
             first = None
         token = first.get(CONFIRMATION_TOKEN_PARAM) if isinstance(first, dict) else None
         if token:
-            result = await execute_tool(tool_name, {**args, CONFIRMATION_TOKEN_PARAM: token}, db, user_id)
+            result = await execute_isolated(db, tool_name, {**args, CONFIRMATION_TOKEN_PARAM: token}, user_id)
     return result

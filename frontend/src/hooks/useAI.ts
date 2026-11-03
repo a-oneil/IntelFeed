@@ -681,6 +681,10 @@ export interface CopilotConfirmRequest {
   tool_name?: string;
   description: string;
   proposed: Record<string, unknown>;
+  /** What each id-holding argument names, e.g. { feed_id: "feed 'Krebs'" }. */
+  targets?: Record<string, string>;
+  /** A delete's own summary of what it will remove (its first, harmless call). */
+  preview?: string | null;
   /** Deletes and admin-only changes: shown with a warning, never edited. */
   destructive?: boolean;
 }
@@ -832,6 +836,8 @@ export async function streamCopilotChat(
                 tool_name: typeof data.tool_name === "string" ? data.tool_name : undefined,
                 description: String(data.description ?? ""),
                 proposed: (data.proposed ?? {}) as Record<string, unknown>,
+                targets: (data.targets ?? {}) as Record<string, string>,
+                preview: typeof data.preview === "string" ? data.preview : null,
                 destructive: data.destructive === true,
               });
               break;

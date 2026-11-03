@@ -9,6 +9,8 @@ const request = {
   tool_name: "delete_feed",
   description: "Delete feed (feed_id=f1)",
   proposed: { feed_id: "f1", reason: { why: "stale" } },
+  targets: { feed_id: "feed 'Krebs on Security'" },
+  preview: "Are you sure you want to delete this feed? · entry count: 412",
   destructive: true,
 };
 
@@ -20,6 +22,8 @@ describe("ConfirmCard", () => {
     expect(screen.getByText("Delete Feed")).toBeInTheDocument();
     expect(screen.getByText("feed_id")).toBeInTheDocument();
     expect(screen.getByText("f1")).toBeInTheDocument();
+    expect(screen.getByText("feed 'Krebs on Security'")).toBeInTheDocument();
+    expect(screen.getByText(/entry count: 412/)).toBeInTheDocument();
     expect(screen.getByText('{"why":"stale"}')).toBeInTheDocument();
     expect(screen.getByText(/deletes data or changes it for everyone/)).toBeInTheDocument();
 

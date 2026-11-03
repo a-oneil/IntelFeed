@@ -56,7 +56,11 @@ async def execute_tool_endpoint(
             if caller.agent_scope == AGENT_SCOPE_PROPOSE:
                 if name not in auto_approve_tools():
                     action_id = await stage_tool_call(
-                        user_id=user.id, conversation_id=caller.conversation_id, tool_name=name, args=request.args
+                        user_id=user.id,
+                        conversation_id=caller.conversation_id,
+                        tool_name=name,
+                        args=request.args,
+                        db=db,
                     )
                     return ToolExecuteResponse(result=staged_reply(action_id, name))
             elif name in MUTATING_TOOLS:
