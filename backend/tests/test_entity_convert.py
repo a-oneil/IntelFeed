@@ -184,3 +184,24 @@ async def test_rename_happy_path(client, db_session, admin_headers):
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["name"] == "Acme Corp"
+
+
+# --- reclassify (the merge engine's path: review queue, adjudicator, registry tool) ---
+
+
+async def test_reclassify_into_new_entity_keeps_article_count(db_session, test_entry):
+    from app.api.entity_merge import ReclassifyRequest, perform_reclassify
+
+    tool = Tool(name="Groovy", article_count=1)
+    db_session.add(tool)
+    await db_session.flush()
+    db_session.add(EntryTool(entry_id=test_entry.id, tool_id=tool.id))
+    await db_session.flush()
+
+    resp = await perform_reclassify(
+        db_session, ReclassifyRequest(source_type="tool", source_id=tool.id, target_type="product")
+    )
+    assert resp.applied and resp.target_created
+
+    product = await db_session.get(Product, resp.target_id)
+    assert product.article_count == 1
