@@ -418,14 +418,15 @@ def test_cve_shaped_names_rejected_for_every_type(entity_type, name):
         "cve-bin-tool",
         "CVE Binary Tool",
         "Vulners",
-        # A four-digit year alone is not an id, and a real family may carry one.
+        # A four-digit year alone is not an id. (These two are vulnerability
+        # nicknames and the shape gates refuse them, but not as CVE ids.)
         "Spring4Shell",
         "Log4Shell",
     ],
 )
 def test_cve_lookalike_names_still_pass(name):
-    assert generic_name_reason("tool", name) is None
-    assert generic_name_reason("malware", name) is None
+    assert generic_name_reason("tool", name) != "cve_id"
+    assert generic_name_reason("malware", name) != "cve_id"
 
 
 # ---------------------------------------------------------------------------
@@ -908,6 +909,67 @@ async def test_store_tools_evidence_gate_drops_unwielded(db_session, test_entry)
         ],
     )
     assert stored == []
+
+
+async def test_store_tools_never_mints_defender_software(db_session, test_entry):
+    """New tools are attacker tools. A defender's tool links when the catalogue
+    already has it, but the vet's Ghidra/FakeNet-NG rows are never minted."""
+    from app.intelligence.tool import store_tools
+
+    db_session.add(Tool(name="Velociraptor", aliases=[]))
+    await db_session.flush()
+
+    stored = await store_tools(
+        db_session,
+        test_entry.id,
+        [
+            {"name": "Velociraptor", "wielded_by": "incident responders", "evidence": "Responders ran Velociraptor."},
+            {"name": "FakeNet-NG", "wielded_by": "the analyst", "evidence": "We used FakeNet-NG to intercept traffic."},
+        ],
+    )
+    assert [(t.name, is_new) for t, is_new in stored] == [("Velociraptor", False)]
+    assert (await db_session.execute(select(Tool.name))).scalars().all() == ["Velociraptor"]
+
+
+async def test_store_tools_needs_evidence_that_names_the_tool(db_session, test_entry):
+    from app.intelligence.tool import store_tools
+
+    stored = await store_tools(
+        db_session,
+        test_entry.id,
+        [{"name": "diskarbitrationd", "wielded_by": "the attacker", "evidence": "Elastic's TCC rule covers it."}],
+    )
+    assert stored == []
+    assert (await db_session.execute(select(func.count()).select_from(Tool))).scalar_one() == 0
+
+
+async def test_actor_and_malware_need_evidence_naming_them(db_session, test_entry, monkeypatch):
+    """With the evidence door on, a new actor or family needs a quoted sentence
+    that names it; an existing one still links without."""
+    monkeypatch.setattr(settings, "ai_entity_evidence_required", True)
+    db_session.add(ThreatActor(name="Lazarus Group", aliases=[]))
+    await db_session.flush()
+
+    actors = await store_threat_actors(
+        db_session,
+        test_entry.id,
+        [
+            {"name": "Lazarus Group"},
+            {"name": "Team82", "evidence": "Researchers at Claroty found the flaw."},
+            {"name": "Storm-9999", "evidence": "Microsoft attributes the intrusions to Storm-9999."},
+        ],
+    )
+    assert sorted((a.name, is_new) for a, is_new in actors) == [("Lazarus Group", False), ("Storm-9999", True)]
+
+    malware = await store_malware(
+        db_session,
+        test_entry.id,
+        [
+            {"name": "PhantomCourier", "evidence": "The packages were published under one npm account."},
+            {"name": "GhostLoader", "evidence": "GhostLoader decrypts and runs the second stage."},
+        ],
+    )
+    assert [(m.name, is_new) for m, is_new in malware] == [("GhostLoader", True)]
 
 
 # ---------------------------------------------------------------------------

@@ -1676,6 +1676,11 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
                 verdicts[item_id].verdict = "keep"
                 verdicts[item_id].explicit = False
             stats["copied_reason"] += len(ids)
+    # The prompt asks for a verdict on every entity this article minted; an
+    # omission is counted so a model that ignores the rule shows in the stats.
+    stats["new_unanswered"] = sum(
+        1 for it in items if it.kind == "link" and it.minted_here and it.item_id not in verdicts
+    )
     out = [verdicts.get(it.item_id) or Verdict(it, "keep", "low", "") for it in items]
     assessment = result.get("assessment")
     if isinstance(assessment, dict) and any(it.kind == "assessment" for it in items):

@@ -168,18 +168,24 @@ The same word lists keep junk out of `aliases` arrays in the first place (`backe
 - `is_junk_alias(alias, canonical_name)` rejects aliases shorter than the minimum length, copies of the entity's own name, and anything on the false-positive or blocked lists.
 - `filter_aliases(aliases, canonical_name)` drops junk aliases and removes case-insensitive duplicates, keeping order.
 
-AI extraction and the Cybergeist sync pass new aliases through `gate_aliases()` (`backend/app/intelligence/entity_resolution.py:1966`), which applies `is_junk_alias()` plus further quality checks. The Malpedia sync (`_run_malpedia_sync`, `backend/app/workers/enrichment_tasks.py:873`) runs Malpedia's `alt_names` through `filter_aliases()`.
+AI extraction and the Cybergeist sync pass new aliases through `gate_aliases()` (`backend/app/intelligence/entity_resolution.py:2134`), which applies `is_junk_alias()` plus further quality checks. The Malpedia sync (`_run_malpedia_sync`, `backend/app/workers/enrichment_tasks.py:873`) runs Malpedia's `alt_names` through `filter_aliases()`.
 
 ### Cross-Type Resurrection Guard
 
 A same-type merge survives re-import because the loser's name becomes an alias of the survivor (`backend/app/intelligence/entity_dedup.py`). A cross-type fold (the "Akira" malware folded into the "Akira" actor) needs more, because each importer only searches its own table and would recreate the loser within hours.
 
-All automated creation goes through `resolve_entity_creation()` (`backend/app/intelligence/entity_resolution.py:1543`). Manual creation in the UI goes through it too, and may override a refusal with `force=true`. In order, it:
+All automated creation goes through `resolve_entity_creation()` (`backend/app/intelligence/entity_resolution.py:1711`). Manual creation in the UI goes through it too, and may override a refusal with `force=true`. In order, it:
 
 1. **Matches an existing entity** by exact name or alias, then a normalized match through `entity_alias_index`, then known actor synonyms.
 2. **Checks reclassify tombstones.** A cross-type reclassify (`perform_reclassify()` in `backend/app/api/entity_merge.py`) writes one `EntityReclassifyTombstone` row per folded name: `(source_type, normalized_name) → (target_type, target_id)`. On a hit, nothing is created and the entry links to the survivor through `link_entry_to_entity()`. Set `active = False` on a tombstone row in the database to allow a split again; there is no UI for this.
 3. **Applies always-on blocks.** For automated sources creating an actor or malware family, `is_fp_entity_name()` (`backend/app/intelligence/autolinker.py:101`) rejects the false-positive list and bare file names such as `svchost.exe`, `*.dll` or `*.sys`. The do-not-recreate list (`entity_name_denylist`) also applies here.
-4. **Applies the switchable gates** (`entity_creation_gates`: `off`, `shadow` or `on`, default `on`). `shadow` logs what it would block and still creates. Besides generic phrases, regions and countries, the gates refuse names that are not things at all (`non_entity_reason()`): protocols (WebRTC, MQTT), cipher names (RSA, Ed25519), install commands (`npm install`, `git clone`), code tokens (`trust_remote_code=True`, `CAP_NET_ADMIN`, AutoConfig), OS APIs and kernel features (BitBlt, ptrace, inotify), product categories (SIEM, ZTNA, "OpenAI models"), technique names (BYOVD, HVNC, DNS tunneling) and hex literals. These apply to actors, malware, tools and products; protocols may still be products, and vendors are not checked. For actors, descriptions ("China-nexus", "North Korea-linked group", "Russian submarine operation") and number-only names ("888") are refused too. The same checks drop matching aliases.
+4. **Applies the switchable gates** (`entity_creation_gates`: `off`, `shadow` or `on`, default `on`). `shadow` logs what it would block and still creates. Besides generic phrases, regions and countries, the gates refuse names that are not things at all (`non_entity_reason()`): protocols (WebRTC, MQTT), cipher names (RSA, Ed25519), install commands (`npm install`, `git clone`), code tokens (`trust_remote_code=True`, `CAP_NET_ADMIN`, AutoConfig), OS APIs and kernel features (BitBlt, ptrace, inotify), product categories (SIEM, ZTNA, "OpenAI models"), technique names (BYOVD, HVNC, DNS tunneling) and hex literals. These apply to actors, malware, tools and products; protocols may still be products, and vendors are not checked. For actors, descriptions ("China-nexus", "North Korea-linked group", "Russian submarine operation", "Chinese spies") and number-only names ("888") are refused too. The same checks drop matching aliases.
+
+   Per type (`generic_name_reason()`), the gates also refuse shapes that are never a name:
+   - **Malware:** file names from an IoC table (`shell.war`, `tc9.dex`, `.x11d`), lowercase hyphenated package names (`btree-range-store`), and descriptions ("Rust-based backdoors", "Turla's RPC backdoor", "Rust loader (embedded)").
+   - **Tools:** absolute paths (`/bin/sh`, `C:\ProgramData\...`), command lines (`aws s3 sync`, `net user`, `gzip -d -c`), and category phrases ("VPN software", "remote desktop sessions").
+   - **Actors:** campaign names ("ArcaneDoor campaign").
+   - **All three:** vulnerability nicknames (Spring4Shell, PHP2Shell, "… RCE").
 5. **Holds weak candidates.** A name that only loosely matches an existing entity is held for review and never auto-merged.
 
 Every decision is written to `EntityMaintenanceLog` (`resolution_*` actions), so it shows in the hygiene feed.
@@ -190,6 +196,11 @@ Tools have two extra guards that apply whatever `entity_creation_gates` says:
 - A name already on file as a product or vendor is held as `product_or_vendor_name`, and the entry links to that product or vendor instead. Dual-use tools in `DUAL_USE_TOOL_NAMES` (AnyDesk, rclone, ngrok, …) are exempt.
 
 A feed with `extract_tools` off calls the resolver with `link_only=True`: known tools still link, and a name that would create a row is blocked as `creation_disabled`.
+
+The AI must back each name with a quoted sentence (`evidence`), and a new entity is only created when that sentence names it. Without one the name still links to an entity that exists, but nothing new is made.
+
+- **Tools** (`ai_tool_evidence_required`): the AI also says who used it (`wielded_by`). New tools are attacker tools. Software that only defenders, researchers, vendors or ordinary users run (Ghidra, FakeNet-NG, a vendor's own platform) links to an existing row but is never created.
+- **Actors and malware** (`ai_entity_evidence_required`): the sentence must name the group as the attacker, or the family as malicious software. Researchers, victims and IoC-table file names fail it.
 
 See diagram: [Entity creation guards](diagrams/intelligence-engine-entity-creation-guards.md)
 

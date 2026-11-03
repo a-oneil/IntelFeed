@@ -174,6 +174,7 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "ai_daily_budget_usd": float,
     "ai_analysis_relevance_threshold": float,
     "ai_tool_evidence_required": bool,
+    "ai_entity_evidence_required": bool,
     "ai_batch_max_requests": int,
     "site_ai_user_daily_requests": int,
     "share_ai_daily_requests": int,
@@ -588,6 +589,15 @@ SETTING_METADATA: dict[str, dict] = {
         "description": (
             "Only store an extracted tool when the model names who wielded it and quotes the "
             "sentence showing its use. Turn off if tool extraction stops finding anything."
+        ),
+        "group": "ai",
+    },
+    "ai_entity_evidence_required": {
+        "label": "Actor & Malware Evidence Gate",
+        "description": (
+            "Only create a new threat actor or malware family when the model quotes a sentence that "
+            "names it as the attacker or the malicious software. Without one, the name still links to "
+            "an existing entity but no new one is made."
         ),
         "group": "ai",
     },

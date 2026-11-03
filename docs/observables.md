@@ -25,15 +25,15 @@ Related: summary in [intelligence-engine.md](intelligence-engine.md#observables-
 
 Defanged values (`evil[.]com`, `hxxps://`) get +0.1. No `created_via` value means "regex".
 
-Door input must pass `validate_kind_value()` (`backend/app/intelligence/observables.py:1350`). New entries are then **sighted**: `sight_known_values()` (`backend/app/intelligence/observables.py:1069`) records exact matches of ledger values.
+Door input must pass `validate_kind_value()` (`backend/app/intelligence/observables.py:1453`). New entries are then **sighted**: `sight_known_values()` (`backend/app/intelligence/observables.py:1169`) records exact matches of ledger values.
 
 ## What becomes a candidate
 
-Rules in `scan_candidates()` (`backend/app/intelligence/observables.py:501`):
+Rules in `scan_candidates()` (`backend/app/intelligence/observables.py:601`):
 
 | Family | Becomes a candidate when |
 |---|---|
-| Hashes, public IPs | Always; IPs must be public, outside reserved or benign ranges (`_valid_public_ip`, `backend/app/intelligence/observables.py:250`) |
+| Hashes, public IPs | Always; IPs must be public, outside reserved or benign ranges (`_valid_public_ip`, `backend/app/intelligence/observables.py:329`) |
 | Domains, URLs, emails | Only when defanged (`microsoft.com` in prose nominates nothing) |
 | Host artifacts | Never from prose. A `<pre>`/`<code>` block may nominate one (`scan_code_block_candidates`) only if the block is mostly commands and the line starts with a shell prompt or known executable |
 
@@ -83,7 +83,7 @@ Host rules (`_plausible_cmdline`, `_plausible_path_atom`, and the branches of `v
 
 **Roles.** Network: `c2`, `delivery`, `payload`, `phishing`, `exfil`, `exploit`, `scanning`. Host (a tactic): `persistence`, `execution`, `defense_evasion`, `credential_access`, `discovery`, `lateral_movement`, `collection`. Feed rows take it from the file path (`domainC2s` → `c2`, scanners → `scanning`, phishing-simulation → `phishing`); VPN, RMM and KVM lists get an infrastructure tag.
 
-**Shared infrastructure.** `is_shared_infra()` (`backend/app/intelligence/observables.py:722`) tags shared hosting, CDNs and URL shorteners in `infra_tag`; publishing skips them, profiles show them.
+**Shared infrastructure.** `is_shared_infra()` (`backend/app/intelligence/observables.py:822`) tags shared hosting, CDNs and URL shorteners in `infra_tag`; publishing skips them, profiles show them.
 
 ## What the AI sees: the analysis window
 
@@ -101,10 +101,17 @@ The seeded `entry_analysis` assignment has a 10,000-token output budget (`backen
 
 `observables_ai_capture_mode` controls the AI door:
 
-- **`capture`** (default) writes rows only for kinds in `observables_ai_capture_kinds` (default: network kinds, hash kinds and `script`).
+- **`capture`** (default) writes rows only for kinds in `observables_ai_capture_kinds` (default: network kinds except `uri_path`, hash kinds and `script`).
 - **`shadow`** stages every AI value as a candidate **carrying its role, evidence, confidence and technique**.
 
-Kinds outside the list are staged as in shadow. The TTP door obeys both switches. Host kinds stay off the list until the fixture (below) shows they are precise. Promoting a staged value (UI, API or tool) carries its judgment to the new row.
+Kinds outside the list are staged as in shadow. The TTP door obeys both switches.
+
+In both modes the AI door refuses three things an analyst can still add by hand:
+- a bare service host (`webhook.site`, `api.github.com`, `login.microsoftonline.com`, the reference hosts in `observables.py`), or its URL with no path; a subdomain or a full URL on the service still counts;
+- a Cloudflare edge IP, since the lure domain behind it is the indicator;
+- a sha1/sha256 whose evidence calls it a wallet, contract or transaction.
+
+Every door rejects a domain without a real public suffix (table cells glued together), and URLs and emails carrying templates or redactions. `&amp;` in a URL is stored as `&`. Host kinds stay off the list until the fixture (below) shows they are precise. Promoting a staged value (UI, API or tool) carries its judgment to the new row.
 
 After changing either, `scripts/maintenance/replay_ai_observables.py` replays stored analysis results through the door and re-creates actor/malware → observable relationships.
 
@@ -169,7 +176,7 @@ Shodan, GreyNoise, VirusTotal and the abuse.ch lookups send the indicator to a t
 
 ## Lifecycle and jobs
 
-Confidence = `base × 0.5^(days since last sighting / half-life)`. `status_for()` (`backend/app/intelligence/observables.py:823`) derives status: `active`, `aging` below 0.5, `expired` below 0.15. `retro_sight_observable()` (`backend/app/intelligence/observables.py:2067`) searches recent entries when a row is created, so promoted candidates keep their history.
+Confidence = `base × 0.5^(days since last sighting / half-life)`. `status_for()` (`backend/app/intelligence/observables.py:923`) derives status: `active`, `aging` below 0.5, `expired` below 0.15. `retro_sight_observable()` (`backend/app/intelligence/observables.py:2206`) searches recent entries when a row is created, so promoted candidates keep their history.
 
 | Job | When (UTC) | Does |
 |---|---|---|
