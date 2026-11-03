@@ -152,9 +152,10 @@ _CONFINEMENT_FLAGS = (
 # container holding every secret in .env. What a task can have:
 #
 # * IntelFeed lookups, through intelfeed-mcp/intelfeed_mcp.py run as an MCP
-#   server. It calls the API with a read-only agent token minted for the
-#   caller (see create_agent_token), so the model holds no credential and can
-#   reach no write tool, whatever it is told.
+#   server. It calls the API with an agent token minted for the caller (see
+#   create_agent_token), so the model holds no credential. The token is
+#   read-only, except on a copilot turn, where it may propose writes: the API
+#   stages them and only the user's click runs one, whatever the model is told.
 # * WebSearch, which Anthropic runs server-side; nothing leaves this host.
 #
 # Assignment configs written before this list "Bash"/"Read"/"Skill" (the old
@@ -284,12 +285,17 @@ class ClaudeCodeProvider(AIProvider):
             )
         return path
 
-    def _mcp_config(self, agent_user_id: uuid.UUID | None, ttl_seconds: float) -> str | None:
+    def _mcp_config(
+        self, agent_user_id: uuid.UUID | None, ttl_seconds: float, *, conversation_id: uuid.UUID | None = None
+    ) -> str | None:
         """--mcp-config JSON for the IntelFeed server, or None when it cannot run.
 
-        The token is minted per run, read-only, and lives no longer than the
-        run. It travels in the server's environment, which the agent cannot
-        read: the agent has no shell or file tools.
+        The token is minted per run and lives no longer than the run. It is
+        read-only, or with ``conversation_id`` a propose token: writes are
+        staged on that copilot conversation for the user's click, and the
+        server offers them as ``write_action``. It travels in the server's
+        environment, which the agent cannot read: the agent has no shell or
+        file tools.
         """
         if agent_user_id is None:
             logger.warning("claude-code: IntelFeed tools requested without a user to act for; answering without them")
@@ -303,11 +309,13 @@ class ClaudeCodeProvider(AIProvider):
 
         env = {
             "INTELFEED_API_URL": self.agent_api_url,
-            "INTELFEED_TOKEN": create_agent_token(agent_user_id, ttl_seconds),
+            "INTELFEED_TOKEN": create_agent_token(agent_user_id, ttl_seconds, conversation_id=conversation_id),
             # Claude reads far more than the small local models the server's
             # 7k default was sized for.
             "INTELFEED_MCP_RESULT_CHARS": "20000",
         }
+        if conversation_id:
+            env["INTELFEED_MCP_PROPOSE_WRITES"] = "1"
         if self.agent_api_url.startswith("http://"):
             # The api on the compose network; the token never leaves the host.
             env["INTELFEED_ALLOW_INSECURE_HTTP"] = "1"
@@ -776,8 +784,13 @@ class ClaudeCodeProvider(AIProvider):
         heartbeat_label: str | None = None,
         env: dict[str, str] | None = None,
         agent_user_id: uuid.UUID | None = None,
+        agent_conversation_id: uuid.UUID | None = None,
     ) -> AsyncGenerator[dict, None]:
         """Run one agent turn via the CLI and yield typed streaming events.
+
+        ``agent_conversation_id`` (the copilot) lets the IntelFeed tools stage
+        writes on that conversation for the user to confirm; without it they
+        are read-only.
 
         Yields dicts of the shapes:
           {"kind": "text", "text": <delta>}
@@ -799,7 +812,7 @@ class ClaudeCodeProvider(AIProvider):
         effective_tools = allowed_tools if allowed_tools is not None else self.allowed_tools
         mcp_config = None
         if self._effective_plan(effective_tools, flags).intelfeed:
-            mcp_config = self._mcp_config(agent_user_id, effective_timeout + 120)
+            mcp_config = self._mcp_config(agent_user_id, effective_timeout + 120, conversation_id=agent_conversation_id)
         argv = self._build_stream_argv(cli, model, system, allowed_tools, flags, mcp_config=mcp_config)
 
         # A scrubbed environment plus the caller's overlay; see _scrubbed_env.

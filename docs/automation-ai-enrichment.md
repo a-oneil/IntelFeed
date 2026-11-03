@@ -294,19 +294,20 @@ There are four provider types (`backend/app/ai/providers/`):
 
 | `provider_type` | Class | What it talks to | Tools? |
 |---|---|---|---|
-| `claude` | `ClaudeProvider` | The Anthropic API (API key) | No |
+| `claude` | `ClaudeProvider` | The Anthropic API (API key) | Yes, a Messages API tool-use loop over the backend tool registry |
 | `claude_code` | `ClaudeCodeProvider` | The Claude Code CLI under an OAuth sign-in, run in `celery-worker-ai` (see [copilot.md](copilot.md)) | Yes, through the IntelFeed MCP server |
 | `ollama` | `OllamaProvider` | An Ollama server (`base_url`, default `http://localhost:11434`) | Yes, a native `/api/chat` tool loop over the backend tool registry |
-| `openai_compatible` | `OpenAICompatibleProvider` | Any `/v1/chat/completions` server: OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter, Groq. `base_url` is required | No |
+| `openai_compatible` | `OpenAICompatibleProvider` | Any `/v1/chat/completions` server: OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter, Groq. `base_url` is required | Yes, a `tools` / `tool_calls` loop, unless the row sets `tools_enabled: false` |
 
-Some tasks only work with tools. `TOOL_REQUIRED_TASKS` (`copilot`, `entity_enrichment_research`) and `TOOL_CAPABLE_PROVIDER_TYPES` (`claude_code`, `ollama`) in `backend/app/ai/capabilities.py:34` stop you from assigning those tasks to a provider that cannot run tools.
+Some tasks only work with tools. `TOOL_REQUIRED_TASKS` (`copilot`, `entity_enrichment_research`) and `provider_type_supports_tools` in `backend/app/ai/capabilities.py` stop you from assigning those tasks to a provider that cannot run tools: today that is only an `openai_compatible` row with tool calling turned off. Background agentic tasks get read-only tools; only the copilot proposes writes, and the user confirms each one (see [copilot.md](copilot.md#the-tool-layer-one-gate-for-every-provider)).
 
 Useful `config` keys by type (provider row, overridable per assignment):
 
 - All: `timeout_seconds`.
 - `claude_code`: `cli_path`, `cli_retries`, `allowed_tools`, `max_budget_usd`, `extra_args`, `mcp_server_path`, `agent_api_url`.
-- `ollama`: `default_model`, `keep_alive`, `model_overrides`; per assignment, `ollama_tools` and `ollama_tools_read_only` (default `true`).
-- `openai_compatible`: `default_model`, `model_overrides`, `model_filter`, `extra_headers`, `embedding_dimensions`, `pricing` (`input_per_mtok`, `output_per_mtok`).
+- `ollama`: `default_model`, `keep_alive`, `model_overrides`.
+- `openai_compatible`: `default_model`, `model_overrides`, `model_filter`, `extra_headers`, `embedding_dimensions`, `pricing` (`input_per_mtok`, `output_per_mtok`), `tools_enabled` (default `true`).
+- Agentic tasks on `claude`, `ollama` or `openai_compatible`, per assignment: `agent_tools` (the tool allowlist) and `agent_tools_read_only` (default `true`). `ollama_tools` / `ollama_tools_read_only` are their old names and still work.
 
 ### Model Configuration
 

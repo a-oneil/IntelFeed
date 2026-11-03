@@ -105,14 +105,29 @@ def _tool(name: str, description: str, input_schema: dict, mutating: bool | None
     return decorator
 
 
-# Default tool subset for the Ollama copilot. The full read-only registry (97
-# tools) serializes to ~6.6k tokens of schema per round — that bloats every
+# Reads the registry doesn't flag mutating that still store what they produce
+# (extractions, AI task results, generated rule drafts). The copilot treats them
+# as writes: they wait for the user's click. Mirrors PERSISTING_READ_TOOLS in
+# intelfeed-mcp/intelfeed_mcp.py, which keeps its own copy (it is stdlib-only).
+PERSISTING_READ_TOOLS: frozenset[str] = frozenset(
+    {
+        "extract_ttps",
+        "extract_cves",
+        "extract_threat_actors",
+        "extract_malware",
+        "run_ai_task",
+        "generate_detection_rules",
+    }
+)
+
+# Default read tools for the copilot on a local model (Ollama). The full
+# registry serializes to ~27k tokens of schema per round — that bloats every
 # request's context AND overwhelms local models' tool selection. This curated
 # set covers the copilot's actual workload (search, entity lookups, pivots,
-# landscape stats) at ~2k tokens. Override per-deployment via the copilot
-# assignment's ``ollama_tools`` config key (editable in the Prompt Workspace's
-# Routing panel when the task is assigned to an Ollama provider).
-DEFAULT_COPILOT_OLLAMA_TOOLS: list[str] = [
+# landscape stats) at ~2k tokens. Hosted providers (Anthropic API,
+# OpenAI-compatible) get the whole registry instead. Override per assignment
+# via the ``agent_tools`` config key (Prompt Workspace → Routing panel).
+DEFAULT_COPILOT_TOOLS: list[str] = [
     "search_entries",
     "search_entities",
     "search_unified",
@@ -130,6 +145,23 @@ DEFAULT_COPILOT_OLLAMA_TOOLS: list[str] = [
     "get_dashboard_stats",
     "search_documentation",
     "get_documentation_page",
+]
+
+# Writes offered alongside DEFAULT_COPILOT_TOOLS on a local model: the everyday
+# ones, the same list the MCP server's write_action allows. Each still waits
+# for the user's click unless it is on copilot_auto_approve_tools.
+DEFAULT_COPILOT_LOCAL_WRITE_TOOLS: list[str] = [
+    "create_note",
+    "create_entity_note",
+    "add_tag",
+    "star_entry",
+    "bookmark_entry",
+    "mark_entry_read",
+    "watch_entity",
+    "unwatch_entity",
+    "create_campaign",
+    "add_to_campaign",
+    "create_saved_search",
 ]
 
 

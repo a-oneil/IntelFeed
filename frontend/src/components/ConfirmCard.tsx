@@ -18,6 +18,11 @@ function actionLabel(actionType: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** One argument value as the card shows it: strings as-is, the rest as JSON. */
+function argText(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
 interface ConfirmCardProps {
   request: CopilotConfirmRequest;
   state: ConfirmState;
@@ -27,9 +32,10 @@ interface ConfirmCardProps {
 
 /**
  * Inline "writes-with-confirm" card rendered within the copilot thread after
- * the assistant turn that proposed a write. Shows the description plus
- * Confirm / Cancel, a disabled/pending state while the request is in flight,
- * and a resolved state (executed / cancelled / error) afterward.
+ * the assistant turn that proposed a write. Shows the exact tool call (its
+ * name and every argument) plus Confirm / Cancel, a disabled/pending state
+ * while the request is in flight, and a resolved state (executed / cancelled /
+ * error) afterward. Nothing runs until Confirm.
  */
 export function ConfirmCard({
   request,
@@ -64,7 +70,23 @@ export function ConfirmCard({
         </Chip>
       </div>
 
-      <div className={styles.description}>{request.description}</div>
+      {request.tool_name ? (
+        <dl className={styles.args}>
+          {Object.entries(request.proposed).map(([key, value]) => (
+            <div key={key} className={styles.arg}>
+              <dt>{key}</dt>
+              <dd>{argText(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <div className={styles.description}>{request.description}</div>
+      )}
+      {request.destructive && (
+        <div className={styles.warning}>
+          This deletes data or changes it for everyone. Check it before you confirm.
+        </div>
+      )}
 
       {(state.status === "pending" || inFlight) && (
         <div className={styles.actions}>

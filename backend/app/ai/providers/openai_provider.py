@@ -52,11 +52,12 @@ Config keys (``ai_providers.config`` / assignment config):
   vector). Omitted entirely unless set — sending it unconditionally breaks
   servers that don't support the parameter.
 
-Not implemented in v1: tool calling. ``supports_tools`` is ``False`` and this
-type is intentionally excluded from
-``app.ai.capabilities.TOOL_CAPABLE_PROVIDER_TYPES`` — local servers vary too
-much in tool-calling quality for a blanket capability (tracked for a
-follow-up behind a per-provider opt-in).
+* ``tools_enabled`` — default on: ``stream_agent`` runs a
+  ``tools`` / ``tool_calls`` loop, and ``complete(tools=..., tool_executor=...)``
+  collapses it for agentic engine tasks. Hosted servers (OpenAI, OpenRouter,
+  Groq) handle tools well; set ``false`` for a local server that doesn't. A
+  server that rejects the ``tools`` parameter gets a text-only answer for that
+  turn, with a note saying so.
 """
 
 from __future__ import annotations
@@ -66,13 +67,22 @@ import json
 import logging
 import re
 import time
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
-from typing import ClassVar
 from urllib.parse import urlparse
 
 import httpx
 
+from app.ai.agent_loop import (
+    DEFAULT_MAX_TOOL_ITERATIONS,
+    ToolExecutor,
+    clip_tool_result,
+    coerce_args,
+    complete_with_agent,
+    run_tool,
+    summarize_result,
+)
 from app.ai.providers.base import AIProvider, AIResponse
 from app.ai.providers.claude_code_provider import QuotaExhaustedError
 from app.ai.providers.schema_utils import enforce_required, to_openai_strict
@@ -88,6 +98,9 @@ _MAX_MODEL_FILTER_LEN = 256
 # Pause after a 429 that names no window: long enough to let a per-minute
 # limit clear, short enough that work resumes on its own.
 _DEFAULT_RATE_LIMIT_PAUSE_SECONDS = 60
+
+# Leads an answer from a server that refused the ``tools`` parameter.
+_TOOLS_REJECTED_NOTE = "_[This provider didn't accept tools, so this answer has none.]_\n\n"
 
 
 def _validate_provider_base_url(raw_url: str) -> str:
@@ -125,9 +138,6 @@ def _parse_retry_after(value: str | None) -> datetime | None:
 class OpenAICompatibleProvider(AIProvider):
     """OpenAI `/v1/chat/completions` dialect (OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter, Groq)."""
 
-    # No in-process tool-calling loop in v1 — see module docstring.
-    supports_tools: ClassVar[bool] = False
-
     def __init__(
         self,
         base_url: str | None = None,
@@ -135,6 +145,8 @@ class OpenAICompatibleProvider(AIProvider):
         config: dict | None = None,
     ):
         super().__init__(base_url=base_url, api_key=api_key, config=config)
+        # Per provider row, not per type (see capabilities.provider_type_supports_tools).
+        self.supports_tools = self.config.get("tools_enabled") is not False
         if not base_url or not base_url.strip():
             raise ValueError("OpenAI-compatible provider requires a base_url")
         self.base_url = _validate_provider_base_url(base_url)
@@ -314,8 +326,23 @@ class OpenAICompatibleProvider(AIProvider):
         model: str | None = None,
         timeout_seconds: float | None = None,
         heartbeat_label: str | None = None,
+        tools: list[dict] | None = None,
+        tool_executor: ToolExecutor | None = None,
     ) -> AIResponse:
         del heartbeat_label  # subprocess-provider concept; not applicable
+        if tools and tool_executor is not None and self.supports_tools:
+            return await complete_with_agent(
+                self,
+                prompt=prompt,
+                system=system,
+                model=model,
+                tools=tools,
+                tool_executor=tool_executor,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout_seconds=timeout_seconds,
+                response_format=response_format,
+            )
 
         resolved_model = self._resolve_model(model)
         cfg = self._model_config(resolved_model)
@@ -442,6 +469,99 @@ class OpenAICompatibleProvider(AIProvider):
                     text = (choices[0].get("delta") or {}).get("content")
                     if text:
                         yield text
+
+    @staticmethod
+    def _rejects_tools(resp: httpx.Response) -> bool:
+        return resp.status_code in (400, 404, 422) and "tool" in resp.text.lower()
+
+    async def stream_agent(
+        self,
+        prompt: str,
+        system: str | None = None,
+        model: str | None = None,
+        tools: list[dict] | None = None,
+        tool_executor: ToolExecutor | None = None,
+        temperature: float = 0.0,
+        max_tokens: int = 4096,
+        timeout_seconds: float | None = None,
+        heartbeat_label: str | None = None,
+    ) -> AsyncGenerator[dict, None]:
+        """Run one agent turn over ``/chat/completions`` with ``tools``, yielding typed events.
+
+        Rounds run non-streamed (tool-call deltas vary too much between
+        servers to stitch reliably); each round's text is emitted whole. Event
+        shapes are the ones in app.ai.agent_loop.
+        """
+        del heartbeat_label
+        payload, cfg = self._build_payload(
+            prompt, system, temperature, max_tokens, response_format=None, model=model, stream=False, mode="prompt"
+        )
+        timeout = timeout_seconds or float(cfg.get("timeout_seconds", self.timeout))
+        max_iterations = int(cfg.get("max_tool_iterations", DEFAULT_MAX_TOOL_ITERATIONS))
+        messages: list[dict] = payload["messages"]
+        effective_tools = tools if (tools and tool_executor is not None and self.supports_tools) else None
+        tokens_input = 0
+        tokens_output = 0
+        cost: float | None = None
+
+        def _done() -> dict:
+            return {
+                "kind": "done",
+                "usage": {"tokens_input": tokens_input, "tokens_output": tokens_output, "total_cost_usd": cost},
+            }
+
+        async with httpx.AsyncClient(timeout=timeout, headers=self._headers()) as client:
+            for iteration in range(max_iterations):
+                body = {**payload, "messages": messages}
+                if effective_tools:
+                    body["tools"] = effective_tools
+                resp = await client.post(f"{self.base_url}/chat/completions", json=body)
+                if effective_tools and self._rejects_tools(resp):
+                    logger.warning(
+                        "%s rejected tools (%s); answering this turn without them", self.base_url, resp.text[:200]
+                    )
+                    effective_tools = None
+                    body.pop("tools", None)
+                    yield {"kind": "text", "text": _TOOLS_REJECTED_NOTE}
+                    resp = await client.post(f"{self.base_url}/chat/completions", json=body)
+                self._raise_for_status(resp)
+                data = resp.json()
+
+                usage = data.get("usage") or {}
+                tokens_input += usage.get("prompt_tokens") or 0
+                tokens_output += usage.get("completion_tokens") or 0
+                round_cost = self._resolve_cost(cfg, usage, resp.headers)
+                if round_cost is not None:
+                    cost = (cost or 0.0) + round_cost
+
+                choice = (data.get("choices") or [{}])[0]
+                message = choice.get("message") or {}
+                content = message.get("content") or ""
+                tool_calls = message.get("tool_calls") or []
+
+                if not tool_calls or not effective_tools:
+                    if content:
+                        yield {"kind": "text", "text": content}
+                    if choice.get("finish_reason") == "length":
+                        yield {"kind": "text", "text": "\n\n_[answer truncated — model hit its output limit]_"}
+                    yield _done()
+                    return
+
+                if content.strip():
+                    yield {"kind": "text", "text": content.rstrip() + "\n\n"}
+                messages.append({"role": "assistant", "content": content or None, "tool_calls": tool_calls})
+                for n, tc in enumerate(tool_calls):
+                    fn = tc.get("function") or {}
+                    name = fn.get("name") or ""
+                    args = coerce_args(fn.get("arguments"))
+                    call_id = tc.get("id") or f"call-{iteration}-{n}"
+                    yield {"kind": "tool_call", "id": call_id, "name": name, "args": args}
+                    status, result = await run_tool(tool_executor, name, args)
+                    yield {"kind": "tool_result", "id": call_id, "status": status, "summary": summarize_result(result)}
+                    messages.append({"role": "tool", "tool_call_id": call_id, "content": clip_tool_result(result)})
+
+        logger.warning("%s agent loop hit max_iterations=%d without a final answer", self.base_url, max_iterations)
+        yield _done()
 
     async def embed(self, texts: list[str], model: str) -> list[list[float]]:
         """``POST /embeddings`` — one vector per input, in input order.

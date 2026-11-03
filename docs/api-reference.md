@@ -49,7 +49,7 @@ IntelFeed signs you in with JWTs (JSON Web Tokens, signed with HS256). You get t
 - **Access token:** sent on every request as `Authorization: Bearer <token>`. Lasts 120 minutes by default (`ACCESS_TOKEN_EXPIRE_MINUTES`).
 - **Refresh token:** trades in for a new pair at `POST /api/auth/refresh`. Lasts 7 days by default (`REFRESH_TOKEN_EXPIRE_DAYS`).
 
-Logging out, or refreshing, revokes the old token: its ID (`jti`) goes on a Redis blacklist until the token would have expired anyway. Every protected route checks that list. Tokens are made by `create_access_token()` (`backend/app/core/security.py:31`) and revoked by `blacklist_token()` (`backend/app/core/security.py:89`).
+Logging out, or refreshing, revokes the old token: its ID (`jti`) goes on a Redis blacklist until the token would have expired anyway. Every protected route checks that list. Tokens are made by `create_access_token()` (`backend/app/core/security.py:31`) and revoked by `blacklist_token()` (`backend/app/core/security.py:99`).
 
 Sign in from the host:
 
@@ -82,9 +82,9 @@ Each endpoint below lists one of these access levels:
 | Level | Who may call it | Dependency |
 | --- | --- | --- |
 | **Public** | Anyone, no token. Some of these check their own token instead (share links, publish feeds, RSS). | none |
-| **Visitor** | A signed-in user. With [public read-only mode](public-read-only-mode.md) on, also an anonymous visitor (read only, with some fields removed). | `get_viewer()` (`backend/app/core/security.py:161`), or `get_entry_viewer()` (`backend/app/core/security.py:194`) for one-article routes |
-| **User** | Any signed-in user. | `get_current_user()` (`backend/app/core/security.py:107`) |
-| **Admin** | Users with the `admin` role. Everyone else gets 403. | `get_admin_user()` (`backend/app/core/security.py:277`) |
+| **Visitor** | A signed-in user. With [public read-only mode](public-read-only-mode.md) on, also an anonymous visitor (read only, with some fields removed). | `get_viewer()` (`backend/app/core/security.py:171`), or `get_entry_viewer()` (`backend/app/core/security.py:204`) for one-article routes |
+| **User** | Any signed-in user. | `get_current_user()` (`backend/app/core/security.py:117`) |
+| **Admin** | Users with the `admin` role. Everyone else gets 403. | `get_admin_user()` (`backend/app/core/security.py:303`) |
 | **Owner** | A signed-in user, but only the row's creator or an admin may change or delete it (403 otherwise). | checked inside the route |
 
 "User (admin for …)" means the route is open to users, but some fields or options are admin-only.

@@ -1,14 +1,16 @@
-"""Global copilot API — a streaming, tool-calling, read-only chat endpoint.
+"""Global copilot API — a streaming, tool-calling chat endpoint.
 
-Workstream E (P1.0). Reuses the P0 AIConversation persistence and the SSE
-framing from intelligence.py's ask-agent endpoints, but drives the Claude Code
-CLI provider's ``stream_agent()`` method so it can call IntelFeed's read-only
-tools mid-answer and surface a tool-call trace to the UI.
+Reuses the AIConversation persistence and the SSE framing from
+intelligence.py's ask-agent endpoints, and drives the answering provider's
+``stream_agent()`` so it can call IntelFeed tools mid-answer and surface a
+tool-call trace to the UI.
 
-Read-only: on the CLI the tools come from the IntelFeed MCP server holding a
-read-only agent token for the asking user (see ClaudeCodeProvider's tool
-policy); on Ollama, from the registry's non-mutating tools. No write tools, no
-confirm_request flow.
+Every provider gets the registry under the asking user's permissions, through
+one gate (app.tools.gate): reads run, writes are staged and run only when the
+user clicks Confirm (``/confirm``). On the Claude CLI the tools come from the
+IntelFeed MCP server holding a ``propose`` agent token for this conversation;
+on the Anthropic API, OpenAI-compatible servers and Ollama, from an in-process
+loop whose executor is the gate itself.
 """
 
 from __future__ import annotations
@@ -53,19 +55,47 @@ _ACTION_FENCE = "```intelfeed-action"
 # still detectable. Must be >= len(_ACTION_FENCE).
 _HOLDBACK = len(_ACTION_FENCE)
 
-# Redis key + TTL for a pending, awaiting-confirmation action.
-_PENDING_KEY_PREFIX = "copilot:action:"
-_PENDING_TTL_SECONDS = 900
+# Redis key + TTL for a pending, awaiting-confirmation action. Shared with the
+# tool gate, which stages tool calls under the same prefix.
+from app.tools.gate import STAGED_KEY_PREFIX as _PENDING_KEY_PREFIX  # noqa: E402
+from app.tools.gate import STAGED_TTL_SECONDS as _PENDING_TTL_SECONDS  # noqa: E402
 
-# Action types the confirm endpoint can execute. Anything the model proposes
-# outside this set is rejected at confirm time.
+# Action types the legacy fence can propose (a copilot prompt edited before
+# writes became tool calls still asks for the fence). Anything else is
+# rejected at confirm time.
 _SUPPORTED_ACTION_TYPES = ("create_campaign", "add_note")
 
-# Curated default tool subset for the Ollama copilot — lives in app.tools so
-# the registry and its defaults stay in one module. Override per-deployment via
-# the copilot assignment's ``ollama_tools`` config key (Prompt Workspace →
-# Routing panel).
-from app.tools import DEFAULT_COPILOT_OLLAMA_TOOLS as _DEFAULT_OLLAMA_TOOLS  # noqa: E402
+from app.tools import DEFAULT_COPILOT_LOCAL_WRITE_TOOLS, DEFAULT_COPILOT_TOOLS  # noqa: E402
+
+
+def _default_copilot_tools() -> list[str]:
+    """The tools shown to the model directly when the assignment sets none.
+
+    The everyday reads and writes. Everything else the user may run stays
+    reachable through ``find_tools`` / ``call_tool`` (app.tools.gate): the whole
+    registry's schemas (~26k tokens) would swamp a local model, and OpenAI
+    refuses more than 128 tools in one request.
+    """
+    return [*DEFAULT_COPILOT_TOOLS, *DEFAULT_COPILOT_LOCAL_WRITE_TOOLS]
+
+
+def _copilot_tool_override(config: dict) -> list[str] | None:
+    """The assignment's ``agent_tools`` (or its old name ``ollama_tools``): exactly these, nothing more."""
+    override = config.get("agent_tools") or config.get("ollama_tools")
+    return list(override) if override else None
+
+
+def _copilot_tool_plan(role: str, config: dict) -> tuple[list[dict], list[dict]]:
+    """(definitions shown to the model, definitions ``call_tool`` may reach) for one user."""
+    from app.tools.gate import meta_tool_definitions, model_tool_definitions
+
+    override = _copilot_tool_override(config)
+    if override is not None:
+        defs = model_tool_definitions(role=role, names=override)
+        return defs, defs
+    reachable = model_tool_definitions(role=role)
+    direct = set(_default_copilot_tools())
+    return [d for d in reachable if d["name"] in direct] + meta_tool_definitions(), reachable
 
 
 class CopilotContext(BaseModel):
@@ -476,7 +506,7 @@ async def copilot_config(
         "configured": False,
         "provider_type": None,
         "provider_name": None,
-        "default_ollama_tools": _DEFAULT_OLLAMA_TOOLS,
+        "default_tools": _default_copilot_tools(),
         "enabled_tools": None,
         "source": None,
         "model": None,
@@ -494,26 +524,21 @@ async def copilot_config(
     if resolved is None:
         return unconfigured
     provider_model = resolved.provider
-    # Only Ollama restricts the copilot to an explicit tool allowlist; other
-    # providers get the full read-only registry, so there's nothing to gate
-    # the "/" command menu on for them (enabled_tools stays None = unrestricted).
-    enabled_tools = None
-    if provider_model.provider_type == "ollama":
-        enabled_tools = resolved.config.get("ollama_tools") or _DEFAULT_OLLAMA_TOOLS
     return {
         "configured": True,
         "provider_type": provider_model.provider_type,
         "provider_name": provider_model.name,
-        # Curated tool subset used when the assignment has no ollama_tools
-        # override — the Prompt Workspace tools editor renders this as the
-        # default selection.
-        "default_ollama_tools": _DEFAULT_OLLAMA_TOOLS,
-        # The assignment's actual effective allowlist (override or default),
-        # used by the dock to hide "/" commands whose tool isn't enabled.
-        "enabled_tools": enabled_tools,
+        # The tools shown directly when the assignment sets no ``agent_tools``
+        # (the rest stay reachable through find_tools / call_tool) — the
+        # Prompt Workspace tools editor renders it as the default selection.
+        "default_tools": _default_copilot_tools(),
+        # The assignment's ``agent_tools`` when it narrows the copilot to just
+        # those (None = every tool the user may run), used by the dock to hide
+        # "/" commands whose tool isn't enabled.
+        "enabled_tools": _copilot_tool_override(resolved.config),
         # Whose provider answers: "user" means the person's own key, and the
-        # dock says so in its header. A key without a tool loop (Claude API,
-        # openai_compatible) answers without tools, and the dock says that too.
+        # dock says so in its header. A provider with tool calling turned off
+        # answers without tools, and the dock says that too.
         "source": resolved.source,
         "model": resolved.model_name,
         "supports_tools": provider_model.supports_tools,
@@ -720,9 +745,9 @@ async def copilot_stream(
         try:
             try:
                 if isinstance(provider, ClaudeCodeProvider):
-                    # The CLI's IntelFeed tools act for this user, read-only:
-                    # the provider mints an agent token the API refuses for
-                    # any mutating tool.
+                    # The CLI's IntelFeed tools act for this user: the provider
+                    # mints a propose token for this conversation, so a write
+                    # the model asks for is staged for the user's click.
                     if settings.copilot_worker_dispatch:
                         # Prod topology: run the CLI on the dedicated claude_code
                         # worker (owns the OAuth credentials volume) and relay its
@@ -741,6 +766,7 @@ async def copilot_stream(
                                 "timeout_seconds": cli_timeout,
                                 "provider_config": config,
                                 "agent_user_id": str(user.id),
+                                "agent_conversation_id": str(conversation_id),
                             },
                             queue="ai",
                         )
@@ -760,30 +786,28 @@ async def copilot_stream(
                             timeout_seconds=cli_timeout,
                             heartbeat_label="copilot stream",
                             agent_user_id=user.id,
+                            agent_conversation_id=conversation_id,
                         )
                 elif getattr(provider, "supports_tools", False) and hasattr(provider, "stream_agent"):
-                    # Ollama native tool loop — runs in-process (no creds needed, so
-                    # copilot_worker_dispatch does not apply). Tools are dispatched
-                    # against the backend registry via an in-process executor bound
-                    # to this request's db session + user; read-only tools only.
-                    from app.tools import ADMIN_TOOLS, execute_tool, ollama_tool_specs, restrict_to_offered
+                    # In-process tool loop (Anthropic API, OpenAI-compatible,
+                    # Ollama): no CLI credentials, so copilot_worker_dispatch
+                    # does not apply. The executor is the tool gate, bound to
+                    # this user, this conversation and exactly the tools
+                    # offered: reads run, writes are staged for the user's
+                    # click, and a tool the model names without being offered
+                    # it is refused.
+                    from app.tools.gate import ToolGate, auto_approve_tools
 
-                    async def _tool_executor(name: str, args: dict) -> str:
-                        result = await execute_tool(name, args, db, user.id)
-                        # A handler exception (execute_tool returns {"error": ...})
-                        # can leave the shared session in a failed transaction
-                        # (is_active False); roll back so later tool calls + the
-                        # conversation persistence don't hit PendingRollbackError.
-                        if result.startswith('{"error"') and not db.sync_session.is_active:
-                            await db.rollback()
-                        return result
-
-                    # Read-only, and never an admin tool for a non-admin. The
-                    # executor is bound to exactly this set, so a tool the model
-                    # names without being offered it is refused, not run.
-                    tool_specs = ollama_tool_specs(config.get("ollama_tools") or _DEFAULT_OLLAMA_TOOLS, read_only=True)
-                    if user.role != "admin":
-                        tool_specs = [s for s in tool_specs if s["function"]["name"] not in ADMIN_TOOLS]
+                    tool_defs, reachable = _copilot_tool_plan(user.role, config)
+                    gate = ToolGate(
+                        db=db,
+                        user_id=user.id,
+                        role=user.role,
+                        offered=[d["name"] for d in tool_defs],
+                        conversation_id=conversation_id,
+                        auto_approve=auto_approve_tools(),
+                        reachable=reachable,
+                    )
                     # NB: conversation history is already rendered into the prompt via
                     # the copilot template's ``conversation_history`` variable (same as
                     # the CLI path), so we do NOT also pass it as ``history`` here —
@@ -792,8 +816,8 @@ async def copilot_stream(
                         prompt=rendered_user,
                         system=rendered_system,
                         model=model,
-                        tools=tool_specs,
-                        tool_executor=restrict_to_offered(tool_specs, _tool_executor),
+                        tools=provider.render_tools(tool_defs),
+                        tool_executor=gate,
                         timeout_seconds=cli_timeout,
                         heartbeat_label="copilot stream",
                     )
@@ -829,8 +853,8 @@ async def copilot_stream(
                             # emitted after persistence, at the end of generate().
                             turn_usage = ev.get("usage") or None
                 else:
-                    # Text-only fallback: a non-tool provider (Anthropic API) streams
-                    # via the base stream_complete contract. No tool trace.
+                    # Text-only fallback: a provider with tool calling turned off
+                    # streams via the base stream_complete contract. No tool trace.
                     async for chunk in provider.stream_complete(
                         prompt=rendered_user, system=rendered_system, model=model
                     ):
@@ -930,6 +954,17 @@ async def copilot_stream(
                 except Exception as e:  # staging failure shouldn't crash the stream
                     logger.error("copilot failed to stage pending action: %s", e)
 
+            # Writes the model asked for through tools, staged by the gate (in
+            # this process, or by /api/tools/execute for the CLI's propose
+            # token). One confirm card each, oldest first.
+            try:
+                from app.tools.gate import take_staged
+
+                for row in await take_staged(conversation_id, user.id):
+                    yield {"data": json.dumps(_confirm_request_event(row))}
+            except Exception as e:  # a lost card is a missed write, not a broken stream
+                logger.error("copilot failed to collect staged tool calls: %s", e)
+
             if errored and not answer:
                 yield {"data": json.dumps({"type": "error", "message": errored})}
             # The reply footer: which provider answered, whose key, and what the
@@ -964,6 +999,28 @@ async def copilot_stream(
 # ---------------------------------------------------------------------------
 # Confirm / execute a proposed write action
 # ---------------------------------------------------------------------------
+
+
+def _is_destructive(tool_name: str) -> bool:
+    """Deletes (the two-step token tools) and admin-only tools: no edited args, a warning on the card."""
+    from app.tools import ADMIN_TOOLS
+    from app.tools.gate import confirmation_token_tools
+
+    return tool_name in ADMIN_TOOLS or tool_name in confirmation_token_tools()
+
+
+def _confirm_request_event(row: dict) -> dict:
+    """The SSE frame for one staged tool call."""
+    tool_name = row.get("tool_name") or ""
+    return {
+        "type": "confirm_request",
+        "action_id": row["action_id"],
+        "action_type": tool_name,
+        "tool_name": tool_name,
+        "description": row.get("summary") or tool_name,
+        "proposed": row.get("args") or {},
+        "destructive": _is_destructive(tool_name),
+    }
 
 
 class CopilotConfirmRequest(BaseModel):
@@ -1072,6 +1129,78 @@ _ACTION_HANDLERS = {
 }
 
 
+async def _append_conversation_note(
+    db: AsyncSession, user: User, conversation_id: str | None, content: str, meta: dict
+) -> None:
+    """Add an assistant line to the conversation the action came from (best-effort)."""
+    if not conversation_id:
+        return
+    try:
+        conv_res = await db.execute(
+            select(AIConversation).where(
+                AIConversation.id == uuid.UUID(conversation_id),
+                AIConversation.user_id == user.id,
+            )
+        )
+        conv = conv_res.scalar_one_or_none()
+        if conv is not None:
+            new_messages = list(conv.messages or [])
+            new_messages.append({"role": "assistant", "content": content, "created_at": now_iso(), "meta": meta})
+            conv.messages = new_messages
+            flag_modified(conv, "messages")
+    except Exception as e:
+        logger.warning("copilot confirm: failed to append conversation message: %s", e)
+
+
+async def _confirm_tool_call(db: AsyncSession, user: User, key: str, pending: dict, edited_args: dict | None) -> dict:
+    """Run a tool call the gate staged, as the user who clicked Confirm."""
+    from app.services.redis_client import get_redis
+    from app.tools.gate import run_confirmed
+
+    tool_name = pending["tool_name"]
+    if edited_args is not None and _is_destructive(tool_name):
+        # The card shows exactly what will be deleted or changed for everyone;
+        # approve that or cancel it.
+        return {"status": "error", "message": "This change can't be edited. Confirm it as shown or cancel it."}
+    args = edited_args if edited_args is not None else (pending.get("args") or {})
+
+    r = await get_redis()
+    claim_key = f"{key}:claim"
+    if not await r.set(claim_key, "1", nx=True, ex=60):
+        raise AppError(code="conflict", message="This action is already being confirmed", status_code=409)
+
+    try:
+        raw = await run_confirmed(db, user_id=user.id, role=user.role, tool_name=tool_name, args=args)
+    except Exception as e:
+        logger.error("copilot confirm: %s failed: %s", tool_name, e)
+        await db.rollback()
+        await r.delete(claim_key)
+        return {"status": "error", "message": f"Failed to execute action: {e}"}
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError:
+        result = raw
+    if isinstance(result, dict) and result.get("error"):
+        # Keep the staged call so the user can retry (with edited args).
+        if not db.sync_session.is_active:
+            await db.rollback()
+        await r.delete(claim_key)
+        return {"status": "error", "message": str(result["error"])[:500]}
+
+    summary = f"Done: {pending.get('summary') or tool_name}"
+    preview = " ".join(raw.split())[:300]
+    await _append_conversation_note(
+        db,
+        user,
+        pending.get("conversation_id"),
+        f"✓ {summary}. Result: {preview}",
+        {"action_executed": tool_name},
+    )
+    await db.commit()
+    await r.delete(key, claim_key)
+    return {"status": "executed", "result": {"summary": summary, "link": None, "tool_name": tool_name}}
+
+
 @router.post("/confirm")
 async def copilot_confirm(
     body: CopilotConfirmRequest,
@@ -1111,6 +1240,9 @@ async def copilot_confirm(
         await r.delete(key)
         return {"status": "cancelled"}
 
+    if pending.get("tool_name"):
+        return await _confirm_tool_call(db, user, key, pending, body.edited_params)
+
     action_type = pending.get("action_type")
     params = body.edited_params if body.edited_params is not None else (pending.get("params") or {})
     handler = _ACTION_HANDLERS.get(action_type)
@@ -1138,30 +1270,9 @@ async def copilot_confirm(
         return {"status": "error", "message": f"Failed to execute action: {e}"}
 
     # Append a success message to the conversation this action came from.
-    conversation_id = pending.get("conversation_id")
-    if conversation_id:
-        try:
-            conv_res = await db.execute(
-                select(AIConversation).where(
-                    AIConversation.id == uuid.UUID(conversation_id),
-                    AIConversation.user_id == user.id,
-                )
-            )
-            conv = conv_res.scalar_one_or_none()
-            if conv is not None:
-                new_messages = list(conv.messages or [])
-                new_messages.append(
-                    {
-                        "role": "assistant",
-                        "content": f"✓ {result.get('summary')}",
-                        "created_at": now_iso(),
-                        "meta": {"action_executed": action_type},
-                    }
-                )
-                conv.messages = new_messages
-                flag_modified(conv, "messages")
-        except Exception as e:  # message append is best-effort
-            logger.warning("copilot confirm: failed to append conversation message: %s", e)
+    await _append_conversation_note(
+        db, user, pending.get("conversation_id"), f"✓ {result.get('summary')}", {"action_executed": action_type}
+    )
 
     await db.commit()
     await r.delete(key, claim_key)

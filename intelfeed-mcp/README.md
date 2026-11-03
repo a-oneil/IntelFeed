@@ -49,6 +49,10 @@ intelfeed-help, and writes (only when writes are enabled). Adding one is adding 
   stars, bookmarks, read state, watches, campaigns and saved searches. `INTELFEED_MCP_WRITE_TOOLS`
   can narrow that list but never extend it. Merges, deletes, feed and automation changes are never
   exposed. Admin-only tools stay gated by `/api/tools/execute` as usual.
+- When IntelFeed's own Claude CLI runs this server for a copilot turn, it sets
+  `INTELFEED_MCP_PROPOSE_WRITES=1` and passes a short-lived *propose* token. `write_action` then
+  takes any registry write, but nothing runs: the API stages the call, and the user confirms or
+  cancels it in the copilot. You don't set this yourself; with your own login it does nothing extra.
 - Credentials only travel over `https://` (or `http://` to localhost; `INTELFEED_ALLOW_INSECURE_HTTP=1`
   for a trusted LAN), and redirects are never followed: urllib would otherwise re-send the
   `Authorization` header to whatever host a redirect names.
@@ -116,6 +120,7 @@ stayed small end to end:
 | `INTELFEED_USERNAME` / `INTELFEED_PASSWORD` | — | required |
 | `INTELFEED_MCP_ALLOW_WRITES` | off | exposes `write_action` |
 | `INTELFEED_MCP_WRITE_TOOLS` | the allowlist above | comma-separated; can only narrow it |
+| `INTELFEED_MCP_PROPOSE_WRITES` | off | set by the backend for copilot turns; `write_action` takes any write, which the API stages for the user |
 | `INTELFEED_ALLOW_INSECURE_HTTP` | off | allow `http://` to a non-loopback host |
 | `INTELFEED_MCP_RESULT_CHARS` | 7000 (≈2k tokens) | per-result budget |
 | `INTELFEED_MCP_DEFAULT_LIMIT` | 10 | default `limit` for list/search tools |

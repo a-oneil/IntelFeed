@@ -32,6 +32,9 @@ from app.models.user_ai_route import UserAIPreferences, UserAIRoute
 
 logger = logging.getLogger(__name__)
 
+# Provider types whose tool loop runs in this process over an injected executor.
+_IN_PROCESS_TOOL_TYPES = frozenset({"ollama", "claude", "openai_compatible"})
+
 # Cost per 1M tokens (input/output) — approximate defaults
 COST_TABLE: dict[str, tuple[float, float]] = {
     "claude-opus-4-6": (15.0, 75.0),
@@ -1010,17 +1013,17 @@ async def run_task(
     # response is a lost analysis; extra budget costs nothing when unused.
     max_tokens = config.get("max_tokens", 16384 if task_name == "entry_analysis" else 8192)
 
-    # Agentic tool wiring for tool-capable non-CLI providers (Ollama). The
-    # Claude Code CLI reaches tools via its own subprocess (no injected executor
-    # needed); the Anthropic API and OpenAI-compatible providers are not
-    # tool-capable (v1). Only agentic tasks get tools — everything else stays
-    # a pure prompt→completion call.
+    # Agentic tool wiring. The Claude Code CLI reaches tools via its own
+    # subprocess (no injected executor needed); Ollama, the Anthropic API and
+    # OpenAI-compatible providers run an in-process loop over an injected
+    # executor. Only agentic tasks get tools — everything else stays a pure
+    # prompt→completion call.
     complete_kwargs: dict = {}
     if provider_model.provider_type == "claude_code":
         # Who the CLI's IntelFeed tools act for. The provider turns it into a
         # read-only agent token for that run; nothing else reaches the agent.
         complete_kwargs["agent_user_id"] = user_id
-    if provider_model.provider_type == "ollama":
+    if provider_model.provider_type in _IN_PROCESS_TOOL_TYPES and provider_model.supports_tools:
         from app.ai.capabilities import task_requires_tools
 
         if task_requires_tools(task_name):
@@ -1028,10 +1031,11 @@ async def run_task(
             from app.tools import execute_tool as _execute_tool
 
             # Read-only by default (safe). A task that must mutate (apply-mode
-            # maintenance) opts in via assignment config ``ollama_tools_read_only:
-            # false`` plus an explicit ``ollama_tools`` allowlist.
-            read_only = bool(config.get("ollama_tools_read_only", True))
-            tool_names = config.get("ollama_tools")
+            # maintenance) opts in via assignment config ``agent_tools_read_only:
+            # false`` plus an explicit ``agent_tools`` allowlist. (The ``ollama_``
+            # spellings are the keys' old names, still read.)
+            read_only = bool(config.get("agent_tools_read_only", config.get("ollama_tools_read_only", True)))
+            tool_names = config.get("agent_tools", config.get("ollama_tools"))
 
             # The mutating opt-in must not become a side door around the gates
             # /api/tools/execute enforces: an agentic task runs AS ``user_id``,
@@ -1043,7 +1047,7 @@ async def run_task(
             _privileged = _role in ("admin", "system")
             if not _privileged:
                 # Don't even offer the gated ones. This has to run even when the
-                # assignment set no ``ollama_tools`` allowlist: ``None`` means
+                # assignment set no ``agent_tools`` allowlist: ``None`` means
                 # "offer everything" to ollama_tool_specs, so short-circuiting on
                 # a falsy tool_names would hand a non-admin the full gated set
                 # whenever read_only is off. Materialize the registry and filter.
@@ -1070,6 +1074,15 @@ async def run_task(
             # still executed any tool the model named, mutating ones included.
             specs = ollama_tool_specs(tool_names, read_only=read_only)
             complete_kwargs["tools"] = specs
+            if provider_model.provider_type == "claude":
+                complete_kwargs["tools"] = [
+                    {
+                        "name": f["function"]["name"],
+                        "description": f["function"]["description"],
+                        "input_schema": f["function"]["parameters"],
+                    }
+                    for f in specs
+                ]
             complete_kwargs["tool_executor"] = restrict_to_offered(specs, _tool_executor)
 
     # Execute

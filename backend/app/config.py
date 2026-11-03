@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     # Let a personal key point at a private address (a LAN Ollama). Off on a
     # public instance: the server calls whatever URL a person enters.
     user_ai_allow_private_endpoints: bool = False
+    # Comma-separated write tools the copilot may run without the user's click
+    # (e.g. create_note,add_tag,star_entry,watch_entity). Admin tools are never
+    # honoured here. Empty: every write waits for Confirm.
+    copilot_auto_approve_tools: str = ""
     # Cap on one person's own keys, counted on ai_results.key_owner_id as
     # calls, not dollars: their key is their money, so the only limit the
     # operator sets is on how hard this server will drive it. 0 = unlimited.

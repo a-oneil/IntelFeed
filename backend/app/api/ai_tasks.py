@@ -307,12 +307,12 @@ async def upsert_task_assignment(
     if not provider:
         raise AppError(code="not_found", message="Provider not found", status_code=404)
 
-    if task_requires_tools(task.name) and not provider_type_supports_tools(provider.provider_type):
+    if task_requires_tools(task.name) and not provider_type_supports_tools(provider.provider_type, provider.config):
         raise AppError(
             code="provider_incompatible",
             message=(
-                f"'{task.display_name}' is agentic and requires a tool-capable provider "
-                f"(Claude Code CLI or Ollama); '{provider.name}' ({provider.provider_type}) cannot run tools."
+                f"'{task.display_name}' is agentic and requires a provider that can run tools; "
+                f"'{provider.name}' ({provider.provider_type}) has tool calling turned off."
             ),
             status_code=400,
         )

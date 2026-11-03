@@ -668,14 +668,19 @@ export interface CopilotContext {
 
 /**
  * A pending "write-with-confirm" action proposed by the agent. Arrives on the
- * copilot stream (right before `done`) as a `confirm_request` event. The user
- * must approve/cancel it via {@link CopilotConfirmResponse}.
+ * copilot stream (right before `done`) as a `confirm_request` event, one per
+ * write the model asked for. Nothing has run: the user must approve/cancel it
+ * via {@link CopilotConfirmResponse}.
  */
 export interface CopilotConfirmRequest {
   action_id: string;
   action_type: string;
+  /** The registry tool that will run; absent for a legacy fenced proposal. */
+  tool_name?: string;
   description: string;
   proposed: Record<string, unknown>;
+  /** Deletes and admin-only changes: shown with a warning, never edited. */
+  destructive?: boolean;
 }
 
 /** Response from POST /api/ai/copilot/confirm. */
@@ -822,8 +827,10 @@ export async function streamCopilotChat(
               options.onConfirmRequest?.({
                 action_id: String(data.action_id ?? ""),
                 action_type: String(data.action_type ?? ""),
+                tool_name: typeof data.tool_name === "string" ? data.tool_name : undefined,
                 description: String(data.description ?? ""),
                 proposed: (data.proposed ?? {}) as Record<string, unknown>,
+                destructive: data.destructive === true,
               });
               break;
             case "done":

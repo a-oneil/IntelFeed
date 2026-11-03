@@ -37,8 +37,8 @@ import { Chip, RailToggle } from "@/components/primitives";
 /** An assistant turn can interleave tool-trace chips with streamed text. */
 interface CopilotMessage extends AskAgentMessage {
   traces?: ToolTrace[];
-  /** A proposed write attached to this turn, awaiting user confirmation. */
-  confirm?: CopilotConfirmRequest;
+  /** Writes proposed in this turn, each awaiting the user's confirmation. */
+  confirms?: CopilotConfirmRequest[];
   /** Which provider answered this turn, whose key, and what it cost. */
   answeredBy?: CopilotAnsweredBy;
 }
@@ -239,7 +239,7 @@ export function CopilotDockPanel() {
           onConfirmRequest: (req) => {
             // Attach the proposed write to the current assistant turn and seed
             // its lifecycle so a ConfirmCard renders after the message.
-            updateAssistant((m) => ({ ...m, confirm: req }));
+            updateAssistant((m) => ({ ...m, confirms: [...(m.confirms ?? []), req] }));
             setConfirmStates((prev) => ({
               ...prev,
               [req.action_id]: { status: "pending" },
@@ -374,9 +374,8 @@ export function CopilotDockPanel() {
               { role: "assistant", content },
             ]);
           }
-          // The write may have created/changed a campaign; refresh views + history.
-          queryClient.invalidateQueries({ queryKey: ["campaigns"] });
-          queryClient.invalidateQueries({ queryKey: ["ai-conversations"] });
+          // The write can touch anything the registry reaches; refresh every view.
+          queryClient.invalidateQueries();
         } else if (data.status === "cancelled") {
           setConfirmStates((prev) => ({
             ...prev,
@@ -413,11 +412,12 @@ export function CopilotDockPanel() {
   );
 
   // A card is awaiting the user while its action is pending or in flight.
-  const hasUnresolvedConfirm = messages.some((m) => {
-    if (!m.confirm) return false;
-    const s = confirmStates[m.confirm.action_id];
-    return !s || s.status === "pending" || s.status === "in_flight";
-  });
+  const hasUnresolvedConfirm = messages.some((m) =>
+    (m.confirms ?? []).some((c) => {
+      const s = confirmStates[c.action_id];
+      return !s || s.status === "pending" || s.status === "in_flight";
+    }),
+  );
 
   // Slash commands are gated by the same conditions as the input: never while
   // streaming or with a pending confirm. The menu triggers only on a leading
@@ -779,18 +779,15 @@ export function CopilotDockPanel() {
                       {msg.answeredBy.fallback_reason && ` · ${fallbackMessage(msg.answeredBy.fallback_reason)}`}
                     </div>
                   )}
-                  {msg.confirm && (
+                  {(msg.confirms ?? []).map((req) => (
                     <ConfirmCard
-                      request={msg.confirm}
-                      state={
-                        confirmStates[msg.confirm.action_id] ?? {
-                          status: "pending",
-                        }
-                      }
-                      onConfirm={() => resolveConfirm(msg.confirm!, true)}
-                      onCancel={() => resolveConfirm(msg.confirm!, false)}
+                      key={req.action_id}
+                      request={req}
+                      state={confirmStates[req.action_id] ?? { status: "pending" }}
+                      onConfirm={() => resolveConfirm(req, true)}
+                      onCancel={() => resolveConfirm(req, false)}
                     />
-                  )}
+                  ))}
                 </div>
               );
             })}

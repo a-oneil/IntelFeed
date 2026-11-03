@@ -126,7 +126,7 @@ async def route_tasks_to_provider(
 
     tasks = (await db.execute(select(AITask).where(AITask.is_system.is_(True)))).scalars().all()
     existing = {a.task_id: a for a in (await db.execute(select(AITaskAssignment))).scalars().all()}
-    supports_tools = provider_type_supports_tools(provider.provider_type)
+    supports_tools = provider_type_supports_tools(provider.provider_type, provider.config)
     fixed_model = configured_model(provider)
 
     for task in tasks:

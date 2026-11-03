@@ -417,6 +417,7 @@ function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider;
   const updateProvider = useUpdateAIProvider();
   const cfg = (provider.config || {}) as Record<string, unknown>;
   const [knobs, setKnobs] = useState<OpenAICompatKnobs>(() => openAIKnobsFrom(cfg));
+  const [toolsEnabled, setToolsEnabled] = useState(cfg.tools_enabled !== false);
   const [extraBodyError, setExtraBodyError] = useState<string | null>(null);
   const set = (key: keyof OpenAICompatKnobs, value: string) =>
     setKnobs((prev) => ({ ...prev, [key]: value }));
@@ -441,7 +442,9 @@ function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider;
     delete next.pricing;
     delete next.report_cost;
     delete next.extra_body;
+    delete next.tools_enabled;
     Object.assign(next, knobConfig);
+    if (!toolsEnabled) next.tools_enabled = false;
     updateProvider.mutate({ id: provider.id, config: next }, { onSuccess: onClose });
   };
 
@@ -485,6 +488,13 @@ function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider;
           <select value={knobs.send_temperature} onChange={(e) => set("send_temperature", e.target.value)}>
             <option value="">yes (default)</option>
             <option value="false">no</option>
+          </select>
+        </label>
+        <label title="Lets the copilot and agentic tasks call IntelFeed tools on this server. Hosted APIs (OpenAI, OpenRouter, Groq) handle this well. Turn it off for a local server that doesn't; a server that refuses tools also gets a text-only answer on its own.">
+          Tool calling
+          <select value={toolsEnabled ? "" : "false"} onChange={(e) => setToolsEnabled(e.target.value !== "false")}>
+            <option value="">on (default)</option>
+            <option value="false">off</option>
           </select>
         </label>
         <label title="Per-request timeout in seconds.">

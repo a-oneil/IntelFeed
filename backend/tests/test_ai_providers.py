@@ -109,7 +109,8 @@ async def test_create_openai_compatible_provider_no_key(client: AsyncClient, adm
     )
     assert data["provider_type"] == "openai_compatible"
     assert data["base_url"] == "http://localhost:1234/v1"
-    assert data["supports_tools"] is False
+    # Tool calling is on unless the row turns it off.
+    assert data["supports_tools"] is True
 
 
 @pytest.mark.asyncio
@@ -320,8 +321,8 @@ async def test_test_provider_unreachable_host_returns_success_false(client: Asyn
 
 @pytest.mark.asyncio
 async def test_provider_response_includes_supports_tools(client: AsyncClient, admin_headers: dict):
-    # Ollama runs a native tool-calling loop, so it is tool-capable. A plain
-    # Anthropic-API provider ("claude") is not.
+    # Ollama, the Anthropic API and OpenAI-compatible servers all run an
+    # in-process tool loop; only an OpenAI-compatible row can turn it off.
     data = await _create_provider(
         client,
         admin_headers,
@@ -338,7 +339,7 @@ async def test_provider_response_includes_supports_tools(client: AsyncClient, ad
         provider_type="claude",
         base_url="https://api.anthropic.com",
     )
-    assert api_data["supports_tools"] is False
+    assert api_data["supports_tools"] is True
 
 
 def test_provider_classes_agree_with_capability_registry():
@@ -352,7 +353,12 @@ def test_provider_classes_agree_with_capability_registry():
     assert ClaudeCodeProvider.supports_tools is provider_type_supports_tools("claude_code")
     assert ClaudeProvider.supports_tools is provider_type_supports_tools("claude")
     assert OllamaProvider.supports_tools is provider_type_supports_tools("ollama")
-    assert OpenAICompatibleProvider.supports_tools is provider_type_supports_tools("openai_compatible")
+    # Per row for OpenAI-compatible: on by default, off with tools_enabled false.
+    on = OpenAICompatibleProvider(base_url="https://api.openai.com/v1")
+    assert on.supports_tools is provider_type_supports_tools("openai_compatible", {})
+    off = OpenAICompatibleProvider(base_url="http://localhost:1234/v1", config={"tools_enabled": False})
+    assert off.supports_tools is provider_type_supports_tools("openai_compatible", {"tools_enabled": False})
+    assert on.supports_tools is True and off.supports_tools is False
 
 
 def test_engine_factory_raises_on_unknown_provider_type():

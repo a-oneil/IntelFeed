@@ -658,18 +658,22 @@ def test_ollama_tool_specs_shape_and_read_only():
     assert [s["function"]["name"] for s in narrowed] == ["search_entries"]
 
 
-def test_copilot_default_ollama_tools_all_resolve():
+def test_copilot_default_tools_all_resolve():
     """Every curated copilot tool name must exist in the registry (drift guard).
 
-    ollama_tool_specs silently ignores unknown names, so a registry rename
-    would otherwise shrink the copilot's toolbox without any error.
+    The tool list silently ignores unknown names, so a registry rename would
+    otherwise shrink the copilot's toolbox without any error. The reads must
+    be reads and the writes writes: the gate stages only writes.
     """
-    from app.api.copilot import _DEFAULT_OLLAMA_TOOLS
-    from app.tools import ollama_tool_specs
+    from app.api.copilot import _default_copilot_tools
+    from app.tools import DEFAULT_COPILOT_LOCAL_WRITE_TOOLS, DEFAULT_COPILOT_TOOLS, MUTATING_TOOLS
+    from app.tools.gate import model_tool_definitions
 
-    specs = ollama_tool_specs(_DEFAULT_OLLAMA_TOOLS, read_only=True)
-    resolved = {s["function"]["name"] for s in specs}
-    assert resolved == set(_DEFAULT_OLLAMA_TOOLS)
+    names = _default_copilot_tools()
+    resolved = {d["name"] for d in model_tool_definitions(role="user", names=names)}
+    assert resolved == set(names)
+    assert not set(DEFAULT_COPILOT_TOOLS) & MUTATING_TOOLS
+    assert set(DEFAULT_COPILOT_LOCAL_WRITE_TOOLS) <= MUTATING_TOOLS
 
 
 @pytest.mark.asyncio

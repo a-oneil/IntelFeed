@@ -130,7 +130,7 @@ vi.mock("@/hooks/useAI", () => ({
   useAgentTools: vi.fn(() => ({ data: [], isLoading: false })),
 }));
 
-// OllamaToolsRow reads the copilot config; without this the real hook runs and
+// AgentToolsRow reads the copilot config; without this the real hook runs and
 // blows up on the missing QueryClientProvider.
 vi.mock("@/hooks/useCopilotAuth", () => ({
   useCopilotConfig: vi.fn(() => ({ data: undefined, isLoading: false })),

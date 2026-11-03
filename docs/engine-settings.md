@@ -34,7 +34,7 @@ A database value that equals the default does nothing useful, and it stops you g
 |---|---|---|
 | `CONFIGURABLE_KEYS` | `backend/app/services/system_settings.py:26` | Which keys the UI can edit, and each value's type |
 | `SETTING_METADATA` | `backend/app/services/system_settings.py:216` | Label, description and group shown in the UI |
-| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1403` | Moves engine keys into the group of the Engine panel that owns them |
+| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1413` | Moves engine keys into the group of the Engine panel that owns them |
 | `SECRET_KEYS` | `system_settings.py:14` | Encrypted in the database, hidden on read |
 | `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Which Engine screen shows each group; drives the Engine settings search |
 | `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:67` | Single keys that live somewhere other than their group's screen |
@@ -566,7 +566,7 @@ Three networking keys need a word:
 - `webhook_allow_private_networks` (default `true`): the same rule for automation webhooks.
 - `trusted_client_ip_header` (default empty): the header your edge proxy uses for the visitor's real IP, such as `CF-Connecting-IP` behind Cloudflare. Set it only when the server accepts traffic from that proxy alone. Empty uses the first `X-Forwarded-For` address.
 
-`postgres_password`, `meili_master_key`, `secret_key` and `encryption_key` are checked at startup. The value `changeme` gives a warning in development and **stops startup** in production (`_reject_insecure_defaults`, `backend/app/config.py:496`). `encryption_key` must also be a valid Fernet key (32 bytes, URL-safe base64).
+`postgres_password`, `meili_master_key`, `secret_key` and `encryption_key` are checked at startup. The value `changeme` gives a warning in development and **stops startup** in production (`_reject_insecure_defaults`, `backend/app/config.py:505`). `encryption_key` must also be a valid Fernet key (32 bytes, URL-safe base64).
 
 ---
 

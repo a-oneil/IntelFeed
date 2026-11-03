@@ -58,21 +58,31 @@ def create_refresh_token(user_id: uuid.UUID) -> str:
 # A credential for an AI agent acting for a user: the Claude CLI's IntelFeed MCP
 # server holds one for the length of one run. It is its own token type, so
 # get_current_user (and with it every ordinary route) refuses it; only the tool
-# endpoints accept it, through get_tool_caller, and only for read-only tools.
+# endpoints accept it, through get_tool_caller: a ``read`` token runs read-only
+# tools, a ``propose`` token also stages writes for the user to confirm.
 AGENT_TOKEN_TYPE = "agent"
+AGENT_SCOPE_READ = "read"
+AGENT_SCOPE_PROPOSE = "propose"
 
 
-def create_agent_token(user_id: uuid.UUID, ttl_seconds: float) -> str:
-    """A read-only, short-lived token for one agent run on ``user_id``'s behalf."""
+def create_agent_token(user_id: uuid.UUID, ttl_seconds: float, *, conversation_id: uuid.UUID | None = None) -> str:
+    """A short-lived token for one agent run on ``user_id``'s behalf.
+
+    Read-only by default. With ``conversation_id`` it is a ``propose`` token:
+    a write it asks for is staged on that copilot conversation for the user to
+    confirm, never run (see app.tools.gate).
+    """
     now = datetime.now(UTC)
     payload = {
         "sub": str(user_id),
         "exp": now + timedelta(seconds=max(60.0, ttl_seconds)),
         "iat": now,
         "type": AGENT_TOKEN_TYPE,
-        "scope": "read",
+        "scope": AGENT_SCOPE_PROPOSE if conversation_id else AGENT_SCOPE_READ,
         "jti": str(uuid.uuid4()),
     }
+    if conversation_id:
+        payload["conversation_id"] = str(conversation_id)
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
@@ -214,23 +224,40 @@ async def get_entry_viewer(
 
 @dataclass(frozen=True, slots=True)
 class ToolCaller:
-    """Who is calling the tool endpoints, and whether only read tools may run."""
+    """Who is calling the tool endpoints, and what their credential lets them do.
+
+    ``agent_scope`` is None for a person's own login, else the agent token's
+    scope: ``read`` runs read tools only, ``propose`` stages writes on
+    ``conversation_id`` instead of running them.
+    """
 
     user: User
-    read_only: bool
+    agent_scope: str | None = None
+    conversation_id: str | None = None
+
+    @property
+    def is_agent(self) -> bool:
+        return self.agent_scope is not None
 
 
 async def get_tool_caller(
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> ToolCaller:
-    """get_current_user for /api/tools: also accepts an agent token, as read-only."""
+    """get_current_user for /api/tools: also accepts an agent token."""
     payload = decode_token(credentials.credentials)
     token_type = payload.get("type")
     if token_type not in ("access", AGENT_TOKEN_TYPE):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
     user = await _user_from_payload(payload, db)
-    return ToolCaller(user=user, read_only=token_type == AGENT_TOKEN_TYPE)
+    if token_type != AGENT_TOKEN_TYPE:
+        return ToolCaller(user=user)
+    scope = payload.get("scope")
+    conversation_id = payload.get("conversation_id")
+    if scope != AGENT_SCOPE_PROPOSE or not conversation_id:
+        # Anything but a well-formed propose token is read-only.
+        return ToolCaller(user=user, agent_scope=AGENT_SCOPE_READ)
+    return ToolCaller(user=user, agent_scope=AGENT_SCOPE_PROPOSE, conversation_id=str(conversation_id))
 
 
 async def _user_from_payload(payload: dict, db: AsyncSession) -> User:
