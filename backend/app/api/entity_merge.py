@@ -980,7 +980,8 @@ async def perform_reclassify(
             name=source.name,
             aliases=merged_aliases,
             description=body.new_description if body.new_description is not None else source.description,
-            article_count=source.article_count or 0,
+            # Starts empty: step 3 adds the source's count once the links move.
+            article_count=0,
             first_seen_at=source.first_seen_at,
             last_seen_at=source.last_seen_at,
         )
