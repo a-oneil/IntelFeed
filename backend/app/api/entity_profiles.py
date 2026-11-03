@@ -3497,6 +3497,9 @@ async def convert_entity_type(
     # 4. Delete the source (+ its search doc), invalidate caches, refresh vocab.
     await db.delete(source_entity)
     await db.flush()
+    # Like a reclassify: the source's pending proposals close, and its held
+    # autolink matches move to the converted entity.
+    await settle_gone_entity(db, src_slug, body.entity_id, successor=(tgt_slug, new_id), gone=True)
     delete_entity_document(src_slug, body.entity_id)
     await invalidate_entity_cache(src_slug, str(body.entity_id))
     await invalidate_entity_cache(tgt_slug, str(new_id))
