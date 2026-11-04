@@ -99,6 +99,7 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
     from app.services.entry_adjudication import (
         COMPLETED,
         FAILED,
+        RECHECK,
         SKIPPED_OFF,
         SKIPPED_PAUSED,
         TARGET_TYPE,
@@ -109,6 +110,8 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
         _validate_verdicts,
         apply_verdicts,
         build_variables,
+        held_review_owed,
+        mark_held_reviewed,
         supersede_legacy_proposals,
     )
     from app.services.system_settings import _ensure_cache, invalidate_cache
@@ -136,9 +139,14 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
             if row.adjudication_status == COMPLETED:
                 return {"skipped": "already_reviewed", "mode": cfg["mode"], "items": 0}
 
+            started = datetime.now(UTC)
+            recheck_since = row.adjudication_recheck_since
+
             async def _finish(status: str, detail: dict) -> dict:
                 row.adjudication_status = status
                 row.adjudicated_at = datetime.now(UTC)
+                if status == COMPLETED:
+                    row.adjudication_recheck_since = None
                 db.add(row)
                 await db.commit()
                 return detail
@@ -157,7 +165,9 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
             # Legacy rows are taken here, before the model runs, so the
             # reviewer's own freshly written rows are never superseded.
             dropped: list = []
-            items, variables, legacy_rows = await build_variables(db, entry, parsed, cfg, dropped_out=dropped)
+            items, variables, legacy_rows = await build_variables(
+                db, entry, parsed, cfg, dropped_out=dropped, recheck_since=recheck_since
+            )
             if not items:
                 return await _finish(COMPLETED, {"skipped": "nothing_to_review", "mode": cfg["mode"], "items": 0})
 
@@ -210,6 +220,13 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
                     detail[key] = n
             if stats["duplicate"]:
                 detail["skipped"] = "ai_bad_shape"
+            else:
+                await mark_held_reviewed(db, items)
+                # Held matches settled while this review ran, or rejects past
+                # the manifest's cap: owe the article a recheck for those.
+                if "links" in cfg["scope"] and await held_review_owed(db, entry_id, started):
+                    row.adjudication_recheck_since = started
+                    return await _finish(RECHECK, detail)
             return await _finish(COMPLETED, detail)
     finally:
         try:

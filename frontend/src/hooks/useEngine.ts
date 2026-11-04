@@ -221,9 +221,11 @@ export interface StageRunRow {
 
 export interface EntryAdjudicationVerdict {
   item_id: string;
-  kind: "link" | "edge" | "ioc" | "assessment";
+  kind: "link" | "held" | "edge" | "ioc" | "assessment";
   entity_type: string | null;
   entity_id: string | null;
+  /** The entity's name when the verdict recorded one (held matches). */
+  name?: string | null;
   verdict: string;
   reason: string | null;
   suggested_type?: string | null;

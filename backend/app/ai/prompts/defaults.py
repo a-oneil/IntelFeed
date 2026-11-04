@@ -2213,9 +2213,8 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
         "description": (
             "The adjudicate stage: after the one-pass analysis lands, re-reads the article next to a "
             "manifest of everything the analysis wrote to the entry — links of every source, entities "
-            "it minted, pending-tier promotions, relationship claims, AI observables — and returns a "
-            "verdict for each record it would change. Replaces the nightly link validator, hygiene "
-            "reviewer and merge engine."
+            "it minted, pending-tier promotions, held matches it rejected, relationship claims, AI "
+            "observables — and returns a verdict for each record it would change."
         ),
         "category": "extraction",
         "variables": ["entry.title", "entry.feed_title", "entry.content_text", "manifest_block", "item_count"],
@@ -2248,6 +2247,7 @@ VERDICTS (keep is the default for anything you omit; state it explicitly only to
   reclassify  — (links only) a real reference, but the entity sits under the wrong catalogue type; set suggested_type to one of threat_actor, malware, tool, vendor, product, country. Never use remove for type confusion. A type change applies to the entity everywhere, so judge what the entity IS, not how this one article uses the name: a person nicknamed "Prometheus" does not make the Prometheus monitoring product a threat actor — that article's link is a remove.
   veto        — (links marked "NEW, created by this article" only) the entity should not exist at all: a description instead of a name ("Chinese espionage group"), a victim organisation, a vendor or researcher, a product that is not malware or a tool, a generic term. Also: a file, package or plugin name from an IoC table filed as malware; a vulnerability or exploit nickname filed as malware or a tool (Spring4Shell, EternalBlue); a built-in command, shell or developer tool nobody abuses here (/bin/sh, cron, Vite); a security product or analysis tool only defenders run; a political or military body with no cyber operations in the article. A new malware or tool that is really the other type is a reclassify, not a veto.
   merge       — (links marked "NEW, created by this article" only) the entity duplicates one of the names printed after "nearest existing names:"; set merge_into to that name EXACTLY as printed. If the right match is not among those names you cannot merge; use keep or veto.
+  link        — (`held:` items only) the item is NOT linked: its name is also an ordinary word, and the analysis did not name it in this article. Use link when the article is in fact about this entity (the context line uses the name for the threat actor, malware, tool or country, not in its ordinary sense: "the Royal ransomware gang", not "the Royal Navy"). Omit the item when the ordinary sense is meant, which is most of the time.
   demote      — (edges only) the entities co-occur but the article never asserts the claimed relationship: roundups, lists, generic defensive advice ("watch for Cobalt Strike beacons"), the wrong verb, or the wrong direction (an actor's origin country is attribution, not a target).
   drop        — (ioc items only) the value is not an attacker indicator: the publisher's own site or links, researcher and sandbox hosts, documentation URLs, sample-page or tracking URLs, private or reserved addresses, a benign domain the article happens to defang (google[.]com in an example), analyst tooling. Defanging by itself marks a value as malicious, never as benign: a defanged value in an indicator list stays. The article prints it defanged (example[.]com, hxxp://) — look for it in that form before calling it absent. A hash the article lists as an indicator stays, even when its file path is a system path: attackers replace and modify system files, and a vendor's IoC table says so.
                 The item's "found in:" line is where the value sits (its table row or list line, the heading above it), found in its defanged form too. A value in an indicator table, an IoC section or a hash list is an attacker indicator unless the row itself shows it is benign: never drop it as "not in the body text" or "placeholder data", and never on the strength of a boilerplate note elsewhere ("re-fang only in VirusTotal/MISP", "IoCs are also on GitHub").
@@ -2260,6 +2260,7 @@ RULES
   - Each reason must be about its own item and name that item's entity (for an edge, at least one of its two ends; for a ttp, its id or name). A remove or demote whose reason does not name its item is discarded, and so is one whose reason argues the record is right ("validating the edge"): when the evidence supports the record, the verdict is keep. Never copy one reason onto several items; if you cannot say what is wrong with a specific item, leave it out.
   - Leave the item out whenever you are uncertain. A wrong removal destroys real intelligence signal; a wrong keep is cheap to fix later.
   - "promoted from the pending tier" means the name is also an ordinary word and was linked only because the extraction named it; look hard at the context line for these.
+  - A `held:` item is the other side of that: a held word the extraction did not name, so it was never linked. Link it only on a clear mention of the entity itself, and name the entity in the reason.
   - A link marked "an analyst restored this link recently" is a strong keep; remove only on an unambiguous name collision.
   - Article counts and ages are context about how established an entity is: a one-article entity created by this very article deserves scrutiny; a 200-article entity usually does not.
   - For NEW entities, the "nearest existing names" line is what the catalogue already holds. Prefer merge over veto when one of them is the same thing under another name.
@@ -2291,7 +2292,7 @@ Return strict JSON matching the provided schema: the verdicts list first, one ob
                             "item_id": {"type": "string"},
                             "verdict": {
                                 "type": "string",
-                                "enum": ["keep", "remove", "reclassify", "veto", "merge", "demote", "drop"],
+                                "enum": ["keep", "remove", "reclassify", "veto", "merge", "demote", "drop", "link"],
                             },
                             "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
                             "reason": {"type": "string"},

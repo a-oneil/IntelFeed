@@ -748,8 +748,6 @@ The links between articles and entities that the autolinker and extraction creat
 | --- | --- | --- | --- |
 | GET | `/api/entity-links` | Visitor | Every link, newest first |
 | GET | `/api/entity-links/stats` | User | Totals by type and source, and the held-match queue size |
-| GET | `/api/entity-links/pending` | Admin | Held matches (a name that is also an ordinary word) waiting for confirmation |
-| POST | `/api/entity-links/pending/resolve` | Admin | Confirm or reject held matches |
 | DELETE | `/api/entity-links/{entity_type}/{entity_id}/{entry_id}` | User | Remove one link |
 | POST | `/api/entity-links/bulk-unlink` | User | Remove up to 500 links |
 | POST | `/api/false-positives` | User | Report a wrong match (this article, this alias, this entity or this word) |

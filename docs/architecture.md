@@ -237,7 +237,7 @@ For each entry:
 4. **Pattern scan.** Regex finds `CVE-YYYY-NNNN`, `CWE-N` and ATT&CK IDs (`T1234`, `T1234.001`).
 5. **Store** with `store_autolink_matches()`. This writes the junction rows (ignoring ones that exist) and updates each entity's article count and last-seen date.
 
-**Pending tier.** When `autolink_pending_tier_enabled` and `ai_one_pass_enabled` are both on, a match on an ordinary dictionary word is held as a `PendingAutolinkMatch`. The AI analysis then confirms or rejects it.
+**Pending tier.** When `autolink_pending_tier_enabled` and `ai_one_pass_enabled` are both on, a match on an ordinary dictionary word is held as a `PendingAutolinkMatch`. The AI analysis then links or rejects it, and the adjudicator checks that call.
 
 ### Confidence Weighting
 

@@ -21,11 +21,14 @@ class AIAnalysisRequest(Base):
     scoring hasn't reached the entry yet.
 
     ``adjudication_status`` tracks the post-analysis adjudicate stage for the
-    same entry: pending | completed | failed | skipped_<reason> (off, plan,
-    echo, nothing_new, score, budget, paused). NULL = not yet decided. The
-    resweep re-enqueues completed analyses left NULL, budget/paused
-    rows every hour, and pending rows whose ``adjudication_queued_at`` is
-    older than its stale window (a lost task).
+    same entry: pending | completed | failed | recheck | skipped_<reason>
+    (off, plan, echo, nothing_new, score, budget, paused). NULL = not yet
+    decided. The resweep re-enqueues completed analyses left NULL,
+    budget/paused/recheck rows every hour, and pending rows whose
+    ``adjudication_queued_at`` is older than its stale window (a lost task).
+    ``adjudication_recheck_since`` is set while a review is owed only for
+    held matches settled after that moment: the review then judges just
+    those, not the whole article again.
     Pruned after 30 days by prune_engine_tables.
     """
 
@@ -48,6 +51,7 @@ class AIAnalysisRequest(Base):
     adjudication_status: Mapped[str | None] = mapped_column(String(24), index=True)
     adjudicated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     adjudication_queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    adjudication_recheck_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (Index("ix_ai_analysis_status_created", "status", "created_at"),)
 

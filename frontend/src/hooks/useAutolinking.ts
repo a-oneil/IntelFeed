@@ -22,7 +22,6 @@ export interface EntityLinkStats {
   by_source: Record<string, number>;
   by_type: Record<string, number>;
   pending: number;
-  pending_ready: number;
   pending_dropped_ai_off?: number;
   relationships_total: number;
 }
@@ -159,56 +158,5 @@ export function useAllRelationships(filters: RelationshipFilters, enabled = true
     },
     staleTime: 30_000,
     enabled,
-  });
-}
-
-export interface PendingMatchEntry {
-  id: string;
-  entry_id: string;
-  entry_title: string;
-  published_at: string | null;
-  matched_names: string[];
-  confidence: string | null;
-}
-
-export interface PendingMatchGroup {
-  entity_type: string;
-  entity_id: string;
-  name: string;
-  count: number;
-  high: number;
-  entries: PendingMatchEntry[];
-}
-
-/** Held autolink matches (names that are also ordinary words), grouped by entity. */
-export function usePendingMatches(search: string, enabled = true) {
-  return useQuery({
-    queryKey: ["entity-links", "pending", search],
-    queryFn: async () => {
-      const { data } = await api.get<{ groups: PendingMatchGroup[]; total_matches: number }>("/entity-links/pending", {
-        params: search ? { search } : undefined,
-      });
-      return data;
-    },
-    enabled,
-  });
-}
-
-/** Link (promote) or reject held matches — every one for an entity, or picked rows. */
-export function useResolvePending() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (body: {
-      resolution: "promote" | "reject";
-      entity_type?: string;
-      entity_id?: string;
-      ids?: string[];
-    }) => {
-      const { data } = await api.post<{ promoted: number; rejected: number }>("/entity-links/pending/resolve", body);
-      return data;
-    },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["entity-links"] });
-    },
   });
 }

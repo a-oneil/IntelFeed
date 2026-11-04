@@ -1,10 +1,12 @@
-"""Pending autolink matches — dictionary-word entity matches held for AI confirmation.
+"""Pending autolink matches — dictionary-word entity matches held for the analysis.
 
 The autolinker diverts actor/malware/tool/country matches whose only surface
 forms are common English words ("Royal", "Hive", "Turkey") here instead of
-creating junction rows. The one-pass AI analysis reconciler promotes rows whose
-entity it confirms is discussed (creating the real junction row) and rejects
-the rest. Unresolved rows expire via the engine-tables prune job.
+creating junction rows. The article's one-pass analysis settles each row: it
+links the entity when the analysis named it and rejects it when it didn't
+(``autolink_reconcile``). The adjudicator then checks that call — a link like
+any other link, a reject as a ``held`` review item — and ``reviewed_at``
+records that it has. Unresolved rows expire via the engine-tables prune job.
 """
 
 import uuid
@@ -37,4 +39,7 @@ class PendingAutolinkMatch(Base):
     source_weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    resolution: Mapped[str | None] = mapped_column(String(20), nullable=True)  # promoted | rejected | dropped_ai_off
+    resolution: Mapped[str | None] = mapped_column(String(20), nullable=True)  # promoted | rejected
+    # When the adjudicator judged the analysis's reject. Only rejected rows
+    # with no reviewed_at go into its manifest, so each is judged once.
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -1,4 +1,4 @@
-/* Additions to ProposalsQueue.module.css for the per-entity cleanup queues. */
+/* Additions to ProposalsQueue.module.css for the queue's one-row-per-entity groups. */
 
 .search {
   font: inherit;
@@ -9,11 +9,6 @@
   background: var(--bg-secondary);
   color: var(--text-primary);
   min-width: 200px;
-}
-
-.chk {
-  width: 28px;
-  text-align: center;
 }
 
 .chips {
@@ -93,14 +88,6 @@
 .subRow td {
   background: var(--bg-tertiary);
   font-size: var(--fs-sm);
-}
-
-.article {
-  color: var(--text-primary);
-  text-decoration: none;
-}
-.article:hover {
-  text-decoration: underline;
 }
 
 .pager {

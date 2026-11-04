@@ -29,13 +29,14 @@ from app.api.hygiene import (
     _parse_decision,
     _snippet_around,
 )
+from app.intelligence.autolink_reconcile import promote_held, reconcile_pending_autolinks
 from app.models.entity_link_validation_log import EntityLinkValidationLog
 from app.models.entity_maintenance import EntityMaintenanceLog
 from app.models.entry import Entry
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.pending_autolink import PendingAutolinkMatch
 from app.models.product import Product
-from app.models.tool import Tool
+from app.models.tool import EntryTool, Tool
 from app.models.vendor import Vendor
 from app.services.proposal_apply import outcome_is_moot
 
@@ -261,10 +262,12 @@ async def test_converting_an_entity_moves_its_held_matches(client, admin_headers
     [row] = await _held_rows(db_session, entry_id)
     assert (row.entity_type, str(row.entity_id), row.resolved_at) == ("tool", resp.json()["id"], None)
 
-    resp = await client.post(
-        "/api/entity-links/pending/resolve", json={"resolution": "promote", "ids": [str(row.id)]}, headers=admin_headers
-    )
-    assert resp.json() == {"promoted": 1, "rejected": 0}, resp.text
+    # The moved row still links, now to the converted entity.
+    await promote_held(db_session, row)
+    await db_session.flush()
+    tool_id = uuid.UUID(resp.json()["id"])
+    linked = (await db_session.execute(select(EntryTool).where(EntryTool.entry_id == entry_id))).scalars().all()
+    assert [j.tool_id for j in linked] == [tool_id]
 
 
 @pytest.mark.asyncio
@@ -306,20 +309,18 @@ async def test_deleting_an_entity_deletes_its_held_matches(client, admin_headers
 
 
 @pytest.mark.asyncio
-async def test_linking_a_held_match_whose_entity_is_gone_closes_it(client, admin_headers, db_session, test_feed):
+async def test_settling_a_held_match_whose_entity_is_gone_closes_it(db_session, test_feed):
     # Rows left behind before moves existed point at an id that no longer exists.
     e = await _entry(db_session, test_feed)
     row = _held("malware", uuid.uuid4(), e, "Blackwood")
     db_session.add(row)
-    await db_session.commit()
+    await db_session.flush()
 
-    resp = await client.post(
-        "/api/entity-links/pending/resolve", json={"resolution": "promote", "ids": [str(row.id)]}, headers=admin_headers
-    )
-    assert resp.status_code == 200, resp.text
-    assert resp.json() == {"promoted": 0, "rejected": 1}
-    await db_session.refresh(row)
+    counts = await reconcile_pending_autolinks(db_session, e.id, {"malware": [{"name": "Blackwood"}]})
+    assert counts == {"promoted": 0, "rejected": 1}
     assert row.resolution == "rejected"
+    # nothing left for the adjudicator to check
+    assert row.reviewed_at is not None
 
 
 @pytest.mark.asyncio

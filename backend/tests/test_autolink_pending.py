@@ -6,6 +6,7 @@ store diversion into pending_autolink_matches, and the one-pass AI reconcile
 """
 
 import uuid
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -162,6 +163,26 @@ async def test_store_diverts_provisional_to_pending(db_session, entry, royal_mal
     assert pending.resolved_at is None
     await db_session.refresh(royal_malware)
     assert royal_malware.article_count == 5  # unchanged
+
+
+@pytest.mark.asyncio
+async def test_a_rescan_relinks_a_match_already_settled_as_a_link(db_session, entry, royal_malware):
+    # The held match was linked earlier; a re-scan deleted the autolinks first.
+    db_session.add(
+        PendingAutolinkMatch(
+            entry_id=entry.id,
+            entity_type="malware",
+            entity_id=royal_malware.id,
+            canonical_name="Royal",
+            resolution="promoted",
+            resolved_at=datetime.now(UTC),
+        )
+    )
+    await db_session.flush()
+    stored = await store_autolink_matches(db_session, entry.id, [_provisional_match(royal_malware)])
+    assert [m["canonical_name"] for m in stored] == ["Royal"]
+    junction = (await db_session.execute(select(EntryMalware).where(EntryMalware.entry_id == entry.id))).scalar_one()
+    assert junction.source == "auto_link"
 
 
 @pytest.mark.asyncio

@@ -152,15 +152,29 @@ async def _submit_analysis_batches() -> dict | None:
         )
         for eid in missed:
             await enqueue_entry_analysis(db, eid)
+        # Matches held on articles that were analysed before the hold (a
+        # re-scan): the stored analysis settles them, and the article's
+        # review is reopened so the adjudicator checks the result.
+        try:
+            from app.intelligence.autolink_reconcile import settle_held_on_analysed_entries
+
+            async with db.begin_nested():
+                await settle_held_on_analysed_entries(db)
+        except Exception:
+            logger.warning("held-match settle failed", exc_info=True)
+
         # Sibling sweep for the adjudicate stage: completed analyses whose
-        # review decision never landed, and over-budget rows waiting for a
-        # fresh hour.
+        # review decision never landed, over-budget rows waiting for a fresh
+        # hour, and reviews reopened above.
         try:
             from app.services.entry_adjudication import resweep_adjudications
 
             await resweep_adjudications(db)
         except Exception:
             logger.warning("adjudication resweep failed", exc_info=True)
+        # Commit the sweeps before the batch submit: settling bumps entity
+        # article counts, and those row locks must not wait on the provider call.
+        await db.commit()
 
         # Budget clamp (backstop, not a gate — pending rows simply wait)
         budget = float(await get_setting("ai_daily_budget_usd", db) or 2.0)

@@ -149,15 +149,16 @@ Both lists are checked when the vocabulary is built, so a blocked word never ent
 
 ### Pending Tier: Dictionary-Word Matches
 
-The capital-letter rule cannot tell "Royal" the ransomware from "Royal Navy", or "INC" the group from "N2K Networks, Inc." So matches on ordinary English words wait for the AI to confirm them.
+The capital-letter rule cannot tell "Royal" the ransomware from "Royal Navy", or "INC" the group from "N2K Networks, Inc." So matches on ordinary English words wait for the article's AI analysis, and the adjudicator checks what the analysis decided.
 
 - **Which words.** `is_provisional_form()` (`backend/app/intelligence/autolinker.py:194`) marks a single alphabetic word that appears in the bundled list of about 31,000 common English words (`backend/app/intelligence/data/common_english_words.txt`). Examples: "royal", "inc", "hive", "medusa". Coined names such as "Emotet" or "LockBit" link at once. This applies to actors, malware, tools and countries. Countries use a short list of their own instead (`AMBIGUOUS_COUNTRY_WORDS`: Chad, China, Georgia, Guinea, Jersey, Jordan, Niger, Panama, Turkey, Chile, Cuba). Vendors and products always link at once.
 - **Other held matches.** The context rules hold a few more kinds of match the same way (step 6 of the scan): one-word names inside a longer capitalised name, names made only of digits, actor names with initials, and actor or malware names a vendor or product also uses.
 - **Holding.** If every occurrence of an entity in the article is held, the match goes to `pending_autolink_matches` instead of a junction table. Held matches are invisible to correlation, scoring, counts and the UI. One non-dictionary name (the alias "Royal Ransomware", say) turns the whole match into a normal link.
-- **Confirming.** When the one-pass AI analysis lands, `reconcile_pending_autolinks()` (`backend/app/intelligence/autolink_reconcile.py:74`) promotes held entities whose name or alias the AI also extracted. Promotion goes through the normal store path. The rest are rejected with a `FalsePositiveRecord` (`extraction_source = "ai_reconcile"`).
+- **The analysis decides.** When the one-pass AI analysis lands, `reconcile_pending_autolinks()` (`backend/app/intelligence/autolink_reconcile.py:74`) links held entities whose name or alias the AI also extracted, through the normal store path. The rest are rejected with a `FalsePositiveRecord` (`extraction_source = "ai_reconcile"`).
+- **Held after the analysis.** A re-scan (a new entity or alias, a backfill) can hold a match on an article analysed long ago. Every 30 minutes `settle_held_on_analysed_entries()` (inside `submit_analysis_batches`) runs those against the stored analysis the same way and queues a recheck (`adjudication_status = recheck`): a review of just those matches, not the whole article again. A held match that was linked before and is found again by a re-scan is linked again straight away.
+- **The adjudicator checks.** A linked match is an ordinary link to the [adjudicate stage](engine-settings.md#adjudicate-stage-post-analysis-ai-review): it can propose removing it. A rejected match is a `held:` item it can propose linking (`adjudication_held_link`). Each reject is judged once (`pending_autolink_matches.reviewed_at`). Its proposals show in Engine → Review → Proposals with the rest, under the Links domain.
 - **Feeds without AI.** `entry_will_get_ai_analysis()` (`backend/app/services/ai_eligibility.py:41`) checks the instance switch `ai_one_pass_enabled`, the feed's `ai_analysis_enabled`, and that the feed's mode is not `none`. If the entry will never be analysed, nothing could confirm a held match, so these matches are dropped. They are counted in daily Redis keys (`autolink:pending_dropped_ai_off:<YYYYMMDD>`), and the Engine's Autolinking view shows the 30-day total.
 - **Expiry.** Some entries never get an AI pass (junk-gated, out of budget). `prune_engine_tables` deletes unresolved held rows after 14 days and resolved ones after `engine_run_retention_days` (default 30).
-- **Review by hand.** Engine → Review → Held links (`GET /api/entity-links/pending`, `POST /api/entity-links/pending/resolve`).
 
 The tier is on by default (`autolink_pending_tier_enabled`). It switches itself off while `ai_one_pass_enabled` is off, because nothing could confirm the matches. Retroactive linking of a new entity (`link_entity_to_existing_entries`) does not use the tier.
 
@@ -531,7 +532,7 @@ The complete list, including the relationship-strength knobs, is in [engine-sett
 - The name is shorter than `autolinker_min_name_length`.
 - The name is on the false-positive list (actor, malware, country) or the analyst block list.
 - It is a short single word written in lowercase, or repeated more than the limit.
-- It is a dictionary word and the entry is waiting for AI confirmation (Engine → Review → Held links), or the feed has no AI, so the match was dropped.
+- It is a dictionary word and the entry's analysis has not run yet, the analysis did not name it (the adjudicator may still propose linking it, under Engine → Review → Proposals), or the feed has no AI, so the match was dropped.
 - The feed's mode is `manual` or `none`, or `selective` and the entry scored below the relevance threshold.
 - The entity is less than 30 minutes old; the vocabulary has not rebuilt yet. A manually created entity is linked to existing entries straight away by `link_entity_to_existing_entries()`.
 
@@ -653,8 +654,8 @@ Then it is bucketed: ≥ 0.7 high, ≥ 0.4 medium, else low. So "APT29" on an A-
 
 ### Operational notes
 
-- Changing a feed's mode only affects new entries. To re-process old ones, use the rescan endpoints or `autolink_batch()` (`backend/app/intelligence/autolinker.py:1601`), which commits every 100 entries.
-- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1874`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the case and context rules applied, and confidence scaled by feed reliability. The pending tier does not apply, so a match ingest would hold is not linked.
+- Changing a feed's mode only affects new entries. To re-process old ones, use the rescan endpoints or `autolink_batch()` (`backend/app/intelligence/autolinker.py:1621`), which commits every 100 entries.
+- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1894`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the case and context rules applied, and confidence scaled by feed reliability. The pending tier does not apply, so a match ingest would hold is not linked.
 
 ### None of this uses AI
 

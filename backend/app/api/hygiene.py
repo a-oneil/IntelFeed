@@ -67,6 +67,7 @@ from app.services.entity_merge_review import ORIGIN as MERGE_REVIEW_ORIGIN
 from app.services.entry_adjudication import (
     ACTION_ASSESSMENT,
     ACTION_EDGE_DEMOTE,
+    ACTION_HELD_LINK,
     ACTION_IOC_DROP,
     ACTION_MERGE,
     ACTION_RECLASSIFY,
@@ -1096,6 +1097,8 @@ def _adjudication_subject(row: EntityMaintenanceLog) -> str:
         return f"Reclassify: {name or row.entity_type} → {after.get('suggested_type') or '?'}"
     if row.action == ACTION_UNLINK:
         return f"Unlink: {name or row.entity_type} from this article"
+    if row.action == ACTION_HELD_LINK:
+        return f"Link: {name or row.entity_type} to this article (held match the analysis rejected)"
     if row.action == ACTION_EDGE_DEMOTE:
         return f"Demote: {before.get('claim') or 'relationship'}"
     if row.action == ACTION_IOC_DROP:
@@ -1136,7 +1139,11 @@ def _maint_links(row: EntityMaintenanceLog) -> list[FeedLink]:
 
     if row.action in ADJUDICATION_ACTIONS:
         ent = before.get("entity") if isinstance(before.get("entity"), dict) else None
-        if ent and row.entity_id and row.action in (ACTION_VETO, ACTION_MERGE, ACTION_UNLINK, ACTION_RECLASSIFY):
+        if (
+            ent
+            and row.entity_id
+            and row.action in (ACTION_VETO, ACTION_MERGE, ACTION_UNLINK, ACTION_RECLASSIFY, ACTION_HELD_LINK)
+        ):
             _add(row.entity_type, row.entity_id, ent.get("name"), role="subject")
         if row.action == ACTION_MERGE and after.get("target_id"):
             _add(
@@ -4375,8 +4382,9 @@ async def review_groups(
                     },
                 )
                 m["count"] += 1
-            junction = before.get("junction") if isinstance(before.get("junction"), dict) else {}
-            for f in junction.get("matched_names") or []:
+            # the forms the link matched on: a junction snapshot, or a held match
+            matched = before.get("junction") or before.get("held")
+            for f in (matched.get("matched_names") if isinstance(matched, dict) else None) or []:
                 d["forms"][f] += 1
             entry_id = None
             if before.get("entry_id"):
