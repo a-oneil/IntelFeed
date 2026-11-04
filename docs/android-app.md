@@ -36,6 +36,14 @@ The app shows its version at the bottom of **Settings**, for example
 While the repo is private, downloading a release needs a GitHub account with
 access to it.
 
+Once a day the app asks GitHub for the newest release
+(`notifications/AppUpdates.kt`) and, when it is newer than the installed
+version, posts one "IntelFeed <version> is available" notification; tapping it
+opens the release page. The request goes straight from the phone to
+`api.github.com` with no token, so it works signed in or not, and it finds
+nothing while the repo is private. Settings → **App updates** turns the notice
+off and has a "Check for an app update" button.
+
 Every CI run of the `android` job also attaches the APK it built to the run
 as an artifact named `IntelFeed-<version>-apk`, kept for 30 days. Use that to
 try a build from a PR that is not merged yet.

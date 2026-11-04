@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.foundation.background
@@ -65,6 +66,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -93,6 +95,7 @@ import com.example.intelfeed.LocalSnackbarHostState
 import com.example.intelfeed.data.local.UserPreferences
 import com.example.intelfeed.data.model.TagEntity
 import com.example.intelfeed.data.repository.IntelFeedRepository
+import com.example.intelfeed.notifications.AppUpdates
 import com.example.intelfeed.notifications.IntelNotificationHelper
 import com.example.intelfeed.notifications.PriorityAlerts
 import com.example.intelfeed.theme.CyberAmber
@@ -136,6 +139,8 @@ fun SettingsScreen(
     val textSize = ReaderFontSize.fromName(textSizeName)
     val notificationsEnabled by userPreferences.notificationsEnabled.collectAsStateWithLifecycle(initialValue = true)
     val priorityAlertScore by userPreferences.priorityAlertScore.collectAsStateWithLifecycle(initialValue = PriorityAlerts.DEFAULT_CUTOFF)
+    val updateNoticesEnabled by userPreferences.updateNoticesEnabled.collectAsStateWithLifecycle(initialValue = true)
+    var checkingForUpdate by remember { mutableStateOf(false) }
     val snackbarHostState = LocalSnackbarHostState.current
     val speechRate by userPreferences.ttsSpeechRate.collectAsStateWithLifecycle(initialValue = 1.0f)
     var confirmLogout by remember { mutableStateOf(false) }
@@ -153,6 +158,8 @@ fun SettingsScreen(
         onPauseOrDispose { }
     }
     var sendTestAfterGrant by remember { mutableStateOf(false) }
+    // The permission prompt was opened by the update-notices switch, not the intel alerts one.
+    var updatesAfterGrant by remember { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -160,8 +167,11 @@ fun SettingsScreen(
         systemAllowsAlerts = IntelNotificationHelper.canPostNotifications(context)
         val sendTest = sendTestAfterGrant
         sendTestAfterGrant = false
+        val forUpdates = updatesAfterGrant
+        updatesAfterGrant = false
         scope.launch {
-            userPreferences.setNotificationsEnabled(isGranted)
+            if (forUpdates) userPreferences.setUpdateNoticesEnabled(isGranted)
+            else userPreferences.setNotificationsEnabled(isGranted)
             when {
                 !isGranted -> snackbarHostState.showSnackbar("Notifications aren't allowed. You can allow them in Android's app settings.")
                 sendTest -> {
@@ -177,6 +187,13 @@ fun SettingsScreen(
     val setAlerts: (Boolean) -> Unit = { next ->
         if (next && needsPermission) permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         else scope.launch { userPreferences.setNotificationsEnabled(next) }
+    }
+    val updateNoticesOn = updateNoticesEnabled && systemAllowsAlerts
+    val setUpdateNotices: (Boolean) -> Unit = { next ->
+        if (next && needsPermission) {
+            updatesAfterGrant = true
+            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else scope.launch { userPreferences.setUpdateNoticesEnabled(next) }
     }
 
     Scaffold(
@@ -466,8 +483,8 @@ fun SettingsScreen(
 
             SettingsRow(
                 icon = Icons.Default.Sync,
-                title = "Check for updates now",
-                subtitle = "Trigger immediate background sync for tracked intelligence",
+                title = "Check for new intel now",
+                subtitle = "Run the background alert check for tracked intelligence right away",
                 onClick = {
                     IntelNotificationHelper.triggerImmediateSync(context)
                     scope.launch { snackbarHostState.showSnackbar("Background sync triggered") }
@@ -491,6 +508,52 @@ fun SettingsScreen(
                     onClick = { showTagManager = true }
                 )
             }
+
+            SectionHeader("App updates")
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { setUpdateNotices(!updateNoticesOn) }
+                    .padding(vertical = 10.dp)
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("New version notices", fontSize = 15.sp, color = TextPrimary)
+                    Text(
+                        if (updateNoticesEnabled && !systemAllowsAlerts) "Android isn't allowing IntelFeed notifications. Turn this on to allow them."
+                        else "Once a day, notifies you when a new release of the app is out",
+                        fontSize = 12.sp,
+                        color = if (updateNoticesEnabled && !systemAllowsAlerts) CyberAmber else TextMuted
+                    )
+                }
+                Switch(checked = updateNoticesOn, onCheckedChange = setUpdateNotices)
+            }
+            SettingsRow(
+                icon = Icons.Default.SystemUpdate,
+                title = "Check for an app update",
+                subtitle = if (checkingForUpdate) "Checking…" else "You have ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+                onClick = {
+                    if (checkingForUpdate) return@SettingsRow
+                    checkingForUpdate = true
+                    scope.launch {
+                        val release = AppUpdates.fetchLatest()
+                        checkingForUpdate = false
+                        when {
+                            release == null -> snackbarHostState.showSnackbar("Couldn't check GitHub for releases.")
+                            AppUpdates.isNewer(release, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE) -> {
+                                val url = release.url
+                                val result = snackbarHostState.showSnackbar(
+                                    "IntelFeed ${release.versionName} is available",
+                                    actionLabel = if (url != null) "Open" else null,
+                                    withDismissAction = true
+                                )
+                                if (result == SnackbarResult.ActionPerformed) ExternalLinks.openInBrowser(context, url)
+                            }
+                            else -> snackbarHostState.showSnackbar("You have the newest version.")
+                        }
+                    }
+                }
+            )
 
             HorizontalDivider(color = SlateDark600, modifier = Modifier.padding(vertical = 16.dp))
             SettingsRow(

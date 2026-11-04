@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -28,6 +29,11 @@ object IntelNotificationHelper {
     private const val CHANNEL_DESCRIPTION = "Alerts for tracked campaigns, saved searches, and priority intelligence"
     private const val PERIODIC_WORK_NAME = "intel_periodic_sync"
     private const val IMMEDIATE_WORK_NAME = "intel_immediate_sync"
+
+    // New app releases get their own channel, so they can be silenced apart from intel alerts.
+    const val UPDATE_CHANNEL_ID = "app_updates"
+    private const val UPDATE_WORK_NAME = "app_update_check"
+    private const val UPDATE_NOTIFICATION_ID = 9998
 
     const val EXTRA_ROUTE_ENTRY_ID = "route_entry_id"
     const val EXTRA_ROUTE_CAMPAIGN_ID = "route_campaign_id"
@@ -75,8 +81,12 @@ object IntelNotificationHelper {
                 description = CHANNEL_DESCRIPTION
                 enableVibration(true)
             }
+            val updates = NotificationChannel(UPDATE_CHANNEL_ID, "App updates", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "A new version of IntelFeed for Android is available"
+            }
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
+            notificationManager.createNotificationChannel(updates)
         }
     }
 
@@ -99,6 +109,52 @@ object IntelNotificationHelper {
     /** Stops the periodic check (signed out, or alerts switched off in the app). */
     fun cancelPeriodicSync(context: Context) {
         WorkManager.getInstance(context).cancelUniqueWork(PERIODIC_WORK_NAME)
+    }
+
+    /** The daily new-release check (AppUpdateWorker). */
+    fun scheduleUpdateCheck(context: Context) {
+        val request = PeriodicWorkRequestBuilder<AppUpdateWorker>(1, TimeUnit.DAYS)
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(UPDATE_WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, request)
+    }
+
+    fun cancelUpdateCheck(context: Context) {
+        WorkManager.getInstance(context).cancelUniqueWork(UPDATE_WORK_NAME)
+    }
+
+    /** "IntelFeed <version> is available"; a tap opens the release page ([url]) in the browser. */
+    fun postUpdateNotification(context: Context, version: String, url: String?, summary: String?) {
+        if (!canPostNotifications(context)) return
+        val intent = url?.let { Intent(Intent.ACTION_VIEW, Uri.parse(it)).addCategory(Intent.CATEGORY_BROWSABLE) }
+            ?: context.packageManager.getLaunchIntentForPackage(context.packageName)
+            ?: return
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            UPDATE_NOTIFICATION_ID,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(context, UPDATE_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(0xFF8B5CF6.toInt()) // CyberPurple
+            .setContentTitle("IntelFeed $version is available")
+            .setContentText(summary ?: "Tap to open the release and download the new APK.")
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+        try {
+            NotificationManagerCompat.from(context).notify(UPDATE_NOTIFICATION_ID, notification)
+        } catch (_: SecurityException) {
+        }
+    }
+
+    /** Removes the update notice once the installed app is no longer older than [notifiedVersion]. */
+    fun clearStaleUpdateNotification(context: Context, notifiedVersion: String?, currentName: String, currentCode: Int) {
+        notifiedVersion ?: return
+        if (!AppUpdates.isNewer(AppUpdates.Release(notifiedVersion, null, null), currentName, currentCode)) {
+            NotificationManagerCompat.from(context).cancel(UPDATE_NOTIFICATION_ID)
+        }
     }
 
     fun triggerImmediateSync(context: Context) {

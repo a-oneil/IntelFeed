@@ -52,6 +52,20 @@ class IntelFeedApplication : Application(), ImageLoaderFactory {
                     else IntelNotificationHelper.cancelPeriodicSync(this@IntelFeedApplication)
                 }
         }
+        // The daily new-release check asks GitHub, not the server, so it runs signed in or not.
+        appScope.launch {
+            // An "update available" notice still in the tray after updating is stale.
+            runCatching {
+                IntelNotificationHelper.clearStaleUpdateNotification(
+                    this@IntelFeedApplication, userPreferences.getNotifiedUpdateVersion(), BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE
+                )
+            }
+            userPreferences.updateNoticesEnabled
+                .collect { needed ->
+                    if (needed) IntelNotificationHelper.scheduleUpdateCheck(this@IntelFeedApplication)
+                    else IntelNotificationHelper.cancelUpdateCheck(this@IntelFeedApplication)
+                }
+        }
     }
     /** Coil's loader for article images; see IntelFeedRepository.imageHttpClient. */
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)

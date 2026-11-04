@@ -18,7 +18,7 @@ class IntelNotificationWorker(
     workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
 
-    // The periodic check and "Check for updates now" can overlap.
+    // The periodic check and "Check for new intel now" can overlap.
     // Both would post the same alerts and overwrite each other's saved state, so one runs at a time.
     override suspend fun doWork(): Result = runLock.withLock { check() }
 
