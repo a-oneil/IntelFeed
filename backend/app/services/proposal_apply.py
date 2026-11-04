@@ -1,26 +1,17 @@
-"""Bulk application of hygiene proposals, in batches, with progress.
+"""What a Review proposal changes, how a single row is applied, and the
+progress record of a background Apply all.
 
-The Proposals lens offers "Apply all" over queues that can hold thousands of
-rows (the adjudicator files one proposal per link it wants gone). Applying
-them inside one HTTP request hit the browser's 15 s client timeout long
-before the server was done, so the UI reported a failure while the work kept
-landing. The batch functions here are the unit of work: a request may call
-one once for a small, synchronous apply, and the Celery task in
-``app.workers.proposal_apply_tasks`` loops them until the queue is drained,
-committing per batch and publishing progress to Redis for the UI to poll.
+The Review tab's queue, its filters and its Apply / Dismiss live in
+``app.api.hygiene`` (``_review_index`` and the functions on it). This module
+holds the pieces those share with the adjudicate stage and the bulk worker
+(``app.workers.proposal_apply_tasks``):
 
-Two queues, two batch functions:
-
-* ``apply_adjudication_batch`` — the adjudicate stage's pending proposals:
-  entity-maintenance rows (unlink / reclassify / veto / merge / demote /
-  drop / held link) through ``apply_adjudication_row``, and its link-removal proposals
-  through ``apply_link_removal_row``. Assessment flags are informational
-  and skipped.
-* ``apply_advisory_batch`` — the link validator's ``needs_reclassification``
-  advisories, promoted into reclassify operations (deduped per entity).
-
-A row that raises is reported and *excluded from later batches* of the same
-job (``exclude_ids``); without that a stuck row would be re-selected forever.
+* the Domain facet (``proposal_domain`` and the per-log action sets);
+* ``apply_link_removal_row`` — a link-log removal proposal made real;
+* ``settle_adjudication_outcome`` — what an adjudication apply that found
+  nothing left to do means for its proposal;
+* the progress record a background Apply all publishes to Redis for the
+  console to poll.
 """
 
 from __future__ import annotations
@@ -37,21 +28,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.exceptions import AppError
-from app.models.ai_result import AIResult
-from app.models.ai_task import AITask
 from app.models.entity_link_validation_log import EntityLinkValidationLog
 from app.models.entity_maintenance import EntityMaintenanceLog
 from app.services.entry_adjudication import (
-    ACTION_ASSESSMENT,
     ACTION_MERGE,
     ACTION_RECLASSIFY,
     ACTION_VETO,
     ADJUDICATION_PROPOSAL_ACTIONS,
-    apply_adjudication_row,
 )
-from app.services.entry_adjudication import TASK_NAME as ADJUDICATION_TASK_NAME
-
-BULK_APPLY_KINDS = ("adjudication", "advisories", "all")
 
 # The Review tab's Domain facet: what a proposal would change if applied.
 # Both logs feed one queue there, so the split is by effect, not by table.
@@ -117,13 +101,6 @@ def link_log_actions_for_domain(domain: str | None) -> frozenset[str] | None:
     if domain == "entities":
         return frozenset({"needs_reclassification"})
     return frozenset()
-
-
-def parse_actions(action: str | None) -> set[str]:
-    """A filter is one code or a comma list (the UI groups id fixes as one chip)."""
-    if not action:
-        return set()
-    return {a.strip() for a in action.split(",") if a.strip()}
 
 
 PROGRESS_TTL_SECONDS = 2 * 60 * 60
@@ -202,9 +179,12 @@ async def apply_link_removal_row(db: AsyncSession, row: EntityLinkValidationLog)
 
 # What an apply that changes nothing reports when its outcome is already
 # reached: the link, edge or entity it acts on is gone, the article is
-# already linked to the entity a held-link proposal names, or an analyst
-# rejected the edge. Such a proposal is resolved, not left pending.
-MOOT_REASONS = frozenset({"entry gone", "edge gone or analyst-rejected", "entity gone", "already linked"})
+# already linked to the entity a held-link proposal names, a capture's value
+# is on the never-capture list (or no longer valid), or an analyst rejected
+# the edge. Such a proposal is resolved, not left pending.
+MOOT_REASONS = frozenset(
+    {"entry gone", "edge gone or analyst-rejected", "entity gone", "already linked", "value refused"}
+)
 
 
 def outcome_is_moot(row: EntityMaintenanceLog, outcome: dict) -> bool:
@@ -240,255 +220,13 @@ async def settle_adjudication_outcome(db: AsyncSession, row: EntityMaintenanceLo
 
 
 # ---------------------------------------------------------------------------
-# Scope helpers
-# ---------------------------------------------------------------------------
-
-
-def adjudication_scope(action: str | None, domain: str | None = None) -> tuple[list[str], bool]:
-    """What a bulk apply of the adjudicator's proposals covers.
-
-    Returns ``(maintenance actions, include link-log removals)``. ``action``
-    is one code or a comma list: adjudication actions, ``shadow_remove`` for
-    the link log, or empty for everything applyable. ``domain`` narrows
-    further (the Review tab's facet). A code that is neither is a 400; a
-    legacy scan code (``normalize_name``) is simply ignored here, since the
-    scans' proposals have their own appliers.
-    """
-    applyable = ADJUDICATION_PROPOSAL_ACTIONS - {ACTION_ASSESSMENT}
-    wanted = parse_actions(action)
-    unknown = wanted - applyable - {"shadow_remove"} - _LEGACY_SCAN_ACTIONS - {"needs_reclassification"}
-    if unknown:
-        raise AppError(
-            code="invalid",
-            message=f"not an applyable adjudication action: {', '.join(sorted(unknown))}",
-            status_code=400,
-        )
-    maint = set(applyable) if not wanted else wanted & applyable
-    links = not wanted or "shadow_remove" in wanted
-    if domain:
-        allowed = maint_actions_for_domain(domain) or frozenset()
-        maint &= allowed
-        links = links and "shadow_remove" in (link_log_actions_for_domain(domain) or frozenset())
-    return sorted(maint), links
-
-
-_LEGACY_SCAN_ACTIONS = frozenset(
-    {"normalize_name", "alias_collision", "vendor_autolink", "ttp_malformed_id", "cve_malformed_id", "cve_withdrawn"}
-)
-
-
-def adjudication_maint_actions(action: str | None) -> list[str]:
-    """Back-compat shim for the synchronous apply-all endpoint."""
-    return adjudication_scope(action)[0]
-
-
-def _adjudicator_results():
-    return select(AIResult.id).where(
-        AIResult.task_id == select(AITask.id).where(AITask.name == ADJUDICATION_TASK_NAME).scalar_subquery()
-    )
-
-
-async def count_adjudication_pending(db: AsyncSession, action: str | None = None, domain: str | None = None) -> int:
-    """How many proposals ``apply_adjudication_batch`` would work through."""
-    total = 0
-    maint, include_links = adjudication_scope(action, domain)
-    if maint:
-        total += (
-            await db.execute(
-                select(func.count())
-                .select_from(EntityMaintenanceLog)
-                .where(EntityMaintenanceLog.action.in_(maint), EntityMaintenanceLog.applied.is_(False))
-            )
-        ).scalar_one()
-    if include_links:
-        total += (
-            await db.execute(
-                select(func.count())
-                .select_from(EntityLinkValidationLog)
-                .where(
-                    EntityLinkValidationLog.action == "shadow_remove",
-                    EntityLinkValidationLog.ai_result_id.in_(_adjudicator_results()),
-                )
-            )
-        ).scalar_one()
-    return int(total)
-
-
-async def count_advisories_pending(db: AsyncSession, entity_type: str | None = None) -> int:
-    q = (
-        select(func.count())
-        .select_from(EntityLinkValidationLog)
-        .where(
-            EntityLinkValidationLog.action == "needs_reclassification",
-            EntityLinkValidationLog.suggested_entity_type.is_not(None),
-        )
-    )
-    if entity_type:
-        q = q.where(EntityLinkValidationLog.entity_type == entity_type)
-    return int((await db.execute(q)).scalar_one())
-
-
-# ---------------------------------------------------------------------------
-# Batches
-# ---------------------------------------------------------------------------
-
-
-async def _still_pending(db: AsyncSession, model: type, row_id: uuid.UUID) -> bool:
-    """True while the proposal row still exists (another row's settle may have deleted it)."""
-    return (await db.execute(select(model.id).where(model.id == row_id))).first() is not None
-
-
-async def apply_adjudication_batch(
-    db: AsyncSession,
-    *,
-    action: str | None = None,
-    domain: str | None = None,
-    limit: int = BATCH_SIZE,
-    exclude_ids: set[uuid.UUID] | None = None,
-) -> dict[str, Any]:
-    """Apply up to ``limit`` pending adjudicator proposals, oldest first.
-
-    Each row is its own savepoint, so one failure is reported and the rest
-    still apply. Returns ``{"applied", "skipped", "errors", "processed",
-    "failed_ids"}``; ``processed`` is how many rows were selected, so a
-    caller looping over batches stops when it comes back 0.
-    """
-    exclude_ids = exclude_ids or set()
-    applied = skipped = processed = 0
-    errors: list[dict] = []
-    failed_ids: set[uuid.UUID] = set()
-    budget = limit
-
-    maint_actions, include_links = adjudication_scope(action, domain)
-    if maint_actions:
-        q = (
-            select(EntityMaintenanceLog)
-            .where(EntityMaintenanceLog.action.in_(maint_actions), EntityMaintenanceLog.applied.is_(False))
-            .order_by(EntityMaintenanceLog.created_at.asc())
-            .limit(budget)
-        )
-        if exclude_ids:
-            q = q.where(EntityMaintenanceLog.id.notin_(exclude_ids))
-        rows = (await db.execute(q)).scalars().all()
-        for row in rows:
-            row_id, row_action = row.id, row.action
-            # An earlier row in this batch may have settled this one (a veto closes the
-            # entity's other proposals); applying the deleted object would fail.
-            if not await _still_pending(db, EntityMaintenanceLog, row_id):
-                skipped += 1
-                continue
-            try:
-                async with db.begin_nested():
-                    outcome = await apply_adjudication_row(db, row)
-                    status = await settle_adjudication_outcome(db, row, outcome)
-            except Exception as exc:  # one bad row must not sink the batch
-                errors.append({"log_id": str(row_id), "action": row_action, "error": str(exc)[:300]})
-                failed_ids.add(row_id)
-                continue
-            if status == "applied":
-                applied += 1
-            else:
-                skipped += 1
-                if status == "skipped":
-                    # Still pending: keep later batches of this job off it, or
-                    # a drain-everything job would select it forever.
-                    failed_ids.add(row_id)
-        processed += len(rows)
-        budget -= len(rows)
-
-    if budget > 0 and include_links:
-        q = (
-            select(EntityLinkValidationLog)
-            .where(
-                EntityLinkValidationLog.action == "shadow_remove",
-                EntityLinkValidationLog.ai_result_id.in_(_adjudicator_results()),
-            )
-            .order_by(EntityLinkValidationLog.created_at.asc())
-            .limit(budget)
-        )
-        if exclude_ids:
-            q = q.where(EntityLinkValidationLog.id.notin_(exclude_ids))
-        link_rows = (await db.execute(q)).scalars().all()
-        for row in link_rows:
-            if not await _still_pending(db, EntityLinkValidationLog, row.id):
-                skipped += 1
-                continue
-            try:
-                async with db.begin_nested():
-                    await apply_link_removal_row(db, row)
-            except Exception as exc:
-                errors.append({"log_id": str(row.id), "action": row.action, "error": str(exc)[:300]})
-                failed_ids.add(row.id)
-                continue
-            applied += 1
-        processed += len(link_rows)
-
-    await db.flush()
-    return {"applied": applied, "skipped": skipped, "errors": errors, "processed": processed, "failed_ids": failed_ids}
-
-
-async def apply_advisory_batch(
-    db: AsyncSession,
-    *,
-    entity_type: str | None = None,
-    mode: str = "apply",
-    limit: int = BATCH_SIZE,
-    exclude_ids: set[uuid.UUID] | None = None,
-) -> dict[str, Any]:
-    """Promote up to ``limit`` ``needs_reclassification`` advisories.
-
-    Same shape as ``apply_adjudication_batch``. In ``shadow`` mode the
-    advisories stay in place, so a loop over this function must stop after
-    one batch (the task does).
-    """
-    # Lazy: the advisory promoter lives beside the reclassify endpoint it
-    # drives, and that module imports this one.
-    from app.api.hygiene import _apply_advisory_rows
-
-    exclude_ids = exclude_ids or set()
-    q = (
-        select(EntityLinkValidationLog)
-        .where(
-            EntityLinkValidationLog.action == "needs_reclassification",
-            EntityLinkValidationLog.suggested_entity_type.is_not(None),
-        )
-        .order_by(EntityLinkValidationLog.created_at.desc())
-        .limit(limit)
-    )
-    if entity_type:
-        q = q.where(EntityLinkValidationLog.entity_type == entity_type)
-    if exclude_ids:
-        q = q.where(EntityLinkValidationLog.id.notin_(exclude_ids))
-    advisories = list((await db.execute(q)).scalars().all())
-    result = await _apply_advisory_rows(db, advisories, mode)
-
-    # Advisories whose reclassify failed stay in the log; keep them out of the
-    # next batch. Every advisory for a failed (type, id) tuple is excluded.
-    failed_keys = {(e.get("source_type"), e.get("source_id")) for e in result.errors}
-    failed_ids = {a.id for a in advisories if (a.entity_type, str(a.entity_id)) in failed_keys}
-    # Rows the promoter ignores outright (same-type or unknown-type advisories)
-    # are never deleted either, so they must not be re-selected forever.
-    for a in advisories:
-        if a.entity_type == a.suggested_entity_type:
-            failed_ids.add(a.id)
-    return {
-        "applied": result.applied,
-        "skipped": result.skipped + result.failed,
-        "errors": list(result.errors),
-        "processed": len(advisories),
-        "failed_ids": failed_ids,
-    }
-
-
-# ---------------------------------------------------------------------------
 # Progress (Redis)
 # ---------------------------------------------------------------------------
 
 
-def new_progress(job_id: str, *, kind: str, scope: dict[str, Any], total: int) -> dict[str, Any]:
+def new_progress(job_id: str, *, scope: dict[str, Any], total: int) -> dict[str, Any]:
     return {
         "job_id": job_id,
-        "kind": kind,
         "scope": scope,
         "status": "queued",  # queued | running | done | error
         "total": total,

@@ -51,15 +51,6 @@
   margin-left: 4px;
 }
 
-.gone {
-  font-size: var(--fs-xs);
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  padding: 0 4px;
-  margin-left: 6px;
-}
-
 .meta {
   font-size: var(--fs-sm);
   color: var(--text-secondary);

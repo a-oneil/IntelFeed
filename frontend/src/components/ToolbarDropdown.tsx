@@ -6,9 +6,12 @@ interface ToolbarDropdownProps {
   label: string;
   icon?: ReactNode;
   children: ReactNode;
+  /** Replaces the trigger's own look, to match the buttons beside it. */
+  triggerClassName?: string;
+  title?: string;
 }
 
-export function ToolbarDropdown({ label, icon, children }: ToolbarDropdownProps) {
+export function ToolbarDropdown({ label, icon, children, triggerClassName, title }: ToolbarDropdownProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -68,8 +71,9 @@ export function ToolbarDropdown({ label, icon, children }: ToolbarDropdownProps)
     <div className={styles.container} ref={containerRef}>
       <button
         ref={triggerRef}
-        className={`${styles.trigger} ${open ? styles.triggerOpen : ""}`}
+        className={triggerClassName ? `${triggerClassName} ${styles.triggerCustom}` : `${styles.trigger} ${open ? styles.triggerOpen : ""}`}
         onClick={() => setOpen(!open)}
+        title={title}
         aria-expanded={open}
         aria-haspopup="true"
         aria-label={label}
@@ -106,9 +110,21 @@ interface DropdownItemProps {
   newTab?: boolean;
   active?: boolean;
   shortcut?: string;
+  title?: string;
+  disabled?: boolean;
 }
 
-export function DropdownItem({ icon, label, onClick, href, newTab = true, active, shortcut }: DropdownItemProps) {
+export function DropdownItem({
+  icon,
+  label,
+  onClick,
+  href,
+  newTab = true,
+  active,
+  shortcut,
+  title,
+  disabled,
+}: DropdownItemProps) {
   const className = `${styles.item} ${active ? styles.itemActive : ""}`;
 
   if (href) {
@@ -128,7 +144,7 @@ export function DropdownItem({ icon, label, onClick, href, newTab = true, active
   }
 
   return (
-    <button className={className} onClick={onClick} role="menuitem">
+    <button className={className} onClick={onClick} role="menuitem" title={title} disabled={disabled}>
       {icon && <span className={styles.itemIcon}>{icon}</span>}
       <span className={styles.itemLabel}>{label}</span>
       {shortcut && <span className={styles.itemShortcut}>{shortcut}</span>}

@@ -12,7 +12,7 @@
 import uuid
 
 import pytest
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select, update
 
 from app.intelligence.link_validation_apply import LinkRow, log_reclassification
 from app.models.entity_link_validation_log import EntityLinkValidationLog
@@ -89,42 +89,6 @@ async def _pending_reclassify_rows(db_session, entity_id) -> int:
         )
     ).scalar_one()
     return a + b
-
-
-async def test_reclassify_groups_fold_per_entity(client, admin_headers, db_session, test_feed):
-    malware = MalwareFamily(name="Everest")
-    db_session.add(malware)
-    await db_session.flush()
-    await _seed_reclassify(db_session, test_feed, malware)
-    await db_session.commit()
-
-    resp = await client.get("/api/admin/hygiene/reclassify-groups", headers=admin_headers)
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["total"] == 1
-    g = body["groups"][0]
-    assert g["name"] == "Everest" and g["exists"] is True
-    assert g["proposals"] == 5
-    assert [s["type"] for s in g["suggestions"]] == ["threat_actor", "tool"]
-    assert g["suggestions"][0]["count"] == 4
-
-    stats = (await client.get("/api/admin/hygiene/stats", headers=admin_headers)).json()
-    assert stats["pending_advisories"] == 1
-
-
-async def test_reclassify_groups_drop_deleted_entities(client, admin_headers, db_session, test_feed):
-    malware = MalwareFamily(name="Everest")
-    db_session.add(malware)
-    await db_session.flush()
-    await _seed_reclassify(db_session, test_feed, malware)
-    mid = malware.id
-    await db_session.delete(malware)
-    await db_session.commit()
-
-    resp = await client.get("/api/admin/hygiene/reclassify-groups", headers=admin_headers)
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["total"] == 0
-    assert await _pending_reclassify_rows(db_session, mid) == 0
 
 
 async def test_dismiss_one_row_clears_every_copy_and_sticks(client, admin_headers, db_session, test_feed):
@@ -266,57 +230,42 @@ async def _count(db_session, model, *where) -> int:
     return (await db_session.execute(select(func.count()).select_from(model).where(*where))).scalar_one()
 
 
-async def test_unlink_groups_drop_deleted_entities(client, admin_headers, db_session, test_feed):
-    malware, tool, _entries_ = await _seed_unlinks(db_session, test_feed)
-    mid, tid = malware.id, tool.id
-    await db_session.execute(delete(EntryMalware).where(EntryMalware.malware_family_id == mid))
-    await db_session.execute(delete(EntryTool).where(EntryTool.tool_id == tid))
-    await db_session.delete(malware)
-    await db_session.delete(tool)
-    await db_session.commit()
-
-    body = (await client.get("/api/admin/hygiene/unlink-groups", headers=admin_headers)).json()
-    assert body["total"] == 0 and body["proposals"] == 0
-    assert await _count(db_session, EntityLinkValidationLog, EntityLinkValidationLog.entity_id == mid) == 0
-    assert await _count(db_session, EntityMaintenanceLog, EntityMaintenanceLog.entity_id == tid) == 0
-
-
-async def test_unlink_groups_list_apply_and_keep(client, admin_headers, db_session, test_feed):
+async def test_review_apply_and_dismiss_act_on_what_the_filters_show(client, admin_headers, db_session, test_feed):
     malware, tool, _entries_ = await _seed_unlinks(db_session, test_feed)
     mid, tid = malware.id, tool.id
     await db_session.commit()
-
-    body = (await client.get("/api/admin/hygiene/unlink-groups", headers=admin_headers)).json()
-    assert body["total"] == 2 and body["proposals"] == 4
-    first = body["groups"][0]
-    assert first["name"] == "Linuxish" and first["proposals"] == 3 and first["linked"] == 3
-    assert first["matched_names"] == ["Linuxish"] and first["reason"] == "the OS, not malware"
 
     rows = (
         await client.get(
-            f"/api/admin/hygiene/unlink-groups/rows?entity_type=malware&entity_id={mid}", headers=admin_headers
+            f"/api/admin/hygiene/feed?pending=true&entity_type=malware&entity_id={mid}", headers=admin_headers
         )
-    ).json()
-    assert len(rows) == 3 and rows[0]["entry_title"] == "t"
+    ).json()["rows"]
+    assert len(rows) == 3
+    # Keep one article's link: the dismissal is remembered for that article.
+    source, _, log_id = rows[0]["id"].partition(":")
+    assert (await client.delete(f"/api/admin/hygiene/feed/{source}/{log_id}", headers=admin_headers)).status_code == 204
+    from app.services.proposal_dismissals import dismissed_verdicts
 
-    # Keep one article's link, remove the rest of the group.
+    kept_entry = uuid.UUID(rows[0]["payload"]["entry_id"])
+    assert ("adjudication_unlink", "malware", mid) in await dismissed_verdicts(db_session, kept_entry)
+
+    # Apply under a filter that shows only the link log's removals: the tool's
+    # unlink (maintenance log) is outside it and stays pending.
     resp = await client.post(
-        "/api/admin/hygiene/unlink-groups/keep", json={"row_ids": [rows[0]["id"]]}, headers=admin_headers
-    )
-    assert resp.json()["done"] == 1
-    resp = await client.post(
-        "/api/admin/hygiene/unlink-groups/apply",
+        "/api/admin/hygiene/review-groups/apply",
         json={
-            "items": [{"entity_type": "malware", "entity_id": str(mid)}, {"entity_type": "tool", "entity_id": str(tid)}]
+            "action": "shadow_remove",
+            "items": [
+                {"entity_type": "malware", "entity_id": str(mid)},
+                {"entity_type": "tool", "entity_id": str(tid)},
+            ],
         },
         headers=admin_headers,
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"done": 3, "failed": 0, "remaining": 0, "errors": []}
-
+    assert resp.json() == {"applied": 2, "skipped": 0, "failed": 0, "has_more": False, "unapplied": [], "errors": []}
     assert await _count(db_session, EntryMalware, EntryMalware.malware_family_id == mid) == 1
-    assert await _count(db_session, EntryTool, EntryTool.tool_id == tid) == 0
-    assert (await client.get("/api/admin/hygiene/unlink-groups", headers=admin_headers)).json()["total"] == 0
+    assert await _count(db_session, EntryTool, EntryTool.tool_id == tid) == 1
     # Each removal left a restorable record.
     assert (
         await _count(
@@ -327,6 +276,12 @@ async def test_unlink_groups_list_apply_and_keep(client, admin_headers, db_sessi
         )
         == 2
     )
+
+    # Dismiss all under the tool's search clears only the tool's proposal.
+    resp = await client.post("/api/admin/hygiene/review-groups/dismiss", json={"q": "python"}, headers=admin_headers)
+    assert resp.json() == {"cleared_rows": 1}
+    assert (await client.get("/api/admin/hygiene/review-groups", headers=admin_headers)).json()["total"] == 0
+    assert await _count(db_session, EntryTool, EntryTool.tool_id == tid) == 1  # the link stays
 
 
 async def test_legacy_link_proposals_expire(db_session, test_feed):
@@ -395,18 +350,23 @@ async def test_review_groups_fold_every_kind_per_entity(client, admin_headers, d
     everest, linuxish, tool, edge_id = await _seed_everything(db_session, test_feed)
     await db_session.commit()
 
-    resp = await client.get("/api/admin/hygiene/review-groups", headers=admin_headers)
+    resp = await client.get("/api/admin/hygiene/review-groups?sort=count", headers=admin_headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["total"] == 4 and body["proposals"] == 10
     by_name = {g["name"]: g for g in body["groups"]}
     assert [g["name"] for g in body["groups"]][:2] == ["Everest", "Linuxish"]  # most proposals first
+    assert body["facets"] == {
+        "domains": {"entities": 5, "links": 4, "relationships": 1},
+        "origins": {"adjudicator": 10},
+    }
 
     ev = by_name["Everest"]
-    assert ev["entity_id"] == str(everest.id) and ev["exists"] is True and ev["proposals"] == 5
+    assert ev["entity_id"] == str(everest.id) and ev["proposals"] == 5
     assert {k["action"]: k["count"] for k in ev["kinds"]} == {"needs_reclassification": 4, "adjudication_reclassify": 1}
     assert ev["reclassify_to"] == [{"type": "threat_actor", "count": 4}, {"type": "tool", "count": 1}]
-    assert ev["origin"] == "mixed" and ev["domains"] == ["entities"]
+    # the link log's proposals are the adjudicator's, the validator's leftovers included
+    assert ev["origin"] == "adjudicator" and ev["domains"] == ["entities"]
 
     lx = by_name["Linuxish"]
     assert lx["kinds"] == [{"action": "shadow_remove", "count": 3}] and lx["linked"] == 3
@@ -419,7 +379,7 @@ async def test_review_groups_fold_every_kind_per_entity(client, admin_headers, d
     edge = next(g for g in body["groups"] if g["entity_type"] == "relationship")
     assert edge["entity_id"] == str(edge_id) and edge["subject"] == "Demote: Everest uses Linuxish"
     assert edge["name"] == "Everest uses Linuxish"  # an edge group is named by its claim
-    assert edge["exists"] is True and edge["row_ids"] == []  # a pseudo type is never assumed gone
+    assert edge["row_ids"] == []  # a pseudo type is never assumed gone
 
     # Facets narrow the same way the flat feed does.
     links = (await client.get("/api/admin/hygiene/review-groups?domain=links", headers=admin_headers)).json()
@@ -434,9 +394,19 @@ async def test_review_groups_fold_every_kind_per_entity(client, admin_headers, d
     found = (await client.get("/api/admin/hygiene/review-groups?q=linux", headers=admin_headers)).json()
     # the edge's claim names Linuxish too, so a name search finds its proposals
     assert [g["name"] for g in found["groups"]] == ["Linuxish", "Everest uses Linuxish"]
-    adj = (await client.get("/api/admin/hygiene/review-groups?origin=adjudicator", headers=admin_headers)).json()
-    assert {g["name"] for g in adj["groups"]} == {"Everest", py["name"], edge["name"]}
-    assert next(g for g in adj["groups"] if g["name"] == "Everest")["proposals"] == 1
+    scans = (await client.get("/api/admin/hygiene/review-groups?origin=scan", headers=admin_headers)).json()
+    assert scans["total"] == 0 and scans["facets"]["origins"] == {"adjudicator": 10}
+    # The default order is newest first: a proposal filed later leads.
+    from datetime import UTC, datetime, timedelta
+
+    await db_session.execute(
+        update(EntityMaintenanceLog)
+        .where(EntityMaintenanceLog.action == "adjudication_edge_demote")
+        .values(created_at=datetime.now(UTC) + timedelta(hours=1))
+    )
+    await db_session.commit()
+    newest = (await client.get("/api/admin/hygiene/review-groups", headers=admin_headers)).json()
+    assert newest["groups"][0]["name"] == "Everest uses Linuxish"
 
     # The expand: one entity's rows from the flat feed.
     rows = (
@@ -482,7 +452,7 @@ async def test_review_groups_dismiss_settles_the_entity_and_sticks(client, admin
         headers=admin_headers,
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"entities": 3, "cleared_rows": 9}
+    assert resp.json() == {"cleared_rows": 9}
     body = (await client.get("/api/admin/hygiene/review-groups", headers=admin_headers)).json()
     assert [g["kinds"][0]["action"] for g in body["groups"]] == ["adjudication_unlink"]
     # Links untouched, the type change won't be proposed again.
@@ -490,3 +460,125 @@ async def test_review_groups_dismiss_settles_the_entity_and_sticks(client, admin
     from app.services.proposal_dismissals import reclassify_dismissed
 
     assert await reclassify_dismissed(db_session, "malware", everest.id) is True
+
+
+async def _seed_one_stuck_one_prunable(db_session, feed):
+    """Two orphan-prune proposals: the older one's tool has a link again (its
+    apply finds nothing to do), the newer one's is a real orphan."""
+    from datetime import UTC, datetime, timedelta
+
+    [entry] = await _entries(db_session, feed, 1)
+    linked = Tool(name="Rclone", article_count=1)
+    orphan = Tool(name="Ghost Tool", article_count=0)
+    db_session.add_all([linked, orphan])
+    await db_session.flush()
+    db_session.add(EntryTool(entry_id=entry.id, tool_id=linked.id, confidence="high", source="ai"))
+    now = datetime.now(UTC)
+    for tool, at in ((linked, now - timedelta(hours=2)), (orphan, now)):
+        db_session.add(
+            EntityMaintenanceLog(
+                entity_type="tool",
+                entity_id=tool.id,
+                action="orphan_prune",
+                mode="shadow",
+                before={"entity": {"name": tool.name}},
+                after={},
+                reasoning="no articles",
+                applied=False,
+                created_at=at,
+            )
+        )
+    await db_session.flush()
+    return linked, orphan
+
+
+async def test_review_apply_never_retries_a_row_it_already_tried(client, admin_headers, db_session, test_feed):
+    linked, orphan = await _seed_one_stuck_one_prunable(db_session, test_feed)
+    orphan_id = orphan.id
+    await db_session.commit()
+
+    body = {"action": "orphan_prune", "limit": 1}
+    first = (await client.post("/api/admin/hygiene/review-groups/apply", json=body, headers=admin_headers)).json()
+    assert (first["applied"], first["skipped"], first["has_more"]) == (0, 1, True)
+    [stuck] = first["unapplied"]
+    assert stuck.startswith("entity_maintenance:")
+
+    second = (
+        await client.post(
+            "/api/admin/hygiene/review-groups/apply", json={**body, "exclude": [stuck]}, headers=admin_headers
+        )
+    ).json()
+    assert (second["applied"], second["has_more"], second["unapplied"]) == (1, False, [])
+    db_session.expire_all()
+    assert await _count(db_session, Tool, Tool.id == orphan_id) == 0
+
+    third = (
+        await client.post(
+            "/api/admin/hygiene/review-groups/apply", json={**body, "exclude": [stuck]}, headers=admin_headers
+        )
+    ).json()
+    assert (third["applied"], third["skipped"], third["has_more"]) == (0, 0, False)
+
+
+async def test_apply_all_job_tries_each_row_once(db_session, test_feed, monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from app.services import proposal_apply as svc
+    from app.workers import proposal_apply_tasks as tasks
+
+    await _seed_one_stuck_one_prunable(db_session, test_feed)
+
+    @asynccontextmanager
+    async def fake_session():
+        yield db_session
+
+    async def no_progress(job_id):
+        return None
+
+    async def flush_only():
+        await db_session.flush()
+
+    written: list[dict] = []
+    monkeypatch.setattr(tasks, "worker_session", fake_session)
+    monkeypatch.setattr(svc, "read_progress", no_progress)
+    monkeypatch.setattr(svc, "write_progress_sync", lambda p: written.append(dict(p)))
+    monkeypatch.setattr(db_session, "commit", flush_only)
+
+    out = await tasks._bulk_apply("job1", {"action": "orphan_prune"}, limit=None)
+    assert out == {"status": "done", "processed": 2, "applied": 1, "skipped": 1, "error_count": 0}
+
+
+async def test_dismiss_all_works_through_the_queue_in_chunks(client, admin_headers, db_session, test_feed, monkeypatch):
+    import app.api.hygiene as hygiene
+    from app.models.proposal_dismissal import KIND_VERDICT, ProposalDismissal
+
+    monkeypatch.setattr(hygiene, "_GROUPS_PER_CHUNK", 1)
+    malware, tool, _entries_ = await _seed_unlinks(db_session, test_feed)
+    await db_session.commit()
+    resp = await client.post("/api/admin/hygiene/review-groups/dismiss", json={}, headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["cleared_rows"] == 4
+    assert await _count(db_session, EntityLinkValidationLog, EntityLinkValidationLog.action == "shadow_remove") == 0
+    # every article's verdict is remembered, in one insert per chunk
+    assert await _count(db_session, ProposalDismissal, ProposalDismissal.kind == KIND_VERDICT) == 4
+
+
+async def test_row_dismiss_takes_only_a_proposal(client, admin_headers, db_session):
+    tool = Tool(name="Rclone", article_count=3)
+    db_session.add(tool)
+    await db_session.flush()
+    audit = EntityMaintenanceLog(
+        entity_type="tool",
+        entity_id=tool.id,
+        action="ai_enrich_filled",
+        mode="apply",
+        before={},
+        after={},
+        reasoning="",
+        applied=False,
+    )
+    db_session.add(audit)
+    await db_session.commit()
+    resp = await client.delete(f"/api/admin/hygiene/feed/entity_maintenance/{audit.id}", headers=admin_headers)
+    assert resp.status_code == 400
+    assert await _count(db_session, EntityMaintenanceLog, EntityMaintenanceLog.id == audit.id) == 1

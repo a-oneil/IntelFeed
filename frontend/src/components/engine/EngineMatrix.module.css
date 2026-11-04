@@ -31,8 +31,12 @@
   margin: 0 6px;
   flex: none;
 }
+/* Pushes the window picker, the setting finder and the engine switch to the
+   right, whether or not the picker shows on the tab. */
+.topGrow {
+  flex: 1;
+}
 .hwin {
-  margin-left: auto;
   flex: none;
   display: flex;
   border: 1px solid var(--border);
@@ -843,8 +847,11 @@
   .achipN {
     font-size: var(--fs-base);
   }
+  /* the browse buttons stay one line and scroll sideways */
   .attnTools {
     width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
   }
   .attnSearch {
     /* full-width and back on top once the toolbar stacks */
@@ -853,7 +860,7 @@
     max-width: none;
   }
   .attnTools .browseBtn {
-    flex: 1;
+    flex: 1 0 auto;
     text-align: center;
   }
   .mhead {
@@ -865,7 +872,7 @@
     overflow-x: auto;
   }
   .viewSeg button {
-    flex: 1;
+    flex: 1 0 auto;
     justify-content: center;
     padding: var(--sp-2) var(--sp-3);
   }

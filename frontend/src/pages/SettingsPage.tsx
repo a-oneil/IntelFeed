@@ -96,8 +96,14 @@ const NAV_GROUPS: { group: string; items: NavItem[] }[] = [
 const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
 
 export function SettingsPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState<SettingsSection>("account");
+  // Each section is its own URL, so Back from a page a section links to
+  // returns to that section, and Back steps through the sections visited.
+  const openSection = (key: SettingsSection) => {
+    setActiveSection(key);
+    if (searchParams.get("section") !== key) setSearchParams({ section: key });
+  };
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === "admin";
   const navCollapsed = useUIStore((s) => s.settingsNavCollapsed);
@@ -200,7 +206,7 @@ export function SettingsPage() {
               <li key={item.key}>
                 <button
                   className={`${styles.navItem} ${activeSection === item.key ? styles.navItemActive : ""}`}
-                  onClick={() => setActiveSection(item.key)}
+                  onClick={() => openSection(item.key)}
                 >
                   <svg className={styles.navIcon} viewBox={item.iconViewBox ?? "0 0 24 24"} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                     <path d={item.icon} />
@@ -271,7 +277,7 @@ export function SettingsPage() {
                 <li key={item.key}>
                   <button
                     className={`${styles.navItem} ${activeSection === item.key ? styles.navItemActive : ""}`}
-                    onClick={() => setActiveSection(item.key)}
+                    onClick={() => openSection(item.key)}
                   >
                     <svg className={styles.navIcon} viewBox={item.iconViewBox ?? "0 0 24 24"} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                       <path d={item.icon} />

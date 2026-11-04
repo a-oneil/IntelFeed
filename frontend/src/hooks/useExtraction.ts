@@ -37,6 +37,7 @@ export interface ExtractionStats {
   orphaned: number;
   likely_duplicates: number;
   auto_confirmed: number;
+  /** Entities per type first seen in the window, what the list shows for each. */
   by_type: Partial<Record<ExtractionType, number>>;
   window: string;
 }
@@ -44,7 +45,7 @@ export interface ExtractionStats {
 export interface ExtractionParams {
   types?: ExtractionType[];
   status?: "all" | ExtractionStatus;
-  window?: "24h" | "7d" | "30d" | "all";
+  window?: "1h" | "24h" | "7d" | "30d" | "all";
   q?: string;
   source_entry_id?: string;
   sort_by?: "created" | "entries" | "confidence" | "name";
@@ -185,7 +186,7 @@ export function useDeleteExtractionEntity() {
   });
 }
 
-/** Delete from Review › New entities: drops the entities AND adds their names to
+/** Delete from Engine › Entities: drops the entities AND adds their names to
  *  the analyst do-not-recreate denylist, so the one-pass extractor and the
  *  autolinker stop re-minting them. The plain per-entity delete above (used by
  *  the entry drawer) deliberately does not deny.

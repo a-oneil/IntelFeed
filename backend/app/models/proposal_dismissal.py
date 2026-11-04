@@ -8,6 +8,10 @@ stick:
     entity_id). ``other_key`` is '' (any target type).
   - kind='not_duplicate' — the pair (entity_id, other_key) is two different
     things. Stored once per pair with the smaller id in ``entity_id``.
+  - kind='verdict'       — leave this one adjudicator verdict alone: the
+    article's review must not file or apply it again. ``other_key`` is
+    "<entry_id>:<action>" (an unlink, held link, veto, merge, edge demote or
+    observable drop on that article); ``entity_*`` is what it is about.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from app.database import Base
 
 KIND_RECLASSIFY = "reclassify"
 KIND_NOT_DUPLICATE = "not_duplicate"
+KIND_VERDICT = "verdict"
 
 
 class ProposalDismissal(Base):

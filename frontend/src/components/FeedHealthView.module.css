@@ -357,14 +357,16 @@
 }
 
 /* Value table */
+/* On a narrow screen the table scrolls sideways rather than squeezing its columns. */
 .tableWrap {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  overflow: hidden;
+  overflow-x: auto;
 }
 
 .table {
   width: 100%;
+  min-width: 640px;
   border-collapse: collapse;
   font-size: var(--fs-md);
 }
@@ -723,5 +725,16 @@
   .embedded .summaryCard + .summaryCard {
     border-left: none;
     padding-left: 0;
+  }
+}
+
+/* On a phone a filter row stays one line and scrolls sideways. */
+@media (max-width: 720px) {
+  .toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .toolbar > * {
+    flex: none;
   }
 }

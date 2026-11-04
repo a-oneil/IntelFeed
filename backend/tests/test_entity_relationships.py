@@ -565,3 +565,66 @@ async def test_cooccurrence_needs_one_statement_not_a_list_or_a_headline(db_sess
     assert await create_cooccurrence_relationships(db_session, headline.id) == 0
     assert await create_cooccurrence_relationships(db_session, digest.id) == 0
     assert await create_cooccurrence_relationships(db_session, stated.id) == 1
+
+
+@pytest.mark.asyncio
+async def test_list_filters_by_entity_type_alone(client: AsyncClient, auth_headers: dict, db_session: AsyncSession):
+    """The Engine's Relationships tab filters by type with no entity: edges with
+    that type at either end."""
+    for src, tgt in (("threat_actor", "tool"), ("malware", "cve"), ("tool", "ttp")):
+        db_session.add(
+            EntityRelationship(
+                source_type=src,
+                source_id=uuid.uuid4(),
+                target_type=tgt,
+                target_id=uuid.uuid4(),
+                relationship_type="uses",
+                confidence="probable",
+                source="auto_extracted",
+            )
+        )
+    await db_session.flush()
+
+    async def ends(entity_type: str) -> set[tuple[str, str]]:
+        resp = await client.get(
+            "/api/entity-relationships",
+            params={"entity_type": entity_type, "all_confidence": True, "limit": 50},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        return {(r["source_type"], r["target_type"]) for r in resp.json()["items"]}
+
+    assert await ends("tool") == {("threat_actor", "tool"), ("tool", "ttp")}
+    assert await ends("cve") == {("malware", "cve")}
+
+
+@pytest.mark.asyncio
+async def test_list_filters_by_age_in_hours(client: AsyncClient, auth_headers: dict, db_session: AsyncSession):
+    from datetime import UTC, datetime, timedelta
+
+    old = EntityRelationship(
+        source_type="threat_actor",
+        source_id=uuid.uuid4(),
+        target_type="tool",
+        target_id=uuid.uuid4(),
+        relationship_type="uses",
+        confidence="probable",
+        source="auto_extracted",
+        created_at=datetime.now(UTC) - timedelta(days=3),
+    )
+    new = EntityRelationship(
+        source_type="threat_actor",
+        source_id=uuid.uuid4(),
+        target_type="tool",
+        target_id=uuid.uuid4(),
+        relationship_type="uses",
+        confidence="probable",
+        source="auto_extracted",
+    )
+    db_session.add_all([old, new])
+    await db_session.flush()
+    resp = await client.get(
+        "/api/entity-relationships", params={"hours": 24, "all_confidence": True}, headers=auth_headers
+    )
+    ids = {r["id"] for r in resp.json()["items"]}
+    assert str(new.id) in ids and str(old.id) not in ids

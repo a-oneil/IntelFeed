@@ -2214,7 +2214,8 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
             "The adjudicate stage: after the one-pass analysis lands, re-reads the article next to a "
             "manifest of everything the analysis wrote to the entry — links of every source, entities "
             "it minted, pending-tier promotions, held matches it rejected, relationship claims, AI "
-            "observables — and returns a verdict for each record it would change."
+            "observables, observable candidates nothing has captured — and returns a verdict for each "
+            "record it would change, and capture or drop for each candidate."
         ),
         "category": "extraction",
         "variables": ["entry.title", "entry.feed_title", "entry.content_text", "manifest_block", "item_count"],
@@ -2222,9 +2223,10 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
 
 RETURN ONLY THE ITEMS YOU WOULD CHANGE. Every item_id you leave out of the verdicts list is kept exactly as it is, which is the right outcome for most of them — a clean review on a well-extracted article returns verdicts for its edges and NEW entities and nothing else. Do not echo back the links and iocs you agree with: a list with one line per item wastes the response budget and gets truncated on a long article, which throws the whole review away.
 
-TWO EXCEPTIONS:
+THREE EXCEPTIONS:
   - Every `edge:` item needs a verdict, keep or demote. A keep on an edge is a positive claim that this article asserts the relationship, and it is counted as corroboration — three of them promote the relationship to confirmed. So answer on every edge, and never keep one you have not checked against its evidence sentence; if you are unsure the article asserts it, demote it. There are at most ten edges in a list.
   - Every link marked "NEW, created by this article" needs a verdict: keep, veto or merge. The automated pass just added that entity to the catalogue on the strength of this one article, so silence is not good enough — say whether it should exist.
+  - Every `ioc:` item marked CANDIDATE needs a verdict: capture or drop. A candidate is a value nothing has captured yet — the pattern scan spotted it, or the automated pass staged it without capturing it — and this review is the only judgment it gets.
 
 WHAT A LINK MEANS
   A link says only that this article is about, or meaningfully involves, the entity. It is NOT a claim that the entity is an adversary. The catalogue deliberately holds defenders and bystanders too:
@@ -2249,7 +2251,8 @@ VERDICTS (keep is the default for anything you omit; state it explicitly only to
   merge       — (links marked "NEW, created by this article" only) the entity duplicates one of the names printed after "nearest existing names:"; set merge_into to that name EXACTLY as printed. If the right match is not among those names you cannot merge; use keep or veto.
   link        — (`held:` items only) the item is NOT linked: its name is also an ordinary word, and the analysis did not name it in this article. Use link when the article is in fact about this entity (the context line uses the name for the threat actor, malware, tool or country, not in its ordinary sense: "the Royal ransomware gang", not "the Royal Navy"). Omit the item when the ordinary sense is meant, which is most of the time.
   demote      — (edges only) the entities co-occur but the article never asserts the claimed relationship: roundups, lists, generic defensive advice ("watch for Cobalt Strike beacons"), the wrong verb, or the wrong direction (an actor's origin country is attribution, not a target).
-  drop        — (ioc items only) the value is not an attacker indicator: the publisher's own site or links, researcher and sandbox hosts, documentation URLs, sample-page or tracking URLs, private or reserved addresses, a benign domain the article happens to defang (google[.]com in an example), analyst tooling. Defanging by itself marks a value as malicious, never as benign: a defanged value in an indicator list stays. The article prints it defanged (example[.]com, hxxp://) — look for it in that form before calling it absent. A hash the article lists as an indicator stays, even when its file path is a system path: attackers replace and modify system files, and a vendor's IoC table says so.
+  capture     — (CANDIDATE ioc items only) the value is an attacker indicator this article reports: listed in its indicator table, IoC section or hash list, or named in the text as attacker infrastructure, a payload, a dropped file or an attacker's command. Capturing adds it to the indicator ledger.
+  drop        — (ioc items only) the value is not an attacker indicator: a version number or other number shaped like an address, a command or path from a how-to or a defender's procedure, an example or placeholder value, the publisher's own site or links, researcher and sandbox hosts, documentation URLs, sample-page or tracking URLs, private or reserved addresses, a benign domain the article happens to defang (google[.]com in an example), analyst tooling. Defanging by itself marks a value as malicious, never as benign: a defanged value in an indicator list stays. The article prints it defanged (example[.]com, hxxp://) — look for it in that form before calling it absent. A hash the article lists as an indicator stays, even when its file path is a system path: attackers replace and modify system files, and a vendor's IoC table says so.
                 The item's "found in:" line is where the value sits (its table row or list line, the heading above it), found in its defanged form too. A value in an indicator table, an IoC section or a hash list is an attacker indicator unless the row itself shows it is benign: never drop it as "not in the body text" or "placeholder data", and never on the strength of a boilerplate note elsewhere ("re-fang only in VirusTotal/MISP", "IoCs are also on GitHub").
                 A vulnerable or abused driver's own hashes (a LOLDrivers / BYOVD page's MD5, SHA1, SHA256) are indicators: keep them. They are not imports, kernel APIs or certificate fields.
                 A `script` item's value is our hash of the attacker code printed on its "script:" line; the article never prints that hash. Judge the code, never the hash: keep it when the article shows that code as the attacker's.
@@ -2257,7 +2260,7 @@ VERDICTS (keep is the default for anything you omit; state it explicitly only to
 RULES
   - Judge each record against the sentence where it appears, not the article's overall topic. Use the context line printed with the item. The context line is the FIRST place the name occurs, which can be a boilerplate line even when the entity is the article's subject: before removing, check the title and body for the entity too.
   - An item marked "inferred by the analysis" was linked on meaning, not on a name match; judge it against the article as a whole (who the victims are, who is targeted), not against the context line.
-  - Each reason must be about its own item and name that item's entity (for an edge, at least one of its two ends; for a ttp, its id or name). A remove or demote whose reason does not name its item is discarded, and so is one whose reason argues the record is right ("validating the edge"): when the evidence supports the record, the verdict is keep. Never copy one reason onto several items; if you cannot say what is wrong with a specific item, leave it out.
+  - Each reason must be about its own item and name that item's entity (for an edge, at least one of its two ends; for a ttp, its id or name). A remove or demote whose reason does not name its item is discarded, and so is one whose reason argues the record is right ("validating the edge"): when the evidence supports the record, the verdict is keep. Never copy one reason onto several items; if you cannot say what is wrong with a specific item, leave it out. CANDIDATES are the exception: one short reason may fit several of them ("a version number, not an address").
   - Leave the item out whenever you are uncertain. A wrong removal destroys real intelligence signal; a wrong keep is cheap to fix later.
   - "promoted from the pending tier" means the name is also an ordinary word and was linked only because the extraction named it; look hard at the context line for these.
   - A `held:` item is the other side of that: a held word the extraction did not name, so it was never linked. Link it only on a clear mention of the entity itself, and name the entity in the reason.
@@ -2273,11 +2276,11 @@ Source: {{ entry.feed_title }}
 
 {{ entry.content_text }}
 
-ITEMS UNDER REVIEW ({{ item_count }} — return verdicts ONLY for the ones you would change, plus every `edge:` item and every item marked NEW; everything you omit is kept)
+ITEMS UNDER REVIEW ({{ item_count }} — return verdicts ONLY for the ones you would change, plus every `edge:` item, every item marked NEW and every CANDIDATE; everything you omit is kept)
 
 {{ manifest_block }}
 
-Return strict JSON matching the provided schema: the verdicts list first, one object per item_id you are changing plus one per `edge:` item and one per NEW item — an empty list when the records are all correct and no edges or NEW items were listed — then the assessment object if an assessment item was listed.
+Return strict JSON matching the provided schema: the verdicts list first, one object per item_id you are changing plus one per `edge:` item, one per NEW item and one per CANDIDATE — an empty list when the records are all correct and no edges, NEW items or CANDIDATES were listed — then the assessment object if an assessment item was listed.
 """,
         "output_schema": {
             "type": "object",
@@ -2292,7 +2295,17 @@ Return strict JSON matching the provided schema: the verdicts list first, one ob
                             "item_id": {"type": "string"},
                             "verdict": {
                                 "type": "string",
-                                "enum": ["keep", "remove", "reclassify", "veto", "merge", "demote", "drop", "link"],
+                                "enum": [
+                                    "keep",
+                                    "remove",
+                                    "reclassify",
+                                    "veto",
+                                    "merge",
+                                    "demote",
+                                    "drop",
+                                    "link",
+                                    "capture",
+                                ],
                             },
                             "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
                             "reason": {"type": "string"},

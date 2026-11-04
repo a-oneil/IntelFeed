@@ -63,13 +63,14 @@ TRIGGERS = ("all", "created")
 CONFIDENCES = ("high", "medium", "low")
 _CONF_RANK = {"low": 0, "medium": 1, "high": 2}
 
-VERDICTS = {"keep", "remove", "reclassify", "veto", "merge", "demote", "drop", "link"}
+VERDICTS = {"keep", "remove", "reclassify", "veto", "merge", "demote", "drop", "link", "capture"}
 # Which verdicts each item kind accepts. veto/merge are additionally gated on
 # the item being minted by this entry (see _validate_verdicts).
 VALID_FOR_KIND: dict[str, set[str]] = {
     "link": {"keep", "remove", "reclassify", "veto", "merge"},
     "edge": {"keep", "demote"},
-    "ioc": {"keep", "drop"},
+    # capture only on a candidate (an item with `staged` set; see _validate_verdicts)
+    "ioc": {"keep", "drop", "capture"},
     # A held match the analysis rejected: keep the reject, or link it.
     "held": {"keep", "link"},
 }
@@ -104,6 +105,10 @@ ACTION_VETO = "adjudication_veto"
 ACTION_MERGE = "adjudication_merge"
 ACTION_EDGE_DEMOTE = "adjudication_edge_demote"
 ACTION_IOC_DROP = "adjudication_ioc_drop"
+# A candidate (a value the pattern scan spotted or the AI staged, never
+# captured) the review says is an attacker indicator. Applying it creates the
+# ledger row and this article's sighting; restoring it takes them back.
+ACTION_IOC_CAPTURE = "adjudication_ioc_capture"
 ACTION_ASSESSMENT = "adjudication_assessment"
 # A held match the analysis rejected that the review says the article is
 # about. Applying it creates the link; restoring it removes the link again.
@@ -121,6 +126,7 @@ ADJUDICATION_PROPOSAL_ACTIONS = {
     ACTION_MERGE,
     ACTION_EDGE_DEMOTE,
     ACTION_IOC_DROP,
+    ACTION_IOC_CAPTURE,
     ACTION_ASSESSMENT,
     ACTION_HELD_LINK,
 }
@@ -154,6 +160,7 @@ RESTORED_GUARD_DAYS = 90
 _MAX_LINKS = 60
 _MAX_EDGES = 10
 _MAX_IOCS = 25
+_MAX_CANDIDATE_ITEMS = 20
 _MAX_HELD = 15
 # Relationship sources the reviewer may judge. Analyst edges (confirmed,
 # created, rejected) and external-feed imports (MITRE) are settled by hand.
@@ -457,9 +464,10 @@ async def enqueue_and_dispatch(
 
 
 async def reopen_adjudication(db: AsyncSession, entry_id: uuid.UUID, since: datetime) -> None:
-    """Owe an article a review of the held matches settled at or after
-    ``since`` (``settle_held_on_analysed_entries``). The resweep queues it as
-    a recheck, which judges only those matches.
+    """Owe an article a recheck: of the held matches settled at or after
+    ``since`` (``settle_held_on_analysed_entries``) and of the candidates no
+    review has judged (``queue_candidate_reviews``). The resweep queues it,
+    and the recheck judges only those.
 
     Left alone: an article whose full review is still to come (no decision
     yet), one with a review queued or running (it checks for late settles
@@ -481,15 +489,25 @@ async def reopen_adjudication(db: AsyncSession, entry_id: uuid.UUID, since: date
     db.add(row)
 
 
-async def held_review_owed(db: AsyncSession, entry_id: uuid.UUID, since: datetime) -> bool:
-    """True when the article has held matches the review has not judged: a
-    reject not yet reviewed, or a match linked at or after ``since``."""
+def _unjudged_candidates(entry) -> list[dict]:
+    """The entry's candidates no review has judged yet."""
+    return [c for c in entry.observable_candidates or [] if isinstance(c, dict) and not c.get("reviewed")]
+
+
+async def review_owed(db: AsyncSession, entry, since: datetime, scope: set[str]) -> bool:
+    """True when the article holds something in ``scope`` the review has not
+    judged: a held-match reject not yet reviewed or a held match linked at or
+    after ``since`` (links), or a candidate not yet judged (observables)."""
     from app.models.pending_autolink import PendingAutolinkMatch
 
+    if "observables" in scope and _unjudged_candidates(entry):
+        return True
+    if "links" not in scope:
+        return False
     found = await db.scalar(
         select(PendingAutolinkMatch.id)
         .where(
-            PendingAutolinkMatch.entry_id == entry_id,
+            PendingAutolinkMatch.entry_id == entry.id,
             or_(
                 (PendingAutolinkMatch.resolution == "rejected") & PendingAutolinkMatch.reviewed_at.is_(None),
                 (PendingAutolinkMatch.resolution == "promoted") & (PendingAutolinkMatch.resolved_at >= since),
@@ -498,6 +516,52 @@ async def held_review_owed(db: AsyncSession, entry_id: uuid.UUID, since: datetim
         .limit(1)
     )
     return found is not None
+
+
+# How far back the sweep looks for articles with candidates no review judged.
+CANDIDATE_REVIEW_DAYS = 30
+
+
+async def queue_candidate_reviews(db: AsyncSession, limit: int = 50) -> int:
+    """Owe a recheck to reviewed articles that still carry candidates no
+    review has judged: ones past an earlier review's cap, ones a re-scan added
+    after the review, and articles reviewed before candidates were part of
+    the review. Recent articles only (CANDIDATE_REVIEW_DAYS), at most
+    ``limit`` per run, and none while the ai queue is deeper than
+    RESWEEP_QUEUE_CEILING, so a backlog drains at the pace of the worker
+    instead of all at once. Runs every 30 minutes from
+    ``submit_analysis_batches``; returns the articles queued."""
+    from datetime import timedelta
+
+    from sqlalchemy import text as sql_text
+
+    from app.models.ai_analysis import AIAnalysisRequest
+    from app.models.entry import Entry
+
+    cfg = await _settings(db)
+    if cfg["mode"] == "off" or "observables" not in cfg["scope"]:
+        return 0
+    if await _ai_queue_depth() > RESWEEP_QUEUE_CEILING:
+        return 0
+    entry_ids = list(
+        (
+            await db.execute(
+                select(Entry.id)
+                .join(AIAnalysisRequest, AIAnalysisRequest.entry_id == Entry.id)
+                .where(
+                    AIAnalysisRequest.adjudication_status == COMPLETED,
+                    Entry.fetched_at >= datetime.now(UTC) - timedelta(days=CANDIDATE_REVIEW_DAYS),
+                    sql_text("jsonb_path_exists(entries.observable_candidates, '$[*] ? (!(exists(@.reviewed)))')"),
+                )
+                .order_by(Entry.fetched_at.desc())
+                .limit(limit)
+            )
+        ).scalars()
+    )
+    since = datetime.now(UTC)
+    for entry_id in entry_ids:
+        await reopen_adjudication(db, entry_id, since)
+    return len(entry_ids)
 
 
 async def _ai_queue_depth() -> int:
@@ -656,7 +720,10 @@ class ReviewItem:
     ioc_kind: str | None = None
     ioc_value: str | None = None
     observable_id: uuid.UUID | None = None
+    # a candidate on the entry, not a ledger row: the snapshot is what a
+    # capture creates the row from (a script's code included)
     staged: bool = False
+    candidate: dict | None = None
     # edge
     edge_id: uuid.UUID | None = None
     # held: the pending_autolink_matches row
@@ -1280,13 +1347,19 @@ async def _held_items(db: AsyncSession, entry, text: str) -> list[ReviewItem]:
     return items
 
 
-async def _recheck_items(db: AsyncSession, entry, scope: set[str], text: str, since: datetime) -> list[ReviewItem]:
+async def _recheck_items(
+    db: AsyncSession, entry, scope: set[str], text: str, since: datetime, parsed: dict | None
+) -> list[ReviewItem]:
     """A recheck's manifest: links held matches created at or after ``since``,
-    and the rejects not yet judged (see build_manifest)."""
+    the held-match rejects not yet judged, and the candidates not yet judged
+    (see build_manifest)."""
     from app.models.pending_autolink import PendingAutolinkMatch
 
+    items: list[ReviewItem] = []
+    if "observables" in scope:
+        items += await _candidate_items(db, entry, text, parsed, set())
     if "links" not in scope:
-        return []
+        return items
     linked = set(
         (
             await db.execute(
@@ -1298,17 +1371,25 @@ async def _recheck_items(db: AsyncSession, entry, scope: set[str], text: str, si
             )
         ).all()
     )
-    items: list[ReviewItem] = []
     if linked:
         items += [it for it in await _link_items(db, entry, scope, text) if (it.entity_type, it.entity_id) in linked]
     return items + await _held_items(db, entry, text)
 
 
-async def mark_held_reviewed(db: AsyncSession, items: list[ReviewItem]) -> None:
-    """Record that the review judged these held matches, so the next review
-    of the article does not ask again."""
+async def mark_reviewed(db: AsyncSession, entry, items: list[ReviewItem]) -> None:
+    """Record that the review judged these held matches and candidates, so the
+    next review of the article does not ask again. A candidate the review
+    left without a verdict counts as judged too: it stays on the article as
+    an analysis hint and is never shown again."""
     from app.models.pending_autolink import PendingAutolinkMatch
 
+    judged = {(it.ioc_kind, it.ioc_value) for it in items if it.kind == "ioc" and it.staged}
+    if judged and entry.observable_candidates:
+        entry.observable_candidates = [
+            {**c, "reviewed": True} if isinstance(c, dict) and (c.get("kind"), c.get("value")) in judged else c
+            for c in entry.observable_candidates
+        ]
+        db.add(entry)
     ids = [it.held_id for it in items if it.kind == "held" and it.held_id]
     if ids:
         await db.execute(
@@ -1491,33 +1572,36 @@ def _script_lines(text: str, code: str, label: str | None, language: str | None)
     return out
 
 
-async def _ioc_items(db: AsyncSession, entry, text: str = "", parsed: dict | None = None) -> list[ReviewItem]:
-    """Observables this entry's analysis produced, captured ledger rows first.
+def _parsed_scripts(parsed: dict | None) -> dict[str, dict]:
+    """The analysis payload's scripts by their hash: a staged script keeps
+    only its hash, and the payload has the code."""
+    from app.intelligence.observables import script_identity
 
-    The cap trims the tail, so the order decides what gets judged. A captured
-    row is live data — a drop takes a sighting off the ledger and recounts it —
-    while a staged candidate is entry-local and already has a dismiss button on
-    the candidates queue. Collecting the captured rows first also means that a
-    value which is both renders as the captured one, and dropping that handles
-    the staged half too (see ``_drop_ioc``).
+    out: dict[str, dict] = {}
+    for sc in (parsed or {}).get("scripts") or []:
+        code = (sc.get("code") or "").strip() if isinstance(sc, dict) else ""
+        if len(code) >= 40:
+            out[script_identity(code)[0]] = sc
+    return out
+
+
+async def _ioc_items(db: AsyncSession, entry, text: str = "", parsed: dict | None = None) -> list[ReviewItem]:
+    """Observables this entry's analysis captured, then its candidates.
+
+    A captured row is live data — a drop takes a sighting off the ledger and
+    recounts it. A candidate is a value nothing has captured: the pattern
+    scan spotted it, or the analysis staged it without capturing it. Each
+    candidate gets one verdict, capture or drop (``_candidate_items``).
 
     Each item carries where the value sits in ``text`` (its IoC-table row or
     hash-list line, found defanged too), and a script carries its code: the
     value of a script row is our own hash of the snippet, which the article
     never prints.
     """
-    from app.intelligence.observables import SCRIPT_KIND, script_identity
+    from app.intelligence.observables import SCRIPT_KIND
     from app.models.observable import EntryObservable, Observable
 
-    # A staged script keeps only its hash; the analysis payload has the code.
-    parsed_scripts: dict[str, dict] = {}
-    for sc in (parsed or {}).get("scripts") or []:
-        code = (sc.get("code") or "").strip() if isinstance(sc, dict) else ""
-        if len(code) >= 40:
-            parsed_scripts[script_identity(code)[0]] = sc
-
     captured: list[ReviewItem] = []
-    staged: list[ReviewItem] = []
     seen: set[tuple[str, str]] = set()
     rows = (
         await db.execute(
@@ -1550,26 +1634,93 @@ async def _ioc_items(db: AsyncSession, entry, text: str = "", parsed: dict | Non
                 observable_id=obs.id,
             )
         )
-    for cand in entry.observable_candidates or []:
-        if not isinstance(cand, dict) or cand.get("origin") != "ai":
-            continue
-        kind, value = str(cand.get("kind") or ""), str(cand.get("value") or "")
-        if not kind or not value or (kind, value) in seen:
+    return captured[:_MAX_IOCS] + await _candidate_items(db, entry, text, parsed, seen)
+
+
+# The candidate fields a capture proposal keeps, and a restore puts back.
+_CANDIDATE_FIELDS = ("kind", "value", "surface_form", "was_defanged", "origin", "role", "evidence", "confidence")
+
+
+def _candidate_rank(c: dict) -> int:
+    """Which candidates the cap keeps: the analysis's own stagings, then
+    values the author defanged, then hashes, IPs and the rest."""
+    if c.get("origin") == "ai":
+        return 0
+    if c.get("was_defanged"):
+        return 1
+    kind = c.get("kind") or ""
+    if kind in ("sha256", "sha1", "md5"):
+        return 2
+    if kind in ("ipv4", "ipv6"):
+        return 3
+    return 4
+
+
+async def _candidate_items(
+    db: AsyncSession, entry, text: str, parsed: dict | None, seen: set[tuple[str, str]]
+) -> list[ReviewItem]:
+    """The entry's candidates no review has judged yet, best first, capped.
+
+    A candidate that is already a ledger row sighted in this article, or that
+    today's validators reject, has nothing to judge: it is marked judged here
+    and left out. The rest past the cap wait for the next review
+    (``review_owed``)."""
+    from app.intelligence.observables import SCRIPT_KIND, validate_kind_value
+    from app.models.observable import ALL_KINDS, EntryObservable, Observable
+
+    pending = _unjudged_candidates(entry)
+    if not pending:
+        return []
+    sighted = seen | set(
+        (
+            await db.execute(
+                select(Observable.kind, Observable.value)
+                .join(EntryObservable, EntryObservable.observable_id == Observable.id)
+                .where(EntryObservable.entry_id == entry.id)
+            )
+        ).all()
+    )
+    nothing_to_judge: set[tuple[str, str]] = set()
+    judgeable: list[dict] = []
+    for c in pending:
+        kind, value = str(c.get("kind") or ""), str(c.get("value") or "")
+        valid = kind in ALL_KINDS and bool(value) and validate_kind_value(kind, value) is not None
+        if not valid or (kind, value) in sighted:
+            nothing_to_judge.add((kind, value))
+        else:
+            judgeable.append(c)
+    if nothing_to_judge:
+        entry.observable_candidates = [
+            {**c, "reviewed": True}
+            if isinstance(c, dict) and (c.get("kind"), c.get("value")) in nothing_to_judge
+            else c
+            for c in entry.observable_candidates or []
+        ]
+        db.add(entry)
+
+    scripts = _parsed_scripts(parsed)
+    items: list[ReviewItem] = []
+    for c in sorted(judgeable, key=_candidate_rank):
+        kind, value = str(c["kind"]), str(c["value"])
+        if (kind, value) in seen:
             continue
         seen.add((kind, value))
-        line = f"ioc:{kind}:{value}  {kind} · staged by the AI, not yet a ledger row"
-        if cand.get("was_defanged"):
+        where = "staged by the analysis, not captured" if c.get("origin") == "ai" else "spotted by the pattern scan"
+        line = f"ioc:{kind}:{value}  {kind} · CANDIDATE: {where} · not yet an observable"
+        if c.get("was_defanged"):
             line += " · printed defanged"
-        if cand.get("evidence"):
-            line += f'\n    evidence: "{str(cand["evidence"])[:200]}"'
+        if c.get("evidence"):
+            line += f'\n    evidence: "{str(c["evidence"])[:200]}"'
+        snapshot = {k: c.get(k) for k in _CANDIDATE_FIELDS}
         if kind == SCRIPT_KIND:
-            sc = parsed_scripts.get(value) or {}
+            sc = scripts.get(value) or {}
             line += _script_lines(
-                text, sc.get("code") or "", sc.get("label") or cand.get("surface_form"), sc.get("language")
+                text, sc.get("code") or "", sc.get("label") or c.get("surface_form"), sc.get("language")
             )
+            snapshot.update({"code": sc.get("code"), "label": sc.get("label"), "language": sc.get("language")})
         else:
-            line += _ioc_where(text, value, cand.get("surface_form"))
-        staged.append(
+            line += _ioc_where(text, value, c.get("surface_form"))
+        items.append(
             ReviewItem(
                 item_id=f"ioc:{kind}:{value}",
                 kind="ioc",
@@ -1578,9 +1729,12 @@ async def _ioc_items(db: AsyncSession, entry, text: str = "", parsed: dict | Non
                 ioc_kind=kind,
                 ioc_value=value,
                 staged=True,
+                candidate=snapshot,
             )
         )
-    return [*captured, *staged][:_MAX_IOCS]
+        if len(items) >= _MAX_CANDIDATE_ITEMS:
+            break
+    return items
 
 
 def _assessment_item(parsed: dict | None) -> ReviewItem | None:
@@ -1624,7 +1778,7 @@ async def build_manifest(
     scope = scope or {"links", "entities", "relationships", "observables"}
     text = analysis_content_text(entry)
     if recheck_since is not None:
-        items = await _recheck_items(db, entry, scope, text, recheck_since)
+        items = await _recheck_items(db, entry, scope, text, recheck_since, parsed)
         return items, "\n".join(it.line for it in items)
     items: list[ReviewItem] = []
     if "links" in scope or "entities" in scope:
@@ -1837,6 +1991,8 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
                 verdict = "keep"
             if verdict in {"veto", "merge"} and not item.minted_here:
                 verdict = "keep"
+            if verdict == "capture" and not item.staged:
+                verdict = "keep"  # already a ledger row
             if verdict == "reclassify" and (
                 suggested not in RECLASSIFY_TYPES
                 or item.entity_type not in RECLASSIFY_TYPES
@@ -1886,7 +2042,14 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
     # count as a keep, which is corroboration.
     by_reason: dict[tuple[str, str], list[str]] = {}
     for item_id, v in verdicts.items():
-        if v.item.kind in ("link", "held", "ioc", "edge") and v.verdict != "keep" and v.reason.strip():
+        # Candidates are exempt: one reason fits many of them ("a version
+        # number", "listed in the IoC table") without the model losing track.
+        if (
+            v.item.kind in ("link", "held", "ioc", "edge")
+            and not v.item.staged
+            and v.verdict != "keep"
+            and v.reason.strip()
+        ):
             by_reason.setdefault((v.item.kind, " ".join(v.reason.lower().split())), []).append(item_id)
     stats["copied_reason"] = 0
     for ids in by_reason.values():
@@ -1899,6 +2062,10 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
     # omission is counted so a model that ignores the rule shows in the stats.
     stats["new_unanswered"] = sum(
         1 for it in items if it.kind == "link" and it.minted_here and it.item_id not in verdicts
+    )
+    # Every candidate needs capture or drop too.
+    stats["candidates_unanswered"] = sum(
+        1 for it in items if it.kind == "ioc" and it.staged and it.item_id not in verdicts
     )
     out = [verdicts.get(it.item_id) or Verdict(it, "keep", "low", "") for it in items]
     assessment = result.get("assessment")
@@ -2323,9 +2490,8 @@ async def _demote_edge(db: AsyncSession, edge_id: uuid.UUID, reason: str) -> dic
 
 
 async def _drop_ioc(db: AsyncSession, entry, kind: str, value: str, observable_id: uuid.UUID | None) -> dict | None:
-    """Staged → remove from the entry's candidate list (what the analyst
-    dismiss button does); captured → remove this entry's sighting and
-    recount the ledger row."""
+    """A candidate → remove it from the entry's candidate list; a captured
+    value → remove this entry's sighting and recount the ledger row."""
     from app.intelligence.observables import recount_observable
     from app.models.observable import EntryObservable
 
@@ -2358,6 +2524,74 @@ async def _drop_ioc(db: AsyncSession, entry, kind: str, value: str, observable_i
             await db.flush()
             await recount_observable(db, observable_id)
     return snap or None
+
+
+async def _capture_candidate(db: AsyncSession, entry, cand: dict) -> dict | None:
+    """Turn a candidate into a ledger row sighted in this article (the
+    adjudicator's capture door) and take it off the candidate list. Returns
+    what a restore needs, or None when the value is invalid or on the
+    never-capture list. The caller queues the capture automations, once per
+    article (``_queue_capture_automations``)."""
+    from app.intelligence.observables import (
+        SCRIPT_KIND,
+        get_or_create_observable,
+        record_sighting,
+        validate_kind_value,
+    )
+    from app.models.observable import VIA_ADJUDICATOR
+
+    kind, value = str(cand.get("kind") or ""), str(cand.get("value") or "")
+    canonical = validate_kind_value(kind, value) if kind and value else None
+    if canonical is None:
+        return None
+    script = kind == SCRIPT_KIND
+    obs = await get_or_create_observable(
+        db,
+        kind,
+        canonical,
+        via=VIA_ADJUDICATOR,
+        entry_id=entry.id,
+        role=cand.get("role"),
+        evidence=cand.get("evidence"),
+        label=cand.get("label") if script else None,
+        content=cand.get("code") if script else None,
+        language=cand.get("language") if script else None,
+        was_defanged=bool(cand.get("was_defanged")),
+    )
+    if obs is None:
+        return None
+    sighted = await record_sighting(
+        db,
+        entry.id,
+        obs,
+        source="adjudicator",
+        confidence=cand.get("confidence"),
+        surface_form=cand.get("surface_form") or value,
+        was_defanged=bool(cand.get("was_defanged")),
+    )
+    entry.observable_candidates = [
+        c
+        for c in entry.observable_candidates or []
+        if not (isinstance(c, dict) and c.get("kind") == kind and c.get("value") == value)
+    ]
+    db.add(entry)
+    await db.flush()
+    try:
+        from app.services.entity_indexer import index_single_entity
+
+        await index_single_entity("observable", obs)
+    except Exception:
+        logger.debug("search indexing failed for observable %s", obs.id, exc_info=True)
+    created = obs.created_via == VIA_ADJUDICATOR and obs.created_from_entry_id == entry.id
+    return {"observable_id": str(obs.id), "created": created, "sighted": sighted}
+
+
+def _queue_capture_automations(entry_id: uuid.UUID) -> None:
+    """Run the on_observable_captured rules for an article the stage captured
+    into. The countdown lets the capturing transaction commit first."""
+    from app.workers.automation_tasks import dispatch_observable_capture_automations
+
+    dispatch_observable_capture_automations(entry_id, countdown=30)
 
 
 def _json_safe(resp) -> dict | str:
@@ -2533,9 +2767,13 @@ async def apply_verdicts(
         log_shadow_removal,
     )
     from app.models.entity_maintenance import EntityMaintenanceLog
-    from app.services.proposal_dismissals import clear_reclassify_proposals, reclassify_dismissed
+    from app.services.proposal_dismissals import clear_reclassify_proposals, dismissed_verdicts, reclassify_dismissed
 
     mode = cfg["mode"]
+    # Verdicts an analyst dismissed for this article stay dismissed: neither
+    # filed again nor applied.
+    dismissed = await dismissed_verdicts(db, entry.id)
+    dismissed_n = 0
     ai_result_id = await _adjudication_result_id(db, entry.id)
     counts: dict[str, int] = {}
     overridden = 0
@@ -2546,6 +2784,7 @@ async def apply_verdicts(
     # changes the analyst can undo from the queue, so they are counted apart —
     # folding them into `applied` made `shadowed` under-report.
     applied_n = 0
+    captured_n = 0
     promoted_n = 0
 
     # Positive-evidence override: the reviewer may not remove a link to an
@@ -2559,14 +2798,18 @@ async def apply_verdicts(
                 v.verdict = "keep"
                 overridden += 1
 
-    destructive = [v for v in verdicts if v.verdict in DESTRUCTIVE]
+    # Candidates stay out of the breaker: dropping one takes nothing from the
+    # ledger, and every candidate needs a verdict, so a how-to article's junk
+    # commands would otherwise read as a run gone wrong.
+    judged = [v for v in verdicts if v.item.kind != "assessment" and not (v.item.kind == "ioc" and v.item.staged)]
+    destructive = [v for v in judged if v.verdict in DESTRUCTIVE]
     # Everything that files a row an analyst still has to decide. `reclassify`
     # is advisory in both modes, so it never counts as applied — but it is a
     # pending proposal, and leaving it out made `shadowed` read 0 on a run that
     # filed nothing but advisories. The breaker still counts only `destructive`.
-    changes = [v for v in verdicts if v.verdict in DESTRUCTIVE | {"merge", "reclassify", "link"}]
+    changes = [v for v in verdicts if v.verdict in DESTRUCTIVE | {"merge", "reclassify", "link", "capture"}]
     items_n = len([v for v in verdicts if v.item.kind != "assessment"])
-    ratio = (len(destructive) / items_n) if items_n else 0.0
+    ratio = (len(destructive) / len(judged)) if judged else 0.0
     breaker = ratio > cfg["breaker_pct"]
     # The rolling breaker pauses dispatch for an hour, and it exists to stop
     # damage — which a shadow run does none of. Sampling shadow runs would
@@ -2625,6 +2868,9 @@ async def apply_verdicts(
             continue
         if item.kind == "assessment" and v.verdict == "ok":
             continue
+        if dismissed and _verdict_key(v) in dismissed:
+            dismissed_n += 1
+            continue
         reason = v.reason
         do_apply = run_mode == "apply" and _CONF_RANK[v.confidence] >= floor
         # Never touched: a link an analyst restored recently is only ever
@@ -2649,10 +2895,10 @@ async def apply_verdicts(
             if v.verdict == "remove":
                 if item.entity_type in ENTITY_TYPES:
                     if do_apply:
-                        if await apply_removal(db, entry.id, link_row, reason, ai_result_id):
+                        if await apply_removal(db, entry.id, link_row, reason, ai_result_id, v.confidence):
                             applied_n += 1
                     else:
-                        await log_shadow_removal(db, entry.id, link_row, reason, ai_result_id)
+                        await log_shadow_removal(db, entry.id, link_row, reason, ai_result_id, v.confidence)
                 else:
                     snap = _junction_snapshot_from_item(item)
                     if do_apply:
@@ -2708,7 +2954,7 @@ async def apply_verdicts(
                         )
                 if not converted:
                     if etype in ENTITY_TYPES:
-                        await log_reclassification(db, entry.id, link_row, reason, target, ai_result_id)
+                        await log_reclassification(db, entry.id, link_row, reason, target, ai_result_id, v.confidence)
                     else:
                         _log(
                             ACTION_RECLASSIFY,
@@ -2839,6 +3085,25 @@ async def apply_verdicts(
                     entity_type=OBSERVABLE,
                     entity_id=item.observable_id,
                 )
+        elif item.kind == "ioc" and v.verdict == "capture" and item.candidate:
+            before = {"entity": {"name": item.ioc_value}, "candidate": item.candidate}
+            after = {**after_base, "kind": item.ioc_kind, "value": item.ioc_value}
+            if do_apply:
+                snap = await _capture_candidate(db, entry, item.candidate)
+                if snap is not None:
+                    applied_n += 1
+                    captured_n += 1
+                    _log(
+                        ACTION_IOC_CAPTURE,
+                        item,
+                        {**before, **snap},
+                        after,
+                        applied=True,
+                        entity_type=OBSERVABLE,
+                        entity_id=uuid.UUID(snap["observable_id"]),
+                    )
+            else:
+                _log(ACTION_IOC_CAPTURE, item, before, after, applied=False, entity_type=OBSERVABLE, entity_id=None)
         elif item.kind == "assessment":
             _log(
                 ACTION_ASSESSMENT,
@@ -2850,6 +3115,8 @@ async def apply_verdicts(
                 entity_id=entry.id,
             )
 
+    if captured_n:
+        _queue_capture_automations(entry.id)
     return {
         "mode": run_mode,
         "requested_mode": mode,
@@ -2857,12 +3124,30 @@ async def apply_verdicts(
         "verdicts": counts,
         "applied": applied_n,
         "promoted": promoted_n,
-        "shadowed": max(0, len(changes) - applied_n - flip_guarded),
+        "shadowed": max(0, len(changes) - applied_n - flip_guarded - dismissed_n),
         "breaker": breaker,
         "rolling_breaker": rolling,
         "keep_overridden": overridden,
         "reclassify_flip_guarded": flip_guarded,
+        "dismissed_skipped": dismissed_n,
     }
+
+
+def _verdict_key(v: Verdict) -> tuple[str, str, uuid.UUID] | None:
+    """(action, subject type, subject id) a verdict files under — what an
+    analyst's dismissal of it is recorded as. None for verdicts remembered
+    another way (a reclassify, a candidate) or with no subject."""
+    item = v.item
+    if item.kind == "link" and v.verdict in ("remove", "veto", "merge") and item.entity_id:
+        action = {"remove": ACTION_UNLINK, "veto": ACTION_VETO, "merge": ACTION_MERGE}[v.verdict]
+        return action, item.entity_type or "", item.entity_id
+    if item.kind == "held" and v.verdict == "link" and item.entity_id:
+        return ACTION_HELD_LINK, item.entity_type or "", item.entity_id
+    if item.kind == "edge" and v.verdict == "demote" and item.edge_id:
+        return ACTION_EDGE_DEMOTE, LOG_TYPE_RELATIONSHIP, item.edge_id
+    if item.kind == "ioc" and v.verdict == "drop" and not item.staged and item.observable_id:
+        return ACTION_IOC_DROP, OBSERVABLE, item.observable_id
+    return None
 
 
 def _junction_snapshot_from_item(item: ReviewItem) -> dict:
@@ -2988,6 +3273,13 @@ async def apply_adjudication_row(db: AsyncSession, row) -> dict:
         if linked != HELD_LINKED:
             return {"applied": False, "reason": linked}
         after["created_link"] = True
+    elif row.action == ACTION_IOC_CAPTURE:
+        snap = await _capture_candidate(db, entry, before.get("candidate") or {})
+        if snap is None:
+            return {"applied": False, "reason": "value refused"}
+        before.update(snap)
+        row.entity_id = uuid.UUID(snap["observable_id"])
+        _queue_capture_automations(entry.id)
     elif row.action == ACTION_ASSESSMENT:
         return {"applied": False, "reason": "assessment flags are informational"}
     else:
@@ -3057,6 +3349,35 @@ async def restore_adjudication_row(db: AsyncSession, row) -> dict:
             held.resolution = "rejected"
             db.add(held)
         outcome = {"restored": True, "unlinked": snap is not None}
+    elif row.action == ACTION_IOC_CAPTURE and row.entity_id:
+        from app.intelligence.observables import recount_observable
+        from app.models.observable import EntryObservable
+
+        if before.get("sighted"):
+            await db.execute(
+                sa_delete(EntryObservable).where(
+                    EntryObservable.entry_id == entry.id, EntryObservable.observable_id == row.entity_id
+                )
+            )
+            await db.flush()
+        obs = await db.get(Observable, row.entity_id)
+        deleted = False
+        if obs is not None:
+            await recount_observable(db, row.entity_id)
+            # A row this capture created and nothing else sights goes with it.
+            others = await db.scalar(
+                select(func.count()).select_from(EntryObservable).where(EntryObservable.observable_id == row.entity_id)
+            )
+            if before.get("created") and not others:
+                deleted = await _delete_entity(db, OBSERVABLE, row.entity_id)
+        cand = before.get("candidate")
+        if isinstance(cand, dict):
+            cands = list(entry.observable_candidates or [])
+            if not any(c.get("kind") == cand.get("kind") and c.get("value") == cand.get("value") for c in cands):
+                cands.append({**{k: cand.get(k) for k in _CANDIDATE_FIELDS}, "reviewed": True})
+                entry.observable_candidates = cands
+                db.add(entry)
+        outcome = {"restored": True, "deleted": deleted}
     elif row.action == ACTION_EDGE_DEMOTE and row.entity_id:
         edge = await db.get(EntityRelationship, row.entity_id)
         if edge is None:

@@ -640,6 +640,7 @@ async def entry_adjudication(
         ACTION_ASSESSMENT,
         ACTION_EDGE_DEMOTE,
         ACTION_HELD_LINK,
+        ACTION_IOC_CAPTURE,
         ACTION_IOC_DROP,
         ACTION_MERGE,
         ACTION_RECLASSIFY,
@@ -725,6 +726,7 @@ async def entry_adjudication(
         ACTION_MERGE: "merge",
         ACTION_EDGE_DEMOTE: "demote",
         ACTION_IOC_DROP: "drop",
+        ACTION_IOC_CAPTURE: "capture",
         ACTION_ASSESSMENT: "assessment",
         ACTION_HELD_LINK: "link",
     }
@@ -732,7 +734,7 @@ async def entry_adjudication(
         after = r.after or {}
         if r.action == ACTION_EDGE_DEMOTE:
             item_id, kind = f"edge:{r.entity_id}", "edge"
-        elif r.action == ACTION_IOC_DROP:
+        elif r.action in (ACTION_IOC_DROP, ACTION_IOC_CAPTURE):
             item_id, kind = f"ioc:{after.get('kind')}:{after.get('value')}", "ioc"
         elif r.action == ACTION_ASSESSMENT:
             item_id, kind = "assessment", "assessment"
@@ -863,7 +865,7 @@ async def retry_pipeline_stage(
 
 class RetryErrorsRequest(BaseModel):
     stage: str | None = Field(default=None, description="Only this stage; default every retryable stage")
-    window: str = Field(default="7d", description="Entries ingested in this window: 1h, 24h, 7d or 30d")
+    window: str = Field(default="7d", description="Entries ingested in this window: 1h, 24h, 7d, 30d or all")
     limit: int = Field(default=500, ge=1, le=5000, description="Most stage runs to re-dispatch in one call")
 
     model_config = ConfigDict(json_schema_extra={"example": {"stage": "extract", "window": "7d", "limit": 500}})
@@ -884,7 +886,7 @@ async def retry_pipeline_errors(
     one column. Stages that cannot be re-dispatched from a bare entry id
     (automate, translate) are counted in ``skipped``. The adjudicate stage is
     re-queued the same way the single-entry retry does it."""
-    from datetime import UTC, datetime, timedelta
+    from datetime import UTC, datetime
 
     from sqlalchemy import and_, exists, select
     from sqlalchemy.orm import aliased
@@ -897,7 +899,7 @@ async def retry_pipeline_errors(
     _require_admin(user)
     if body.stage is not None and body.stage not in PROCESSING_STAGE_ORDER:
         raise HTTPException(status_code=422, detail=f"Unknown stage: {body.stage}")
-    cutoff = datetime.now(UTC) - timedelta(hours=_WINDOW_HOURS.get(body.window, 24 * 7))
+    cutoff = await _window_cutoff(db, body.window, default="7d")
 
     Run = EntryPipelineRun
     Newer = aliased(Run)
@@ -961,40 +963,55 @@ async def pipeline_overview(
 
     cutoff = datetime.now(UTC) - timedelta(hours=24)
     Run = EntryPipelineRun
-    counts = {
-        (stage, status): n
-        for stage, status, n in (
-            await db.execute(
-                select(Run.stage, Run.status, func.count())
-                .where(Run.created_at >= cutoff)
-                .group_by(Run.stage, Run.status)
-            )
-        ).all()
-    }
+
+    async def run_counts(since) -> dict:
+        return {
+            (stage, status): n
+            for stage, status, n in (
+                await db.execute(
+                    select(Run.stage, Run.status, func.count())
+                    .where(Run.created_at >= since)
+                    .group_by(Run.stage, Run.status)
+                )
+            ).all()
+        }
+
     # Entries currently errored at a stage: an error run with no newer run at the
     # same stage (a later success/retry supersedes it). Newer-run check is NOT
     # window-bounded so a green re-run just outside 24h still clears the error.
     Newer = aliased(Run)
-    errored_now = {
-        stage: n
-        for stage, n in (
-            await db.execute(
-                select(Run.stage, func.count(func.distinct(Run.entry_id)))
-                .where(
-                    Run.created_at >= cutoff,
-                    Run.status == "error",
-                    ~exists().where(
-                        and_(
-                            Newer.entry_id == Run.entry_id,
-                            Newer.stage == Run.stage,
-                            Newer.created_at > Run.created_at,
-                        )
-                    ),
+
+    async def errored(since) -> dict:
+        return {
+            stage: n
+            for stage, n in (
+                await db.execute(
+                    select(Run.stage, func.count(func.distinct(Run.entry_id)))
+                    .where(
+                        Run.created_at >= since,
+                        Run.status == "error",
+                        ~exists().where(
+                            and_(
+                                Newer.entry_id == Run.entry_id,
+                                Newer.stage == Run.stage,
+                                Newer.created_at > Run.created_at,
+                            )
+                        ),
+                    )
+                    .group_by(Run.stage)
                 )
-                .group_by(Run.stage)
-            )
-        ).all()
-    }
+            ).all()
+        }
+
+    counts = await run_counts(cutoff)
+    errored_now = await errored(cutoff)
+    # "Clear check engine": the header light only counts what came in after
+    # the admin cleared it. The console's own counts stay whole.
+    cleared_at = await health_cleared_at()
+    if cleared_at and cleared_at > cutoff:
+        new_counts, new_errored = await run_counts(cleared_at), await errored(cleared_at)
+    else:
+        new_counts, new_errored = counts, errored_now
     stages = [
         {
             "name": s.name,
@@ -1006,6 +1023,8 @@ async def pipeline_overview(
                 "success": counts.get((s.name, "success"), 0),
                 "error": errored_now.get(s.name, 0),
                 "retry": counts.get((s.name, "retry"), 0),
+                "new_error": new_errored.get(s.name, 0),
+                "new_retry": new_counts.get((s.name, "retry"), 0),
             },
         }
         for s in PIPELINE_STAGES.values()
@@ -1026,6 +1045,15 @@ async def pipeline_overview(
             )
         ).all()
     }
+    new_failed = analysis_counts.get("failed", 0)
+    if cleared_at and cleared_at > cutoff:
+        new_failed = (
+            await db.execute(
+                select(func.count()).where(
+                    Req.status == "failed", func.coalesce(Req.completed_at, Req.created_at) >= cleared_at
+                )
+            )
+        ).scalar_one()
     analyze_row = {
         "name": "analyze",
         "kind": "analysis",
@@ -1039,11 +1067,14 @@ async def pipeline_overview(
             "success": analysis_counts.get("completed", 0) + analysis_counts.get("reused_echo", 0),
             "error": analysis_counts.get("failed", 0),
             "retry": 0,
+            "new_error": new_failed,
+            "new_retry": 0,
             "queued": analysis_counts.get("pending", 0) + analysis_counts.get("submitted", 0),
         },
     }
     stages.insert(next(i for i, s in enumerate(stages) if s["name"] == "adjudicate"), analyze_row)
     return {
+        "health_cleared_at": cleared_at.isoformat() if cleared_at else None,
         "pipeline_engine_enabled": bool(await get_setting("pipeline_engine_enabled", db)),
         "run_logging_enabled": bool(await get_setting("pipeline_run_logging_enabled", db)),
         "stages": stages,
@@ -1068,12 +1099,27 @@ PROCESSING_STAGE_ORDER: list[str] = [
     "automate",
 ]
 
-_WINDOW_HOURS: dict[str, int] = {"1h": 1, "24h": 24, "7d": 24 * 7, "30d": 24 * 30}
+_WINDOW_HOURS: dict[str, int | None] = {"1h": 1, "24h": 24, "7d": 24 * 7, "30d": 24 * 30, "all": None}
+
+
+async def _window_cutoff(db, window: str, default: str = "24h"):
+    """When a console window starts. "all" starts at the oldest entry."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import func, select
+
+    from app.models.entry import Entry
+
+    hours = _WINDOW_HOURS.get(window, _WINDOW_HOURS[default])
+    if hours is not None:
+        return datetime.now(UTC) - timedelta(hours=hours)
+    oldest = (await db.execute(select(func.min(Entry.created_at)))).scalar_one_or_none()
+    return oldest or datetime.now(UTC)
 
 
 @router.get("/processing")
 async def processing_flow(
-    window: str = Query("24h", description="Stats window: 1h, 24h or 7d (unknown values fall back to 24h)"),
+    window: str = Query("24h", description="Stats window: 1h, 24h, 7d, 30d or all (unknown values fall back to 24h)"),
     status: str | None = Query(None, description="Bucket filter: complete, errored/error or in_flight/processing"),
     stage: str | None = Query(
         None, description="Entries whose latest run at this stage matches status (default error)"
@@ -1094,7 +1140,7 @@ async def processing_flow(
     entries whose latest run at that stage matches (e.g. errored-at-extract).
     """
     import uuid as _uuid
-    from datetime import UTC, datetime, timedelta
+    from datetime import UTC, datetime
 
     from sqlalchemy import and_, exists, func, literal, or_, select
     from sqlalchemy.orm import aliased
@@ -1114,8 +1160,8 @@ async def processing_flow(
     from app.models.vendor import EntryVendor, Vendor
 
     _require_admin(user)
-    hours = _WINDOW_HOURS.get(window, 24)
-    cutoff = datetime.now(UTC) - timedelta(hours=hours)
+    cutoff = await _window_cutoff(db, window)
+    hours = max(1.0, (datetime.now(UTC) - cutoff).total_seconds() / 3600)
     limit = max(1, min(limit, 200))
 
     Run = EntryPipelineRun
@@ -1225,8 +1271,8 @@ async def processing_flow(
         "observables": 0,
     }
     outputs_map: dict[_uuid.UUID, dict[str, int]] = {}
+    entry_ids = [e.id for e in entries]
     if entries:
-        entry_ids = [e.id for e in entries]
         feed_ids = {e.feed_id for e in entries}
         for fid, title, custom, cat in (
             await db.execute(
@@ -1329,7 +1375,6 @@ async def processing_flow(
     # --- latest run per (entry, stage) for the page ------------------------
     latest: dict[tuple[_uuid.UUID, str], EntryPipelineRun] = {}
     if entries:
-        entry_ids = [e.id for e in entries]
         runs = (
             (
                 await db.execute(
@@ -1441,27 +1486,6 @@ async def processing_flow(
     ).scalar_one()
     if analyze_failed:
         by_stage_errors["analyze"] = analyze_failed
-    # Observables precision funnel over the window: staged candidates vs
-    # judgment-confirmed sightings. If the ratio drifts, this is where it shows
-    # before the workbench feels it.
-    from app.models.observable import EntryObservable as _EntryObs
-
-    obs_candidates_ct = (
-        await db.execute(
-            select(func.coalesce(func.sum(func.jsonb_array_length(Entry.observable_candidates)), 0)).where(
-                Entry.created_at >= cutoff, Entry.observable_candidates.isnot(None)
-            )
-        )
-    ).scalar_one()
-    obs_confirmed_ct = (
-        await db.execute(
-            select(func.count())
-            .select_from(_EntryObs)
-            .join(Entry, Entry.id == _EntryObs.entry_id)
-            .where(Entry.created_at >= cutoff)
-        )
-    ).scalar_one()
-
     # median / p95 latency: score-success run time minus entry creation
     latency_row = (
         await db.execute(
@@ -1505,8 +1529,6 @@ async def processing_flow(
             "errored": errored_ct,
             "processing": max(0, ingested - complete_ct - errored_ct),
             "by_stage_errors": by_stage_errors,
-            "observable_candidates": int(obs_candidates_ct or 0),
-            "observable_confirmed": int(obs_confirmed_ct or 0),
             "median_latency_ms": int(median_s * 1000) if median_s is not None else None,
             "p95_latency_ms": int(p95_s * 1000) if p95_s is not None else None,
             "ingest_series": ingest_series,
@@ -1687,19 +1709,53 @@ class EngineStateUpdate(BaseModel):
 class EngineStateResponse(BaseModel):
     stopped: bool
     queued: dict[str, int] = Field(description="Tasks waiting on each worker queue")
+    health_cleared_at: str | None = Field(
+        default=None, description="When an admin last cleared the check-engine light; the light counts what came after"
+    )
 
     model_config = ConfigDict(
-        json_schema_extra={"example": {"stopped": False, "queued": {"celery": 3, "ai": 12, "enrichment": 0}}}
+        json_schema_extra={
+            "example": {
+                "stopped": False,
+                "queued": {"celery": 3, "ai": 12, "enrichment": 0},
+                "health_cleared_at": "2026-11-04T09:30:00+00:00",
+            }
+        }
     )
+
+
+#: When an admin last cleared the check-engine light. Kept in Redis: losing it
+#: only turns the light back on, which is the safe way to fail.
+HEALTH_CLEARED_KEY = "engine:health_cleared_at"
+
+
+async def health_cleared_at():
+    """When the check-engine light was last cleared, or None."""
+    from datetime import datetime
+
+    from redis.exceptions import RedisError
+
+    from app.services.redis_client import get_redis
+
+    try:
+        raw = await (await get_redis()).get(HEALTH_CLEARED_KEY)
+    except (RedisError, OSError):
+        return None
+    try:
+        return datetime.fromisoformat(raw) if raw else None
+    except ValueError:
+        return None
 
 
 async def _engine_state(db) -> dict:
     from app.services import engine_switch
     from app.services.system_settings import get_setting
 
+    cleared = await health_cleared_at()
     return {
         "stopped": bool(await get_setting(engine_switch.SETTING, db)),
         "queued": await engine_switch.queue_depths(),
+        "health_cleared_at": cleared.isoformat() if cleared else None,
     }
 
 
@@ -1724,6 +1780,22 @@ async def set_engine_state(
     from app.services.engine_switch import set_stopped
 
     await set_stopped(db, body.stopped)
+    return await _engine_state(db)
+
+
+@router.post("/state/clear-health", response_model=EngineStateResponse)
+async def clear_engine_health(
+    user: User = Depends(get_admin_user),
+    db=Depends(get_db),
+):
+    """Admin: clear the check-engine light. It turns green and stays green
+    until a new error or retry comes in. The errors themselves stay where
+    they are in the Engine console."""
+    from datetime import UTC, datetime
+
+    from app.services.redis_client import get_redis
+
+    await (await get_redis()).set(HEALTH_CLEARED_KEY, datetime.now(UTC).isoformat())
     return await _engine_state(db)
 
 

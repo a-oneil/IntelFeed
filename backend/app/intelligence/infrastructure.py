@@ -196,14 +196,19 @@ async def get_entity_infrastructure(
 
 
 async def _staged_candidate_articles(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> int:
-    """How many of this entity's articles still carry staged (un-promoted)
-    candidates — what the analyst can go and work from an empty panel."""
+    """How many of this entity's articles carry candidates the adjudicator has
+    not judged yet — indicators that may still be captured."""
+    from sqlalchemy import text as sql_text
+
     _model, junction, fk_col = _JUNCTIONS[entity_type]
     staged = (
         await db.execute(
             select(func.count(func.distinct(Entry.id)))
             .join(junction, junction.entry_id == Entry.id)
-            .where(fk_col == entity_id, func.jsonb_array_length(Entry.observable_candidates) > 0)
+            .where(
+                fk_col == entity_id,
+                sql_text("jsonb_path_exists(entries.observable_candidates, '$[*] ? (!(exists(@.reviewed)))')"),
+            )
         )
     ).scalar_one()
     return int(staged or 0)

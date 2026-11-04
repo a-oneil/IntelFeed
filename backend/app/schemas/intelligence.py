@@ -705,58 +705,11 @@ class ObservableResponse(BaseModel):
     was_defanged: bool | None = None
 
 
-class ObservableCandidateRow(BaseModel):
-    """One aggregated candidate in the central review queue: a (kind, value)
-    the regex scan nominated but no judgment door has confirmed."""
-
-    kind: str
-    value: str
-    entry_count: int
-    was_defanged: bool
-    sample_surface: str | None = None
-    latest_entry_id: uuid.UUID | None = None
-    latest_entry_title: str | None = None
-    latest_seen_at: datetime | None = None
-
-
-class ObservableNeverCaptureRequest(BaseModel):
-    kind: str
-    value: str
-
-
 class ObservableEntryPayload(BaseModel):
-    """An entry's confirmed observables plus its Tier-0 candidates.
-
-    Candidates are entry-local regex nominations — not entities — surfaced so
-    the reader can offer one-click promotion.
-    """
+    """The ledger rows sighted in an entry. Its candidates stay off the API:
+    the adjudicator captures or drops them (``entry_adjudication``)."""
 
     items: list[ObservableResponse] = []
-    candidates: list[dict] = []
-
-
-class ObservablePromoteRequest(BaseModel):
-    """The analyst door: promote a candidate (or any value) into the ledger.
-
-    ``role`` / ``evidence`` / ``label`` are optional; when omitted and the
-    entry holds a matching candidate, the candidate's own judgment (an AI
-    shadow staging carries role + evidence) fills them in.
-    """
-
-    kind: str
-    value: str
-    surface_form: str | None = None
-    role: str | None = None
-    evidence: str | None = None
-    label: str | None = None
-
-
-class ObservableDismissRequest(BaseModel):
-    """Drop one candidate from one entry's nomination list (entry-local: the
-    value can nominate again elsewhere; never-capture is the global rung)."""
-
-    kind: str
-    value: str
 
 
 class ObservableUpdateRequest(BaseModel):

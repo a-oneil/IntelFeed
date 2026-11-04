@@ -1,10 +1,10 @@
 /**
- * EntityRowActions — the per-row "⋯" entity-management menu the review
- * queues share (Proposals, Remove links, Reclassify), so an analyst can fix
- * the entity a proposal is about without pivoting to its profile: merge it
- * into another, rename it, add an alias, convert its type, or delete it and
- * put its names on the do-not-recreate list. The same actions as the New
- * entities lens, for any catalogue type the queues surface.
+ * EntityRowActions — the per-row "⋯" entity-management menu of the Review
+ * queue, so an analyst can fix the entity a proposal is about without
+ * pivoting to its profile: merge it into another, rename it, add an alias,
+ * convert its type, or delete it and put its names on the do-not-recreate
+ * list. The same actions as the Entities view, for any catalogue type the
+ * queue surfaces.
  *
  * Rendered as a fixed-position popover so it escapes the table's scroll
  * clipping. Every change invalidates the review, extraction and engine

@@ -1,6 +1,12 @@
 import { toast } from "sonner";
 
-import { type EngineState, useEngineState, useSetEngineStopped } from "@/hooks/useEngine";
+import {
+  type EngineState,
+  useClearEngineHealth,
+  useEngineHealth,
+  useEngineState,
+  useSetEngineStopped,
+} from "@/hooks/useEngine";
 import { confirmDialog } from "@/utils/dialog";
 
 import styles from "./EngineSwitch.module.css";
@@ -58,6 +64,40 @@ export function EngineSwitch() {
         {stopped ? "▶" : "■"}
       </span>
       {stopped ? "Start engine" : "Stop engine"}
+    </button>
+  );
+}
+
+/** Turns the header's check-engine light green until a new error or retry
+ *  comes in: for failures the admin knows about and has chosen to leave (a
+ *  feed worth keeping, an entry that can't be retried). Greyed out while
+ *  there is nothing to clear. */
+export function ClearCheckEngine() {
+  const health = useEngineHealth(true);
+  const clear = useClearEngineHealth();
+  if (!health) return null;
+  const lit = health.level === "err" || health.level === "warn";
+
+  return (
+    <button
+      type="button"
+      className={`${styles.btn} ${styles.secondary}`}
+      onClick={() =>
+        clear.mutate(undefined, {
+          onSuccess: () => toast.success("Check engine cleared until the next error"),
+          onError: () => toast.error("Could not clear the check-engine light"),
+        })
+      }
+      disabled={!lit || clear.isPending}
+      title={
+        lit
+          ? "Turn the header light green until a new error or retry comes in. The errors stay in the console."
+          : health.level === "stopped"
+            ? "The light shows the engine is stopped until you start it again."
+            : "No new errors or retries to clear."
+      }
+    >
+      Clear check engine
     </button>
   );
 }

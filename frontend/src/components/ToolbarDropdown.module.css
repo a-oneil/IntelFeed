@@ -24,6 +24,13 @@
   color: var(--text-primary);
 }
 
+/* A caller-styled trigger keeps its own look; only the chevron spacing is added. */
+.triggerCustom {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .triggerOpen {
   background: var(--bg-tertiary);
   color: var(--text-primary);
@@ -89,6 +96,11 @@
 
 .item:hover {
   background: var(--bg-tertiary);
+}
+
+.item:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .itemActive {

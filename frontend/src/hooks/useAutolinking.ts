@@ -22,7 +22,6 @@ export interface EntityLinkStats {
   by_source: Record<string, number>;
   by_type: Record<string, number>;
   pending: number;
-  pending_dropped_ai_off?: number;
   relationships_total: number;
 }
 
@@ -39,6 +38,8 @@ export interface EntityLinkFilters {
   confidence?: string;
   search?: string;
   days?: number;
+  /** Only links extracted within the last N hours. */
+  hours?: number;
   limit: number;
   offset: number;
 }
@@ -57,6 +58,7 @@ export function useEntityLinks(filters: EntityLinkFilters, enabled = true) {
       if (filters.confidence) params.confidence = filters.confidence;
       if (filters.search) params.search = filters.search;
       if (filters.days) params.days = filters.days;
+      if (filters.hours) params.hours = filters.hours;
       const { data } = await api.get<PaginatedResponse<EntityLink>>("/entity-links", { params });
       return data;
     },
@@ -132,6 +134,8 @@ export interface RelationshipFilters {
   entity_type?: string;
   relationship_type?: string;
   evidence_entry_id?: string;
+  /** Only relationships created within the last N hours. */
+  hours?: number;
   limit: number;
   offset: number;
 }
@@ -153,6 +157,7 @@ export function useAllRelationships(filters: RelationshipFilters, enabled = true
       if (filters.entity_type) params.entity_type = filters.entity_type;
       if (filters.relationship_type) params.relationship_type = filters.relationship_type;
       if (filters.evidence_entry_id) params.evidence_entry_id = filters.evidence_entry_id;
+      if (filters.hours) params.hours = filters.hours;
       const { data } = await api.get<PaginatedResponse<EntityRelationship>>("/entity-relationships", { params });
       return data;
     },

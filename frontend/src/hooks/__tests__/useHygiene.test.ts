@@ -9,7 +9,7 @@ vi.mock("@/api/client", () => ({
 }));
 
 import api from "@/api/client";
-import { useHygieneFeed, useDismissProposals, useApplyAdjudicationAll } from "../useHygiene";
+import { useHygieneFeed, useDismissReview, useApplyReview } from "../useHygiene";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockedApi = api as any;
@@ -38,21 +38,37 @@ describe("hygiene proposal queue hooks", () => {
     });
   });
 
-  it("scopes a bulk dismiss to the origin on screen, so one lens never clears another", async () => {
-    mockedApi.post.mockResolvedValue({ data: { dismissed: 4 } });
-    const { result } = renderHook(() => useDismissProposals(), { wrapper: createWrapper() });
-    await result.current.mutateAsync({ source: "entity_maintenance", origin: "adjudicator" });
-    expect(mockedApi.post).toHaveBeenCalledWith("/admin/hygiene/dismiss-proposals", {
-      source: "entity_maintenance",
+  it("scopes Dismiss all to the filters on screen, so one view never clears another", async () => {
+    mockedApi.post.mockResolvedValue({ data: { cleared_rows: 4 } });
+    const { result } = renderHook(() => useDismissReview(), { wrapper: createWrapper() });
+    await result.current.mutateAsync({ origin: "adjudicator", q: "linux" });
+    expect(mockedApi.post).toHaveBeenCalledWith("/admin/hygiene/review-groups/dismiss", {
       origin: "adjudicator",
+      q: "linux",
     });
   });
 
-  it("applies every pending adjudicator proposal through the stage's own endpoint", async () => {
-    mockedApi.post.mockResolvedValue({ data: { applied: 7, skipped: 1, errors: [] } });
-    const { result } = renderHook(() => useApplyAdjudicationAll(), { wrapper: createWrapper() });
-    const out = await result.current.mutateAsync({ limit: 500 });
-    expect(mockedApi.post).toHaveBeenCalledWith("/admin/hygiene/adjudication/apply-all", { limit: 500 });
-    expect(out.applied).toBe(7);
+  it("applies a group in server batches, never sending a row it already tried", async () => {
+    mockedApi.post
+      .mockResolvedValueOnce({
+        data: { applied: 199, skipped: 1, failed: 0, has_more: true, unapplied: ["entity_maintenance:a"], errors: [] },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          applied: 4,
+          skipped: 0,
+          failed: 1,
+          has_more: false,
+          unapplied: ["link_validator:b"],
+          errors: [{ id: "link_validator:b", error: "boom" }],
+        },
+      });
+    const { result } = renderHook(() => useApplyReview(), { wrapper: createWrapper() });
+    const body = { action: "adjudication_unlink", items: [{ entity_type: "product", entity_id: "p1" }] };
+    const out = await result.current.mutateAsync(body);
+    expect(mockedApi.post).toHaveBeenCalledTimes(2);
+    expect(mockedApi.post.mock.calls[0][1]).toEqual({ ...body, exclude: [] });
+    expect(mockedApi.post.mock.calls[1][1]).toEqual({ ...body, exclude: ["entity_maintenance:a"] });
+    expect(out).toEqual({ applied: 203, skipped: 1, failed: 1, errors: [{ id: "link_validator:b", error: "boom" }] });
   });
 });

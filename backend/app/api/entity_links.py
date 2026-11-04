@@ -151,6 +151,9 @@ async def list_entity_links(
     ),
     search: str | None = Query(None, description="Case-insensitive substring match on entity name or entry title."),
     days: int | None = Query(None, ge=1, le=3650, description="Only links extracted within the last N days"),
+    hours: int | None = Query(
+        None, ge=1, le=87_600, description="Only links extracted within the last N hours (instead of days)"
+    ),
     limit: int = Query(50, ge=1, le=500, description="Maximum links per page."),
     offset: int = Query(0, ge=0, description="Number of links to skip for pagination."),
     user: User = Depends(get_viewer),
@@ -162,7 +165,11 @@ async def list_entity_links(
     if entity_type and entity_type not in LINK_CONFIGS:
         raise AppError(code="invalid", message=f"Unknown entity_type: {entity_type}", status_code=400)
 
-    since = datetime.now().astimezone() - timedelta(days=days) if days else None
+    since = (
+        datetime.now().astimezone() - (timedelta(hours=hours) if hours else timedelta(days=days))
+        if (hours or days)
+        else None
+    )
     configs = [LINK_CONFIGS[entity_type]] if entity_type else list(LINK_CONFIGS.values())
 
     subqueries = [

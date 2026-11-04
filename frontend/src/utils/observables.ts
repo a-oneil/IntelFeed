@@ -160,6 +160,7 @@ export const CAPTURED_BY_LABELS: Record<string, string> = {
   ttp_observable: "TTP observable",
   ioc_list: "indicator feed",
   publisher_ioc: "article IOC table",
+  adjudicator: "adjudicator",
   manual: "analyst",
 };
 

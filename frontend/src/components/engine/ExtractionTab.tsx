@@ -28,12 +28,12 @@ import styles from "./ExtractionTab.module.css";
 import { confirmDialog, promptDialog } from "@/utils/dialog";
 
 const ALL_TYPES: ExtractionType[] = ["threat_actor", "malware", "cve", "tool", "ttp", "observable"];
-const WINDOWS: ExtractionParams["window"][] = ["24h", "7d", "30d", "all"];
-const STATUSES: { key: "all" | "review" | "orphan" | "dupe" | "stale"; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "review", label: "Review" },
-  { key: "orphan", label: "Orphans" },
-  { key: "dupe", label: "Dupes" },
+type EntityStatus = "all" | "review" | "orphan" | "dupe" | "stale";
+const STATUSES: { key: EntityStatus; label: string }[] = [
+  { key: "all", label: "Any status" },
+  { key: "review", label: "Needs review" },
+  { key: "orphan", label: "Orphans (no links)" },
+  { key: "dupe", label: "Likely duplicates" },
   { key: "stale", label: "Stale" },
 ];
 
@@ -48,25 +48,27 @@ const EMPTY_ITEMS: ExtractionEntity[] = [];
 
 export function ExtractionTab({
   initialStatus = "all",
-  embedded = false,
+  window: timeWindow,
 }: {
-  initialStatus?: "all" | "review" | "orphan" | "dupe" | "stale";
-  /** Render inside the Engine console card: no stat tiles (the console's
-   *  healthline + attention chips already carry them). */
-  embedded?: boolean;
+  initialStatus?: EntityStatus;
+  /** The console's time picker: entities first seen in this window. */
+  window: NonNullable<ExtractionParams["window"]>;
 }) {
   const navigate = useNavigate();
-  // The console's chips count across all time, so a chip that lands on a
-  // status filter opens on "all" — the list then matches the number clicked.
-  const [timeWindow, setTimeWindow] = useState<ExtractionParams["window"]>(initialStatus === "all" ? "7d" : "all");
-  const [status, setStatus] = useState<"all" | "review" | "orphan" | "dupe" | "stale">(initialStatus);
-  const [types, setTypes] = useState<Set<ExtractionType>>(new Set());
+  const [status, setStatus] = useState<EntityStatus>(initialStatus);
+  const [entityType, setEntityType] = useState<ExtractionType | "">("");
   const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
   const [sortBy, setSortBy] = useState<NonNullable<ExtractionParams["sort_by"]>>("created");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // A new console window starts at the first page.
+  useEffect(() => {
+    setOffset(0);
+    setSelected(new Set());
+  }, [timeWindow]);
 
   // Debounce the search box.
   useEffect(() => {
@@ -77,9 +79,8 @@ export function ExtractionTab({
     return () => clearTimeout(h);
   }, [searchInput]);
 
-  // Chip selection narrows. No selection means every type is in play, which
-  // the API expects as no filter at all.
-  const effectiveTypes = useMemo(() => (types.size ? [...types] : undefined), [types]);
+  // No type picked means every type is in play, which the API expects as no filter at all.
+  const effectiveTypes = useMemo(() => (entityType ? [entityType] : undefined), [entityType]);
 
   const { data: stats } = useExtractionStats(timeWindow);
   const { data, isLoading, isFetching } = useExtractionEntities({
@@ -115,17 +116,6 @@ export function ExtractionTab({
     fn();
     setOffset(0);
     setSelected(new Set());
-  }
-
-  function toggleType(t: ExtractionType) {
-    resetTo(() => {
-      setTypes((prev) => {
-        const next = new Set(prev);
-        if (next.has(t)) next.delete(t);
-        else next.add(t);
-        return next;
-      });
-    });
   }
 
   function toggleSort(col: NonNullable<ExtractionParams["sort_by"]>) {
@@ -366,37 +356,9 @@ export function ExtractionTab({
   }
 
   const allSelected = items.length > 0 && selected.size === items.length;
-  const delta = stats ? stats.created_window - stats.created_prev_window : 0;
 
   return (
     <div className={styles.wrap}>
-      {/* stat tiles — standalone only */}
-      {!embedded && (
-      <div className={styles.stats}>
-        <Stat label={`Created · ${timeWindow}`} value={stats?.created_window} accent="accent">
-          {stats && timeWindow !== "all" && (
-            <span className={delta >= 0 ? styles.up : styles.down}>
-              {delta >= 0 ? "▲" : "▼"} {Math.abs(delta)} vs prior
-            </span>
-          )}
-        </Stat>
-        <Stat label="Needs review" value={stats?.needs_review} tone="warning">
-          <span className={styles.mut}>unconfirmed by AI</span>
-        </Stat>
-        <Stat label="Orphaned" value={stats?.orphaned}>
-          <span className={styles.mut}>0 linked entries</span>
-        </Stat>
-        <Stat label="Likely duplicates" value={stats?.likely_duplicates} tone="danger">
-          <span className={styles.mut}>merge candidates</span>
-        </Stat>
-        <Stat label="Auto-confirmed" value={stats?.auto_confirmed} tone="success">
-          <span className={styles.mut}>
-            {stats && stats.total_created ? Math.round((stats.auto_confirmed / stats.total_created) * 100) : 0}% of created
-          </span>
-        </Stat>
-      </div>
-      )}
-
       {/* toolbar */}
       <div className={styles.toolbar}>
         <label className={styles.search}>
@@ -411,39 +373,33 @@ export function ExtractionTab({
           />
         </label>
 
-        <div className={styles.chips}>
+        <select
+          className={styles.filt}
+          aria-label="Entity type"
+          value={entityType}
+          onChange={(e) => resetTo(() => setEntityType(e.target.value as ExtractionType | ""))}
+        >
+          <option value="">All entity types</option>
           {ALL_TYPES.map((t) => (
-            <button
-              key={t}
-              className={`${styles.chip} ${types.has(t) ? styles.chipOn : ""}`}
-              onClick={() => toggleType(t)}
-            >
-              <span className={`${styles.sw} ${styles[`sw_${t}`]}`} />
-              {TYPE_LABELS[t]}
-              <span className={styles.cnt}>{stats?.by_type[t] ?? 0}</span>
-            </button>
+            <option key={t} value={t}>
+              {TYPE_LABELS[t]} ({(stats?.by_type[t] ?? 0).toLocaleString()})
+            </option>
           ))}
-        </div>
+        </select>
 
-        <div className={styles.seg}>
+        <select
+          className={styles.filt}
+          aria-label="Status"
+          value={status}
+          onChange={(e) => resetTo(() => setStatus(e.target.value as EntityStatus))}
+        >
           {STATUSES.map((s) => (
-            <button
-              key={s.key}
-              className={status === s.key ? styles.segOn : ""}
-              onClick={() => resetTo(() => setStatus(s.key))}
-            >
+            <option key={s.key} value={s.key}>
               {s.label}
-            </button>
+            </option>
           ))}
-        </div>
+        </select>
 
-        <div className={styles.seg}>
-          {WINDOWS.map((w) => (
-            <button key={w} className={timeWindow === w ? styles.segOn : ""} onClick={() => resetTo(() => setTimeWindow(w))}>
-              {w === "all" ? "All" : w}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* bulk bar */}
@@ -657,29 +613,6 @@ export function ExtractionTab({
           }}
         />
       )}
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-  accent,
-  children,
-}: {
-  label: string;
-  value: number | undefined;
-  tone?: "warning" | "danger" | "success";
-  accent?: "accent";
-  children?: React.ReactNode;
-}) {
-  const toneCls = tone ? styles[`v_${tone}`] : accent ? styles.v_accent : "";
-  return (
-    <div className={styles.stat}>
-      <div className={styles.statK}>{label}</div>
-      <div className={`${styles.statV} ${toneCls}`}>{value ?? "—"}</div>
-      <div className={styles.statD}>{children}</div>
     </div>
   );
 }

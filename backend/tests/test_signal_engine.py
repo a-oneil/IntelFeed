@@ -1011,6 +1011,63 @@ def test_pipeline_stage_extracts_entry_id_from_bind_tasks():
 
 
 @pytest.mark.asyncio
+async def test_clear_check_engine_counts_only_newer_errors(
+    client, auth_headers, admin_headers, db_session, reliable_feed
+):
+    from datetime import UTC, datetime, timedelta
+
+    from app.api.engine import HEALTH_CLEARED_KEY
+    from app.models.entry_pipeline_run import EntryPipelineRun
+    from app.services.redis_client import get_redis
+
+    r = await get_redis()
+    await r.delete(HEALTH_CLEARED_KEY)
+    try:
+        old = await _make_entry(db_session, reliable_feed, title="Known failure")
+        db_session.add(
+            EntryPipelineRun(
+                entry_id=old.id,
+                stage="extract",
+                status="error",
+                error="boom",
+                created_at=datetime.now(UTC) - timedelta(minutes=5),
+            )
+        )
+        await db_session.commit()
+
+        def extract(body):
+            return next(s for s in body["stages"] if s["name"] == "extract")["runs_24h"]
+
+        before = extract((await client.get("/api/engine/pipeline", headers=auth_headers)).json())
+        assert before["error"] >= 1 and before["new_error"] == before["error"]
+
+        assert (await client.post("/api/engine/state/clear-health", headers=auth_headers)).status_code == 403
+        resp = await client.post("/api/engine/state/clear-health", headers=admin_headers)
+        assert resp.status_code == 200 and resp.json()["health_cleared_at"]
+
+        body = (await client.get("/api/engine/pipeline", headers=auth_headers)).json()
+        assert body["health_cleared_at"]
+        # The console still sees the stuck entry; the light doesn't.
+        assert extract(body)["error"] == before["error"] and extract(body)["new_error"] == 0
+
+        new = await _make_entry(db_session, reliable_feed, title="Fresh failure")
+        db_session.add(
+            EntryPipelineRun(
+                entry_id=new.id,
+                stage="extract",
+                status="error",
+                error="boom",
+                created_at=datetime.now(UTC) + timedelta(seconds=1),
+            )
+        )
+        await db_session.commit()
+        body = (await client.get("/api/engine/pipeline", headers=auth_headers)).json()
+        assert extract(body)["new_error"] == 1
+    finally:
+        await r.delete(HEALTH_CLEARED_KEY)
+
+
+@pytest.mark.asyncio
 async def test_entry_runs_endpoint_and_retry(
     client, auth_headers, admin_headers, db_session, reliable_feed, monkeypatch
 ):

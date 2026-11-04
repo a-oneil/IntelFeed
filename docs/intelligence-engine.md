@@ -219,16 +219,16 @@ The API is `backend/app/api/hygiene.py`, under `/api/admin/hygiene/*` and admin-
 
 | Endpoint | Does |
 |---|---|
-| `GET /feed` | One timeline of `entity_link_validation_log` and `entity_maintenance_log` rows. `origin=adjudicator\|legacy` splits AI proposals from scanner ones; `orphaned=true` lists proposals whose entry or entity is gone |
-| `DELETE /feed/{source}/{row_id}`, `POST /dismiss-proposals` | Dismiss one row, or every pending proposal of one origin |
+| `GET /feed` | One timeline of `entity_link_validation_log` and `entity_maintenance_log` rows. `origin=adjudicator\|merge_review\|scan` says who filed them (every link-log row is the adjudicator's); `orphaned=true` lists proposals whose entry or entity is gone; `mode=apply` is History |
+| `DELETE /feed/{source}/{row_id}` | Dismiss one pending row; the dismissal sticks |
 | `GET /stats` | Counters (applied 24h/7d, pending, orphans) plus `adjudication_mode`, `adjudication_pending`, `adjudication_breaker_until` |
-| `POST /adjudication/{log_id}/apply`, `/restore`, `/adjudication/apply-all` | Act on, or undo, adjudicator proposals |
+| `POST /adjudication/{log_id}/apply`, `/restore` | Act on, or undo, one adjudicator proposal |
 | `POST /link-log/{log_id}/restore`, `/apply-removal` | Undo or apply one link-log row. A restore re-creates the link and counts as an analyst restore |
-| `POST /apply-reclassify-advisories` | Turn `needs_reclassification` advisories into reclassifies through `perform_reclassify()` |
-| `GET /review-groups`, `POST /review-groups/dismiss` | The Review tab's one queue: every pending proposal folded per entity |
-| `GET /reclassify-groups`, `/unlink-groups` (+ `/apply`, `/dismiss`, `/keep`) | Per-entity apply paths the queue's row buttons use |
+| `GET /review-groups`, `POST /review-groups/apply`, `/review-groups/dismiss` | The Review tab's one queue: every pending proposal folded per entity, and Apply / Dismiss over what its filters show |
+| `POST /bulk-apply`, `GET /bulk-apply/{job_id}` | Apply all, in the background |
+| `POST /reclassify-groups/apply` | Convert an entity to a proposed type (the row's type chips) |
 | `POST /scan-duplicates` | Run the duplicate review (`review-duplicate-entities`) now |
-| `GET /orphans`, `POST /orphans/prune` | Entities with `article_count = 0` |
+| `POST /orphans/prune` | Delete entities with `article_count = 0` |
 | `/enrichment-gaps/enrich`, `/run-name-normalization, `/scan-alias-hygiene`, `/scan-vendor-autolink`, `/scan-id-hygiene` | On-demand scanners with shadow/apply flows |
 | `GET /api/entities/{type}/{id}/cascade-preview` | What deleting an entity would remove. Any signed-in user |
 
@@ -261,11 +261,12 @@ The ledger stores indicators (IPs, domains, hashes, command lines, registry keys
 
 | Door (`created_via`) | Base confidence | Source |
 |---|---|---|
-| `manual` | 1.0 | An analyst promotes a candidate or creates a row |
+| `manual` | 1.0 | An analyst promotes a value with the `promote_observable` tool |
 | `publisher_ioc` | 0.9 | The indicator file an article links to, from allow-listed repositories |
 | `ioc_list` | 0.85 | A curated indicator-list feed |
 | `ttp_observable` | 0.85 | A host artifact attached to a technique claim |
 | `ai_extraction` | 0.8 | The one-pass analysis's `iocs` array |
+| `adjudicator` | 0.8 | The post-analysis review captures a candidate |
 
 Author-defanged values (`evil[.]com`) get +0.1. Once a row exists, later entries that contain the exact value add a sighting. Network values lose confidence over time; hashes and host artifacts do not.
 

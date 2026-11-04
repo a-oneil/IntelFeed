@@ -13,19 +13,20 @@ Related: summary in [intelligence-engine.md](intelligence-engine.md#observables-
 
 ## The contract
 
-**Regex never creates a row.** Scanning only nominates *candidates* on the entry (`entries.observable_candidates`, at most `observables_candidate_max`, default 200) and shown in the reader to promote. Only a judgment "door" creates a row, setting `created_via` and a starting confidence:
+**Regex never creates a row.** Scanning only nominates *candidates* on the entry (`entries.observable_candidates`, at most `observables_candidate_max`, default 200). Only a judgment "door" creates a row, setting `created_via` and a starting confidence:
 
 | Door | `created_via` | Base confidence | What it is |
 |---|---|---|---|
-| Analyst | `manual` | 1.0 | Promote from reader, candidates queue or `promote_observable` tool |
+| Analyst | `manual` | 1.0 | The `promote_observable` tool (the copilot and the skills) |
 | Article IOC table | `publisher_ioc` | 0.9 | The IOC file an article links to (Talos `.txt` and STIX `.json`, Bitdefender CSV, Datadog CSV). Allow-listed repos only; roles from publisher labels; sighting recorded on the article. Switch: `observables_publisher_ioc_enabled` |
 | Curated indicator feed | `ioc_list` | 0.85 | A whole file from a curated list repo (C2IntelFeeds, C2-Tracker). Path sets role and infrastructure tag. `whitelist`, `allowlist`, `benign` and `unverified` files, and C2-Tracker's combined `all.txt`, are refused |
 | TTP observable | `ttp_observable` | 0.85 | A host artifact on a technique claim (`EntryTTP.observable_value`). Sighting carries the technique |
 | One-pass AI analysis | `ai_extraction` | 0.8 | `entry_analysis`'s `iocs` array: any kind, with role, evidence sentence and optional ATT&CK `technique_id` |
+| Adjudicator | `adjudicator` | 0.8 | The post-analysis review's `capture` verdict on a candidate (see [Candidates and the adjudicator](#candidates-and-the-adjudicator)) |
 
 Defanged values (`evil[.]com`, `hxxps://`) get +0.1. No `created_via` value means "regex".
 
-Door input must pass `validate_kind_value()` (`backend/app/intelligence/observables.py:1453`). New entries are then **sighted**: `sight_known_values()` (`backend/app/intelligence/observables.py:1169`) records exact matches of ledger values.
+Door input must pass `validate_kind_value()` (`backend/app/intelligence/observables.py:1460`). New entries are then **sighted**: `sight_known_values()` (`backend/app/intelligence/observables.py:1176`) records exact matches of ledger values.
 
 ## What becomes a candidate
 
@@ -52,7 +53,7 @@ The scanner also refuses:
 - **Hashes inside longer tokens.** 32/40/64 hex inside a hostname, path segment or identifier (`pub-9ee1bf…a.r2.dev`). Cloud dev platforms (`r2.dev`, `pages.dev`, `trycloudflare.com`, `ngrok`, `vercel.app`, …) are in `SHARED_INFRA_SUFFIXES`: their apex never nominates, and rows under them are never published.
 - **Bare paths.** One top-level segment (`/PSEMHUB/`) or a well-known location (`/dev/shm`, `/var/tmp`, `/etc/hosts`, `C:\ProgramData`).
 
-The queue re-applies current validators on read, hiding stale candidates. To rebuild:
+The adjudicator re-applies current validators before it judges a candidate; one that fails them is marked judged and never shown. To rebuild the candidates:
 
 ```bash
 # in the api container
@@ -97,12 +98,23 @@ Host rules (`_plausible_cmdline`, `_plausible_path_atom`, and the branches of `v
 
 The seeded `entry_analysis` assignment has a 10,000-token output budget (`backend/app/ai/prompts/defaults.py`). `parse_ai_json()` (`backend/app/ai/engine.py:179`) repairs bad backslash escapes small models write in Windows paths.
 
+## Candidates and the adjudicator
+
+Every candidate gets one judgment from the [adjudicate stage](engine-settings.md#adjudicate-stage-post-analysis-ai-review), the AI review that runs after an article's analysis. Its list includes the article's candidates that are not already observables sighted in the article: values the scan spotted and values the analysis staged without capturing. Each one needs a verdict:
+
+- **capture**: an attacker indicator the article reports. It becomes an observable (`created_via = adjudicator`, sighting source `adjudicator`) and leaves the candidate list.
+- **drop**: not an indicator (a version number, a how-to's command, an example value, a reference site). It is removed from the article.
+
+Both follow the adjudicator's shadow/apply switch: in apply mode, verdicts at the confidence floor run at once; everything else is a proposal in Engine → Review → Proposals (origin Adjudicator, domain Entities), where Apply, Dismiss and Restore work like any other row. Restoring a capture removes the sighting, deletes the observable if the capture created it and nothing else sights it, and puts the candidate back.
+
+A judged candidate carries `reviewed: true` and is not shown again. A candidate left without a verdict stays on the article only as a hint for a later analysis. Each review judges at most 20 candidates (`_MAX_CANDIDATE_ITEMS`), defanged values, hashes and IPs first; the rest are judged in a recheck. Every 30 minutes `queue_candidate_reviews` (inside `submit_analysis_batches`) queues a recheck for up to 50 reviewed articles from the last 30 days that still carry unjudged candidates, and none while the AI queue is backed up. A review whose answer comes back malformed still marks its candidates judged.
+
 ## Shadow, capture, and the per-kind list
 
 `observables_ai_capture_mode` controls the AI door:
 
 - **`capture`** (default) writes rows only for kinds in `observables_ai_capture_kinds` (default: network kinds except `uri_path`, hash kinds and `script`).
-- **`shadow`** stages every AI value as a candidate **carrying its role, evidence, confidence and technique**.
+- **`shadow`** stages every AI value as a candidate **carrying its role, evidence, confidence and technique**, for the adjudicator to capture or drop.
 
 Kinds outside the list are staged as in shadow. The TTP door obeys both switches.
 
@@ -176,7 +188,7 @@ Shodan, GreyNoise, VirusTotal and the abuse.ch lookups send the indicator to a t
 
 ## Lifecycle and jobs
 
-Confidence = `base × 0.5^(days since last sighting / half-life)`. `status_for()` (`backend/app/intelligence/observables.py:923`) derives status: `active`, `aging` below 0.5, `expired` below 0.15. `retro_sight_observable()` (`backend/app/intelligence/observables.py:2206`) searches recent entries when a row is created, so promoted candidates keep their history.
+Confidence = `base × 0.5^(days since last sighting / half-life)`. `status_for()` (`backend/app/intelligence/observables.py:930`) derives status: `active`, `aging` below 0.5, `expired` below 0.15. `retro_sight_observable()` (`backend/app/intelligence/observables.py:2213`) searches recent entries when a row is created, so promoted candidates keep their history.
 
 | Job | When (UTC) | Does |
 |---|---|---|

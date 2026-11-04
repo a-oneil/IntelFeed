@@ -103,14 +103,17 @@ IntelFeed never creates an observable just because a string looks like an IP.
 One is created only when something with judgment confirms it:
 
 - the AI analysis of an article,
+- the AI review that follows it (the adjudicator),
 - a curated indicator-list feed,
 - a host artifact listed on an ATT&CK technique,
-- or you, promoting it yourself.
+- or you, through the copilot.
 
-Anything that looks like an indicator shows as a **candidate** on the article
-for you to promote or dismiss. Hashes and public IPs are always
-suggested. Domains, URLs and email addresses are suggested only when the author
-defanged them (`evil[.]com`, `hxxps://`).
+Anything that looks like an indicator becomes a **candidate** on the article.
+Hashes and public IPs always do. Domains, URLs and email addresses do only when
+the author defanged them (`evil[.]com`, `hxxps://`). The adjudicator captures
+each candidate as an observable or drops it. When it isn't sure enough to act
+on its own, its call waits in Engine → Review → Proposals for you to apply or
+dismiss.
 
 Each observable records its source, the sentence behind it, and a confidence
 score. Confidence halves every 30 days for an IP, 60 for a URL and
