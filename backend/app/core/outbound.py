@@ -63,7 +63,7 @@ def is_never_reachable(addr: Address) -> bool:
     """Addresses no switch opens: this host itself (loopback, 0.0.0.0) and the
     link-local block, which is where cloud metadata services answer
     (169.254.169.254 hands out instance credentials). A trusted-network setting
-    exists for LAN services such as a homelab's Ollama or n8n box; none of
+    exists for LAN services such as a local Ollama or n8n server; none of
     them live here."""
     if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
         addr = addr.ipv4_mapped
@@ -120,8 +120,8 @@ class OutboundProblem:
 async def outbound_problem(url: str, *, allow_private: bool = False) -> OutboundProblem | None:
     """Why the server must not call ``url``, or None when it may.
 
-    ``allow_private`` is the operator's choice for a trusted network (a
-    homelab pointing at its own Ollama box); it opens private ranges but not
+    ``allow_private`` is the operator's choice for a trusted network (an
+    install pointing at its own Ollama server); it opens private ranges but not
     the scheme and hostname checks, and never the addresses
     ``is_never_reachable`` names (code "reserved").
     """

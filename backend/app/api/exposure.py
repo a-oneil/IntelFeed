@@ -3,7 +3,7 @@
 Aggregates every CVE that affects what the user runs (vendors/products in
 ``UserEntityWatch`` mode="stack") with a detection posture from the telemetry
 inventory. Kept in its own router/module so it doesn't touch the (heavily shared)
-intelligence router. See planning/my-stack-exposure-scoring.md (Phase 6).
+intelligence router. See docs/intelligence-engine.md "Intel profiles and exposure reports".
 """
 
 import uuid

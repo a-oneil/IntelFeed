@@ -149,11 +149,11 @@ class LiveShapeSerializationTest {
         val notes = json.decodeFromString<List<EntryNote>>(
             """[ { "id": "1", "created_by": "u1", "entry_id": null, "title": "Fortibleed",
                    "content_markdown": "<p>body</p>", "content_html": "<p>body</p>", "tags": [], "is_pinned": true,
-                   "creator_username": "aoneil", "updated_at": "2026-07-07T20:57:15Z" } ]"""
+                   "creator_username": "analyst", "updated_at": "2026-07-07T20:57:15Z" } ]"""
         )
         assertEquals("<p>body</p>", notes[0].contentMarkdown)
         assertTrue(notes[0].isPinned)
-        assertEquals("aoneil", notes[0].creatorUsername)
+        assertEquals("analyst", notes[0].creatorUsername)
     }
 
     @Test

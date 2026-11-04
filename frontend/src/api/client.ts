@@ -101,7 +101,6 @@ const PUBLIC_AUTH_PATHS = [
   "/auth/register",
   "/auth/refresh",
   "/auth/registration-status",
-  "/auth/invite-code",
 ];
 
 // The read-only POSTs a visitor may send (the server allows the same list,

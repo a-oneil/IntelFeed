@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     # Anonymous visitors may browse read-only (see docs/public-read-only-mode.md)
     public_read_only_enabled: bool = False
 
-    # Signal engine (see planning/engine-plan.md)
+    # Signal engine (see docs/engine.md)
     signal_engine_shadow: bool = True
     signal_engine_surface: bool = True
     per_user_subscriptions_enabled: bool = True
@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     radar_personalization_min_samples: int = 5
     radar_personalization_window_days: int = 90
 
-    # My Stack exposure scoring (see planning/my-stack-exposure-scoring.md) —
+    # My Stack exposure scoring (see docs/intelligence-engine.md) —
     # per-user, read-time boost of CVEs that affect declared vendors/products.
     my_stack_exposure_enabled: bool = True
     # Phase 7: heuristic "could you detect it" via CVE → co-occurring ATT&CK
@@ -290,13 +290,13 @@ class Settings(BaseSettings):
     observables_publish_min_confidence: float = 0.6
     observables_publish_max_age_days: int = 90
     observables_publish_never_suffixes: str = ""
-    # Entity creation guardrails (planning/entity-creation-guardrails.md).
+    # Entity creation guardrails (docs/engine-settings.md).
     # Phase 1 normalized matching — only prevents duplicate creations, safe on.
     entity_resolution_normalized_match: bool = True
     # Phase 2 creation/alias gates: 'off' | 'shadow' (log would-block decisions
     # to the maintenance log, still create) | 'on' (enforce).
     entity_creation_gates: str = "on"
-    # Adjudicate stage (post-analysis AI review; planning/ai-adjudication-stage.md).
+    # Adjudicate stage (post-analysis AI review; docs/engine-settings.md).
     # 'off' | 'shadow' (file verdicts as proposals) | 'apply' (high-confidence
     # verdicts applied inline, the rest filed). Master switch — plans only subtract.
     adjudication_mode: str = "apply"

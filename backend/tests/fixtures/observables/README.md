@@ -44,7 +44,7 @@ Seed a case from an article's own IOC section, then hand-edit:
 Run the eval (calls the configured AI provider, writes a report):
 
     docker compose -f docker-compose.dev.yml exec api \
-      python scripts/dev/eval_observable_extraction.py --report /app/planning/observables-eval.md
+      python scripts/dev/eval_observable_extraction.py --report /tmp/observables-eval.md
 
 Gate (from the plan): network kinds precision ≥ 0.95 / recall ≥ 0.80, host
 kinds precision ≥ 0.90, zero `must_not` hits, attribution-edge recall ≥ 0.6.

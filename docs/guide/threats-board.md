@@ -71,8 +71,8 @@ Click a row to open it. It has three columns:
 A story row shows **What's extractable** in place of the middle column.
 
 When a threat has a story behind it, the drawer may also show **Precedent**:
-the most similar past story, with a percentage match. Use it to ask "have we
-seen this before?"
+the most similar past story, with a percentage match. Use it to ask "has this
+been seen before?"
 
 The board shows **no coverage percentage** on purpose. Counting how many of a
 group's techniques have some rule tagged with them comes out near 90% for

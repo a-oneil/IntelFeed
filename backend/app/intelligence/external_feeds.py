@@ -277,7 +277,7 @@ async def sync_cybergeist_threat_actors(db: AsyncSession) -> dict:
 
         try:
             # Resolver: exact + normalized lookup, tombstones, creation gates
-            # (planning/entity-creation-guardrails.md) — no override for syncs.
+            # (docs/engine-settings.md) — no override for syncs.
             decision = await resolve_entity_creation(db, "threat_actor", name, list(new_aliases), source="cybergeist")
             actor = decision.entity
 
@@ -379,7 +379,7 @@ async def sync_cybergeist_malware(db: AsyncSession) -> dict:
 
         try:
             # Resolver: exact + normalized lookup, tombstones, creation gates
-            # (planning/entity-creation-guardrails.md) — no override for syncs.
+            # (docs/engine-settings.md) — no override for syncs.
             decision = await resolve_entity_creation(db, "malware", name, list(new_aliases), source="cybergeist")
             malware = decision.entity
 

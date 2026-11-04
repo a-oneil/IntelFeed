@@ -469,7 +469,7 @@
  },
  {
   "name": "create_automation_rule",
-  "description": "Set up an automation rule with trigger, conditions, and actions. Trigger types: on_correlation_event, on_cve_detected, on_entry_scored, on_keyword_match, on_manual, on_new_entry, on_observable_captured, on_schedule. Each action is {type, config}; valid action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, export_to, extract_cves, extract_malware, extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_email, send_notification, star_entry, track_on_threat_board, use_daily_summary. The rule is created enabled.",
+  "description": "Set up an automation rule with trigger, conditions, and actions. Trigger types: on_correlation_event, on_cve_detected, on_entry_scored, on_keyword_match, on_manual, on_new_entry, on_observable_captured, on_schedule. Each action is {type, config}; valid action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, extract_cves, extract_malware, extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_email, send_notification, star_entry, track_on_threat_board, use_daily_summary. The rule is created enabled.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -5133,7 +5133,7 @@
  },
  {
   "name": "update_automation_rule",
-  "description": "Partially update an automation rule — only the provided fields change (mirrors PUT /api/automation/rules/{id}). Trigger types: on_correlation_event, on_cve_detected, on_entry_scored, on_keyword_match, on_manual, on_new_entry, on_observable_captured, on_schedule. Each action is {type, config}; valid action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, export_to, extract_cves, extract_malware, extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_email, send_notification, star_entry, track_on_threat_board, use_daily_summary (branch sub-actions are validated recursively). Note: actions replaces the whole list.",
+  "description": "Partially update an automation rule — only the provided fields change (mirrors PUT /api/automation/rules/{id}). Trigger types: on_correlation_event, on_cve_detected, on_entry_scored, on_keyword_match, on_manual, on_new_entry, on_observable_captured, on_schedule. Each action is {type, config}; valid action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, extract_cves, extract_malware, extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_email, send_notification, star_entry, track_on_threat_board, use_daily_summary (branch sub-actions are validated recursively). Note: actions replaces the whole list.",
   "input_schema": {
    "type": "object",
    "properties": {

@@ -518,11 +518,10 @@ TOOLS: dict[str, dict] = {
             "on_correlation_event, on_cve_detected, on_entry_scored, on_keyword_match, on_manual, "
             "on_new_entry, on_observable_captured, on_schedule. Each action is {type, config}; valid "
             "action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, "
-            "create_intel_report, create_note, export_to, extract_cves, extract_malware, "
-            "extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, "
-            "mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_email, "
-            "send_notification, star_entry, track_on_threat_board, use_daily_summary. The rule is "
-            "created enabled."
+            "create_intel_report, create_note, extract_cves, extract_malware, extract_threat_actors, "
+            "extract_ttps, generate_detection_rules, hide_entry, mark_priority, mark_read, "
+            "remove_tags, run_ai_task, run_webhook, send_email, send_notification, star_entry, "
+            "track_on_threat_board, use_daily_summary. The rule is created enabled."
         ),
         "params": {
             "name": {
@@ -4194,7 +4193,7 @@ TOOLS: dict[str, dict] = {
             "on_entry_scored, on_keyword_match, on_manual, on_new_entry, on_observable_captured, "
             "on_schedule. Each action is {type, config}; valid action types: add_tags, "
             "add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, "
-            "export_to, extract_cves, extract_malware, extract_threat_actors, extract_ttps, "
+            "extract_cves, extract_malware, extract_threat_actors, extract_ttps, "
             "generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, "
             "run_ai_task, run_webhook, send_email, send_notification, star_entry, "
             "track_on_threat_board, use_daily_summary (branch sub-actions are validated recursively). "

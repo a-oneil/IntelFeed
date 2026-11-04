@@ -1,6 +1,6 @@
 """offensive_tools → tools: table rename + persisted slug migration
 
-Layers 2+3 of planning/tool-category-rename.md (broad software-tool scope).
+Layers 2+3 of the tool-category rename (broad software-tool scope).
 The frontend already spoke 'tool'; this makes storage match:
 
 - ALTER TABLE offensive_tools RENAME TO tools (FKs reference the table by oid,

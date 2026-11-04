@@ -1,7 +1,7 @@
 """UNIQUE constraint on normalized_name — threat_actors, vendors, products only
 
 The DB-level backstop that makes F1/F2 duplicate creation impossible
-(planning/entity-creation-guardrails.md Phase 1.4). Validated against a fresh
+(entity creation guardrails, phase 1.4). Validated against a fresh
 prod sync on 2026-08-16: threat_actors, vendors, and products are collision-
 free. Deliberately EXCLUDED:
 

@@ -16,7 +16,7 @@ happened, and which commit you are running.
 
 ## Sending a change
 
-1. For anything bigger than a small fix, open an issue first so we can agree on the approach.
+1. For anything bigger than a small fix, open an issue first to agree on the approach.
 2. Set up a local stack and run the checks: [docs/contributing.md](docs/contributing.md) has the steps.
 3. Open a pull request. The template lists the checks to tick.
 

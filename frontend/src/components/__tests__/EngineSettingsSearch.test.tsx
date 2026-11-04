@@ -54,7 +54,7 @@ describe("searchEngineSettings", () => {
   it("matches on key, description and the hand-written panels", () => {
     expect(searchEngineSettings("autolinker_min", SETTINGS, GROUPS)[0].key).toBe("autolinker_min_name_length");
     expect(searchEngineSettings("dictionary scan", SETTINGS, GROUPS)[0].key).toBe("autolinker_min_name_length");
-    expect(searchEngineSettings("denylist", SETTINGS, GROUPS)[0].dest).toEqual({ kind: "stage", stage: "extract" });
+    expect(searchEngineSettings("denylist", SETTINGS, GROUPS)[0].dest).toEqual({ kind: "stage", stage: "analyze" });
   });
 
   it("drops settings no console surface owns and ranks off-console ones last", () => {

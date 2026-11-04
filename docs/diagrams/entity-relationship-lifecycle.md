@@ -8,6 +8,7 @@ stateDiagram-v2
     [*] --> auto_extracted : AI extraction,\nTelegram forwards
     [*] --> analyst_created : POST /entity-relationships
     [*] --> external_feed : MITRE ATT&CK import\n(confidence confirmed)
+    [*] --> enrichment : enrichment source relation claim\n(confidence probable)
 
     co_occurrence --> analyst_confirmed : POST {id}/confirm\n(confidence → confirmed)
     co_occurrence --> analyst_rejected : POST {id}/reject
@@ -16,6 +17,8 @@ stateDiagram-v2
     analyst_created --> analyst_confirmed : POST {id}/confirm
     analyst_created --> analyst_rejected : POST {id}/reject
     analyst_confirmed --> analyst_rejected : POST {id}/reject
+
+    enrichment --> [*] : last claim withdrawn
 
     analyst_rejected --> analyst_created : POST /entity-relationships\n(an explicit re-create brings it back)
 

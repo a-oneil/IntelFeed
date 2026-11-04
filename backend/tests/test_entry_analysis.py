@@ -289,7 +289,6 @@ async def test_submit_priority_order_and_budget(db_session, feed, analysis_task,
 
 # ---------------------------------------------------------------------------
 # Tool scoping — advisories and rule-repo feeds must not mint tool entities
-# (planning/tool-extraction-cleanup.md)
 # ---------------------------------------------------------------------------
 
 _WIELDED_TOOL = {

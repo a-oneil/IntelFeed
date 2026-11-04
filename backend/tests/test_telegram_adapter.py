@@ -375,3 +375,18 @@ async def test_unconfigured_raises(monkeypatch):
     adapter = TelegramAdapter()
     with pytest.raises(RuntimeError, match="not configured"):
         await adapter.fetch_entries({"channel": "@x"}, since=None)
+
+
+@pytest.mark.parametrize(("window", "probed"), [(0, False), (-1, False), (None, True), ("", True), (5, True)])
+async def test_edit_probe_window_zero_turns_the_probe_off(window, probed):
+    from app.workers.feed_tasks import _probe_telegram_edits_and_deletes
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=RuntimeError("probed"))
+    feed = SimpleNamespace(id="f1", adapter_config={"edit_probe_window": window})
+    if probed:
+        with pytest.raises(RuntimeError, match="probed"):
+            await _probe_telegram_edits_and_deletes(db, feed, MagicMock(), {})
+    else:
+        await _probe_telegram_edits_and_deletes(db, feed, MagicMock(), {})
+        db.execute.assert_not_called()

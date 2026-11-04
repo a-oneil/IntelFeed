@@ -7,7 +7,7 @@ For developers who want to script IntelFeed or build on its REST API. After read
 - **Base URL:** `/api` on your IntelFeed host (in the dev stack, `http://localhost:8000`).
 - **Format:** JSON in, JSON out, unless an endpoint says otherwise (file downloads, SSE streams, RSS, CSV).
 - **Full schemas:** the interactive docs at `/docs` (Swagger) and `/redoc` list every parameter and response field. They are built from the code, so they are always current. The pages themselves load for anyone, but the spec behind them (`/openapi.json`) needs a signed-in user: the docs page reads your token from the web app's local storage, so sign in to IntelFeed in the same browser first.
-- **This page** is the map: how the API behaves, plus every endpoint with its access level and a one-line purpose. The routers are mounted in `backend/app/main.py:825-906`.
+- **This page** is the map: how the API behaves, plus every endpoint with its access level and a one-line purpose. The routers are mounted in `backend/app/main.py:826-908`.
 
 ---
 
@@ -49,7 +49,7 @@ IntelFeed signs you in with JWTs (JSON Web Tokens, signed with HS256). You get t
 - **Access token:** sent on every request as `Authorization: Bearer <token>`. Lasts 120 minutes by default (`ACCESS_TOKEN_EXPIRE_MINUTES`).
 - **Refresh token:** trades in for a new pair at `POST /api/auth/refresh`. Lasts 7 days by default (`REFRESH_TOKEN_EXPIRE_DAYS`).
 
-Logging out, or refreshing, revokes the old token: its ID (`jti`) goes on a Redis blacklist until the token would have expired anyway. Every protected route checks that list. Tokens are made by `create_access_token()` (`backend/app/core/security.py:31`) and revoked by `blacklist_token()` (`backend/app/core/security.py:107`).
+Logging out, or refreshing, revokes the old token: its ID (`jti`) goes on a Redis blacklist until the token would have expired anyway. Every protected route checks that list. Tokens are made by `create_access_token()` (`backend/app/core/security.py:31`) and revoked by `blacklist_token()` (`backend/app/core/security.py:108`).
 
 Sign in from the host:
 
@@ -82,9 +82,9 @@ Each endpoint below lists one of these access levels:
 | Level | Who may call it | Dependency |
 | --- | --- | --- |
 | **Public** | Anyone, no token. Some of these check their own token instead (share links, publish feeds, RSS). | none |
-| **Visitor** | A signed-in user. With [public read-only mode](public-read-only-mode.md) on, also an anonymous visitor (read only, with some fields removed). | `get_viewer()` (`backend/app/core/security.py:179`), or `get_entry_viewer()` (`backend/app/core/security.py:212`) for one-article routes |
-| **User** | Any signed-in user. | `get_current_user()` (`backend/app/core/security.py:125`) |
-| **Admin** | Users with the `admin` role. Everyone else gets 403. | `get_admin_user()` (`backend/app/core/security.py:317`) |
+| **Visitor** | A signed-in user. With [public read-only mode](public-read-only-mode.md) on, also an anonymous visitor (read only, with some fields removed). | `get_viewer()` (`backend/app/core/security.py:180`), or `get_entry_viewer()` (`backend/app/core/security.py:213`) for one-article routes |
+| **User** | Any signed-in user. | `get_current_user()` (`backend/app/core/security.py:126`) |
+| **Admin** | Users with the `admin` role. Everyone else gets 403. | `get_admin_user()` (`backend/app/core/security.py:316`) |
 | **Owner** | A signed-in user, but only the row's creator or an admin may change or delete it (403 otherwise). | checked inside the route |
 
 "User (admin for …)" means the route is open to users, but some fields or options are admin-only.
@@ -166,7 +166,7 @@ Pass `next_cursor` back as `cursor` to get the next page. There is no `total`; u
 
 ## Rate Limiting
 
-Limits are counted in Redis by `_get_limit()` (`backend/app/core/rate_limit.py:89`). Signed-in reads and most writes are not limited.
+Limits are counted in Redis by `_get_limit()` (`backend/app/core/rate_limit.py:91`). Signed-in reads and most writes are not limited.
 
 | Requests | Limit |
 | --- | --- |
@@ -175,7 +175,7 @@ Limits are counted in Redis by `_get_limit()` (`backend/app/core/rate_limit.py:8
 | `POST /api/shared/{token}/run-ai-task` and `/ask-agent` | 20 per minute (plus a per-link daily cap, `share_ai_daily_requests`) |
 | Anonymous visitors (public read-only mode), most routes | 180 per minute and 1500 per hour |
 | Anonymous: one full article (`GET /api/entries/{id}`) | 20 per minute and 150 per hour |
-| Anonymous: heavy reads (graphs, pivots, timelines, analytics, map, calendar, priority queue, relationships, entity links, CWEs) | 20 per minute and 200 per hour |
+| Anonymous: heavy reads (graphs, pivots, timelines, analytics, map, calendar, priority queue, relationships, entity links, CWEs, autolink scan, glossary counts) | 20 per minute and 200 per hour |
 | `/api/taxii2/` and `/api/publish/` pulls | 240 per minute |
 | `/api/health`, `/metrics` | never limited |
 
@@ -597,6 +597,8 @@ Reading entities uses the catalogs above. Creating and editing uses `/api/entiti
 | POST | `/api/entities/{entity_type}/{entity_id}/rescan` | User | Re-scan all articles for this entity |
 | POST | `/api/entities/convert` | Admin | Change an entity's type (for example malware to tool), moving its links, relationships, notes and campaigns |
 | GET | `/api/entities/{entity_type}/{entity_id}/provenance` | Visitor | Who stated each fact on the profile, and whether they still agree |
+| GET | `/api/entities/{entity_type}/context-columns` | Visitor | The enrichment values the entity table can show as columns. The type's list endpoint sorts on one with `sort_by=<id>` and filters it with `<id>=<filter>` |
+| POST | `/api/entities/{entity_type}/context-values` | Visitor | Body `{"ids": [...]}` (up to 1000): those columns' values per entity |
 | GET | `/api/entities/{entity_type}/{entity_id}/context` | Visitor | What the enabled enrichment sources say about the entity, with header badges; admins also get sources missing a key |
 | GET | `/api/entities/{entity_type}/{entity_id}/glance` | Visitor | The highlight popover's few words from enrichment: up to two verdict chips and three facts, each with its source and date, the sources its Look up button runs, and (admins) sources that need a key |
 | GET | `/api/entities/{entity_type}/{entity_id}/detection-gaps` | User | Detection coverage for the entity's techniques |
@@ -627,7 +629,7 @@ Reading entities uses the catalogs above. Creating and editing uses `/api/entiti
 | GET | `/api/entities/{entity_type}/merge-suggestions` | User | Ranked duplicate pairs with reasons |
 | POST | `/api/entities/merge-suggestions/dismiss` | User | Never suggest this pair again |
 
-`/api/offensive-tools/{target_id}/merge` is an older name for the tools merge and does the same thing.
+`/api/offensive-tools/{target_id}/merge` is an alias of the tools merge and does the same thing. It is left out of `/docs`.
 
 #### Entity Profile Export (Markdown)
 
@@ -885,7 +887,7 @@ Create request:
 {
   "name": "Flag LockBit coverage",
   "trigger_type": "on_keyword_match",
-  "trigger_config": { "keywords": ["LockBit"], "match_fields": ["title", "content"] },
+  "trigger_config": { "pattern": "LockBit", "is_regex": false },
   "conditions": {},
   "actions": [
     { "type": "add_tags", "config": { "tags": ["ransomware"] } },
@@ -895,6 +897,8 @@ Create request:
   "is_enabled": true
 }
 ```
+
+`on_keyword_match` matches `pattern` against the title, content and summary, ignoring case; `is_regex` (default true) treats it as a regular expression.
 
 `trigger_type` is one of `on_new_entry`, `on_schedule`, `on_keyword_match`, `on_cve_detected`, `on_manual`, `on_correlation_event`, `on_entry_scored`, `on_observable_captured`.
 
@@ -1032,7 +1036,7 @@ Values within one parameter are ORed; different parameters are ANDed. Each facet
 | DELETE | `/api/telemetry-sources/{source_id}` | User | Remove a source |
 | POST | `/api/telemetry-sources/check-feasibility` | User | Which data sources your inventory covers |
 | GET | `/api/telemetry-sources/telemetry-gaps` | User | Rules that need sources you don't have |
-| GET | `/api/telemetry-sources/taxonomy` | User | The older data-source list for the picker |
+| GET | `/api/telemetry-sources/taxonomy` | User | A flat data-source list by category, for the picker |
 | GET | `/api/telemetry-sources/catalog` | User | The ready-made data-source catalog |
 | POST | `/api/telemetry-sources/sync` | Admin | Save catalog selections as sources |
 
@@ -1063,7 +1067,7 @@ The tool registry behind the skill CLIs and the MCP server.
 | POST | `/api/tools/execute` | User or agent token (admin for `ADMIN_TOOLS`) | Run a tool: `{"tool_name": "search_entries", "args": {"query": "LockBit", "limit": 5}}`. Returns `{"result": "<JSON string>"}` |
 | GET | `/api/tools/tools` | User or agent token | Every tool's name, description and argument schema |
 
-Tools in `ADMIN_TOOLS` (`backend/app/tools/__init__.py`) need an admin, the same as their API routes. An agent token may only run read tools.
+Tools in `ADMIN_TOOLS` (`backend/app/tools/__init__.py`) need an admin, the same as their API routes. An agent token (an AI run acting for a user) with `read` scope may only run read tools; one with `propose` scope has each write staged for the user to confirm in the copilot.
 
 ---
 
@@ -1105,7 +1109,7 @@ A task is one AI job (summarise an article, extract entities, write a report sec
 
 | Method | Path | Access | What it does |
 | --- | --- | --- | --- |
-| GET | `/api/ai/tasks` | User | All tasks. Old tasks hidden unless `include_deprecated` |
+| GET | `/api/ai/tasks` | User | All tasks. Tasks marked deprecated are hidden unless `include_deprecated` |
 | POST | `/api/ai/tasks` | Admin | Create a custom task (409 if the name exists) |
 | PATCH | `/api/ai/tasks/{task_id}` | Admin | Change how it shows in the reader and its output schema |
 | DELETE | `/api/ai/tasks/{task_id}` | Admin | Delete a custom task. 403 for a built-in task, 409 `task_has_results` if it has results |
@@ -1274,7 +1278,7 @@ Enrichment fills in entity details from outside sources (NVD, EPSS, CISA KEV, Ma
 - `entities.counts` is the full count per type; `entities.items` is trimmed to `entity_group_limit` per type.
 - `match_kind` is `direct` (the name, alias or id matched) or `mention` (a description, tag or rule body matched).
 - Free-text queries also return notes as `"type": "note"`. `note_source` tells them apart: `note` (on an article, or standalone) or `entity_note` (on an entity, with `entity_name`). Notes are not limited to your own: search returns every note, like `GET /api/notes`. The `note:` filters (`note:`, `note.tag:`, `note.type:`, `note.about:`, `note.pinned:`) are in [query-language.md](query-language.md).
-- When the query runs in PostgreSQL (`sort:radar`, an entity-only query, or more than 800 matching article ids), `estimatedTotalHits` is exact and `facetDistribution` is missing.
+- When the query runs in PostgreSQL (`sort:radar`, an entity-only query, or more than 500 matching article ids), `estimatedTotalHits` is exact and `facetDistribution` is missing.
 - `parsed_filters` is what the parser understood; the UI shows them as chips.
 - `did_you_mean` suggests a fix when a filter value was cut at a space. `country:North Korea` filters on `country:North` and searches the text `Korea`; the suggestion is `country:"North Korea"`. It is only set when the longer value really exists.
 
@@ -1333,6 +1337,7 @@ Instance settings, stored in the database and falling back to `.env`. All Admin.
 | GET | `/api/system-settings` | Every setting with its current value, grouped for the settings screens |
 | PATCH | `/api/system-settings` | `{"settings": {"registration_enabled": false}}`. A `null` value resets that key |
 | DELETE | `/api/system-settings/{key}` | Reset one key to its default |
+| POST | `/api/system-settings/email/test` | Send a test email through the saved SMTP settings (`{"to"}`, one address) |
 
 #### Signal Engine & Pipeline
 

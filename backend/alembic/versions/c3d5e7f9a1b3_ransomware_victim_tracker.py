@@ -1,7 +1,6 @@
 """ransomware leak-site / victim tracker
 
-Creates ransomware_victims + victim_disclosures (planning/ransomware-victim-tracker.md
-§3-4), wires ransomware_victims into the alias-index machinery (entity_norm()
+Creates ransomware_victims + victim_disclosures, wires ransomware_victims into the alias-index machinery (entity_norm()
 computed normalized_name + sync_entity_alias_index trigger — both the function and
 the trigger fn already exist from d4f6h8j0l2n4), and adds threat_actors.actor_type
 so the dashboard can scope to ransomware groups without heuristics.

@@ -49,7 +49,6 @@ const ACTION_TYPES = [
   { value: "create_note", label: "Create Note" },
   { value: "create_intel_report", label: "Create Intel Report" },
   { value: "chain_rule", label: "Chain Rule" },
-  { value: "export_to", label: "Export Data" },
   { value: "branch", label: "If/Else Branch" },
 ];
 
@@ -390,12 +389,6 @@ function actionConfigFields(
     case "chain_rule":
       return [
         { key: "rule_id", label: "Rule ID", placeholder: "uuid" },
-      ];
-    case "export_to":
-      return [
-        { key: "format", label: "Format", placeholder: "csv, markdown" },
-        { key: "destination", label: "Destination", placeholder: "webhook" },
-        { key: "webhook_url", label: "Webhook URL", placeholder: "https://..." },
       ];
     default:
       return [];

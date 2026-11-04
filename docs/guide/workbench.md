@@ -23,9 +23,10 @@ The Workbench opens on the dashboard, a board of widgets you arrange.
   next to the tabs adds one.
 - The gear on a widget opens its settings, where it has any.
 
-There are 51 widgets. Good ones for a first board:
+There are 46 widgets. Good ones for a first board:
 
-- **Triage Queue Stats** and **Unread Count**: how much is waiting.
+- **Overview** and **Triage Flow**: headline counts, and how many articles
+  arrive each day against how many you read.
 - **Trending Actors**, **Trending CVEs**, **Trending Malware**: what is written
   about most right now. TTPs, vendors and products have trending widgets too.
 - **Feed Activity** and **Feed Health**: how much each feed sends, and whether
@@ -35,8 +36,8 @@ There are 51 widgets. Good ones for a first board:
   detect, and which you can't.
 - **New Detections**: rules added recently.
 - **Under the Radar**: threats that seem important but have little coverage.
-- **Morning Briefing** and **Weekly Recap**: written summaries for a handover.
-  These need an AI provider.
+- **Morning Briefing**: the latest AI daily summary, for a handover. It needs
+  an AI provider.
 - **PIR Coverage**: how well your feeds answer your intelligence requirements
   (see [Intelligence](#intelligence) below).
 

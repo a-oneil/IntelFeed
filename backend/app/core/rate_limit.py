@@ -118,10 +118,9 @@ def _get_limit(path: str, method: str = "GET", *, anonymous: bool = False) -> tu
         if path.startswith(ANON_HEAVY_PREFIXES):
             return (*ANON_HEAVY_LIMITS[0], "anon_heavy")
         return (*ANON_LIMITS[0], "anon")
-    # Authenticated read-only API traffic is not rate limited.
-    # This is a self-hosted, single-user app — the default 600 req/min
-    # limit was too low for normal operation with 200+ feeds triggering
-    # SSE-driven query invalidations.
+    # Authenticated read-only API traffic is not rate limited: with 200+
+    # feeds, SSE-driven query invalidations push a single signed-in user past
+    # a 600 req/min limit in normal use.
     return None
 
 

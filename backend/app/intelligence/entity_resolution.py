@@ -1,8 +1,8 @@
 """Hardened entity resolution + creation/alias gates.
 
-Phases 1–2 of planning/entity-creation-guardrails.md. Every automated entity
-creation path (AI extraction stores, Cybergeist sync, CLI write tools) and the
-manual UI route through :func:`resolve_entity_creation` before minting a
+Phases 1–2 of the entity creation guardrails (docs/engine-settings.md). Every
+automated entity creation path (AI extraction stores, Cybergeist sync, CLI write
+tools) and the manual UI route through :func:`resolve_entity_creation` before minting a
 profile; the gates and normalized matching live here so all call sites inherit
 them. Phase 3 (pending tier / one-pass resolution) hooks into the ``held``
 decisions this module already emits — a held decision today logs an advisory
@@ -382,8 +382,7 @@ _PHYSICAL_OBJECT_RE = re.compile(
 
 # --- Tool semantic gates (2026-09) -----------------------------------------
 # The F13 pattern set above only rejects code-artifact *shapes*. It let eleven
-# weeks of dependency names, vulnerable packages and API symbols through — see
-# planning/tool-extraction-cleanup.md. A tool is software WIELDED during an
+# weeks of dependency names, vulnerable packages and API symbols through. A tool is software WIELDED during an
 # intrusion; a library that is merely imported, shipped or exploited is not.
 #
 # These run after the resolver's exact/normalized matchers, so a known tool
@@ -594,7 +593,7 @@ def evidence_names(evidence: str | None, name: str, aliases: list[str] | None = 
 # cipher names, install commands, code tokens, OS APIs, product categories and
 # technique names. None names a thing anyone wields or a group anyone tracks,
 # and once one is a row the autolinker tags it on every article that uses the
-# word. See planning/review-queue-finish.md.
+# word.
 #
 # Curated lists, not patterns, wherever a pattern would also catch real names
 # (AutoIt and AutoHotkey look like the AutoConfig code tokens). Matching is on

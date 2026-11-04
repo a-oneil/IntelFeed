@@ -8,7 +8,7 @@ flowchart TD
         INLINE["Inline stages (kind=inline, not Celery tasks):<br/>sanitize → dedup → relevance → index"]
         INLINE --> RESOLVE["resolve_feed_plan(db, feed)<br/>pipeline/plans.py:137"]
         RESOLVE --> FLAG{"pipeline_engine_enabled?"}
-        FLAG -- "off → None" --> LEGACY["Feed booleans only:<br/>run_extraction = feed_runs_extraction(feed)<br/>(auto_extract_on_ingest OR extract_detection_rules,<br/>and mode is not none)"]
+        FLAG -- "off → None" --> FEEDONLY["Feed booleans only:<br/>run_extraction = feed_runs_extraction(feed)<br/>(auto_extract_on_ingest OR extract_detection_rules,<br/>and mode is not none)"]
         FLAG -- "on" --> CACHE{"Redis cache hit?<br/>intelfeed:pipeline_plan:{feed_id}:{version}"}
         CACHE -- "miss" --> SYNTH["synthesize_from_feed(feed)<br/>(stage defaults from the feed booleans)"]
         SYNTH --> OVERLAY["Overlay active PipelinePlan rows:<br/>global → category → feed<br/>(partial merge: enabled + config)"]
@@ -17,16 +17,16 @@ flowchart TD
         CACHED --> PLAN
     end
 
-    LEGACY --> DISPATCH
+    FEEDONLY --> DISPATCH
     PLAN --> DISPATCH
 
-    subgraph CHORD["dispatch_entry_pipeline (feed_tasks.py:305)"]
+    subgraph CHORD["dispatch_entry_pipeline (feed_tasks.py:337)"]
         DISPATCH["Build chord from PIPELINE_STAGES registry"]
         DISPATCH --> PRE{"feed auto_translate?"}
         PRE -- "yes" --> TRANSLATE["Prologue (kind=pre):<br/>translate_entry_task<br/>chained ahead — never raises"]
         TRANSLATE --> HEADER
         PRE -- "no" --> HEADER["Chord header (kind=parallel,<br/>plan-gated; autolink forced if all disabled):<br/>autolink ∥ observables ∥ telegram_links ∥ extract"]
-        HEADER --> CB["Chord callback:<br/>entry_post_processing (feed_tasks.py:263)"]
+        HEADER --> CB["Chord callback:<br/>entry_post_processing (feed_tasks.py:295)"]
         CB --> POST["Second chord header (kind=post):<br/>cooccurrence ∥ correlation ∥ requirements"]
         POST --> FINAL["Second chord callback (kind=final):<br/>score_entry_task — signal scoring +<br/>one-pass AI analysis enqueue<br/>(no-op unless signal engine flags on)"]
     end

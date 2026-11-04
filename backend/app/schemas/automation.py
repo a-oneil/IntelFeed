@@ -23,7 +23,7 @@ class AutomationRuleCreate(BaseModel):
                 "name": "Flag LockBit coverage",
                 "description": "Tag and prioritize new entries mentioning LockBit",
                 "trigger_type": "on_keyword_match",
-                "trigger_config": {"keywords": ["LockBit"], "match_fields": ["title", "content"]},
+                "trigger_config": {"pattern": "LockBit", "is_regex": False},
                 "conditions": {},
                 "actions": [
                     {"type": "add_tags", "config": {"tags": ["ransomware"]}},
@@ -150,7 +150,6 @@ VALID_ACTION_TYPES = {
     "create_intel_report",
     "chain_rule",
     "track_on_threat_board",
-    "export_to",
     "branch",
 }
 
@@ -188,7 +187,7 @@ class RuleExportPayload(BaseModel):
                         "name": "Flag LockBit coverage",
                         "description": "Tag and prioritize new entries mentioning LockBit",
                         "trigger_type": "on_keyword_match",
-                        "trigger_config": {"keywords": ["LockBit"], "match_fields": ["title", "content"]},
+                        "trigger_config": {"pattern": "LockBit", "is_regex": False},
                         "conditions": {},
                         "actions": [{"type": "add_tags", "config": {"tags": ["ransomware"]}}],
                         "labels": ["ransomware"],

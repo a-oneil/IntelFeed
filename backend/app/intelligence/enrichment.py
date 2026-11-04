@@ -384,7 +384,7 @@ async def store_threat_actors(
             continue
 
         # Resolver: exact + normalized matching, cross-type tombstones, and the
-        # creation/alias gates (planning/entity-creation-guardrails.md) in one place.
+        # creation/alias gates (docs/engine-settings.md) in one place.
         # Without a quoted sentence naming the group, an existing actor still
         # links but no new one is created.
         decision = await resolve_entity_creation(
@@ -552,7 +552,7 @@ async def store_malware(
             continue
 
         # Resolver: exact + normalized matching, cross-type tombstones, and the
-        # creation/alias gates (planning/entity-creation-guardrails.md) in one place.
+        # creation/alias gates (docs/engine-settings.md) in one place.
         decision = await resolve_entity_creation(
             db,
             "malware",

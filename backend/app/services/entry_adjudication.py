@@ -21,7 +21,7 @@ Three pieces, all entry-scoped:
   on high-confidence verdicts with the same audit rows the existing tools
   write, so the rows double as the undo record.
 
-Design: planning/ai-adjudication-stage.md. Replaces the nightly link
+Design: docs/engine-settings.md "Adjudicate stage". Replaces the nightly link
 validator, hygiene reviewer and merge engine, and folds in relationship
 promotion and the stale sweep.
 """
@@ -76,7 +76,7 @@ VALID_FOR_KIND: dict[str, set[str]] = {
 }
 # Verdicts that count toward the circuit breaker: the ones that take
 # something away. A merge keeps the data under the catalogue name the model
-# was shown, so it is not counted (planning/ai-adjudication-stage.md §4.3).
+# was shown, so it is not counted.
 DESTRUCTIVE = {"remove", "veto", "demote", "drop"}
 # Types a link can be reclassified between (the merge engine's convertible set).
 RECLASSIFY_TYPES = {THREAT_ACTOR, MALWARE, VENDOR, PRODUCT, COUNTRY, TOOL}

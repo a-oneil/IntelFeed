@@ -1,4 +1,4 @@
-"""Entity creation guardrails (planning/entity-creation-guardrails.md Phases 1-2).
+"""Entity creation guardrails, phases 1-2 (docs/engine-settings.md).
 
 Fixtures are the actual prod examples from the plan's §1 failure-mode table:
 F1 punctuation/spacing variants, F2 leetspeak, F3 descriptor variants, F5
@@ -228,7 +228,6 @@ def test_f13_non_software_tool_names_rejected(name):
 # shapes; these are the categories that flooded the catalog for eleven weeks —
 # dependencies, vulnerable packages, API symbols and release strings. Every
 # name here was taken from the prod tools table.
-# See planning/tool-extraction-cleanup.md.
 TOOL_SEMANTIC_JUNK = [
     # package coordinates
     "@fastify/middie",

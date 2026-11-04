@@ -2,17 +2,17 @@
 
 This is the list of every IntelFeed setting: what it does, its default, and where you change it. It is for admins tuning an instance and for developers adding a setting. [engine.md](engine.md) explains the systems these settings control.
 
-IntelFeed has **217 settings**:
+IntelFeed has **219 settings**:
 
-- **166** can be changed in the web UI. They are listed in `CONFIGURABLE_KEYS` (`backend/app/services/system_settings.py:26`). One of them, `registration_invite_code`, lives only in the database.
+- **168** can be changed in the web UI. They are listed in `CONFIGURABLE_KEYS` (`backend/app/services/system_settings.py:26`). One of them, `registration_invite_code`, lives only in the database.
 - **51** come only from the environment (`.env`). See [Env-only settings](#env-only-settings).
-- Six are **secrets**. They are encrypted in the database and never sent back to the browser: `github_token`, `nvd_api_key`, `observables_publish_token`, `registration_invite_code`, `sentry_dsn`, `smtp_password` (`SECRET_KEYS`, `system_settings.py:14`).
+- Six are **secrets**. They are encrypted in the database and never sent back to the browser: `github_token`, `nvd_api_key`, `observables_publish_token`, `registration_invite_code`, `sentry_dsn`, `smtp_password` (`SECRET_KEYS`, `backend/app/services/system_settings.py:14`).
 
 ---
 
 ## How a setting resolves
 
-Code reads a setting with `settings.get(key)` (`backend/app/config.py:509`). The value comes from the first of these that has one:
+Code reads a setting with `settings.get(key)` (`backend/app/config.py:543`). The value comes from the first of these that has one:
 
 1. **Database.** If the key is in `CONFIGURABLE_KEYS` and the `system_settings` table holds a value, that value wins.
 2. **Environment.** A value in `.env` or a real environment variable, read when the process starts.
@@ -20,7 +20,7 @@ Code reads a setting with `settings.get(key)` (`backend/app/config.py:509`). The
 
 Reading `settings.key` as a plain attribute skips the database, so a UI change would do nothing. Always use `settings.get()` for a setting that should be editable.
 
-The code defaults are the values the reference instance uses after tuning, so a fresh install starts out tuned. You still need to set the things that depend on your instance: the AI text budget (`ai_analysis_content_max_chars`, which depends on your AI host's memory), anything that publishes data outward (`public_rss_enabled`, `observables_publish_enabled`), your own name lists (`autolinker_false_positive_names`, `autolinker_blocked_surface_forms`), secrets, and URLs.
+The code defaults are tuned values, so a fresh install starts out tuned. You still need to set the things that depend on your instance: the AI text budget (`ai_analysis_content_max_chars`, which depends on your AI host's memory), anything that publishes data outward (`public_rss_enabled`, `observables_publish_enabled`), your own name lists (`autolinker_false_positive_names`, `autolinker_blocked_surface_forms`), secrets, and URLs.
 
 A database value that equals the default does nothing useful, and it stops you getting a better default later. `scripts/maintenance/prune_setting_overrides.py --dry-run` lists those, plus values for keys nothing reads and overrides for jobs that don't exist. Run it without `--dry-run` to delete them.
 
@@ -33,11 +33,11 @@ A database value that equals the default does nothing useful, and it stops you g
 | Structure | File | Role |
 |---|---|---|
 | `CONFIGURABLE_KEYS` | `backend/app/services/system_settings.py:26` | Which keys the UI can edit, and each value's type |
-| `SETTING_METADATA` | `backend/app/services/system_settings.py:216` | Label, description and group shown in the UI |
+| `SETTING_METADATA` | `backend/app/services/system_settings.py:220` | Label, description and group shown in the UI |
 | `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1413` | Moves engine keys into the group of the Engine panel that owns them |
-| `SECRET_KEYS` | `system_settings.py:14` | Encrypted in the database, hidden on read |
+| `SECRET_KEYS` | `backend/app/services/system_settings.py:14` | Encrypted in the database, hidden on read |
 | `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Which Engine screen shows each group; drives the Engine settings search |
-| `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:67` | Single keys that live somewhere other than their group's screen |
+| `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:72` | Single keys that live somewhere other than their group's screen |
 
 To add a setting, add it to `config.py` (default), `CONFIGURABLE_KEYS` (type) and `SETTING_METADATA` (label, description, group). If a scheduled job reads it, also add it to that job's `settings_keys` in `backend/app/workers/job_registry.py`. A key missing from `CONFIGURABLE_KEYS` always returns the env default, and the UI can never change it.
 
@@ -108,7 +108,7 @@ Settings → Engine → *extract* stage panel. This stage uses pattern matching 
 
 ## Analyze stage
 
-Settings → Engine → *analyze* stage panel (`AnalyzeStageConfig.tsx`). This holds the AI analysis settings (group `ai`, minus the personal-key settings) and the entity creation checks (group `extraction`, minus the two above). The panel also sets the model and output-token limit for the `entry_analysis` AI task, and the list of names the AI may never create.
+Settings → Engine → *analyze* stage panel (`AnalyzeStageConfig.tsx`). This holds the AI analysis settings (group `ai`, minus the personal-key and copilot settings) and the entity creation checks (group `extraction`, minus the two above). The panel also sets the model and output-token limit for the `entry_analysis` AI task, and the list of names the AI may never create.
 
 ### One-pass AI analysis
 
@@ -156,7 +156,7 @@ Radar is the ranked view of articles (the `radar` sort and the Priority Queue). 
 | `my_stack_exposure_enabled` | bool, `true` | Show CVEs that affect vendors and products you follow in the Priority Queue, and power the Threats page's Vulnerabilities tab. **Needs `signal_engine_surface`.** |
 | `exposure_attack_visibility_enabled` | bool, `true` | On the Vulnerabilities tab, for a CVE with no detection rule, estimate whether your telemetry could see it, using the ATT&CK techniques that appear alongside it in articles. This is a weaker signal than a real rule. |
 
-Jobs: `signal-rate-recompute` (daily 04:20 UTC), `signal-personal-weight-fit` (daily 04:35 UTC), `signal-rescore-recent` (every 6 hours at :35), `signal-rescore-all` (Sundays 03:00 UTC).
+Jobs: `signal-rate-recompute` (daily 04:20 UTC), `signal-personal-weight-fit` (daily 04:35 UTC), `signal-rescore-recent` (every 6 hours at :35), `signal-rescore-all` (off by default; Sundays 03:00 UTC once an admin turns it on).
 
 Signal family weights and the Radar threshold are not settings rows. They live in Redis and are changed with the sliders on the score stage card (`PUT /api/engine/signals/settings`). See [engine.md](engine.md#redis-state).
 
@@ -319,7 +319,7 @@ Settings → Engine → **Plans**. A pipeline plan turns processing stages on or
 
 ## Maintenance browse screen
 
-Settings → Engine → **Maintenance** (groups `maintenance` and `retention`). This holds the AI cleanup jobs and the clean-up sweeps.
+Settings → Engine → **Maintenance** (groups `maintenance` and `retention`). This holds the AI cleanup jobs and the clean-up sweeps. The adjudicate and duplicate-review settings below are on the *adjudicate* stage panel instead (group `adjudication`).
 
 | Setting | Type / default | What it does |
 |---|---|---|
@@ -363,7 +363,7 @@ Rows that pass become `pending`, then `completed`, or `failed` once retries run 
 
 **What the reviewer never changes:** links an analyst rejected, and actor, malware, vendor, product or country links an analyst restored in the last 90 days. Veto deletes an entity only if this article created it and nothing else uses it; otherwise it just removes the link. A relationship becomes *confirmed* only after the reviewer explicitly keeps it, at or above the confidence floor, on `relationship_evidence_promote_count` different articles (`reviewer_kept_entry_ids`). Silence does not count as agreement.
 
-**Queue.** Review › Proposals filters by what applying would change (links, entities, relationships), by origin (`adjudicator`, `merge_review` or `scan`) and by action, and sorts by newest (the default), most proposals, oldest or highest confidence. Every link-log row counts as `adjudicator`, including the ones the retired link validator left; the adjudicator's alias trims (`alias_collision` rows with `after.kind = adjudicator`) do too. The facet counts, the tab badge and the console's chips all come from the same index as the table (`_review_index`, `backend/app/api/hygiene.py`).
+**Queue.** Review › Proposals filters by what applying would change (links, entities, relationships), by origin (`adjudicator`, `merge_review` or `scan`) and by action, and sorts by newest (the default), most proposals, oldest or highest confidence. Every link-log row counts as `adjudicator`, and so do the adjudicator's alias trims (`alias_collision` rows with `after.kind = adjudicator`). The facet counts, the tab badge and the console's chips all come from the same index as the table (`_review_index`, `backend/app/api/hygiene.py`).
 
 Every button acts on what the filters show, never more: a row's **Apply** and **Dismiss**, its expanded articles, and **Apply all** (a background job, `POST /api/admin/hygiene/bulk-apply`) and **Dismiss all**. A row's Apply leaves type changes to its type chips; Apply all applies them to their proposed type. Assessments are notes and never apply. A dismissal sticks: a type change is not proposed again for the entity, a duplicate review's pair is marked as two things, and a dismissed adjudicator verdict (an unlink, held link, veto, merge, edge demote or observable drop) is neither filed nor applied again for that article (`proposal_dismissals`, kind `verdict`). A scan can propose its fix again when it runs. Each verdict shows its confidence where the stage gave one. Restore is on History, which lists what Review and the stages applied; a restore is logged as `adjudication_restored`. Stale entities (one article at most, no links, idle 90 days) are a `stale` status on Engine › Entities. `GET /api/admin/hygiene/feed?orphaned=true` lists old proposals with no article, for manual clean-up.
 
@@ -481,6 +481,12 @@ Rules for people using their own AI keys. Everything here depends on the first s
 | `site_ai_user_daily_requests` | int, `0` | Requests one person may make per UTC day on the instance's providers, for tasks they start (copilot, rule help, summaries, reports). Background work, automation and share links don't count. `0` = no limit. |
 | `share_ai_daily_requests` | int, `20` | AI requests one share link may make per UTC day. Always uses the instance's providers. `0` = no limit. |
 
+### Settings → AI Configuration → Prompts (Copilot)
+
+| Setting | Type / default | What it does |
+|---|---|---|
+| `copilot_auto_approve_tools` | csv, empty | Copilot tools that change data but run without the person clicking Confirm, such as `create_note,add_tag`. Admin-only tools and deletes always ask. Empty: every change waits for Confirm. Edited as "Skip Confirm for" in the Copilot prompt's workspace. |
+
 ### Settings → Feeds & Export (public RSS)
 
 | Setting | Type / default | What it does |
@@ -516,7 +522,7 @@ Each job in `JOB_REGISTRY` (`backend/app/workers/job_registry.py`) lists the set
 | `signal-rate-recompute` | 04:20 | `signal_feedback_min_samples` |
 | `signal-personal-weight-fit` | 04:35 | `radar_personalization_enabled`, `radar_personalization_min_samples`, `radar_personalization_window_days` |
 | `signal-rescore-recent` | every 6 h at :35 | `signal_engine_shadow`, `signal_engine_surface` |
-| `signal-rescore-all` | Sun 03:00 | `signal_engine_shadow`, `signal_engine_surface` |
+| `signal-rescore-all` | Sun 03:00 (off by default) | `signal_engine_shadow`, `signal_engine_surface` |
 | `backfill-entity-assessments` | 05:45 | every `assessment_*` |
 | `review-duplicate-entities` | 06:30 | every `merge_review_*` |
 | `actor-profile-refresh` | Mon 03:00 | every `actor_refresh_*` |
@@ -539,7 +545,7 @@ Each job in `JOB_REGISTRY` (`backend/app/workers/job_registry.py`) lists the set
 
 `entity_maintenance_mode` is read by `actor-profile-refresh` but is not in its `settings_keys`, so the Jobs screen doesn't show it there. Edit it on the Maintenance screen.
 
-All 67 jobs, including those with no settings, are in [workers-search-dashboards.md](workers-search-dashboards.md).
+All 84 jobs, including those with no settings, are in [workers-search-dashboards.md](workers-search-dashboards.md).
 
 ---
 
@@ -568,7 +574,7 @@ Three networking keys need a word:
 - `webhook_allow_private_networks` (default `true`): the same rule for automation webhooks.
 - `trusted_client_ip_header` (default empty): the header your edge proxy uses for the visitor's real IP, such as `CF-Connecting-IP` behind Cloudflare. Set it only when the server accepts traffic from that proxy alone. Empty uses the first `X-Forwarded-For` address.
 
-`postgres_password`, `meili_master_key`, `secret_key` and `encryption_key` are checked at startup. The value `changeme` gives a warning in development and **stops startup** in production (`_reject_insecure_defaults`, `backend/app/config.py:505`). `encryption_key` must also be a valid Fernet key (32 bytes, URL-safe base64).
+`postgres_password`, `meili_master_key`, `secret_key` and `encryption_key` are checked at startup. The value `changeme` gives a warning in development and **stops startup** in production (`_reject_insecure_defaults`, `backend/app/config.py:506`). `encryption_key` must also be a valid Fernet key (32 bytes, URL-safe base64).
 
 ---
 

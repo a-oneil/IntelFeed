@@ -15,7 +15,7 @@ class UserEntityWatch(Base):
     mute  → entries linked to the entity are suppressed from Radar/chips
     stack → "I run this" (vendor/product only). Feeds My Stack exposure scoring:
             CVEs affecting a stack entity get a read-time boost in the Radar and
-            a detection-posture flag. See planning/my-stack-exposure-scoring.md.
+            a detection-posture flag. See docs/intelligence-engine.md.
     """
 
     __tablename__ = "user_entity_watches"

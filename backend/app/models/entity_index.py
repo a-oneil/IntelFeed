@@ -1,5 +1,5 @@
-"""Normalized-name infrastructure for entity resolution (Phase 1 of
-planning/entity-creation-guardrails.md).
+"""Normalized-name infrastructure for entity resolution (phase 1 of
+the entity creation guardrails, docs/engine-settings.md).
 
 Three pieces, kept together because they share the ``entity_norm`` SQL function:
 

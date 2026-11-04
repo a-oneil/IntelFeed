@@ -44,7 +44,7 @@
       "title": "Detection rule repositories",
       "description": "GitHub repositories that publish detection content as code — Sigma, Elastic, Splunk, YARA, Nuclei, Atomic Red Team, LOLBAS and friends. Each commit becomes an entry, which feeds the detection-rule extractor directly.",
       "file": "github-rules.opml",
-      "requires": "A GitHub token (Settings → System → github_token). Unauthenticated GitHub API calls are capped at 60/hour, which these repositories will exhaust."
+      "requires": "A GitHub token (Settings → Engine → Enrichment → Keys). Unauthenticated GitHub API calls are capped at 60/hour, which these repositories will exhaust."
     },
     {
       "id": "blogs",

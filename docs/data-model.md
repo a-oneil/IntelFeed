@@ -31,7 +31,7 @@ See diagram: [ER diagram](diagrams/data-model-er-diagram.md)
 
 These hold for every table unless its section says otherwise, so the column lists below skip them.
 
-- **Primary keys** are UUIDs named `id`. The exceptions are junction tables (composite keys), `system_settings` (integer `1`), `tts_audio` (`cache_key`), `log_type_alias` (`raw`), `rule_coverage` and `threat_board_state` (composite keys), `entry_embeddings` and `user_ai_preferences` (keyed by the row they belong to).
+- **Primary keys** are UUIDs named `id`. The exceptions are junction tables (composite keys), `system_settings` (integer `1`), `tts_audio` (`cache_key`), `log_type_alias` (`raw`), `capec_patterns` (`capec_id`), `rule_coverage`, `threat_board_state`, `entity_context` and `entity_relation_claims` (composite keys), `entry_embeddings` and `user_ai_preferences` (keyed by the row they belong to).
 - **Timestamps** are timezone-aware. `created_at` and `updated_at` default to `now()`.
 - **`created_by`** points at `users` with `ON DELETE SET NULL`, so deleting a user keeps their work. Per-user state (read marks, watches, personal AI keys, subscriptions) uses `CASCADE` instead.
 - **`metadata_`** is the Python attribute name. On `entries`, `campaigns`, `detection_rules`, `entry_media` and `podcasts` the database column is called `metadata`; on the entity tables it is `metadata_`.
@@ -256,7 +256,7 @@ Table `tools`: any named software. That includes attack tools, defensive tools, 
 - `metadata_`
 
 #### RansomwareVictim & VictimDisclosure
-The leak-site victim tracker, filled by the `sync_ransomware_victims` job from ransomware.live. A victim is the organization. A disclosure is one posting: one organization, one group, one time, one leak site. If a group re-lists a victim, or a second group claims it, there is still one victim with several disclosures.
+The leak-site victim tracker, filled by the `sync-ransomware-victims` job from ransomware.live. A victim is the organization. A disclosure is one posting: one organization, one group, one time, one leak site. If a group re-lists a victim, or a second group claims it, there is still one victim with several disclosures.
 
 **`ransomware_victims`:**
 - `name` (indexed, **not** unique — dedup uses `normalized_name` and `domain`), `aliases`, `normalized_name`
@@ -305,6 +305,7 @@ Each row keeps a copy of the junction row so a removal can be undone. A `restore
 
 - `entry_id` (FK, CASCADE), `entity_type`, `entity_id` (no FK, so history survives entity deletion), `entity_name_snapshot`
 - `action`, `reason`, `suggested_entity_type`
+- `verdict_confidence` — the reviewer's confidence in its verdict (`high`, `medium`, `low`), not the link's own (that is `original_confidence`)
 - `original_source`, `original_confidence`, `original_matched_names`, `original_paragraph_indices`, `original_extracted_at` — the junction row copy
 - `ai_result_id` (SET NULL)
 
@@ -357,6 +358,7 @@ Table `observables`: the indicator ledger. An IOC (indicator of compromise) is a
   | `ttp_observable` | an `EntryTTP.observable_value` | 0.85 |
   | `ioc_list` | a curated indicator-list feed | 0.85 |
   | `publisher_ioc` | the indicator file a write-up links to | 0.9 |
+  | `adjudicator` | the adjudicate stage capturing a candidate the analysis left behind | 0.8 |
   | `manual` | analyst promote or create | 1.0 |
 
   There is deliberately no value meaning "regex". A value the author defanged gets +0.1, because defanging tells you the author meant it as an indicator.
@@ -510,7 +512,7 @@ Table `ai_tasks`: one kind of AI job, for example `entry_analysis`, `entry_adjud
 - `default_prompt_template`, `default_system_template`
 - `output_schema`, `output_schema_override` (JSONB) — the expected JSON shape
 - `variables` (JSONB) — hints for the prompt editor only. The backend never checks them when rendering.
-- `is_system` (built-in), `is_deprecated` (kept for old `ai_results`, hidden from pickers)
+- `is_system` (built-in), `is_deprecated` (hidden from pickers; the row stays because `ai_results` rows point at it)
 - `show_in_entry_actions`, `entry_action_order`, `show_in_entity_actions` — where the task appears as a one-click action
 - `allows_user_provider` (default false) — a person's own key may answer this task. It starts true for the tasks in `USER_PROVIDER_ELIGIBLE_TASKS` (`backend/app/ai/capabilities.py:73`). The admin can turn it off, or on for a custom task, but not on for a pipeline task outside that set.
 
@@ -582,9 +584,10 @@ Bookkeeping for the one-pass `entry_analysis` (one AI call that reads an article
 - `batch_id` (indexed), `custom_id`, `attempts`, `reused_from_entry_id`, `error`
 - `adjudication_status` (indexed) — the adjudicate stage's state:
   - `pending`, `completed` or `failed`
+  - `recheck` — a review is owed only for held matches settled after `adjudication_recheck_since`, so the review judges just those, not the whole article again
   - or why it was skipped: `skipped_off`, `skipped_plan`, `skipped_echo`, `skipped_nothing_new`, `skipped_score`, `skipped_budget`, `skipped_paused`
 
-  An hourly resweep queues budget and paused rows again.
+  An hourly resweep queues budget, paused and recheck rows again.
 - `adjudication_queued_at` — when the row went pending. A pending row older than 6 hours with no run is treated as lost and queued again.
 - `adjudicated_at`, `submitted_at`, `completed_at`
 
@@ -597,7 +600,7 @@ Bookkeeping for the one-pass `entry_analysis` (one AI call that reads an article
 
 ### 6. Enrichment & External Data
 
-**Tables:** `enrichment_sources`, `user_enrichment_overrides`, `enrichment_results`, `entity_context`, `entity_relation_claims`, `entity_notes`, `entity_field_claims`, `entity_relationships`
+**Tables:** `enrichment_sources`, `user_enrichment_overrides`, `enrichment_jobs`, `enrichment_results`, `entity_context`, `entity_relation_claims`, `entity_notes`, `entity_field_claims`, `entity_relationships`
 
 #### EnrichmentSource
 Table `enrichment_sources`: one external data source.
@@ -613,6 +616,17 @@ Table `enrichment_sources`: one external data source.
 #### UserEnrichmentOverride
 Table `user_enrichment_overrides`: a person's own API key for a source. Unique on (`created_by`, `source_id`): each user has at most one override per source.
 - `source_id` (FK, CASCADE), `created_by`, `api_key_encrypted`
+
+#### EnrichmentJob
+Table `enrichment_jobs`: one entity's pending lookup at one source. Triggers add rows (`app/enrichment/queue.py`) instead of calling sources, and the dispatcher runs them every 30 seconds, so a lookup a source refuses waits instead of being dropped. Unique on `(entity_type, entity_id, source_type)`; indexed on `(status, priority, due_at)` for the dispatcher's claim.
+- `entity_type`, `entity_id` (no FK), `entity_value`, `source_type`
+- `lane` — `manual`, `new`, `refresh` or `backfill`; `priority` is the lane's rank, lowest first
+- `status` (default `queued`) — `queued`, `running` or `failed`
+- `due_at`, `claimed_at`, `attempts`, `last_status` (the last run's outcome, for example `rate_limited`), `last_error`
+- `requested_by` (SET NULL) — whose override key a manual job uses
+- `entity_confidence`, `entity_base_confidence`
+
+A finished lookup deletes its row. A refused or erroring one comes due again later; after too many errors it is marked `failed`.
 
 #### EnrichmentResult
 Table `enrichment_results`: a cached answer from a source.
@@ -646,7 +660,7 @@ Table `entity_field_claims`: where each profile field value came from. It does f
 - `field` — the column, for example `motivation` or `targeted_sectors`
 - `value_text` — the value as the profile shows it
 - `source_kind` — `analyst`, `ai_extraction`, `ai_assessment`, `enrichment`, `external_feed` or `seed`
-- `source_ref` — the adapter or feed within that kind (for example `wikipedia`, `cybergeist`), or one part of a source's answer (`cvelist:cna`, `cvelist:adp` for the CVE record's CNA and CISA-ADP scores)
+- `source_ref` — the adapter or feed within that kind (for example `wikipedia`, `ransomware.live`), or one part of a source's answer (`cvelist:cna`, `cvelist:adp` for the CVE record's CNA and CISA-ADP scores)
 - `entry_id` (FK, SET NULL), `quote` — the article and sentence behind the claim
 - `confidence`, `created_by` (SET NULL), `ai_result_id` (SET NULL)
 - `claim_key` (String 64, unique) — a digest of entity + field + value + source + article
@@ -1081,7 +1095,7 @@ Fixed value sets are plain strings. The lists below come from code; where a migr
 |---|---|---|
 | `feeds.feed_type` | `rss`, `atom`, `youtube`, `podcast` (HTTP adapters); `reddit`, `github_releases`, `github_advisories`, `github_repo`, `nvd`, `mastodon`, `web_scraper`, `bluesky`, `telegram` (extended adapters) | `app/adapters/` |
 | `feeds.intel_extraction_mode` | `full`, `selective`, `manual`, `none` | `schemas/feed.py` |
-| `detection_rules.rule_type` | `sigma`, `splunk_spl`, `crowdstrike_ql`, `elastic_ql`, `kql`, `snort_suricata`, `yara`, `nuclei`, `panther` | `RULE_TYPE_PATTERN` in `schemas/intelligence.py`. The `ck_detection_rules_rule_type` CHECK lists only the first seven. |
+| `detection_rules.rule_type` | `sigma`, `splunk_spl`, `crowdstrike_ql`, `elastic_ql`, `kql`, `snort_suricata`, `yara`, `nuclei`, `panther` | `RULE_TYPE_PATTERN` in `schemas/intelligence.py`; CHECK `ck_detection_rules_rule_type` |
 | `campaigns.status` | `active`, `monitoring`, `closed`, `historical` | CHECK `ck_campaigns_status` |
 | `cves.exploit_availability` | `none`, `poc`, `weaponized`, `active_exploitation` | CHECK `ck_cves_exploit_availability` |
 | `entity_relationships.confidence` | `confirmed`, `probable`, `possible` | CHECK `ck_entity_relationships_confidence` |
@@ -1175,7 +1189,7 @@ The history has a single head. CI fails if there is more than one, and it also t
 
 ### Migration Naming
 
-File names are `<revision>_<description>.py`. Older files use a short number (`016_glossary_terms.py`); newer ones use a 12-character revision id (`h5c6d7e8f9a0_feed_visible_to_visitors.py`). The docstring at the top of each file explains the change. Read it before changing anything nearby.
+File names are `<revision>_<description>.py`. The revision is either a short number (`016_glossary_terms.py`) or a 12-character revision id (`h5c6d7e8f9a0_feed_visible_to_visitors.py`); new migrations use the id. The docstring at the top of each file explains the change. Read it before changing anything nearby.
 
 ### Writing a New Migration
 

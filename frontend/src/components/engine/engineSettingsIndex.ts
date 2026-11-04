@@ -25,8 +25,8 @@ export interface SettingHit {
  *  two groups that only exist on the Settings page. */
 const GROUP_DEST: Record<string, EngineDest> = {
   autolink: { kind: "stage", stage: "autolink" },
-  ai: { kind: "stage", stage: "extract" },
-  extraction: { kind: "stage", stage: "extract" },
+  ai: { kind: "stage", stage: "analyze" },
+  extraction: { kind: "stage", stage: "analyze" },
   scoring: { kind: "stage", stage: "score" },
   threads: { kind: "stage", stage: "score" },
   intelligence: { kind: "stage", stage: "correlation" },
@@ -88,6 +88,7 @@ const KEY_DEST: Record<string, EngineDest> = {
 const STAGE_LABEL: Record<string, string> = {
   autolink: "Autolink stage",
   extract: "Extract stage",
+  analyze: "AI analysis stage",
   score: "Score stage",
   correlation: "Correlation stage",
   observables: "Observables stage",
@@ -123,13 +124,13 @@ const PANELS: { label: string; hint: string; terms: string; dest: EngineDest }[]
     label: "Extraction denylist",
     hint: "Names the AI extractor may never create as entities",
     terms: "denylist deny list blocklist banned entity names extraction",
-    dest: { kind: "stage", stage: "extract" },
+    dest: { kind: "stage", stage: "analyze" },
   },
   {
     label: "AI model for extraction",
     hint: "Provider, model and token budget for the entry_analysis task",
     terms: "model provider ollama claude openai token budget assignment extraction",
-    dest: { kind: "stage", stage: "extract" },
+    dest: { kind: "stage", stage: "analyze" },
   },
   {
     label: "False-positive names",

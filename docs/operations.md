@@ -37,7 +37,7 @@ Dev mounts code for live edits; prod builds it into images and adds memory limit
 | Memory limits | None | Per service (below) |
 | Restart policy | `unless-stopped` | Same |
 
-- **The AI worker** (`celery-worker-ai`) drains the `ai` queue and the older `claude_code` queue, one task at a time (`CLAUDE_CODE_CONCURRENCY`, default 1) so AI calls never overlap. Only it holds the Claude CLI login (`claude_cli` volume).
+- **The AI worker** (`celery-worker-ai`) drains the `ai` queue and a second queue named `claude_code`, one task at a time (`CLAUDE_CODE_CONCURRENCY`, default 1) so AI calls never overlap. Only it holds the Claude CLI login (`claude_cli` volume).
 - **The enrichment worker** (`celery-worker-enrichment`) drains the `enrichment` queue, one task at a time: the enrichment dispatcher, which beat queues every 30 seconds to run due lookups from `enrichment_jobs`. If it is down, lookups wait in that table and nothing is lost; ticks queued meanwhile expire after 30 seconds.
 - **LibreTranslate** is off by default, behind the `translate` profile, since its models hold about 740 MB. Start: `docker compose -f docker-compose.prod.yml --profile translate up -d libretranslate`. While off, auto-translate skips; `retry-untranslated-entries` (every 30 minutes) catches up later.
 - **Startup seeders** (AI tasks, enrichment sources) take a Postgres advisory lock so the three API workers don't collide.
@@ -137,8 +137,8 @@ Generate secrets:
 
 ```bash
 openssl rand -hex 32        # SECRET_KEY
-python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"   # ENCRYPTION_KEY
-openssl rand -base64 24     # POSTGRES_PASSWORD, REDIS_PASSWORD, MEILI_MASTER_KEY
+openssl rand -base64 32 | tr '+/' '-_'   # ENCRYPTION_KEY (a Fernet key)
+openssl rand -hex 24        # POSTGRES_PASSWORD, REDIS_PASSWORD, MEILI_MASTER_KEY
 ```
 
 Prod compose sets `ENV=production` on app containers and `RUN_MIGRATIONS=true` on the API. With `ENV=production` the app won't start if a secret is a placeholder like `changeme`, `SECRET_KEY` is under 32 characters, or `CORS_ORIGINS` contains `*`; logs are JSON instead of coloured.
@@ -435,9 +435,7 @@ export BACKUP_ENCRYPT_KEY="<passphrase>"
 ./scripts/ops/restore.sh ./backups/intelfeed_20260503_020000.sql.gz.gpg
 ```
 
-With no argument it lists `./backups`. It asks for confirmation, stops `api`, `celery-worker` and `celery-beat`, drops and recreates the database, loads the backup in one transaction, and restarts those three.
-
-It leaves `celery-worker-ai` and `telegram-listener` running (stop them for a write-free restore) and honours `COMPOSE_FILE`, `POSTGRES_USER` and `POSTGRES_DB`.
+With no argument it lists `./backups`. It asks for confirmation, stops every service that holds a database connection (`api`, the four Celery services and `telegram-listener`), drops and recreates the database, loads the backup in one transaction, and starts them again. It honours `COMPOSE_FILE`, `POSTGRES_USER` and `POSTGRES_DB`.
 
 **Restoring overwrites the current database.** Keep backups read-only.
 
@@ -596,7 +594,7 @@ docker compose -f docker-compose.prod.yml exec redis redis-cli -a "$REDIS_PASSWO
 
 #### 8. Entity data is wrong after a rule change
 
-**Symptom:** a profile shows far more articles than it links, a graph shows edges from "Related:" lines or roundups, the Review queue's auto-applied removals took out good links, or older articles read as glued text ("powerSource", an IP running into the next one).
+**Symptom:** a profile shows far more articles than it links, a graph shows edges from "Related:" lines or roundups, the Review queue's auto-applied removals took out good links, or article text reads as glued words ("powerSource", an IP running into the next one).
 
 **Fix:** four repair scripts. Each is a dry run unless you add `--apply`, prints a summary, and is safe to run again. CSVs go to `/tmp` in the container (`scripts/` is read-only in prod); copy them out with `docker compose cp`.
 
@@ -607,22 +605,22 @@ D="docker compose -f docker-compose.prod.yml exec -T api python scripts/maintena
 $D/recount_article_counts.py
 $D/recount_article_counts.py --apply
 
-# Co-occurrence edges whose articles no longer pass the same-paragraph rule
+# Co-occurrence edges whose articles fail the same-paragraph rule
 $D/sweep_cooccurrence_edges.py                 # writes the plan CSV
 $D/sweep_cooccurrence_edges.py --apply         # keep the CSV: it is the undo
 $D/sweep_cooccurrence_edges.py --undo /tmp/cooccurrence_sweep.csv --apply
 
 # Removals the adjudicate stage applied on its own that match known-bad patterns
-$D/audit_auto_removals.py --since 2026-10-08   # review CSV, restore=y prefilled
+$D/audit_auto_removals.py --since YYYY-MM-DD   # review CSV, restore=y prefilled
 $D/audit_auto_removals.py --restore /tmp/auto_removals.csv --apply
 
-# Article text stored before html_to_text separated blocks and table cells
-$D/rederive_content_text.py --since 2026-01-01
+# Article text whose blocks or table cells run together
+$D/rederive_content_text.py --since YYYY-MM-DD
 $D/rederive_content_text.py --apply --rerun    # --rerun re-queues the link stages
 ```
 
 - `recount_article_counts.py` counts each entity's linked articles and writes that number where the stored one differs. It re-indexes the changed entities in search and clears the cached graphs. Observables are left to the nightly counter job.
-- `sweep_cooccurrence_edges.py` checks each article behind a `co_occurrence` edge: both names in one body paragraph, not boilerplate, fewer than five entities in it, with a recorded position. Articles that fail are dropped from the edge's evidence. An edge with none left is rejected, the same as the Reject button. A trimmed `probable` edge that no longer meets the promotion rule goes back to `possible`. Articles the adjudicate stage kept the edge on always stay. No other edge source is touched.
+- `sweep_cooccurrence_edges.py` checks each article behind a `co_occurrence` edge: both names in one body paragraph, not boilerplate, fewer than five entities in it, with a recorded position. Articles that fail are dropped from the edge's evidence. An edge with none left is rejected, the same as the Reject button. A trimmed `probable` edge that falls below the promotion rule goes back to `possible`. Articles the adjudicate stage kept the edge on always stay. No other edge source is touched.
 - `audit_auto_removals.py` lists applied removals that are sector links, legitimate or defensive tools, TTPs from a detection rule's ATT&CK tags or an article's ATT&CK table, hashes from an indicator table, and removals whose reason calls the entity legitimate, a victim or the publisher. `--restore` puts back the rows marked `y` through the same Restore the Review queue uses.
 - `rederive_content_text.py` rebuilds each article's text from its stored HTML and keeps the Transcript or Image OCR text added after it. It writes only rows where the change is whitespace alone and updates search. `content_hash` stays as it is, so duplicate detection does not shift. `--rerun` queues autolink, observables, extract and co-occurrence for the changed articles (no AI, no automation rules).
 - Run `rederive_content_text.py --rerun` first, then `sweep_cooccurrence_edges.py` and `recount_article_counts.py`, so they see the new links.
@@ -684,7 +682,7 @@ grep '"rate_limited"' logs/app.log | tail
 
 ## Update & Deployment
 
-[update.sh](../update.sh) updates a prod checkout from `origin/main`. Cron runs it every 2 minutes, so a push to `main` is a deploy:
+[update.sh](../update.sh) updates a prod checkout from `origin/main`. Run from cron (the script's own example is every 2 minutes), a push to `main` becomes a deploy:
 
 ```bash
 */2 * * * * /path/to/intelfeed/update.sh
@@ -702,7 +700,7 @@ Run by hand with `./update.sh`. Each run:
 | `Caddyfile` | `caddy reload` in place (TLS stays up) |
 | Anything else | Pull only; nothing restarts |
 
-4. Before a build, ensures `./tts_media` and `./ingest_files` exist, owned by uid 1000.
+4. Before a build, ensures `./tts_media`, `./ingest_files`, `./telegram_data` and `./telegram_media` exist, owned by uid 1000.
 5. Logs to `logs/update.log` (JSON lines, also in **Settings → Logs**).
 
 - **Most commits need no rebuild.** Docs, scripts, Android and CI aren't in any image; mounted `./docs` and `./scripts` go live on pull. Rebuilds cost CPU minutes and `up -d` drops in-flight requests.

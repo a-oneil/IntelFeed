@@ -148,7 +148,7 @@ See the [CLI read-only gating diagram](diagrams/cli-readonly-gating.md) for the 
 | Read-only switch | `INTELFEED_READ_ONLY=1` | Not needed: it has no write tools |
 | Best for | Analyst work, automation, curation | Questions, lookups, dashboards, smaller tool lists for an agent |
 
-The lite CLI drops the tools the registry marks `mutating`, then the read tools in `LITE_EXCLUDE` in `scripts/dev/sync_skill_clis.py`. Today those are `validate_detection_rule`, `export_attack_layer` and `export_campaign` (shown as **read, full only** below). The other names in that set are already write tools.
+The lite CLI drops the tools the registry marks `mutating`, then the read tools in `LITE_EXCLUDE` in `scripts/dev/sync_skill_clis.py`. Those are `validate_detection_rule`, `export_attack_layer` and `export_campaign` (shown as **read, full only** below). The other names in that set are already write tools.
 
 The lite CLI is not a permission boundary on the server: it logs in as your user. It just has no write tools to call.
 
@@ -156,7 +156,7 @@ The lite CLI is not a permission boundary on the server: it logs in as your user
 
 ## Admin tools and confirmations
 
-**Admin tools.** Some tools need an admin account, because the matching web API is admin-only. They are listed in `ADMIN_TOOLS` in `backend/app/tools/__init__.py` and marked **admin** in the tables below. They cover entity merges and reclassification, feed edits and deletes, every automation rule change except creating one, bulk unlinking, sector claims, the IOC deny list, some deletes, and the curation and extraction review reads. A non-admin call comes back as `API returned 403`.
+**Admin tools.** Some tools need an admin account, because the matching web API is admin-only. They are listed in `ADMIN_TOOLS` in `backend/app/tools/__init__.py` and marked **admin** in the tables below. They cover entity merges, reclassification and alias removal, feed edits and deletes, every automation rule change except creating one, bulk unlinking, sector claims, the IOC deny list, some deletes, the curation and extraction review reads, and the Review queue. A non-admin call comes back as `API returned 403`.
 
 **Confirmations.** Tools that delete for good take a `confirmation_token` and run in two steps:
 
@@ -350,7 +350,7 @@ Source: `backend/app/tools/read.py`.
 | `get_feed_value` | A 0-100 value score per feed. | `days` | read |
 | `get_source_reliability` | Feeds ranked by how much intelligence they produce. | `limit` | read |
 | `get_entry_insights` | Insights about the entities in one article. | **`entry_id`** | read |
-| `get_triage_queue` | Scored review queue. Older than `get_priority_queue` and does not fold stories. | `days`, `limit` | read |
+| `get_triage_queue` | Scored review queue. Unlike `get_priority_queue`, it does not fold stories. | `days`, `limit` | read |
 | `get_priority_queue` | The reading queue as the Priority Queue page shows it, with stories folded into one row. | `limit`, `unread_only`, `with_threads`, `cursor` | read |
 | `get_requirement_coverage` | Requirement counts by status, priority, category and staleness. | none | read |
 
@@ -527,11 +527,13 @@ Source: `backend/app/tools/write.py`.
 | `create_automation_rule` | Create an automation rule. It starts enabled. | **`name`**, **`trigger_type`**, **`actions`**, `description`, `trigger_config`, `conditions` | write |
 | `create_intel_report` | Create a draft report from a template. | **`title`**, **`template_type`**, `entry_ids`, `entity_ids`, `tlp_marking` | write |
 | `merge_threat_actors` | Merge a duplicate actor into another. `mode: shadow` only logs. | **`target_id`**, **`source_id`**, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
-| `reclassify_entity` | Move an entity filed under the wrong type. | **`source_type`**, **`source_id`**, **`target_type`**, `target_id`, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
+| `reclassify_entity` | Move an entity filed under the wrong type. Name the source by `source_id` or `source_name`. | **`source_type`**, **`target_type`**, `source_id`, `source_name`, `target_id`, `target_name`, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
 | `merge_vendors` | Merge a duplicate vendor into another. | **`target_id`**, **`source_id`**, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
 | `merge_products` | Merge a duplicate product into another. | **`target_id`**, **`source_id`**, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
 | `merge_tools` | Merge a duplicate tool into another. | **`target_id`**, **`source_id`**, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
 | `merge_malware` | Merge a duplicate malware family into another. | **`target_id`**, **`source_id`**, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
+| `merge_entities` | Merge duplicate entities of one type into a keeper, by name or id. Merged names become aliases. | **`entity_type`**, **`keeper`**, **`merge`** | write, admin |
+| `remove_entity_aliases` | Remove aliases from an entity, by name or id. Articles linked only through a removed alias are unlinked. | **`entity_type`**, **`entity`**, **`aliases`** | write, admin |
 | `update_entity_profile` | Edit an entity's profile fields. | **`entity_type`**, **`entity_id`**, **`updates`** | write |
 | `create_requirement` | Create a Priority Intelligence Requirement (PIR). | **`title`**, **`keywords`**, `description`, `priority`, `category`, `auto_match` | write |
 | `update_requirement` | Change a requirement. | **`requirement_id`**, **`updates`** | write |
@@ -589,6 +591,9 @@ Source: `backend/app/tools/curation.py`.
 | `confirm_extraction_entities` | Sign off AI-created entities so they leave the review queue. | **`entity_type`**, **`ids`** | write, admin |
 | `get_hygiene_stats` | Entity clean-up counters and pending proposals. | none | read, admin |
 | `get_hygiene_feed` | Log of entity clean-up actions and proposals. | `action`, `source`, `mode`, `origin`, `pending`, `since`, `limit`, `offset` | read, admin |
+| `list_review_groups` | The Engine › Review queue: pending proposals, one row per entity. | `q`, `entity_type`, `action`, `domain`, `origin`, `sort`, `limit`, `offset` | read, admin |
+| `get_review_rows` | The pending proposals behind one Review group, with the article text around each match. | `entity_type`, `entity_id`, `action`, `origin`, `domain`, `limit`, `offset` | read, admin |
+| `decide_proposals` | Apply, dismiss or reclassify many Review proposals in one call. | **`decisions`** | write, admin |
 
 ### Export
 
@@ -604,7 +609,7 @@ Source: `backend/app/tools/delete.py`.
 
 | Tool | What it does | Arguments | Kind |
 |---|---|---|---|
-| `delete_entity` | Delete a record or any entity. Needs confirmation. | **`entity_type`**, **`entity_id`**, `confirmation_token` | write, admin |
+| `delete_entity` | Delete a record or any entity, by id (or, for an intelligence entity, by `name`). Needs confirmation. | **`entity_type`**, `entity_id`, `name`, `confirmation_token` | write, admin |
 
 ### Documentation
 

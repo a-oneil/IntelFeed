@@ -632,9 +632,9 @@ async def test_seeding_starts_job_sources_on_but_manual(db_session, monkeypatch)
         assert row.is_enabled is src["default_enabled"]
         assert row.trigger_mode == src["default_trigger_mode"], src["source_type"]
     # On only so its jobs run: per-entity lookups wait for an admin.
-    assert rows["nvd"].is_enabled and rows["nvd"].trigger_mode == "manual"
-    # The IP sources run on their own from the start.
-    for source_type in ("shodan", "greynoise", "cymru"):
+    assert rows["mitre_attack"].is_enabled and rows["mitre_attack"].trigger_mode == "manual"
+    # The CVE sources and the IP sources run on their own from the start.
+    for source_type in ("nvd", "epss", "cisa_kev", "osv", "cvelist", "shodan", "greynoise", "cymru"):
         assert (rows[source_type].is_enabled, rows[source_type].trigger_mode) == (True, "auto"), source_type
 
 
@@ -765,3 +765,9 @@ def test_bulk_catch_up_jobs_run_in_the_backfill_lane():
     # leaving the rest to new CVEs and people's lookups.
     for job in (tasks._run_cve_nvd_backfill, tasks._run_cvelist_backfill, maintenance._reenrich_cve_nvd):
         assert job.lane == "backfill", job.__name__
+
+
+@pytest.mark.parametrize("source_type", ["nvd", "epss", "cisa_kev", "osv", "cvelist"])
+def test_cve_sources_are_seeded_on_and_auto(source_type):
+    row = next(s for s in DEFAULT_SOURCES if s["source_type"] == source_type)
+    assert (row["default_enabled"], row["default_trigger_mode"]) == (True, "auto")

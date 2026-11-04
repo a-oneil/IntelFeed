@@ -25,6 +25,9 @@ class NVDAdapter(EnrichmentAdapter):
     license = License(
         "NVD terms of use", attribution="This product uses the NVD API but is not endorsed or certified by the NVD."
     )
+    # On and auto from the start, so a new CVE gets its NVD record when it
+    # arrives instead of waiting for the nightly backfill.
+    default_enabled = True
     default_trigger_mode = "auto"
     # NVD answers 403 as well as 429 when a client exceeds its rolling window.
     throttle_statuses = (403, 429, 503)

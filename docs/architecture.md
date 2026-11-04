@@ -51,9 +51,9 @@ Ports are the dev stack (`docker-compose.dev.yml`). Production (`docker-compose.
 | redis | 6380 | Task queue, caches, locks, autolinker word-list version |
 | api (FastAPI) | 8000 | REST API. Runs database migrations on start |
 | celery-worker | — | Background tasks on the default queue (fetching, linking, scheduled enrichment syncs) |
-| celery-worker-ai | — | The `ai` queue, one task at a time. Every AI call runs here |
+| celery-worker-ai | — | The `ai` queue, one task at a time. Background AI tasks run here |
 | celery-worker-enrichment | — | The `enrichment` queue, one task at a time: the enrichment dispatcher |
-| celery-beat | — | Scheduler for the 67 jobs in `JOB_REGISTRY` (`backend/app/workers/job_registry.py`) |
+| celery-beat | — | Scheduler for the 84 jobs in `JOB_REGISTRY` (`backend/app/workers/job_registry.py`) |
 | telegram-listener | — | Long-running Telegram client |
 | meilisearch | 7700 | Full-text search |
 | libretranslate | 5050 | Article translation |
@@ -552,7 +552,7 @@ Some examples:
 
 **The grid starts locked.** `uiStore.dashboardLocked` (default on, saved per device, toggled from the toolbar) turns off drag and resize. You can still add, configure and remove widgets. The lock matters most on phones: below 768 px the grid has one column, and dragging there would save a one-column layout over the desktop one. Visitors in public read-only mode always see a locked grid.
 
-**Each user has their own boards.** `/api/dashboards` only lists and changes your own. A user with no boards gets the five default tabs in `backend/app/dashboard_defaults.py` through `POST /api/dashboards/seed-defaults`, which the Dashboard calls once. Seeding never touches a user who already has a board. To change the defaults, capture boards from a curated instance with `GET /api/dashboards` and update that module.
+**Each user has their own boards.** `/api/dashboards` only lists and changes your own. A user with no boards gets the five default tabs in `backend/app/dashboard_defaults.py` through `POST /api/dashboards/seed-defaults`, which the Dashboard calls once. Seeding never touches a user who already has a board. To change the defaults, export the boards you want with `GET /api/dashboards` and update that module.
 
 ---
 
@@ -646,7 +646,7 @@ A setting's value comes from the first of these that has one:
 2. **`.env` or environment variables.**
 3. **Defaults in `config.py`.**
 
-`settings.get(key)` follows that order. 150 of the 201 settings can be edited in the UI; the other 51 are infrastructure and secrets. UI changes reach the API within about 5 seconds and each Celery task when it starts, with no restart.
+`settings.get(key)` follows that order. 168 of the 219 settings can be edited in the UI; the other 51 are infrastructure and secrets. UI changes reach the API within about 5 seconds and each Celery task when it starts, with no restart.
 
 **Every setting is listed in [engine-settings.md](engine-settings.md)** with its default and where to edit it.
 

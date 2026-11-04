@@ -38,7 +38,7 @@ vi.mock("react-router-dom", () => ({
 }));
 vi.mock("@/stores/authStore", () => ({
   useAuthStore: (selector: (s: unknown) => unknown) =>
-    selector({ user: { id: "u1", username: "aoneil", role, settings } }),
+    selector({ user: { id: "u1", username: "analyst", role, settings } }),
 }));
 
 const { OnboardingWizard } = await import("../OnboardingWizard");

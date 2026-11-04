@@ -1,5 +1,5 @@
 """Ransomware leak-site sync: fetch postings, resolve entities, upsert victims +
-disclosures (planning/ransomware-victim-tracker.md §5.2, Option A).
+disclosures (see docs/automation-ai-enrichment.md "Ransomware victims").
 
 Kept self-contained (separate from external_feeds.py) so the tracker owns its dedup
 and never leaks into the article stream. The Celery wrapper + JOB_REGISTRY entry live

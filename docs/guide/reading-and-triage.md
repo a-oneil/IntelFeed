@@ -3,7 +3,7 @@
 This page covers the three panes, the reader, the keyboard, and how to get
 through a big pile of unread articles quickly.
 
-![The reader with an article open: entity links underlined in the body, an extracted summary above it, and the entry list beside it](../assets/screenshots/reader-article.png)
+![The reader with an article open: entity links underlined in the body, CVE chips under the title, and the entry list beside it](../assets/screenshots/reader-article.png)
 
 *An article open in the reader. Entities in the body are already linked, and
 the summary above the text is made when the article arrives.*

@@ -367,6 +367,10 @@ class CVEListAdapter(EnrichmentAdapter):
     # jobs read zips, a handful of requests a run.
     quota = Quota(30, 60, daily_budget=12000)
     egress = Egress.NONE
+    # On and auto from the start, so a new CVE is looked up when it arrives
+    # instead of waiting for the source's scheduled job.
+    default_enabled = True
+    default_trigger_mode = "auto"
     # "You may search, download, and use the content hosted in this
     # repository, per the CVE Program Terms of Use" (the repository's README);
     # the terms (www.cve.org/Legal/TermsOfUse) grant a perpetual, royalty-free

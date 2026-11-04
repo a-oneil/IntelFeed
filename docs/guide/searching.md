@@ -34,8 +34,8 @@ press **Tab** in the box, to cycle through the three scopes:
 | Workbench | Entities only |
 | Feeds | Articles only |
 
-The scope only changes what the results page shows. It starts on whatever
-suits the page you searched from, then stays where you put it.
+The scope only changes what the results page shows. It starts on
+**everything**, then stays where you put it, whichever page you search from.
 
 ## Direct matches vs mentions
 

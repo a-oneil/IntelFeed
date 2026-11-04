@@ -6,10 +6,10 @@ For contributors and operators. It explains how a feed article becomes linked in
 
 - [Overview](#overview)
 - [Entry-to-Intelligence Pipeline](#entry-to-intelligence-pipeline)
-  - [Phase 1: Entry Arrival & Text Normalization](#phase-1-entry-arrival--text-normalization)
-  - [Phase 2: Autolinker Scan (Layer 0)](#phase-2-autolinker-scan-layer-0)
-  - [Phase 3: Junction Record Storage](#phase-3-junction-record-storage)
-  - [Phase 4 (Optional): Secondary Extraction Layers](#phase-4-optional-secondary-extraction-layers)
+  - [Step 1: Entry Arrival & Text Normalization](#step-1-entry-arrival--text-normalization)
+  - [Step 2: Autolinker Scan (Layer 0)](#step-2-autolinker-scan-layer-0)
+  - [Step 3: Junction Record Storage](#step-3-junction-record-storage)
+  - [Step 4 (Optional): Secondary Extraction Layers](#step-4-optional-secondary-extraction-layers)
 - [Autolinker Deep Dive](#autolinker-deep-dive)
   - [False Positive Filtering](#false-positive-filtering)
   - [Pending Tier: Dictionary-Word Matches](#pending-tier-dictionary-word-matches)
@@ -28,7 +28,7 @@ For contributors and operators. It explains how a feed article becomes linked in
 - [Configuration](#configuration)
 - [Troubleshooting & Debugging](#troubleshooting--debugging)
 - [Per-feed pipeline switches](#per-feed-pipeline-switches)
-- [Signal Engine (engine phase 2)](#signal-engine-engine-phase-2)
+- [Signal Engine](#signal-engine)
 
 ## Overview
 
@@ -37,7 +37,7 @@ Terms used throughout:
 | Term | Meaning |
 |---|---|
 | Entry | One article, post or file pulled from a feed |
-| Entity | A tracked thing: threat actor, malware family, CVE, technique, vendor, product, tool, mitigation, country, CWE, sector, observable |
+| Entity | A tracked thing: threat actor, malware family, CVE, technique, vendor, product, tool, mitigation, country, CWE, sector, observable, ransomware victim |
 | TTP | An ATT&CK technique ID such as `T1059.001` (tactics, techniques and procedures) |
 | CVE / CWE | A vulnerability ID (`CVE-2024-3400`) / a weakness class ID (`CWE-79`) |
 | IOC / observable | Indicator of compromise: an IP, domain, hash, command line and so on. IntelFeed keeps these in the observables ledger |
@@ -66,7 +66,7 @@ The non-AI layer ("Layer 0") runs on every entry the feed allows. The AI layer r
 
 ## Entry-to-Intelligence Pipeline
 
-### Phase 1: Entry Arrival & Text Normalization
+### Step 1: Entry Arrival & Text Normalization
 
 `split_into_paragraphs()` (`backend/app/intelligence/autolinker.py:303`) cuts the entry into numbered paragraphs: the title, then the summary, then each block of the body separated by a blank line. Empty parts are skipped, so the numbering stays dense.
 
@@ -74,7 +74,7 @@ Paragraph numbers matter because they are stored on every link. Correlation uses
 
 When an entry has a translation, the autolinker and the extract stage scan the original and translated text together (`entry_text_with_translation`, called from `_autolink_entry` in `backend/app/workers/intel_feed_tasks.py:218`).
 
-### Phase 2: Autolinker Scan (Layer 0)
+### Step 2: Autolinker Scan (Layer 0)
 
 The autolinker matches text against a dictionary of every known entity name and alias, using an Aho-Corasick automaton (one pass over the text finds every dictionary word in it).
 
@@ -102,7 +102,7 @@ The autolinker matches text against a dictionary of every known entity name and 
 7. A canonical-name match is `high` confidence; an alias match is `medium`.
 8. Regex picks up structured IDs in the same pass: `CVE-YYYY-NNNN…` (through `extract_cve_ids()`, which strips a CVSS score glued onto an id, so "CVE-2026-10384910.0" is CVE-2026-103849, and skips ids that can't be real), `CWE-N`, and ATT&CK technique IDs (`T1234` or `T1234.001`; the invalid `.000` falls back to the parent).
 
-### Phase 3: Junction Record Storage
+### Step 3: Junction Record Storage
 
 `store_autolink_matches()` (`backend/app/intelligence/autolinker.py:1200`) writes one junction row per entity, with:
 
@@ -122,7 +122,7 @@ How each ID type is handled:
 | CWE | Linked only if the ID is in the seeded CWE catalog. Never created. |
 | Dictionary words | Held for AI confirmation instead of linked; see [Pending Tier](#pending-tier-dictionary-word-matches). |
 
-### Phase 4 (Optional): Secondary Extraction Layers
+### Step 4 (Optional): Secondary Extraction Layers
 
 Other stages add more intelligence after (or beside) the autolinker:
 
@@ -154,7 +154,7 @@ The capital-letter rule cannot tell "Royal" the ransomware from "Royal Navy", or
 - **Which words.** `is_provisional_form()` (`backend/app/intelligence/autolinker.py:194`) marks a single alphabetic word that appears in the bundled list of about 31,000 common English words (`backend/app/intelligence/data/common_english_words.txt`). Examples: "royal", "inc", "hive", "medusa". Coined names such as "Emotet" or "LockBit" link at once. This applies to actors, malware, tools and countries. Countries use a short list of their own instead (`AMBIGUOUS_COUNTRY_WORDS`: Chad, China, Georgia, Guinea, Jersey, Jordan, Niger, Panama, Turkey, Chile, Cuba). Vendors and products always link at once.
 - **Other held matches.** The context rules hold a few more kinds of match the same way (step 6 of the scan): one-word names inside a longer capitalised name, names made only of digits, actor names with initials, and actor or malware names a vendor or product also uses.
 - **Holding.** If every occurrence of an entity in the article is held, the match goes to `pending_autolink_matches` instead of a junction table. Held matches are invisible to correlation, scoring, counts and the UI. One non-dictionary name (the alias "Royal Ransomware", say) turns the whole match into a normal link.
-- **The analysis decides.** When the one-pass AI analysis lands, `reconcile_pending_autolinks()` (`backend/app/intelligence/autolink_reconcile.py:74`) links held entities whose name or alias the AI also extracted, through the normal store path. The rest are rejected with a `FalsePositiveRecord` (`extraction_source = "ai_reconcile"`).
+- **The analysis decides.** When the one-pass AI analysis lands, `reconcile_pending_autolinks()` (`backend/app/intelligence/autolink_reconcile.py:79`) links held entities whose name or alias the AI also extracted, through the normal store path. The rest are rejected with a `FalsePositiveRecord` (`extraction_source = "ai_reconcile"`).
 - **Held after the analysis.** A re-scan (a new entity or alias, a backfill) can hold a match on an article analysed long ago. Every 30 minutes `settle_held_on_analysed_entries()` (inside `submit_analysis_batches`) runs those against the stored analysis the same way and queues a recheck (`adjudication_status = recheck`): a review of just those matches, not the whole article again. A held match that was linked before and is found again by a re-scan is linked again straight away.
 - **The adjudicator checks.** A linked match is an ordinary link to the [adjudicate stage](engine-settings.md#adjudicate-stage-post-analysis-ai-review): it can propose removing it. A rejected match is a `held:` item it can propose linking (`adjudication_held_link`). Each reject is judged once (`pending_autolink_matches.reviewed_at`). Its proposals show in Engine → Review → Proposals with the rest, under the Links domain.
 - **Feeds without AI.** `entry_will_get_ai_analysis()` (`backend/app/services/ai_eligibility.py:41`) checks the instance switch `ai_one_pass_enabled`, the feed's `ai_analysis_enabled`, and that the feed's mode is not `none`. If the entry will never be analysed, nothing could confirm a held match, so these matches are dropped. They are counted in daily Redis keys (`autolink:pending_dropped_ai_off:<YYYYMMDD>`), and the Engine's Autolinking view shows the 30-day total.
@@ -169,13 +169,13 @@ The same word lists keep junk out of `aliases` arrays in the first place (`backe
 - `is_junk_alias(alias, canonical_name)` rejects aliases shorter than the minimum length, copies of the entity's own name, and anything on the false-positive or blocked lists.
 - `filter_aliases(aliases, canonical_name)` drops junk aliases and removes case-insensitive duplicates, keeping order.
 
-AI extraction and the Cybergeist sync pass new aliases through `gate_aliases()` (`backend/app/intelligence/entity_resolution.py:2134`), which applies `is_junk_alias()` plus further quality checks. The Malpedia sync (`_run_malpedia_sync`, `backend/app/workers/enrichment_tasks.py:873`) runs Malpedia's `alt_names` through `filter_aliases()`.
+AI extraction and the Cybergeist sync pass new aliases through `gate_aliases()` (`backend/app/intelligence/entity_resolution.py:2135`), which applies `is_junk_alias()` plus further quality checks. The Malpedia sync (`_run_malpedia_sync`, `backend/app/workers/enrichment_tasks.py:873`) runs Malpedia's `alt_names` through `filter_aliases()`.
 
 ### Cross-Type Resurrection Guard
 
 A same-type merge survives re-import because the loser's name becomes an alias of the survivor (`backend/app/intelligence/entity_dedup.py`). A cross-type fold (the "Akira" malware folded into the "Akira" actor) needs more, because each importer only searches its own table and would recreate the loser within hours.
 
-All automated creation goes through `resolve_entity_creation()` (`backend/app/intelligence/entity_resolution.py:1711`). Manual creation in the UI goes through it too, and may override a refusal with `force=true`. In order, it:
+All automated creation goes through `resolve_entity_creation()` (`backend/app/intelligence/entity_resolution.py:1712`). Manual creation in the UI goes through it too, and may override a refusal with `force=true`. In order, it:
 
 1. **Matches an existing entity** by exact name or alias, then a normalized match through `entity_alias_index`, then known actor synonyms.
 2. **Checks reclassify tombstones.** A cross-type reclassify (`perform_reclassify()` in `backend/app/api/entity_merge.py`) writes one `EntityReclassifyTombstone` row per folded name: `(source_type, normalized_name) → (target_type, target_id)`. On a hit, nothing is created and the entry links to the survivor through `link_entry_to_entity()`. Set `active = False` on a tombstone row in the database to allow a split again; there is no UI for this.
@@ -226,10 +226,11 @@ The API is `backend/app/api/hygiene.py`, under `/api/admin/hygiene/*` and admin-
 | `POST /link-log/{log_id}/restore`, `/apply-removal` | Undo or apply one link-log row. A restore re-creates the link and counts as an analyst restore |
 | `GET /review-groups`, `POST /review-groups/apply`, `/review-groups/dismiss` | The Review tab's one queue: every pending proposal folded per entity, and Apply / Dismiss over what its filters show |
 | `POST /bulk-apply`, `GET /bulk-apply/{job_id}` | Apply all, in the background |
+| `POST /decisions` | Apply a reviewed batch of decisions (`apply`, `dismiss` or `reclassify:<type>`), one result per row |
 | `POST /reclassify-groups/apply` | Convert an entity to a proposed type (the row's type chips) |
 | `POST /scan-duplicates` | Run the duplicate review (`review-duplicate-entities`) now |
 | `POST /orphans/prune` | Delete entities with `article_count = 0` |
-| `/enrichment-gaps/enrich`, `/run-name-normalization, `/scan-alias-hygiene`, `/scan-vendor-autolink`, `/scan-id-hygiene` | On-demand scanners with shadow/apply flows |
+| `/enrichment-gaps/enrich`, `/run-name-normalization`, `/scan-alias-hygiene`, `/scan-vendor-autolink`, `/scan-id-hygiene` | On-demand scanners with shadow/apply flows |
 | `GET /api/entities/{type}/{id}/cascade-preview` | What deleting an entity would remove. Any signed-in user |
 
 **The adjudicate stage** (`backend/app/services/entry_adjudication.py`). After an entry's one-pass analysis lands, `adjudicate_entry_task` (on the `ai` queue) sends the article plus a list of everything the analysis wrote: links, entities it created (with their nearest existing names), relationship claims and IOCs. The reviewer answers only for items it would change: remove, reclassify, veto, merge, demote or drop. Anything it leaves out is kept.
@@ -284,13 +285,14 @@ The type names come from `backend/app/entity_types.py`; import its constants rat
 | Malware family | `name` | Aliases; Malpedia enrichment |
 | CVE | `cve_id` | Created as a stub when first seen, then enriched from NVD |
 | TTP | `technique_id` | Loaded from the MITRE ATT&CK catalog |
-| Mitigation | `name` / MITRE ID | Loaded from ATT&CK; no aliases |
+| Mitigation | `mitre_id` | Loaded from ATT&CK; no aliases |
 | Tool | `name` | Attack and dual-use tooling (Mimikatz, AnyDesk) |
 | Vendor, product | `name` | A product belongs to a vendor |
 | Country | `name` | Seeded; aliases |
 | CWE | `cwe_id` | Seeded from the MITRE catalog; `parent_cwe_id` links to the broader weakness |
 | Sector | slug | Canonical sector vocabulary |
 | Observable | `(kind, value)` | Created only by a judgment door |
+| Ransomware victim | `normalized_name` and `domain` (not unique) | Leak-site victims from ransomware.live |
 
 **Enrichment** fills in profiles from outside sources: MITRE ATT&CK (techniques, groups, mitigations), Malpedia (malware), Wikipedia, NVD (CVSS, description, affected products, references), FIRST EPSS (exploit probability), CISA KEV (known exploited), GitHub PoC search and Metasploit modules. See [automation-ai-enrichment.md](automation-ai-enrichment.md) for the enrichment pipeline.
 
@@ -316,7 +318,7 @@ Correlation runs after extraction. It finds second-order facts from which entiti
 Other code raises the remaining event types: `campaign_match`, `requirement_match` (medium), `trending_entity` (medium), `feed_stale` (low), `feed_error` (medium), `exploit_status_change`, `cve_score_change`, `new_exploit_discovered` and `kev_addition` (high). The full map is `EVENT_SEVERITY` (`backend/app/intelligence/correlation_events.py:18`).
 
 - **Dedup.** An event with the same type and source entity inside 24 hours is not stored again; the existing row's `occurrence_count` goes up instead (`_deduplicate_event`, `backend/app/intelligence/correlation_events.py:88`).
-- **Delivery.** Stored events go to `correlation_events` and are pushed to open browsers over SSE (`publish_event("broadcast", "correlation_event", …)`). Automation rules with the `on_correlation_event` trigger can notify, call a webhook or take other actions.
+- **Delivery.** Stored events go to `correlation_event_records` and are pushed to open browsers over SSE (`publish_event("broadcast", "correlation_event", …)`). Automation rules with the `on_correlation_event` trigger can notify, call a webhook or take other actions.
 - **Retention.** The `archive-correlation-events` job (04:45 daily) deletes events that are read and older than 90 days (`archive_old_events`, `backend/app/intelligence/correlation_events.py:553`). The 24-hour window and 90 days are code defaults, not settings.
 
 ### Pivot queries and relationship strength
@@ -331,7 +333,7 @@ Each related entity carries a **strength** score from 0 to 1, made of three part
 | Closeness | Mean of the top 3 per-article proximity scores | `relationship_weight_closeness` (0.40) |
 | Recency | Decays with `relationship_recency_half_life_days` (90) since the newest evidence | `relationship_weight_recency` (0.15) |
 
-**Proximity** for one article (`_compute_proximity_score`, `backend/app/intelligence/correlation.py:176`) is `1 / (1 + proximity_decay_rate × d)`, where `d` is the smallest paragraph distance between the two entities. Same paragraph = 1.0, one apart = 0.5, five apart ≈ 0.17. With no paragraph data it is `proximity_default_score` (0.3).
+**Proximity** for one article (`_compute_proximity_score`, `backend/app/intelligence/correlation.py:179`) is `1 / (1 + proximity_decay_rate × d)`, where `d` is the smallest paragraph distance between the two entities. Same paragraph = 1.0, one apart = 0.5, five apart ≈ 0.17. With no paragraph data it is `proximity_default_score` (0.3).
 
 Adjustments:
 
@@ -407,7 +409,7 @@ Re-processing the same article stores nothing new. See [detection-engineering.md
 
 ### CVE Extraction & NVD Enrichment
 
-CVE IDs come from the autolinker (stubs), the extract stage (`extract_and_store_cves()` in `backend/app/intelligence/cve.py`) and the KEV sync. None of them calls NVD: each new CVE is queued in the [enrichment job queue](automation-ai-enrichment.md#enrichment-job-queue), and NVD looks it up from there while the source is switched on. `enrich_from_nvd()` (`backend/app/intelligence/cve.py:144`) calls the NVD API 2.0 and fills in the CVSS score and severity (v3.1, then v3.0, then v2), the English description, affected products (CPE) and references.
+CVE IDs come from the autolinker (stubs), the extract stage (`extract_and_store_cves()` in `backend/app/intelligence/cve.py`) and the KEV sync. None of them calls NVD: each new CVE is queued in the [enrichment job queue](automation-ai-enrichment.md#enrichment-job-queue), and NVD looks it up from there while the source is on and its trigger mode is `auto`. `enrich_from_nvd()` (`backend/app/intelligence/cve.py:144`) calls the NVD API 2.0 and fills in the CVSS score and severity (v3.1, then v3.0, then v2), the English description, affected products (CPE) and references.
 
 - Every lookup goes through the `nvd` source's [gateway](automation-ai-enrichment.md#source-gateway). An NVD API key (`nvd_api_key`, set under Settings → Engine → Enrichment → Keys) raises the rate limit from 5 to 50 requests per rolling 30 seconds. The gateway paces every caller inside that window, one request at a time.
 - A 429, or a 403 that isn't a rejected key, opens the gateway's breaker for the whole source. A sweep then stops and picks up on its next run. A rejected key stops NVD until the key changes and shows as "key rejected" in the Enrichment console.
@@ -423,7 +425,7 @@ CVE IDs come from the autolinker (stubs), the extract stage (`extract_and_store_
 | CISA KEV (known exploited) | `is_kev`, `kev_date_added`, `kev_due_date` | `sync-kev-feed`, every 6 h |
 | Public PoC code on GitHub | `github_poc_count`, `github_poc_urls` | `github-poc-scan`, daily 05:00 |
 | Metasploit module | `metasploit_module` | `metasploit-sync`, weekly |
-| NVD refresh | CVSS, description, products | `cve-nvd-backfill` (01:30), `reenrich-cve-nvd` (03:05), `cve-nvd-refresh` (12:00) |
+| NVD refresh | CVSS, description, products | `cve-nvd-backfill` (01:30), `reenrich-cve-nvd` (03:05), `cve-nvd-refresh` (hourly) |
 
 `exploit_availability` is one of `none`, `poc`, `weaponized`, `active_exploitation`. An analyst-set value (`exploit_status_source = 'manual'`) is never overwritten by enrichment.
 
@@ -547,8 +549,8 @@ To rebuild the vocabulary by hand, run the `refresh-autolinker-vocabulary` job f
 
 **CVE details missing.**
 
-- NVD is rate-limiting you (set `nvd_api_key`), or NVD has no record yet. After 3 misses a week apart the ID is no longer retried.
-- The feed has regex enrichment off (`auto_extract_on_ingest`), so the stub waits for the nightly `cve-nvd-backfill` job.
+- NVD is rate-limiting you (set `nvd_api_key`), or NVD has no record yet. After 3 misses a week apart the ID is not retried again.
+- The `nvd` source is off or set to `manual` in Settings → Engine → Enrichment (a fresh install starts it on and `auto`). In `manual`, new CVEs are not looked up as they arrive and wait for the nightly `cve-nvd-backfill` job.
 
 ---
 
@@ -572,7 +574,7 @@ The observables stage has no switch of its own, but `_scan_entry_observables` sk
 
 ### The two pipelines
 
-**Pipeline A — the autolinker.** Entry point `_autolink_entry` (`backend/app/workers/intel_feed_tasks.py:218`). Runs for `full` and `selective` (if the entry passes the relevance filter). It links actors, malware, countries, vendors, products, tools and mitigations, plus CVE, CWE and technique IDs. See [Phase 2](#phase-2-autolinker-scan-layer-0).
+**Pipeline A — the autolinker.** Entry point `_autolink_entry` (`backend/app/workers/intel_feed_tasks.py:218`). Runs for `full` and `selective` (if the entry passes the relevance filter). It links actors, malware, countries, vendors, products, tools and mitigations, plus CVE, CWE and technique IDs. See [Step 2](#step-2-autolinker-scan-layer-0).
 
 **Pipeline B — the extract stage.** Entry point `_extract_entry_intel` (`backend/app/workers/intel_feed_tasks.py:483`):
 
@@ -666,7 +668,7 @@ AI is a separate layer (`backend/app/ai/`): the one-pass analysis, the adjudicat
 
 ---
 
-## Signal Engine (engine phase 2)
+## Signal Engine
 
 After post-processing, `score_entry_task` (`backend/app/workers/signal_tasks.py`) computes explainable signals (`backend/app/intelligence/signals.py`), stores them in `entry_signals` (one row per entry and signal type) and sets `entries.priority_score` (0–10).
 
@@ -684,7 +686,7 @@ Flags (Settings → Engine → score stage): `signal_engine_shadow` computes and
 
 Scheduled-job runs are recorded in `job_runs` by `backend/app/workers/task_tracking.py` and pruned after 30 days by `prune-engine-tables`.
 
-### Surfacing (engine phase 3)
+### Surfacing
 
 With `signal_engine_surface` on:
 

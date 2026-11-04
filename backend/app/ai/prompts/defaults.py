@@ -70,7 +70,7 @@ DEFAULT_MODEL_ASSIGNMENTS: dict[str, str] = {
     "entity_enrichment_research": "sonnet",
     # Post-analysis review of one entry's output (adjudicate stage). Smaller
     # job than extraction: a short article window, a short list, a verdict
-    # list back — the cheap model is right, and it runs on Ollama in prod.
+    # list back — a small, cheap model is enough, and a local Ollama model works well.
     "entry_adjudication": "claude-haiku-4-5-20251001",
     # Same shape as the adjudication: short profiles in, a verdict list out.
     "entity_merge_review": "claude-haiku-4-5-20251001",
@@ -79,7 +79,7 @@ DEFAULT_MODEL_ASSIGNMENTS: dict[str, str] = {
 # Tasks that must be assigned to a specific provider type (rather than the
 # first active provider the seeder finds). Used for tasks tied to a
 # particular invocation model — the copilot streams through the Claude Code
-# CLI subprocess under the Max subscription, not the Anthropic API.
+# CLI subprocess on its Claude sign-in, not the Anthropic API.
 DEFAULT_PROVIDER_TYPE_ASSIGNMENTS: dict[str, str] = {
     "copilot": "claude_code",
     "actor_profile_refresh": "claude_code",

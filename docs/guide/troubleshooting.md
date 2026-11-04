@@ -3,7 +3,7 @@
 Common problems and what to do about them, most frequent first. Some fixes
 need an admin; those are marked.
 
-![The Engine console showing per-entry pipeline stages across translate, autolink, observables, extraction, correlation and scoring](../assets/screenshots/engine.png)
+![The Engine console showing per-entry pipeline stages, from translate and autolink through scoring, AI analysis and adjudication](../assets/screenshots/engine.png)
 
 *The Engine console shows what each processing step did with each article.*
 
@@ -60,9 +60,11 @@ one message per article. That can flood a channel.
 ## The copilot isn't answering
 
 - **A sign-in prompt in the copilot panel**: the AI service's sign-in has
-  expired. An admin can sign in again at **Settings → AI Configuration**.
+  expired. An admin can sign in again at **Settings → AI Configuration**, with
+  **Re-authenticate** on the Claude Code CLI provider's **Copilot
+  authentication** card.
 - **No provider set**: an admin needs to give the copilot task a provider
-  under **Settings → AI Configuration → Providers**.
+  and model under **Settings → AI Configuration → Prompts**.
 - **Answers with no tool chips**: the copilot answered from the AI model's
   general knowledge, not from your data. Ask again more specifically. If it
   still doesn't use tools, the provider may not support tool calling.
@@ -120,14 +122,14 @@ copy until it expires.
 
 Each enrichment source has a limit on how many requests it accepts, and some
 have a daily budget. A request over the limit waits a moment for room; if
-there is none, that source is skipped this time and nothing is saved, so the
-next enrichment tries again. A source that answers "too many requests", or
+there is none, the lookup stays queued and runs once the source has room
+again (after a spent daily budget, the next UTC day). A source that answers "too many requests", or
 keeps failing, is paused for a while (its own Retry-After time, or a minute
 and growing). Scheduled jobs wait longer for room; when a source refuses
 them they stop, keep what they did, and continue on their next run (the run's
 details in the Jobs view say `stopped`). NVD's public API is the usual cause. If it happens all the time,
-an admin can add an **NVD API Key** under **Settings → Engine** to raise the
-limit.
+an admin can add an **NVD API Key** under **Settings → Engine → Enrichment →
+Keys** to raise the limit.
 
 ## Still stuck
 

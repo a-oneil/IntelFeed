@@ -51,7 +51,7 @@ function renderAIStep() {
       status={undefined}
       refetchStatus={vi.fn()}
       isAdmin
-      username="aoneil"
+      username="analyst"
       Logo={() => <span />}
       themes={{ list: [], current: undefined, apply: vi.fn() }}
     />,

@@ -152,6 +152,9 @@ erDiagram
     JOB_RUN {
         string note "records scheduled job executions"
     }
+    ENRICHMENT_JOB {
+        string note "queued lookups: one row per entity and source"
+    }
     PIPELINE_PLAN {
         string note "composes pipeline stages per feed-category-global"
     }

@@ -1473,7 +1473,9 @@ async def _probe_telegram_edits_and_deletes(db: AsyncSession, feed: Feed, adapte
     Telegram outage could falsely report deletion; soft-delete preserves history and is
     reversible.
     """
-    probe_window = int((feed.adapter_config or {}).get("edit_probe_window") or 50)
+    raw_window = (feed.adapter_config or {}).get("edit_probe_window")
+    # Unset or blank means the default; 0 (or less) turns the probe off.
+    probe_window = 50 if raw_window in (None, "") else int(raw_window)
     if probe_window <= 0:
         return
 

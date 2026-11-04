@@ -135,7 +135,7 @@ The list of fields the search understands is `ENTRY_FIELDS` and `ENTITY_FIELDS` 
 | `intel_report` | entity (title) | `intel_report:quarterly` |
 | `intel_report.status` | exact | `intel_report.status:draft` |
 | `intel_report.type` | exact | `intel_report.type:threat_brief` |
-| `intel_report.tlp` | exact | `intel_report.tlp:amber` |
+| `intel_report.tlp` | exact | `intel_report.tlp:TLP:AMBER` |
 | `pir` | entity (title) | `pir:"APT capability"` |
 | `pir.priority` | exact | `pir.priority:high` |
 | `pir.category` | exact | `pir.category:strategic` |
@@ -421,12 +421,14 @@ A Pillar is a broad family and a Variant is one specific mistake. Base is usuall
 `ioc` and `observable` are the same field, with the same properties.
 
 ```text
-ioc:evil.com                 # by value; defanged input like evil[.]com also works
+ioc:evil.com                 # by value or label; type the plain value (evil.com, not evil[.]com)
 ioc.kind:sha256              # ipv4 | ipv6 | domain | url | uri_path | email | md5 |
                              # sha1 | sha256 | ja3 | ja4 | cert_fingerprint | cmdline |
                              # registry | path | mutex | named_pipe | service_name |
                              # scheduled_task | http_header | user_agent | script
-ioc.role:c2                  # c2 | delivery | payload | phishing | exfil | exploit | scanning
+ioc.role:c2                  # c2 | delivery | payload | phishing | exfil | exploit | scanning |
+                             # persistence | execution | defense_evasion | credential_access |
+                             # discovery | lateral_movement | collection
 ioc.status:active            # active | aging | expired
 ioc.reports:>0               # number of articles reporting it (indicator lists don't count)
 ioc.feeds:>=2                # number of indicator feeds listing it
@@ -488,12 +490,12 @@ rule.license:DRL             # upstream license
 **Reports, campaigns and requirements**
 
 ```text
-campaign.status:active               # active | monitoring | closed
+campaign.status:active               # active | monitoring | closed | historical
 intel_report.status:draft            # report status
 intel_report.type:threat_brief       # report template
-intel_report.tlp:amber               # clear | green | amber | red
+intel_report.tlp:TLP:AMBER           # TLP:CLEAR | TLP:GREEN | TLP:AMBER | TLP:AMBER+STRICT | TLP:RED
 pir.priority:critical                # critical | high | medium | low
-pir.category:strategic               # strategic | operational | tactical
+pir.category:strategic               # strategic | operational | tactical | technical
 ```
 
 **Notes**

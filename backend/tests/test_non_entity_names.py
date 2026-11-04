@@ -1,7 +1,7 @@
 """Non-entity names: concepts the extractor filed as tools, malware, actors or products.
 
-Every junk name here was deleted from prod in the 2026-11 Review-queue triage
-(planning/review-queue-finish.md). The negative lists are the regression guard:
+Every junk name here was deleted from prod in the 2026-11 Review-queue triage.
+The negative lists are the regression guard:
 a rule that eats a real tool, family or group is worse than the junk it stops.
 """
 
@@ -306,8 +306,8 @@ def test_real_products_pass(name):
 
 
 # ---------------------------------------------------------------------------
-# Shape gates from the 2026-11-02 vet of every AI-created entity
-# (planning/new-entities/2026-11-02). Each junk name was minted on prod.
+# Shape gates from the 2026-11-02 vet of every AI-created entity.
+# Each junk name was minted on prod.
 # ---------------------------------------------------------------------------
 
 SHAPE_JUNK = [

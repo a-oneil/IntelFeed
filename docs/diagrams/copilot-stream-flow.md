@@ -21,7 +21,7 @@ sequenceDiagram
     loop agent turn
         CLI->>SK: IntelFeed tool call (search_entries, write_action ...)
         SK->>API: POST /api/tools/execute (propose token)
-        API->>Q: a write: SET copilot:action:{action_id} + RPUSH copilot:staged:{conversation_id}
+        API->>Q: a write: SET copilot:action:{action_id} + RPUSH copilot:staged:{turn_id}
         API-->>SK: read result, or {"status": "awaiting_confirmation"}
         SK-->>CLI: JSON results (nothing written)
         CLI-->>W: stream-json lines (text_delta, tool_use, tool_result)
@@ -32,7 +32,7 @@ sequenceDiagram
     W->>Q: RPUSH {"kind":"__end__"}
     API->>API: persist user + assistant turn to ai_conversations<br/>(tool_events in message meta)
     opt the model asked for writes
-        API->>Q: take copilot:staged:{conversation_id} (each call TTL 900s)
+        API->>Q: take copilot:staged:{turn_id} (each call TTL 900s)
         API-->>UI: SSE {type:"confirm_request", action_id, tool_name, proposed} per write
         UI->>API: POST /api/ai/copilot/confirm {action_id, approved}
         API->>API: run_confirmed: re-check admin tools, run the tool as the user<br/>(a delete's token minted server-side)

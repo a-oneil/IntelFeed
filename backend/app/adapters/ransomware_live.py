@@ -1,4 +1,4 @@
-"""Ransomware leak-site collector adapters (planning/ransomware-victim-tracker.md §5.1).
+"""Ransomware leak-site collector adapters (see docs/adapters.md).
 
 Structurally mirrors nvd.py: an ``ExtendedAdapter`` that polls an external API and
 returns ``ParsedEntry`` objects carrying a rich ``metadata`` dict. Unlike NVD these

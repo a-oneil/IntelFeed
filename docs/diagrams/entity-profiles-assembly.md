@@ -25,7 +25,7 @@ flowchart TD
     subgraph STORE["Entity Store (PostgreSQL)"]
         ENTITIES["<b>Entity tables</b><br/>ThreatActor · MalwareFamily · CVE · CWE · TTP ·<br/>Country · Sector · Tool · Mitigation ·<br/>Vendor · Product · Observable · Campaign"]
         JUNCTIONS["<b>Entry junctions</b><br/>EntryThreatActor … EntryProduct<br/>confidence · paragraph_indices · matched_names<br/>provisional dictionary-word matches held in<br/>pending_autolink_matches (AI-decided, adjudicator-checked)"]
-        RELS["<b>EntityRelationship (strength model)</b><br/>verb: uses · exploits · targets · attributed_to ·<br/>variant_of · communicates_with · delivers · drops ·<br/>related_to · successor_of · subgroup_of · overlaps_with<br/>(semantic allowlist: relationship_matrix.py)<br/>confidence: confirmed / probable / possible<br/>source · adjudication_verdict · evidence_entry_ids"]
+        RELS["<b>EntityRelationship (strength model)</b><br/>verb: uses · exploits · targets · attributed_to ·<br/>variant_of · communicates_with · delivers · drops ·<br/>controls · related_to · successor_of · subgroup_of ·<br/>overlaps_with · exposes · operates_in<br/>(semantic allowlist: relationship_matrix.py)<br/>confidence: confirmed / probable / possible<br/>source · adjudication_verdict · evidence_entry_ids"]
         NOTES_T["<b>EntityNote</b><br/>title · markdown content ·<br/>note_type · tags"]
     end
 
