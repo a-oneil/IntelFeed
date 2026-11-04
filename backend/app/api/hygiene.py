@@ -1833,11 +1833,16 @@ async def scan_alias_hygiene(
     fix is a simple alias trim; the missed-merge case still gets a trim
     (merge engine will catch the real merge on its next pass).
     """
-    # Wipe stale unapplied proposals so each scan returns the current state.
+    # Wipe this scan's stale unapplied proposals so each scan returns the
+    # current state. The adjudicator's and the duplicate review's alias trims
+    # share the action code; they are not the scan's to clear.
     await db.execute(
         EntityMaintenanceLog.__table__.delete().where(
             EntityMaintenanceLog.action == "alias_collision",
             EntityMaintenanceLog.applied.is_(False),
+            EntityMaintenanceLog.after["kind"].astext.in_(
+                ["case_duplicate", "alias_equals_canonical", "matches_other_entity"]
+            ),
         )
     )
 

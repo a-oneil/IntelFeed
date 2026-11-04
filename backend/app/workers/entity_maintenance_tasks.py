@@ -1439,7 +1439,7 @@ async def _review_duplicate_entities_async() -> dict:
         if not candidates:
             return {"status": "ok", "candidates": 0, "proposed": 0, "distinct": 0, "unsure": 0, "calls": 0}
 
-        totals = {"proposed": 0, "distinct": 0, "unsure": 0, "ignored": 0}
+        totals = {"proposed": 0, "distinct": 0, "unsure": 0, "ignored": 0, "conflicts": 0, "bad_aliases": 0}
         calls = 0
         for i in range(0, len(candidates), per_call):
             chunk = candidates[i : i + per_call]
@@ -1490,7 +1490,7 @@ async def _review_duplicate_entities_async() -> dict:
                 db, chunk, result.get("decisions") or [], min_confidence=min_confidence, ai_result_id=ai_result_id
             )
             for k, v in counts.items():
-                totals[k] += v
+                totals[k] = totals.get(k, 0) + v
             await db.commit()
 
     return {"status": "ok", "candidates": len(candidates), "calls": calls, **totals}

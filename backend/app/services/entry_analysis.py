@@ -36,6 +36,46 @@ from app.services.ai_eligibility import (
 
 logger = logging.getLogger(__name__)
 
+# Quote check for sectors: case, whitespace, curly quotes and dashes are not
+# the model's to get right; the words are.
+_QUOTE_FOLD = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-", "\u2014": "-"})
+_MIN_EVIDENCE_CHARS = 4
+# A reply naming this many sectors is the schema's list handed back, not a
+# reading of the article: nothing in it is stored.
+_ECHO_SECTOR_COUNT = 10
+# One quote names one victim's industry; a sentence pasted under five sectors
+# backs none of them.
+_MAX_SECTORS_PER_QUOTE = 2
+
+
+def _fold(text: str) -> str:
+    return " ".join(text.translate(_QUOTE_FOLD).lower().split())
+
+
+def sectors_with_evidence(sectors: list, text: str) -> list[dict]:
+    """The sectors whose ``evidence`` is words the article actually contains.
+
+    The schema hands the model every sector name; on a two-line leak-site post
+    a small model returns the list back, every name "high" (231 Ransomware.live
+    posts got the same twelve). A quote it cannot copy out of the article is
+    how that shows, so a sector without one is not stored. An ellipsis splits
+    a quote into parts that must each be found. A list as long as the schema's
+    and one quote pasted under several sectors are the same echo, and store
+    nothing.
+    """
+    sectors = [s for s in sectors if isinstance(s, dict)]
+    if len({str(s.get("name") or "").strip().lower() for s in sectors}) >= _ECHO_SECTOR_COUNT:
+        return []
+    haystack = _fold(text)
+    by_quote: dict[str, list[dict]] = {}
+    for s in sectors:
+        quote = _fold(str(s.get("evidence") or "")).replace("\u2026", "...")
+        parts = [p for p in (p.strip(" \"'") for p in quote.split("...")) if p]
+        if parts and sum(map(len, parts)) >= _MIN_EVIDENCE_CHARS and all(p in haystack for p in parts):
+            by_quote.setdefault(" ... ".join(parts), []).append(s)
+    return [s for group in by_quote.values() if len(group) <= _MAX_SECTORS_PER_QUOTE for s in group]
+
+
 ECHO_REUSE_MIN_RATIO = 0.7
 
 
@@ -221,7 +261,16 @@ async def store_entry_analysis(db: AsyncSession, entry_id: uuid.UUID, parsed: di
     if parsed.get("countries"):
         counts["countries"] = len(await store_countries(db, entry_id, parsed["countries"]))
     if parsed.get("sectors"):
-        counts["sectors"] = len(await store_sectors(db, entry_id, parsed["sectors"]))
+        from app.models.entry import Entry
+        from app.services.sanitizer import entry_text_with_translation
+
+        entry = await db.get(Entry, entry_id)
+        title, text = entry_text_with_translation(entry) if entry is not None else ("", "")
+        sectors = sectors_with_evidence(parsed["sectors"], f"{title}\n{text}")
+        if len(sectors) < len(parsed["sectors"]):
+            counts["sectors_unquoted"] = len(parsed["sectors"]) - len(sectors)
+        if sectors:
+            counts["sectors"] = len(await store_sectors(db, entry_id, sectors))
     if parsed.get("mitigations"):
         counts["mitigations"] = len(await store_mitigations(db, entry_id, parsed["mitigations"]))
     # The observables ledger's AI doors. Guarded: a ledger failure must never
