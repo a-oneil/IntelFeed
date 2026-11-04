@@ -12,7 +12,7 @@ Two nouns, one join:
                        keeps "posted by Qilin and later LockBit" one org / two
                        disclosures instead of two duplicate orgs.
 
-See planning/ransomware-victim-tracker.md §3. The victim is registered into the
+See docs/automation-ai-enrichment.md "Ransomware victims". The victim is registered into the
 alias-index machinery (models/entity_index.py ALIAS_INDEXED_TABLES), so it needs
 `name` + `aliases` columns and the entity_norm() trigger fires on write.
 """

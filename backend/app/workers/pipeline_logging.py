@@ -4,8 +4,7 @@ Wraps the sync Celery task functions (INSIDE the @celery_app.task decorator)
 and records one EntryPipelineRun row when the stage completes. Deliberately
 does NOT touch the tasks' existing Prometheus metric boilerplate — the plan
 wanted the decorator to subsume it, but doing both would double-count
-CELERY_TASKS_TOTAL, so metrics stay where they are (deviation noted in
-planning/engine-progress.md).
+CELERY_TASKS_TOTAL, so metrics stay where they are.
 
 Never raises: run logging failing must not break a task. Gated by the
 pipeline_run_logging_enabled kill switch.

@@ -63,7 +63,7 @@ HEAD_SHA=$(git rev-parse HEAD)
 
 # --- What moved? -------------------------------------------------------------
 #
-# Most commits on this repo touch docs/, scripts/, planning/, the Android client
+# Most commits on this repo touch docs/, scripts/, the Android client
 # or CI — none of which are baked into an image. ./docs, ./scripts and
 # ./intelfeed-skill are bind-mounted read-only into the containers, so new
 # content there is live the moment the pull lands. Rebuilding and recreating the

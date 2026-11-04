@@ -8,8 +8,8 @@ reusing the same ``split_data_sources`` matcher as rule-backed coverage.
 This is a LOWER-CONFIDENCE signal than rule coverage: the CVE->technique link is
 co-occurrence on shared entries, not a curated mapping. Surface it as a hint
 ("you have the telemetry to write a detection"), never as authoritative coverage.
-Gated by ``exposure_attack_visibility_enabled``. See planning/my-stack-exposure-scoring.md
-(Phase 7). This module only READS from detection_coverage — it never edits it, to
+Gated by ``exposure_attack_visibility_enabled``. See docs/intelligence-engine.md.
+This module only READS from detection_coverage — it never edits it, to
 stay clear of concurrently-edited detection code.
 """
 

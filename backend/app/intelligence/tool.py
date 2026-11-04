@@ -78,7 +78,7 @@ async def store_tools(
     # better than with a list of things not to do — this is what drains the
     # advisory-driven flood of dependency and vulnerable-package names. The
     # setting is the escape hatch if a provider stops filling the fields at
-    # all. See planning/tool-extraction-cleanup.md.
+    # all.
     evidence_required = bool(await get_setting("ai_tool_evidence_required", db))
     dropped_no_evidence = 0
 
@@ -105,7 +105,7 @@ async def store_tools(
 
         # Resolver: exact + normalized matching, cross-type tombstones, and the
         # creation gates — F13 code-artifact/technique/physical-object names
-        # never become tools (planning/entity-creation-guardrails.md).
+        # never become tools (docs/engine-settings.md).
         decision = await resolve_entity_creation(
             db, "tool", name, tool_data.get("aliases"), source="ai", entry_id=entry_id, link_only=not may_create
         )

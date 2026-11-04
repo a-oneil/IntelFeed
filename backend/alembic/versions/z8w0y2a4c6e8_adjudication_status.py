@@ -4,7 +4,7 @@ Revision ID: z8w0y2a4c6e8
 Revises: z7r9t1v3x5z7
 Create Date: 2026-10-08
 
-The post-analysis adjudicate stage (planning/ai-adjudication-stage.md) decides,
+The post-analysis adjudicate stage (docs/engine-settings.md) decides,
 right after an entry's one-pass analysis lands, whether that entry gets an AI
 review of everything the analysis wrote. The decision and its outcome live on
 the same per-entry row that already tracks the analysis lifecycle:

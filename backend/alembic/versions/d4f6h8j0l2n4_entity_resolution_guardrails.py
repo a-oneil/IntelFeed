@@ -1,7 +1,7 @@
 # ruff: noqa: E501 — file embeds the generated denylist seed corpus
 """entity resolution guardrails: entity_norm, normalized_name columns, alias index, denylist
 
-Phases 1-2 of planning/entity-creation-guardrails.md:
+Entity creation guardrails, phases 1-2:
 
 - pg_trgm extension (fuzzy-candidate advisory queries)
 - entity_norm(text) IMMUTABLE function: lowercase -> NFKC -> leetspeak fold

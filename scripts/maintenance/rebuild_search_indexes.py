@@ -13,7 +13,7 @@ exist. Run inside the API container:
 
     docker compose -f docker-compose.dev.yml exec api python scripts/maintenance/rebuild_search_indexes.py
     # bake per-user entry state for a specific account instead of the first admin
-    docker compose -f docker-compose.dev.yml exec api python scripts/maintenance/rebuild_search_indexes.py --user aoneil
+    docker compose -f docker-compose.dev.yml exec api python scripts/maintenance/rebuild_search_indexes.py --user <username>
     # do half the job
     docker compose -f docker-compose.dev.yml exec api python scripts/maintenance/rebuild_search_indexes.py --entries-only
     docker compose -f docker-compose.dev.yml exec api python scripts/maintenance/rebuild_search_indexes.py --entities-only

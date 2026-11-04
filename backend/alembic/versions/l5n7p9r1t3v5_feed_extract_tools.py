@@ -6,8 +6,6 @@ catalog's junk — NVD alone produced 230 tools in eleven weeks, 224 of them wit
 no adversary link. Defaults to true so existing behaviour is unchanged; the
 offending feeds are flipped off below.
 
-See planning/tool-extraction-cleanup.md.
-
 Revision ID: l5n7p9r1t3v5
 Revises: k4m6o8q0s2u4
 Create Date: 2026-09-20

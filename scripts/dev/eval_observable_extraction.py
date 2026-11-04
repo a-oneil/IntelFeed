@@ -19,8 +19,8 @@ after each run so the eval never rewrites the entry's current AIResult.
 the model (free; measures what production already produced).
 
 Run inside the api container (``docker compose -f docker-compose.dev.yml exec api``):
-    python scripts/dev/eval_observable_extraction.py --offline --report /app/planning/observables-eval-offline.md
-    python scripts/dev/eval_observable_extraction.py --report /app/planning/observables-eval.md
+    python scripts/dev/eval_observable_extraction.py --offline --report /tmp/observables-eval-offline.md
+    python scripts/dev/eval_observable_extraction.py --report /tmp/observables-eval.md
     python scripts/dev/eval_observable_extraction.py --only talos-uat-11587 --dump-prompt
 """
 

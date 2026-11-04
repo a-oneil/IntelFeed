@@ -13,7 +13,7 @@ let role = "admin";
 
 vi.mock("@/stores/authStore", () => ({
   useAuthStore: (selector: (s: unknown) => unknown) =>
-    selector({ user: { id: "u1", username: "aoneil", role } }),
+    selector({ user: { id: "u1", username: "analyst", role } }),
 }));
 
 vi.mock("@/hooks/useFeeds", () => ({

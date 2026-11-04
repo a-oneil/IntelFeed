@@ -44,8 +44,8 @@ const TYPE_ALIASES: Record<string, string> = {
  * The single "where does clicking this search result go?" table.
  *
  * ---------------------------------------------------------------------------
- * NOT YET WIRED UP. Created by Step 0 of `planning/search-consolidation.md`;
- * Step 5 replaces the remaining copies with it. That rollout is a deliberate
+ * NOT YET WIRED UP. Created by step 0 of the search consolidation;
+ * a later step replaces the remaining copies with it. That rollout is a deliberate
  * behaviour change, because the copies disagree:
  *
  * 1. `UnifiedSearchBar.handleEntityClick` — GONE. That component was deleted

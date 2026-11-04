@@ -13,8 +13,7 @@ of ``Entry.priority_raw``, added to the Radar ordering (mirroring the watchlist 
 Ordering uses the severity-driven exposure lift (SQL, one grouped join). The
 detection posture (blind / no-rule / defended) is computed only for the visible
 page via ``classify_cves`` and decorates the response; it does not yet re-order
-the queue — see planning/my-stack-exposure-scoring.md (coverage-in-ordering is a
-documented follow-up).
+the queue (coverage-in-ordering is a follow-up).
 """
 
 import uuid
@@ -28,7 +27,7 @@ from app.models.product import Product
 from app.models.user_entity_watch import UserEntityWatch
 from app.models.vendor import Vendor
 
-# --- scoring constants (see planning/my-stack-exposure-scoring.md) ---
+# --- scoring constants (see docs/intelligence-engine.md) ---
 EXPOSURE_BASE = 1.5
 KEV_MULT = 2.5
 EPSS_MULT = 2.0

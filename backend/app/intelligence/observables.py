@@ -228,7 +228,7 @@ _REFERENCE_HOSTS = frozenset(
         "therecord.media",
         "krebsonsecurity.com",
         # Services malware uses or an article names in passing, minted by the
-        # AI door as indicators until 2026-11 (planning/new-entities/2026-11-02).
+        # AI door as indicators until 2026-11.
         # Their bare host is never an indicator; a subdomain or full URL on one
         # still can be.
         "webhook.site",
