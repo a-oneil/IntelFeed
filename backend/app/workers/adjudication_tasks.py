@@ -110,8 +110,8 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
         _validate_verdicts,
         apply_verdicts,
         build_variables,
-        held_review_owed,
-        mark_held_reviewed,
+        mark_reviewed,
+        review_owed,
         supersede_legacy_proposals,
     )
     from app.services.system_settings import _ensure_cache, invalidate_cache
@@ -212,7 +212,14 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
             detail["unknown_ids"] = stats["unknown"]
             detail["coerced_verdicts"] = stats["coerced"]
             # verdicts the guards threw out, so a run shows why its removes didn't land
-            for key in ("copied_reason", "unnamed_reason", "affirming_reason", "bystander_reason", "new_unanswered"):
+            for key in (
+                "copied_reason",
+                "unnamed_reason",
+                "affirming_reason",
+                "bystander_reason",
+                "new_unanswered",
+                "candidates_unanswered",
+            ):
                 if stats.get(key):
                     detail[key] = stats[key]
             for kind, key in (("link", "uncapped_links"), ("edge", "uncapped_edges")):
@@ -220,11 +227,16 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
                     detail[key] = n
             if stats["duplicate"]:
                 detail["skipped"] = "ai_bad_shape"
+                # Its candidates count as judged anyway: they stay on the
+                # article as analysis hints, and the candidate sweep would
+                # otherwise reopen it every 30 minutes.
+                await mark_reviewed(db, entry, [it for it in items if it.kind == "ioc"])
             else:
-                await mark_held_reviewed(db, items)
-                # Held matches settled while this review ran, or rejects past
-                # the manifest's cap: owe the article a recheck for those.
-                if "links" in cfg["scope"] and await held_review_owed(db, entry_id, started):
+                await mark_reviewed(db, entry, items)
+                # Held matches settled while this review ran, or rejects and
+                # candidates past the manifest's caps: owe the article a
+                # recheck for those.
+                if await review_owed(db, entry, started, cfg["scope"]):
                     row.adjudication_recheck_since = started
                     return await _finish(RECHECK, detail)
             return await _finish(COMPLETED, detail)

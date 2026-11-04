@@ -1538,28 +1538,8 @@ export interface ObservableResponse {
   was_defanged?: boolean | null;
 }
 
-export interface ObservableCandidateRow {
-  kind: string;
-  value: string;
-  entry_count: number;
-  was_defanged: boolean;
-  sample_surface?: string | null;
-  latest_entry_id?: string | null;
-  latest_entry_title?: string | null;
-  latest_seen_at?: string | null;
-}
-
-export interface ObservableCandidate {
-  kind: string;
-  value: string;
-  surface_form: string;
-  was_defanged: boolean;
-  paragraph_index: number;
-}
-
 export interface ObservableEntryPayload {
   items: ObservableResponse[];
-  candidates: ObservableCandidate[];
 }
 
 export interface CAPECRef {

@@ -7,6 +7,7 @@ import { EngineSection } from "../engine/EngineSection";
 // stage panels) — mock it and the browse-view children, then test the shell's
 // wiring: default matrix, jobs/feeds/plans browse views, legacy deep links.
 vi.mock("../engine/EngineMatrix", () => ({
+  MATRIX_VIEWS: ["entries", "entities", "links", "relationships", "review", "feeds"],
   EngineMatrix: ({
     initialView,
     initialOpenStage,
@@ -100,9 +101,19 @@ describe("EngineSection", () => {
     expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-view", "links");
   });
 
-  it("routes legacy ?tab=extraction into the card's review view", () => {
+  it("routes legacy ?tab=extraction into the card's entities view", () => {
     renderSection("?tab=extraction");
-    expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-view", "review");
+    expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-view", "entities");
+  });
+
+  it("opens a console tab from ?view=", () => {
+    renderSection("?view=entities");
+    expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-view", "entities");
+  });
+
+  it("ignores an unknown ?view=", () => {
+    renderSection("?view=nope");
+    expect(screen.getByTestId("engine-matrix")).not.toHaveAttribute("data-view", "nope");
   });
 
   it("routes legacy ?tab=jobs to the jobs browse view", () => {

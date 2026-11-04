@@ -31,10 +31,12 @@ class Entry(Base):
     image_url: Mapped[str | None] = mapped_column(Text)
     extracted_urls: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     #: Tier-0 observable candidates: [{kind, value, surface_form, was_defanged,
-    #: paragraph_index}]. Written by the observables stage's refang+regex scan.
-    #: Candidates are entry-local — never entities, never searchable, never
-    #: graphed. They exist so the reader can offer one-click promotion and so
-    #: the one-pass analysis gets hints. See models/observable.py for the rule.
+    #: paragraph_index, origin, reviewed?}]. Written by the observables stage's
+    #: refang+regex scan (origin "scan") and the AI door in shadow mode (origin
+    #: "ai"). Candidates are entry-local — never entities, never searchable,
+    #: never graphed. The adjudicator captures or drops each one and marks it
+    #: ``reviewed``; the one-pass analysis gets them as hints. See
+    #: models/observable.py for the rule.
     observable_candidates: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     translated_html: Mapped[str | None] = mapped_column(Text)
     translated_title: Mapped[str | None] = mapped_column(String(2000))

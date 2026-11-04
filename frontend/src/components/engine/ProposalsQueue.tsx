@@ -10,24 +10,26 @@
  * (an edge, an article's assessment) stand alone. A Domain facet (what
  * applying changes: links, entities, relationships), an Origin facet (who
  * proposed it), inline Apply / Dismiss, one background Apply all, the
- * adjudicator's mode switch with its tuning knobs beside it, and a History
- * lens of everything that ran (with Restore).
+ * adjudicator's mode switch with a Settings button (the adjudicate stage's
+ * panel, which the console opens above the table) and a Generate proposals
+ * menu of scans beside it, and a History lens of everything that ran (with
+ * Restore).
  */
 
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import api from "@/api/client";
-import SystemSettings from "@/components/SystemSettings";
+import { DropdownItem, ToolbarDropdown } from "@/components/ToolbarDropdown";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
   PROPOSAL_DOMAINS,
-  invalidateAfterBulkApply,
+  invalidateAfterReview,
   useApplyReclassifyGroups,
+  useApplyReview,
   useBulkApplyProgress,
-  useDismissProposals,
-  useDismissReviewGroups,
+  useDismissReview,
   useHygieneFeed,
   useHygieneStats,
   useReviewGroups,
@@ -37,13 +39,14 @@ import {
   useScanIdHygiene,
   useScanVendorAutolink,
   useStartBulkApply,
-  useUnlinkAction,
+  type Confidence,
   type FeedLink,
-  type FeedResponse,
   type FeedRow,
   type ProposalDomain,
   type ProposalOrigin,
   type ReviewGroup,
+  type ReviewScope,
+  type ReviewSort,
 } from "@/hooks/useHygiene";
 import { useHygieneRowAction } from "@/hooks/useHygieneRowAction";
 import { formatDateTime } from "@/utils/formatDate";
@@ -76,6 +79,7 @@ const CHANGE_META: Record<string, { label: string; cls: string }> = {
   adjudication_reclassify: { label: "Reclassify (review)", cls: styles.tRecl },
   adjudication_edge_demote: { label: "Demote edge", cls: styles.tRecl },
   adjudication_ioc_drop: { label: "Drop observable", cls: styles.tRecl },
+  adjudication_ioc_capture: { label: "Capture observable", cls: styles.tVlink },
   adjudication_assessment: { label: "Assessment", cls: styles.tStale },
   adjudication_restored: { label: "Verdict restored", cls: styles.tVlink },
   // applied history
@@ -109,53 +113,93 @@ const QUEUE_FILTERS = [
   { value: "adjudication_veto", label: "Veto entity" },
   { value: "adjudication_merge", label: "Merge" },
   { value: "adjudication_ioc_drop", label: "Drop observable" },
+  { value: "adjudication_ioc_capture", label: "Capture observable" },
+  { value: "adjudication_assessment", label: "Assessment note" },
   { value: "normalize_name", label: "Name fix" },
   { value: "alias_collision", label: "Alias trim" },
   { value: "vendor_autolink", label: "Vendor link" },
   { value: "ttp_malformed_id,cve_malformed_id,cve_withdrawn", label: "ID fix" },
+  { value: "orphan_prune", label: "Orphan prune" },
 ];
+// What ran. The adjudicator's codes stay the same from proposal to apply
+// (only `applied` flips), so they sit beside the older engines' own codes.
 const HISTORY_FILTERS = [
   { value: "", label: "Any change" },
-  { value: "removed", label: "Link removed" },
+  { value: "removed,adjudication_unlink", label: "Link removed" },
   { value: "restored", label: "Link restored" },
-  { value: "merge", label: "Merged" },
-  { value: "reclassify", label: "Reclassified" },
+  { value: "adjudication_held_link", label: "Held match linked" },
+  { value: "merge,adjudication_merge", label: "Merged" },
+  { value: "reclassify,adjudication_reclassify", label: "Reclassified" },
+  { value: "adjudication_veto", label: "Entity vetoed" },
+  { value: "adjudication_edge_demote", label: "Edge demoted" },
+  { value: "adjudication_ioc_capture", label: "Observable captured" },
+  { value: "adjudication_ioc_drop", label: "Observable dropped" },
+  { value: "alias_collision", label: "Alias trimmed" },
+  { value: "normalize_name", label: "Name fixed" },
+  { value: "vendor_autolink", label: "Vendor linked" },
+  { value: "ttp_malformed_id,cve_malformed_id,cve_withdrawn", label: "ID fixed" },
   { value: "merge_review_distinct", label: "Not duplicates" },
   { value: "orphan_prune", label: "Orphans pruned" },
   { value: "update_description,update_aliases", label: "Profile" },
   { value: "ai_enrich_filled,ai_enrich_unknown", label: "AI enrich" },
   { value: "adjudication_restored", label: "Verdict restored" },
 ];
+// History rows read in the past tense; the proposal codes keep their names after they run.
+const APPLIED_LABEL: Record<string, string> = {
+  adjudication_unlink: "Link removed",
+  adjudication_held_link: "Held match linked",
+  adjudication_veto: "Entity vetoed",
+  adjudication_merge: "Merged",
+  adjudication_reclassify: "Reclassified",
+  adjudication_edge_demote: "Edge demoted",
+  adjudication_ioc_drop: "Observable dropped",
+  adjudication_ioc_capture: "Observable captured",
+  alias_collision: "Alias trimmed",
+  normalize_name: "Name fixed",
+  vendor_autolink: "Vendor linked",
+  ttp_malformed_id: "ID fixed",
+  cve_malformed_id: "ID fixed",
+  cve_withdrawn: "CVE deleted",
+};
+const SORTS: { value: ReviewSort; label: string }[] = [
+  { value: "newest", label: "Newest" },
+  { value: "count", label: "Most proposals" },
+  { value: "oldest", label: "Oldest" },
+  { value: "confidence", label: "Highest confidence" },
+];
+const CONF_CLS: Record<Confidence, string> = { high: styles.confHigh, medium: styles.confMed, low: styles.confLow };
+
+function ConfidenceChip({ value }: { value: Confidence | null | undefined }) {
+  if (!value) return null;
+  return (
+    <span className={`${styles.conf} ${CONF_CLS[value]}`} title="The adjudicator's confidence in this verdict">
+      {value}
+    </span>
+  );
+}
 type OriginFacet = "" | ProposalOrigin | "orphaned";
 const ORIGINS: { value: OriginFacet; label: string; title: string; queueOnly?: boolean }[] = [
   { value: "", label: "All", title: "Every proposal" },
-  { value: "adjudicator", label: "Adjudicator", title: "Filed by the post-analysis review, with the article in hand" },
+  {
+    value: "adjudicator",
+    label: "Adjudicator",
+    title: "Filed by the post-analysis review, with the article in hand (including the link verdicts the retired link validator left)",
+  },
   {
     value: "merge_review",
     label: "Duplicate review",
     title: "Filed by the catalogue-wide duplicate review, from the two profiles side by side",
   },
-  { value: "scan", label: "Scans", title: "Filed by the on-demand scans and analysts" },
+  { value: "scan", label: "Scans", title: "Filed by the on-demand scans (Generate proposals)" },
   {
     value: "orphaned",
     label: "Orphaned",
-    title: "Scan proposals no entry can carry to the adjudicate stage — yours to dismiss or apply by hand",
+    title: "Proposals the retired jobs left with no article to re-judge them against — yours to dismiss or apply by hand",
     queueOnly: true,
   },
 ];
 const ORPHANED_NOTE =
   "Left by the retired jobs with no entry to re-judge them against. Dismiss or apply by hand; nothing automatic touches them.";
-
-// The adjudicator's knobs that decide what becomes a proposal instead of
-// being applied — shown beside the mode switch, where the question comes up.
-const TUNING_KEYS = [
-  "adjudication_apply_min_confidence",
-  "adjudication_reclassify_consensus",
-  "adjudication_circuit_breaker_pct",
-  "adjudication_scope",
-  "merge_review_batch_size",
-  "merge_review_min_confidence",
-];
 
 // Row-action code → button label + tone.
 const ACTION_BTN: Record<string, { label: string; cls: string }> = {
@@ -220,13 +264,15 @@ function ProposalRow({
   sub?: boolean;
 }) {
   const navigate = useNavigate();
-  const meta = CHANGE_META[row.action] ?? { label: row.action, cls: styles.tName };
+  const base = CHANGE_META[row.action] ?? { label: row.action, cls: styles.tName };
+  const meta = hist && row.applied ? { ...base, label: APPLIED_LABEL[row.action] ?? base.label } : base;
   const slug = row.entity_type;
   const acts = [...row.actions].sort((a, b) => ACTION_ORDER.indexOf(a) - ACTION_ORDER.indexOf(b));
   return (
     <tr className={sub ? cg.subRow : undefined}>
       <td>
         <span className={`${styles.tag} ${meta.cls}`}>{meta.label}</span>
+        <ConfidenceChip value={row.confidence} />
         {row.origin === "adjudicator" && !sub && (
           <span className={styles.originTag} title="Filed by the post-analysis review, with the article in hand">
             adjudicator
@@ -286,10 +332,23 @@ function ProposalRow({
   );
 }
 
-/** The articles behind one entity's row. */
-function GroupRows({ group, busy, onAction }: { group: ReviewGroup; busy: boolean; onAction: (row: FeedRow, action: string) => void }) {
+/** The articles behind one entity's row: the proposals the filters show. */
+function GroupRows({
+  group,
+  scope,
+  busy,
+  onAction,
+}: {
+  group: ReviewGroup;
+  scope: ReviewScope;
+  busy: boolean;
+  onAction: (row: FeedRow, action: string) => void;
+}) {
   const feed = useHygieneFeed({
     pending: true,
+    action: scope.action,
+    origin: scope.origin,
+    domain: scope.domain,
     entity_type: group.entity_type,
     entity_id: group.entity_id ?? undefined,
     limit: 200,
@@ -319,31 +378,40 @@ function GroupRows({ group, busy, onAction }: { group: ReviewGroup; busy: boolea
   );
 }
 
-const keyOf = (g: ReviewGroup) => g.key;
-
 export function ProposalsQueue({
   lens,
   initialAction,
   initialOrigin,
   initialDomain,
+  settingsOpen,
+  onToggleSettings,
 }: {
   /** queue: pending proposals with Apply / Dismiss. history: what ran, with Restore. */
   lens: ReviewLens;
   initialAction?: string;
   initialOrigin?: ProposalOrigin;
   initialDomain?: ProposalDomain;
+  /** The adjudicate stage's settings panel is open above the table. */
+  settingsOpen?: boolean;
+  /** Open or close that panel (the console owns it). */
+  onToggleSettings?: () => void;
 }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const hist = lens === "history";
-  const [actionFilter, setActionFilter] = useState(initialAction ?? "");
-  const [originFilter, setOriginFilter] = useState<OriginFacet>(initialOrigin ?? "");
-  const [domainFilter, setDomainFilter] = useState<ProposalDomain | "">(initialDomain ?? "");
+  const [actionFilter, setActionFilterRaw] = useState(initialAction ?? "");
+  const [originFilter, setOriginFilterRaw] = useState<OriginFacet>(initialOrigin ?? "");
+  const [domainFilter, setDomainFilterRaw] = useState<ProposalDomain | "">(initialDomain ?? "");
+  const [sort, setSortRaw] = useState<ReviewSort>("newest");
   const [search, setSearch] = useState("");
   const q = useDebouncedValue(search, 250);
   const [offset, setOffset] = useState(0);
+  // A new filter starts at the first page.
+  const setActionFilter = (v: string) => (setActionFilterRaw(v), setOffset(0));
+  const setOriginFilter = (v: OriginFacet) => (setOriginFilterRaw(v), setOffset(0));
+  const setDomainFilter = (v: ProposalDomain | "") => (setDomainFilterRaw(v), setOffset(0));
+  const setSort = (v: ReviewSort) => (setSortRaw(v), setOffset(0));
   const [modePending, setModePending] = useState(false);
-  const [showTuning, setShowTuning] = useState(false);
   const [busyRow, setBusyRow] = useState<string | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
 
@@ -351,31 +419,32 @@ export function ProposalsQueue({
   const orphaned = !hist && originFilter === "orphaned";
   const origin = orphaned || !originFilter ? undefined : (originFilter as ProposalOrigin);
   const domain = domainFilter || undefined;
+  // What the table shows, and so what every button here acts on.
+  const scope: ReviewScope = { q: q || undefined, action: actionFilter || undefined, origin, domain };
   const stats = useHygieneStats();
   // History and the orphaned switch are flat rows; the queue is per entity,
   // so the flat query only runs when one of those is showing.
   const flat = hist || orphaned;
+  const PAGE = 100;
   const feed = useHygieneFeed(
     hist
-      ? { mode: "apply", action: actionFilter || undefined, origin, domain, limit: 100 }
-      : { pending: true, action: actionFilter || undefined, origin, domain, orphaned: true, limit: 100 },
+      ? { mode: "apply", action: actionFilter || undefined, origin, domain, limit: PAGE, offset }
+      : { pending: true, action: actionFilter || undefined, origin, domain, orphaned: true, limit: PAGE, offset },
     { enabled: flat },
   );
-  const PAGE = 100;
-  const groups = useReviewGroups({
-    q: q || undefined,
-    action: actionFilter || undefined,
-    origin,
-    domain,
-    limit: PAGE,
-    offset,
-  });
-  useEffect(() => setOffset(0), [q, actionFilter, origin, domain]);
+  const groups = useReviewGroups({ ...scope, sort, limit: PAGE, offset });
+  useEffect(() => setOffset(0), [q]);
+  const total = groups.data?.total ?? 0;
+  // A page emptied by its own actions steps back to the last page that has rows.
+  useEffect(() => {
+    if (!flat && groups.data && offset > 0 && offset >= total) setOffset(Math.max(0, Math.floor((total - 1) / PAGE) * PAGE));
+  }, [flat, groups.data, offset, total]);
 
   const runRowAction = useHygieneRowAction();
-  const dismissProposals = useDismissProposals();
-  const dismissGroups = useDismissReviewGroups();
-  const unlinkAction = useUnlinkAction();
+  const dismissReview = useDismissReview();
+  // its own instance, so a row's Dismiss doesn't show Dismiss all as busy
+  const dismissAll = useDismissReview();
+  const applyReview = useApplyReview();
   const applyReclassify = useApplyReclassifyGroups();
   // "Apply all" runs in the background: start a job, poll it, then refresh.
   const startBulkApply = useStartBulkApply();
@@ -392,11 +461,11 @@ export function ProposalsQueue({
       }`;
       if (errs) toast.warning(msg, { description: bulkProgress.errors[0]?.error });
       else toast.success(msg);
-      invalidateAfterBulkApply(qc);
+      invalidateAfterReview(qc);
       setBulkJobId(null);
     } else if (bulkProgress.status === "error") {
       toast.error(`Apply all stopped: ${bulkProgress.message ?? "unknown error"}`);
-      invalidateAfterBulkApply(qc);
+      invalidateAfterReview(qc);
       setBulkJobId(null);
     }
   }, [bulkJobId, bulkProgress, qc]);
@@ -476,14 +545,12 @@ export function ProposalsQueue({
 
   const rows = useMemo(() => feed.data?.rows ?? [], [feed.data]);
   const groupRows = useMemo(() => groups.data?.groups ?? [], [groups.data]);
-  const total = groups.data?.total ?? 0;
 
   // The Proposed / Applied switch is the adjudicate stage's mode: shadow files
   // proposals, apply acts on high-confidence verdicts at ingest.
-  const statsField = "adjudication_mode";
+  const modeKey = "adjudication_mode";
   const mode: "off" | "shadow" | "apply" =
     stats.data?.adjudication_mode === "apply" ? "apply" : stats.data?.adjudication_mode === "shadow" ? "shadow" : "off";
-  const modeKey = "adjudication_mode";
   const setMode = async (next: "shadow" | "apply") => {
     if (next === mode || modePending) return;
     setModePending(true);
@@ -491,7 +558,7 @@ export function ProposalsQueue({
     // per-worker settings cache can return the stale value for a moment, which
     // would otherwise snap the toggle back and read as "the button does nothing".
     qc.setQueryData(["hygiene", "stats"], (prev: unknown) =>
-      prev && typeof prev === "object" ? { ...(prev as Record<string, unknown>), [statsField]: next } : prev,
+      prev && typeof prev === "object" ? { ...(prev as Record<string, unknown>), [modeKey]: next } : prev,
     );
     try {
       await api.patch("/system-settings", { settings: { [modeKey]: next } });
@@ -502,7 +569,7 @@ export function ProposalsQueue({
       );
     } catch (e) {
       qc.setQueryData(["hygiene", "stats"], (prev: unknown) =>
-        prev && typeof prev === "object" ? { ...(prev as Record<string, unknown>), [statsField]: mode } : prev,
+        prev && typeof prev === "object" ? { ...(prev as Record<string, unknown>), [modeKey]: mode } : prev,
       );
       toast.error(`Failed to change mode: ${(e as Error).message}`);
     } finally {
@@ -518,7 +585,8 @@ export function ProposalsQueue({
     const where = domainFilter ? ` ${DOMAIN_LABELS[domainFilter].toLowerCase()}` : "";
     const who =
       origin === "adjudicator" ? " adjudicator" : origin === "merge_review" ? " duplicate-review" : origin === "scan" ? " scan" : "";
-    return `${what}${who}${where}`;
+    const named = q ? ` matching “${q}”` : "";
+    return `${what}${who}${where}${named}`;
   };
 
   const doRow = async (row: FeedRow, action: string) => {
@@ -530,79 +598,19 @@ export function ProposalsQueue({
     }
   };
 
-  const refreshGroups = () => {
-    qc.invalidateQueries({ queryKey: ["hygiene"] });
-    qc.invalidateQueries({ queryKey: ["extraction"] });
-    qc.invalidateQueries({ queryKey: ["entity-links"] });
-    qc.invalidateQueries({ queryKey: ["engine"] });
-  };
+  const groupRef = (g: ReviewGroup) => ({ entity_type: g.entity_type, entity_id: g.entity_id, row_ids: g.row_ids });
 
-  /** Apply everything in an entity's row except its reclassify proposals
-   *  (those need a target type: the chips). Links go through the grouped
-   *  unlink path; the rest row by row through the same code the per-row
-   *  Apply uses. */
+  /** Apply what this row shows under the filters, except its type changes
+   *  (those need a target: the chips). One server loop, one toast. */
   const applyGroup = async (g: ReviewGroup) => {
     setBusyRow(g.key);
     try {
-      let done = 0;
-      let failed = 0;
-      if (g.entity_id && g.kinds.some((k) => UNLINK_KINDS.has(k.action))) {
-        const r = await unlinkAction.mutateAsync({
-          action: "apply",
-          target: { items: [{ entity_type: g.entity_type, entity_id: g.entity_id }] },
-        });
-        done += r.done;
-        failed += r.failed;
-      }
-      const others = g.kinds.filter((k) => !UNLINK_KINDS.has(k.action) && !RECLASSIFY_KINDS.has(k.action));
-      if (others.length > 0) {
-        let targets: FeedRow[];
-        if (g.entity_id) {
-          const { data } = await api.get<FeedResponse>("/admin/hygiene/feed", {
-            params: { pending: "true", entity_type: g.entity_type, entity_id: g.entity_id, limit: 200, context: "true" },
-          });
-          targets = data.rows.filter((r) => !UNLINK_KINDS.has(r.action) && !RECLASSIFY_KINDS.has(r.action));
-          // One entity merges once: the most-proposed target's row, applied
-          // last. The merge removes the entity, which settles every other
-          // proposal about it, so a second target would only fail.
-          const merges = targets.filter((r) => r.action === "adjudication_merge");
-          if (merges.length > 0) {
-            // merge_into arrives most-proposed first.
-            const top = g.merge_into[0]?.target_id;
-            const pick =
-              merges.find((r) => (r.payload.after as { target_id?: string } | undefined)?.target_id === top) ?? merges[0];
-            targets = [...targets.filter((r) => r.action !== "adjudication_merge"), pick];
-          }
-        } else {
-          // A row with no entity is its own group: enough of a FeedRow for the
-          // per-row endpoints (they key on source, id and action).
-          targets = g.row_ids.map((id) => ({
-            id,
-            source: id.startsWith("link_validator:") ? "link_validator" : "entity_maintenance",
-            action: g.kinds[0]?.action ?? "",
-            when: g.latest_at,
-            mode: "shadow",
-            applied: false,
-            entity_type: g.entity_type,
-            entity_id: null,
-            entity_name: null,
-            subject: g.subject,
-            reason: g.reason,
-            payload: {},
-            actions: ["apply", "dismiss"],
-            links: g.links,
-            origin: g.origin === "mixed" ? null : g.origin,
-            domain: g.domains[0] ?? "entities",
-          }));
-        }
-        for (const row of targets) {
-          if (!row.actions.includes("apply")) continue;
-          await runRowAction(row, "apply");
-          done += 1;
-        }
-      }
-      if (failed) toast.warning(`Applied ${done}, ${failed} failed`);
-      refreshGroups();
+      const r = await applyReview.mutateAsync({ ...scope, items: [groupRef(g)] });
+      const parts = [`Applied ${r.applied.toLocaleString()}`];
+      if (r.skipped) parts.push(`${r.skipped.toLocaleString()} skipped`);
+      if (r.failed) parts.push(`${r.failed.toLocaleString()} failed`);
+      if (r.failed) toast.warning(parts.join(", "), { description: r.errors[0]?.error });
+      else toast.success(parts.join(", "));
     } catch (e) {
       toast.error(`Apply failed: ${(e as Error).message}`);
     } finally {
@@ -627,12 +635,8 @@ export function ProposalsQueue({
   const dismissGroup = async (g: ReviewGroup) => {
     setBusyRow(g.key);
     try {
-      const r = await dismissGroups.mutateAsync([{ entity_type: g.entity_type, entity_id: g.entity_id, row_ids: g.row_ids }]);
-      toast.success(
-        g.entity_id
-          ? `Dismissed — ${r.cleared_rows.toLocaleString()} proposal${r.cleared_rows === 1 ? "" : "s"} about ${g.name} cleared; it won't be re-proposed`
-          : "Dismissed",
-      );
+      const r = await dismissReview.mutateAsync({ ...scope, items: [groupRef(g)] });
+      toast.success(`Dismissed ${r.cleared_rows.toLocaleString()} proposal${r.cleared_rows === 1 ? "" : "s"}${g.entity_id ? ` about ${g.name}` : ""}`);
     } catch (e) {
       toast.error(`Dismiss failed: ${(e as Error).message}`);
     } finally {
@@ -640,46 +644,43 @@ export function ProposalsQueue({
     }
   };
 
-  // Scoped to what the table shows: the action filter, the origin and the domain.
+  // What the table shows: the action, origin and domain filters and the search.
   const clearAll = async () => {
     if (
       !(await confirmDialog({
         title: "Dismiss proposals",
-        message: `Dismiss ${scopeLabel()} proposals without applying them? The suggestions are deleted; entities and links are untouched.`,
+        message: `Dismiss ${scopeLabel()} proposals without applying them? Entities and links are untouched, and the adjudicator won't file these verdicts for these articles again.`,
         confirmLabel: "Dismiss",
         destructive: true,
       }))
     )
       return;
     try {
-      const r = await dismissProposals.mutateAsync({ action: actionFilter || undefined, origin, domain });
-      toast.success(`Dismissed ${r.dismissed} proposal${r.dismissed === 1 ? "" : "s"}`);
+      const r = await dismissAll.mutateAsync(scope);
+      toast.success(`Dismissed ${r.cleared_rows.toLocaleString()} proposal${r.cleared_rows === 1 ? "" : "s"}`);
     } catch (e) {
       toast.error(`Dismiss failed: ${(e as Error).message}`);
     }
   };
 
-  // Every pending proposal the table shows, through the same code the per-row
-  // Apply uses, as a background job. The adjudicator's rows go first, then the
-  // scans' reclassify advisories when the filters allow them.
+  // Every proposal the table shows, through the same code a row's Apply uses,
+  // as a background job. Type changes go to their proposed type; assessments
+  // are notes and never apply.
   const applyAll = async () => {
     if (
       !(await confirmDialog({
         title: "Apply proposals",
-        message: `Apply ${scopeLabel()} proposals now? Each one is applied the way the stage would in apply mode, and each stays undoable from History. This runs in the background; the queue updates as it goes.`,
+        message: `Apply ${scopeLabel()} proposals now? Each one is applied the way the stage would in apply mode (type changes to their proposed type), and each stays undoable from History. This runs in the background; the queue updates as it goes.`,
         confirmLabel: "Apply all",
         destructive: true,
       }))
     )
       return;
     try {
-      const job = await startBulkApply.mutateAsync({
-        kind: origin === "adjudicator" ? "adjudication" : "all",
-        action: actionFilter || undefined,
-        domain,
-      });
+      const job = await startBulkApply.mutateAsync(scope);
       setBulkJobId(job.job_id);
-      toast.info(`Applying ${job.total.toLocaleString()} proposal${job.total === 1 ? "" : "s"} in the background`);
+      if (job.total === 0) toast.message("Nothing here can be applied — assessments are notes only");
+      else toast.info(`Applying ${job.total.toLocaleString()} proposal${job.total === 1 ? "" : "s"} in the background`);
     } catch (e) {
       toast.error(`Apply failed: ${(e as Error).message}`);
     }
@@ -690,14 +691,16 @@ export function ProposalsQueue({
       ? `Applying ${bulkProgress.processed.toLocaleString()} / ${bulkProgress.total.toLocaleString()}…`
       : "Applying…"
     : "Apply all";
-  const byDomain = stats.data?.pending_by_domain ?? {};
-  const pendingTotal = groups.data?.proposals ?? stats.data?.pending_total ?? 0;
+  const byDomain = groups.data?.facets.domains ?? {};
+  const byOrigin = groups.data?.facets.origins ?? {};
+  const pendingTotal = groups.data?.proposals ?? 0;
 
   const applyLabel = (g: ReviewGroup) => {
-    const kinds = g.kinds.filter((k) => !RECLASSIFY_KINDS.has(k.action)).map((k) => k.action);
+    const kinds = g.kinds.filter((k) => !RECLASSIFY_KINDS.has(k.action) && k.action !== "adjudication_assessment").map((k) => k.action);
     if (kinds.length === 0) return null;
     if (kinds.every((k) => UNLINK_KINDS.has(k))) return "Remove links";
     if (kinds.every((k) => k === "adjudication_held_link")) return "Link";
+    if (kinds.every((k) => k === "adjudication_ioc_capture")) return "Capture";
     if (kinds.length === 1 && kinds[0] === "adjudication_merge") return "Merge";
     if (kinds.length === 1 && kinds[0] === "adjudication_veto") return "Delete";
     return "Apply";
@@ -723,13 +726,33 @@ export function ProposalsQueue({
             Applied
           </button>
         </div>
-        <button
-          className={`${styles.rowBtn} ${showTuning ? styles.segOn : styles.bGhost}`}
-          title="The knobs that decide what is applied at ingest and what lands here instead"
-          onClick={() => setShowTuning((v) => !v)}
-        >
-          ⚙ Tuning
-        </button>
+        {onToggleSettings && (
+          <button
+            className={`${styles.rowBtn} ${settingsOpen ? styles.segOn : styles.bGhost}`}
+            title="The adjudicator's settings: what is applied at ingest and what lands here instead"
+            aria-expanded={settingsOpen}
+            onClick={onToggleSettings}
+          >
+            ⚙ Settings
+          </button>
+        )}
+        {scans.length > 0 && (
+          <ToolbarDropdown
+            label="Generate proposals"
+            triggerClassName={`${styles.rowBtn} ${styles.bGhost}`}
+            title="Scans that file fresh proposals into this queue"
+          >
+            {scans.map((s) => (
+              <DropdownItem
+                key={s.label}
+                label={s.busy ? `${s.label} — working…` : s.label}
+                title={s.title}
+                disabled={s.busy}
+                onClick={s.run}
+              />
+            ))}
+          </ToolbarDropdown>
+        )}
 
         {!hist && (
           <input
@@ -740,35 +763,47 @@ export function ProposalsQueue({
           />
         )}
 
-        <span className={styles.facetLabel}>Domain</span>
-        <div className={styles.seg} title="What applying the proposal changes">
-          <button className={domainFilter === "" ? styles.segOn : ""} onClick={() => setDomainFilter("")}>
-            All
-          </button>
-          {PROPOSAL_DOMAINS.map((d) => (
-            <button key={d} className={domainFilter === d ? styles.segOn : ""} onClick={() => setDomainFilter(d)}>
-              {DOMAIN_LABELS[d]}
-              {!hist && byDomain[d] ? <span className={styles.segCnt}>{byDomain[d]?.toLocaleString()}</span> : null}
-            </button>
-          ))}
-        </div>
+      </div>
 
-        <span className={styles.facetLabel}>Origin</span>
-        <div className={styles.seg} title="Who proposed it">
-          {ORIGINS.filter((o) => !hist || !o.queueOnly).map((o) => (
-            <button
-              key={o.value || "all"}
-              className={originFilter === o.value ? styles.segOn : ""}
-              title={o.title}
-              onClick={() => setOriginFilter(o.value)}
-            >
-              {o.label}
+      {/* filters — each label stays with its control when the row wraps */}
+      <div className={styles.toolbar}>
+        <span className={styles.facet}>
+          <span className={styles.facetLabel}>Domain</span>
+          <span className={styles.seg} title="What applying the proposal changes">
+            <button className={domainFilter === "" ? styles.segOn : ""} onClick={() => setDomainFilter("")}>
+              All
             </button>
-          ))}
-        </div>
+            {PROPOSAL_DOMAINS.map((d) => (
+              <button key={d} className={domainFilter === d ? styles.segOn : ""} onClick={() => setDomainFilter(d)}>
+                {DOMAIN_LABELS[d]}
+                {!flat && byDomain[d] ? <span className={styles.segCnt}>{byDomain[d]?.toLocaleString()}</span> : null}
+              </button>
+            ))}
+          </span>
+        </span>
 
-        <label className={styles.facetLabel}>
-          Action
+        <span className={styles.facet}>
+          <span className={styles.facetLabel}>Origin</span>
+          <span className={styles.seg} title="Who proposed it">
+            {ORIGINS.filter((o) => !hist || !o.queueOnly).map((o) => {
+              const n = o.value && o.value !== "orphaned" ? byOrigin[o.value] : undefined;
+              return (
+                <button
+                  key={o.value || "all"}
+                  className={originFilter === o.value ? styles.segOn : ""}
+                  title={o.title}
+                  onClick={() => setOriginFilter(o.value)}
+                >
+                  {o.label}
+                  {!flat && n ? <span className={styles.segCnt}>{n.toLocaleString()}</span> : null}
+                </button>
+              );
+            })}
+          </span>
+        </span>
+
+        <label className={styles.facet}>
+          <span className={styles.facetLabel}>Action</span>
           <select className={styles.sel} value={actionFilter} onChange={(e) => setActionFilter(e.target.value)}>
             {FILTERS.map((f) => (
               <option key={f.value || "all"} value={f.value}>
@@ -778,6 +813,19 @@ export function ProposalsQueue({
           </select>
         </label>
 
+        {!flat && (
+          <label className={styles.facet}>
+            <span className={styles.facetLabel}>Sort</span>
+            <select className={styles.sel} value={sort} onChange={(e) => setSort(e.target.value as ReviewSort)}>
+              {SORTS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
         <span className={styles.grow} />
 
         {!hist && !orphaned && (
@@ -785,29 +833,22 @@ export function ProposalsQueue({
             <button
               className={styles.btn}
               disabled={bulkRunning || pendingTotal === 0}
-              title="Apply every proposal the table shows, in the background, through the same code the per-row Apply uses"
+              title="Apply every proposal the table shows, in the background, through the same code a row's Apply uses"
               onClick={applyAll}
             >
               {bulkLabel}
             </button>
-            <button className={styles.btnDanger} disabled={dismissProposals.isPending || bulkRunning} onClick={clearAll}>
-              {dismissProposals.isPending ? "Clearing…" : "Dismiss all"}
+            <button
+              className={styles.btnDanger}
+              disabled={dismissAll.isPending || bulkRunning || pendingTotal === 0}
+              title="Dismiss every proposal the table shows"
+              onClick={clearAll}
+            >
+              {dismissAll.isPending ? "Clearing…" : "Dismiss all"}
             </button>
           </>
         )}
       </div>
-
-      {showTuning && (
-        <div className={styles.tuning}>
-          <p className={styles.note}>
-            In <strong>Applied</strong> mode a verdict still lands here instead of being applied when it is under the
-            confidence floor, when it is a type change that has not reached consensus yet, when the article tripped the
-            circuit breaker (too many destructive verdicts in one review), or when it is an assessment (those are only ever
-            notes). The duplicate review always files its merges here. The full stage panel is under Entries → AI review.
-          </p>
-          <SystemSettings filterKeys={TUNING_KEYS} flat hideGroupTitle />
-        </div>
-      )}
 
       {orphaned && <p className={styles.note}>{ORPHANED_NOTE}</p>}
 
@@ -839,7 +880,7 @@ export function ProposalsQueue({
               rows.map((row) => <ProposalRow key={row.id} row={row} hist={hist} busy={busyRow === row.id} onAction={doRow} />)}
             {!flat &&
               groupRows.map((g) => {
-                const k = keyOf(g);
+                const k = g.key;
                 const busy = busyRow === k;
                 const isOpen = open.has(k);
                 const label = applyLabel(g);
@@ -853,19 +894,23 @@ export function ProposalsQueue({
                         {g.entity_id && !NO_ENTITY_MENU.has(g.entity_type) ? (
                           <button
                             className={styles.ent}
-                            disabled={!g.exists}
                             onClick={() => navigate(`/workbench/${g.entity_type}/${g.entity_id}`)}
-                            title={g.exists ? getEntityLabel(g.entity_type) : "Already deleted or converted"}
+                            title={getEntityLabel(g.entity_type)}
                           >
                             <span className={styles.entDot} style={{ background: getEntityCssVar(g.entity_type) }} />
                             {g.name}
-                            {!g.exists && <span className={cg.gone}>gone</span>}
                           </button>
                         ) : (
                           <span className={styles.muted}>{g.name || g.entity_type}</span>
                         )}
                         <span className={cg.entMeta}>
-                          {g.entity_type === "relationship" ? "Relationship" : g.entity_id ? getEntityLabel(g.entity_type) : ""}
+                          {g.entity_type === "relationship"
+                            ? "Relationship"
+                            : g.entity_type === "entry"
+                              ? "Article"
+                              : g.entity_id
+                                ? getEntityLabel(g.entity_type)
+                                : ""}
                           {g.linked !== null && g.linked !== undefined ? ` · ${g.linked.toLocaleString()} article${g.linked === 1 ? "" : "s"}` : ""}
                         </span>
                       </td>
@@ -881,15 +926,19 @@ export function ProposalsQueue({
                             );
                           })}
                           {g.merge_into.map((m) => (
-                            <a key={m.target_id} className={styles.linkChip} href={`/workbench/${m.target_type}/${m.target_id}`}>
+                            <Link
+                              key={m.target_id}
+                              className={styles.linkChip}
+                              to={`/workbench/${m.target_type}/${m.target_id}`}
+                            >
                               into {m.name ?? "?"}
-                            </a>
+                            </Link>
                           ))}
                           {g.reclassify_to.map((s) => (
                             <button
                               key={s.type}
                               className={cg.target}
-                              disabled={busy || !g.exists}
+                              disabled={busy}
                               onClick={() => reclassifyGroup(g, s.type)}
                               title={`Convert ${g.name} to a ${getEntityLabel(s.type).toLowerCase()} — proposed by ${s.count} article${s.count === 1 ? "" : "s"}`}
                             >
@@ -898,9 +947,15 @@ export function ProposalsQueue({
                               <span className={cg.cnt}>{s.count.toLocaleString()}</span>
                             </button>
                           ))}
+                          <ConfidenceChip value={g.confidence} />
                           {g.origin === "adjudicator" && (
                             <span className={styles.originTag} title="Filed by the post-analysis review, with the article in hand">
                               adjudicator
+                            </span>
+                          )}
+                          {g.origin === "merge_review" && (
+                            <span className={styles.originTag} title="Filed by the catalogue-wide duplicate review, from the two profiles side by side">
+                              duplicate review
                             </span>
                           )}
                         </div>
@@ -949,7 +1004,7 @@ export function ProposalsQueue({
                               className={`${styles.rowBtn} ${label === "Remove links" || label === "Delete" ? styles.bWarn : styles.bGood}`}
                               disabled={busy || bulkRunning}
                               onClick={() => applyGroup(g)}
-                              title="Apply every proposal in this row (type changes use the chips)"
+                              title="Apply what this row shows under the filters (type changes use the chips)"
                             >
                               {label}
                             </button>
@@ -960,19 +1015,19 @@ export function ProposalsQueue({
                             onClick={() => dismissGroup(g)}
                             title={
                               g.entity_id
-                                ? "Leave it as it is — keep its links and type, clear every proposal about it, and don't propose these again"
-                                : "Drop this proposal"
+                                ? "Leave it as it is: clear what this row shows under the filters. The adjudicator won't file these verdicts for these articles again, and a dismissed type change isn't proposed again; a scan can propose its fix again"
+                                : "Drop this proposal; the adjudicator won't file it for this article again"
                             }
                           >
                             Dismiss
                           </button>
-                          {g.entity_id && g.exists && !NO_ENTITY_MENU.has(g.entity_type) && (
+                          {g.entity_id && !NO_ENTITY_MENU.has(g.entity_type) && (
                             <EntityRowActions entityType={g.entity_type} entityId={g.entity_id} name={g.name} disabled={busy} />
                           )}
                         </div>
                       </td>
                     </tr>
-                    {isOpen && <GroupRows group={g} busy={busy} onAction={doRow} />}
+                    {isOpen && <GroupRows group={g} scope={scope} busy={busy} onAction={doRow} />}
                   </Fragment>
                 );
               })}
@@ -981,7 +1036,7 @@ export function ProposalsQueue({
                 <td colSpan={5} className={styles.empty}>
                   {q
                     ? "No pending proposals match."
-                    : `No pending proposals — nothing waiting for review.${scans.length ? " Run a scan below to generate some." : ""}`}
+                    : `No pending proposals — nothing waiting for review.${scans.length ? " Generate proposals runs the scans that file more." : ""}`}
                 </td>
               </tr>
             )}
@@ -1004,29 +1059,30 @@ export function ProposalsQueue({
           </tbody>
         </table>
       </div>
-      {!flat && total > PAGE && (
+      {!flat && (total > PAGE || offset > 0) && (
         <div className={cg.pager}>
           <button className={styles.rowBtn} disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>
             ← Prev
           </button>
           <span className={styles.muted}>
-            {offset + 1}–{Math.min(offset + PAGE, total)} of {total.toLocaleString()} entities
+            {Math.min(offset + 1, total)}–{Math.min(offset + PAGE, total)} of {total.toLocaleString()} entities
           </span>
           <button className={styles.rowBtn} disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>
             Next →
           </button>
         </div>
       )}
-
-      {/* scans that generate proposals into this queue */}
-      {scans.length > 0 && (
-        <div className={styles.genRow}>
-          <span className={styles.genLabel}>Generate proposals</span>
-          {scans.map((s) => (
-            <button key={s.label} className={styles.genBtn} disabled={s.busy} title={s.title} onClick={s.run}>
-              {s.busy ? "Working…" : s.label}
-            </button>
-          ))}
+      {flat && (feed.data?.has_more || offset > 0) && (
+        <div className={cg.pager}>
+          <button className={styles.rowBtn} disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>
+            ← Newer
+          </button>
+          <span className={styles.muted}>
+            {(offset + 1).toLocaleString()}–{(offset + rows.length).toLocaleString()}
+          </span>
+          <button className={styles.rowBtn} disabled={!feed.data?.has_more} onClick={() => setOffset(offset + PAGE)}>
+            Older →
+          </button>
         </div>
       )}
     </div>

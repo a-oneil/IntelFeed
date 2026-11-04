@@ -50,6 +50,9 @@ class EntityLinkValidationLog(Base):
     original_extracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # When action='needs_reclassification', the entity_type Claude recommends.
     suggested_entity_type: Mapped[str | None] = mapped_column(String(20))
+    # The verdict's own confidence (high / medium / low), as the reviewer
+    # gave it — not the link's, which is original_confidence.
+    verdict_confidence: Mapped[str | None] = mapped_column(String(10))
     # Pointer to the full AI prompt/response that produced this decision.
     ai_result_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ai_results.id", ondelete="SET NULL"), nullable=True

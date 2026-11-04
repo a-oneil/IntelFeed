@@ -396,7 +396,7 @@ async def test_manifest_edges_and_ai_iocs(db_session: AsyncSession, feed):
         )
     )
     entry.observable_candidates = [
-        {"kind": "domain", "value": "blog.vendor-research.example", "origin": "ai", "evidence": "our blog"},
+        {"kind": "domain", "value": "cdn.vendor-research.net", "origin": "ai", "evidence": "our blog"},
         {"kind": "ipv4", "value": "10.0.0.1", "origin": "scan"},
     ]
     await db_session.flush()
@@ -434,8 +434,10 @@ async def test_manifest_edges_and_ai_iocs(db_session: AsyncSession, feed):
     edge = edges[0]
     assert "Warlock uses Cobalt Strike" in edge.line and "Defenders should watch" in edge.line
     iocs = [it for it in items if it.kind == "ioc"]
-    assert [it.ioc_value for it in iocs] == ["blog.vendor-research.example"]  # scan-origin excluded
-    assert "staged by the AI" in iocs[0].line
+    # the private address fails today's validators, so it is judged without a review
+    assert [it.ioc_value for it in iocs] == ["cdn.vendor-research.net"]
+    assert "CANDIDATE: staged by the analysis" in iocs[0].line
+    assert [c["value"] for c in entry.observable_candidates if c.get("reviewed")] == ["10.0.0.1"]
 
 
 # ------------------------------------------------------------------ validation
@@ -1031,7 +1033,7 @@ async def test_shadow_writes_proposals_and_mutates_nothing(db_session: AsyncSess
         evidence_entry_ids=[entry.id],
     )
     db_session.add(edge)
-    entry.observable_candidates = [{"kind": "domain", "value": "blog.vendor-research.example", "origin": "ai"}]
+    entry.observable_candidates = [{"kind": "domain", "value": "cdn.vendor-research.net", "origin": "ai"}]
     await db_session.flush()
 
     items, _ = await build_manifest(db_session, entry, _payload())
@@ -1075,7 +1077,7 @@ async def test_shadow_writes_proposals_and_mutates_nothing(db_session: AsyncSess
                 "reason": "Cobalt Strike only in generic advice",
             },
             {
-                "item_id": "ioc:domain:blog.vendor-research.example",
+                "item_id": "ioc:domain:cdn.vendor-research.net",
                 "verdict": "drop",
                 "confidence": "high",
                 "reason": "own blog",
@@ -1096,7 +1098,7 @@ async def test_shadow_writes_proposals_and_mutates_nothing(db_session: AsyncSess
         await db_session.execute(select(EntryThreatActor).where(EntryThreatActor.entry_id == entry.id))
     ).scalars().all().__len__() == 3
     assert (await db_session.get(EntityRelationship, edge.id)).confidence == "probable"
-    assert (await db_session.get(Entry, entry.id)).observable_candidates[0]["value"] == "blog.vendor-research.example"
+    assert (await db_session.get(Entry, entry.id)).observable_candidates[0]["value"] == "cdn.vendor-research.net"
     assert await db_session.get(ThreatActor, victim.id) is not None
 
     # Proposals landed in the two logs the queues read.
@@ -1115,7 +1117,7 @@ async def test_shadow_writes_proposals_and_mutates_nothing(db_session: AsyncSess
     assert maint[(ACTION_MERGE, "threat_actor")].after["merge_into"] == "Storm"
     assert maint[(ACTION_UNLINK, "tool")].entity_id == cobalt.id
     assert maint[(ACTION_EDGE_DEMOTE, "relationship")].entity_id == edge.id
-    assert maint[(ACTION_IOC_DROP, "observable")].after["value"] == "blog.vendor-research.example"
+    assert maint[(ACTION_IOC_DROP, "observable")].after["value"] == "cdn.vendor-research.net"
     assert all(r.mode == "shadow" and r.applied is False for r in maint.values())
 
 
@@ -1364,8 +1366,10 @@ async def test_feed_tags_origin_and_filters_adjudicator_rows(client, admin_heade
     rows = resp.json()["rows"]
     assert {r["origin"] for r in rows} == {"adjudicator"}
     actions = sorted(r["action"] for r in rows)
-    assert actions == [ACTION_VETO, "shadow_remove"]
+    # the validator's leftover row counts as the adjudicator's too
+    assert actions == [ACTION_VETO, "shadow_remove", "shadow_remove"]
     veto = next(r for r in rows if r["action"] == ACTION_VETO)
+    assert veto["confidence"] == "high" and veto["entity_name"] == "Water Utility Co"
     assert veto["subject"].startswith("Veto: Water Utility Co")
     assert veto["actions"] == ["apply", "dismiss"]
     assert {link["kind"] for link in veto["links"]} == {"entity", "entry"}
@@ -1373,11 +1377,10 @@ async def test_feed_tags_origin_and_filters_adjudicator_rows(client, admin_heade
     resp = await client.get(
         "/api/admin/hygiene/feed", params={"pending": "true", "origin": "scan"}, headers=admin_headers
     )
-    rows = resp.json()["rows"]
-    assert len(rows) == 1 and rows[0]["origin"] == "scan" and rows[0]["reason"] == "nightly"
+    assert resp.json()["rows"] == []
 
     stats = (await client.get("/api/admin/hygiene/stats", headers=admin_headers)).json()
-    assert stats["adjudication_mode"] == "shadow" and stats["adjudication_pending"] == 2
+    assert stats["adjudication_mode"] == "shadow" and stats["adjudication_pending"] == 3
 
     # The drawer endpoint keys the same rows by manifest item id.
     resp = await client.get(f"/api/engine/entries/{entry.id}/adjudication", headers=admin_headers)
@@ -1523,7 +1526,7 @@ async def test_apply_demotes_edge_like_the_nightly_job_and_drops_iocs(db_session
     db_session.add(obs)
     await db_session.flush()
     db_session.add(EntryObservable(entry_id=entry.id, observable_id=obs.id, source="ai", confidence="high"))
-    entry.observable_candidates = [{"kind": "domain", "value": "blog.vendor-research.example", "origin": "ai"}]
+    entry.observable_candidates = [{"kind": "domain", "value": "cdn.vendor-research.net", "origin": "ai"}]
     await db_session.flush()
 
     items, verdicts = await _verdicts_for(
@@ -1537,7 +1540,7 @@ async def test_apply_demotes_edge_like_the_nightly_job_and_drops_iocs(db_session
                 "reason": "Cobalt Strike only in generic advice",
             },
             {
-                "item_id": "ioc:domain:blog.vendor-research.example",
+                "item_id": "ioc:domain:cdn.vendor-research.net",
                 "verdict": "drop",
                 "confidence": "high",
                 "reason": "own blog",
@@ -2532,8 +2535,9 @@ async def test_merge_is_not_counted_by_the_breaker(db_session: AsyncSession, fee
     assert "merge" not in adj.DESTRUCTIVE
 
 
-@pytest.mark.asyncio
-async def test_task_parks_a_paused_provider_for_the_sweep(db_session: AsyncSession, feed, monkeypatch):
+async def _run_task_with(db_session: AsyncSession, monkeypatch, entry, ai_result: dict) -> dict:
+    """Run the adjudicate task on ``entry`` against this session, with the
+    model answering ``ai_result``."""
     from contextlib import asynccontextmanager
 
     from app.models.ai_result import AIResult
@@ -2541,13 +2545,8 @@ async def test_task_parks_a_paused_provider_for_the_sweep(db_session: AsyncSessi
     from app.models.user import User
     from app.workers import adjudication_tasks as tasks
 
-    await _seed_settings(db_session)
     system = User(username="system", password_hash="x", role="system")
     db_session.add(system)
-    await db_session.flush()
-    entry = await _make_entry(db_session, feed)
-    await _request(db_session, entry)
-    await _link_actor(db_session, entry, "Storm")
     task_row = AITask(
         name="entry_analysis", display_name="t", description="", category="extraction", default_prompt_template="x"
     )
@@ -2572,7 +2571,7 @@ async def test_task_parks_a_paused_provider_for_the_sweep(db_session: AsyncSessi
         yield db_session
 
     async def fake_run_task(db, user_id, task_name, variables, **kwargs):
-        return {"_extraction_status": "provider_paused", "_pause_until": "2026-10-08T12:00:00+00:00"}
+        return ai_result
 
     class _Lock:
         def set(self, *a, **k):
@@ -2592,8 +2591,21 @@ async def test_task_parks_a_paused_provider_for_the_sweep(db_session: AsyncSessi
     monkeypatch.setattr("app.ai.engine.run_task", fake_run_task)
     monkeypatch.setattr("app.services.system_user.get_system_user_id", fake_system_user)
     monkeypatch.setattr(db_session, "commit", noop_commit)
+    return await tasks._adjudicate_entry(entry.id)
 
-    detail = await tasks._adjudicate_entry(entry.id)
+
+@pytest.mark.asyncio
+async def test_task_parks_a_paused_provider_for_the_sweep(db_session: AsyncSession, feed, monkeypatch):
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    await _request(db_session, entry)
+    await _link_actor(db_session, entry, "Storm")
+    detail = await _run_task_with(
+        db_session,
+        monkeypatch,
+        entry,
+        {"_extraction_status": "provider_paused", "_pause_until": "2026-10-08T12:00:00+00:00"},
+    )
     assert detail["skipped"] == "provider_paused"
     row = (
         await db_session.execute(select(AIAnalysisRequest).where(AIAnalysisRequest.entry_id == entry.id))
@@ -2643,9 +2655,11 @@ async def test_bulk_apply_and_origin_scoped_dismiss(client, admin_headers, db_se
     await db_session.commit()
 
     entry_id, victim_id = entry.id, victim.id
-    resp = await client.post("/api/admin/hygiene/adjudication/apply-all", headers=admin_headers, json={})
+    resp = await client.post(
+        "/api/admin/hygiene/review-groups/apply", headers=admin_headers, json={"origin": "adjudicator"}
+    )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["applied"] == 2 and resp.json()["errors"] == []
+    assert resp.json()["applied"] == 2 and resp.json()["errors"] == [] and resp.json()["has_more"] is False
     db_session.expire_all()
     assert (
         await db_session.execute(select(EntryTool).where(EntryTool.entry_id == entry_id))
@@ -2662,7 +2676,7 @@ async def test_bulk_apply_and_origin_scoped_dismiss(client, admin_headers, db_se
 
     # Dismiss-all scoped to the adjudicator leaves the scanner's row alone.
     resp = await client.post(
-        "/api/admin/hygiene/dismiss-proposals", headers=admin_headers, json={"origin": "adjudicator"}
+        "/api/admin/hygiene/review-groups/dismiss", headers=admin_headers, json={"origin": "adjudicator"}
     )
     assert resp.status_code == 200
     db_session.expire_all()
@@ -2672,8 +2686,8 @@ async def test_bulk_apply_and_origin_scoped_dismiss(client, admin_headers, db_se
         .all()
     )
     assert [r.action for r in pending] == ["normalize_name"]
-    resp = await client.post("/api/admin/hygiene/dismiss-proposals", headers=admin_headers, json={"origin": "scan"})
-    assert resp.json()["dismissed"] == 1
+    resp = await client.post("/api/admin/hygiene/review-groups/dismiss", headers=admin_headers, json={"origin": "scan"})
+    assert resp.json()["cleared_rows"] == 1
 
 
 @pytest.mark.asyncio
@@ -2797,7 +2811,7 @@ async def test_processing_rows_show_the_ai_analysis_column(client, admin_headers
     names = [s["name"] for s in resp.json()["stages"]]
     assert names.index("analyze") == names.index("adjudicate") - 1
     analyze = next(s for s in resp.json()["stages"] if s["name"] == "analyze")
-    assert analyze["runs_24h"] == {"success": 1, "error": 1, "retry": 0, "queued": 1}
+    assert analyze["runs_24h"] == {"success": 1, "error": 1, "retry": 0, "new_error": 1, "new_retry": 0, "queued": 1}
 
 
 @pytest.mark.asyncio
@@ -2893,8 +2907,8 @@ async def test_a_restore_is_history_not_a_fresh_verdict(client, admin_headers, d
     audit_row = next(r for r in rows if r["action"] == adj.ACTION_RESTORED)
     assert audit_row["actions"] == [] and audit_row["origin"] == "adjudicator"
 
-    # And apply-all leaves the restored entity alone.
-    resp = await client.post("/api/admin/hygiene/adjudication/apply-all", json={}, headers=admin_headers)
+    # And Apply all leaves the restored entity alone.
+    resp = await client.post("/api/admin/hygiene/review-groups/apply", json={}, headers=admin_headers)
     assert resp.status_code == 200 and resp.json()["applied"] == 0
     db_session.expire_all()
     assert (
@@ -3180,7 +3194,7 @@ async def test_task_skips_a_row_already_reviewed(db_session: AsyncSession, feed,
 @pytest.mark.asyncio
 async def test_bulk_apply_start_and_progress(client, admin_headers, monkeypatch):
     """Starting a bulk apply records the job, queues the worker, and the
-    progress endpoint reads the record back. An unknown action is a 400 and a
+    progress endpoint reads the record back. An unknown domain is a 400 and a
     missing job a 404."""
     from app.workers import proposal_apply_tasks
 
@@ -3190,21 +3204,20 @@ async def test_bulk_apply_start_and_progress(client, admin_headers, monkeypatch)
     )
 
     resp = await client.post(
-        "/api/admin/hygiene/bulk-apply", headers=admin_headers, json={"kind": "adjudication", "action": "shadow_remove"}
+        "/api/admin/hygiene/bulk-apply", headers=admin_headers, json={"action": "shadow_remove", "q": "storm"}
     )
     assert resp.status_code == 202, resp.text
     job = resp.json()
     assert job["status"] == "queued"
     assert job["total"] == 0
-    assert queued and queued[0]["job_id"] == job["job_id"] and queued[0]["action"] == "shadow_remove"
+    assert queued and queued[0]["job_id"] == job["job_id"]
+    assert queued[0]["scope"]["action"] == "shadow_remove" and queued[0]["scope"]["q"] == "storm"
 
     resp = await client.get(f"/api/admin/hygiene/bulk-apply/{job['job_id']}", headers=admin_headers)
     assert resp.status_code == 200
-    assert resp.json()["kind"] == "adjudication"
+    assert resp.json()["scope"] == {"action": "shadow_remove", "q": "storm"}
 
-    resp = await client.post(
-        "/api/admin/hygiene/bulk-apply", headers=admin_headers, json={"kind": "adjudication", "action": "nope"}
-    )
+    resp = await client.post("/api/admin/hygiene/bulk-apply", headers=admin_headers, json={"domain": "nope"})
     assert resp.status_code == 400
 
     resp = await client.get("/api/admin/hygiene/bulk-apply/doesnotexist", headers=admin_headers)
@@ -3290,28 +3303,23 @@ async def test_review_domain_facet_spans_both_logs(client, admin_headers, db_ses
     assert stats["pending_by_domain"] == {"links": 1, "entities": 3, "relationships": 1}
     assert stats["pending_total"] == 5
 
-    # The one Apply all: kind "all" counts the adjudicator's rows in the domain
-    # plus the advisories when the domain allows them.
+    # Apply all covers what the domain shows, type changes included.
     queued: list[dict] = []
     monkeypatch.setattr(
         proposal_apply_tasks.bulk_apply_proposals, "apply_async", lambda *a, **kw: queued.append(kw["kwargs"])
     )
-    resp = await client.post(
-        "/api/admin/hygiene/bulk-apply", headers=admin_headers, json={"kind": "all", "domain": "entities"}
-    )
+    resp = await client.post("/api/admin/hygiene/bulk-apply", headers=admin_headers, json={"domain": "entities"})
     assert resp.status_code == 202, resp.text
     assert resp.json()["total"] == 3  # the veto, the observable drop, the advisory
-    assert queued[-1]["domain"] == "entities" and queued[-1]["kind"] == "all"
-    resp = await client.post(
-        "/api/admin/hygiene/bulk-apply", headers=admin_headers, json={"kind": "all", "domain": "relationships"}
-    )
+    assert queued[-1]["scope"]["domain"] == "entities"
+    resp = await client.post("/api/admin/hygiene/bulk-apply", headers=admin_headers, json={"domain": "relationships"})
     assert resp.json()["total"] == 1
 
     # Dismiss honours the facet too.
     resp = await client.post(
-        "/api/admin/hygiene/dismiss-proposals", headers=admin_headers, json={"domain": "relationships"}
+        "/api/admin/hygiene/review-groups/dismiss", headers=admin_headers, json={"domain": "relationships"}
     )
-    assert resp.json()["dismissed"] == 1
+    assert resp.json()["cleared_rows"] == 1
     assert await feed("relationships") == []
     assert len(await feed(None)) == 4
 
@@ -3404,7 +3412,7 @@ async def test_manifest_lists_a_rejected_held_match_until_it_is_reviewed(db_sess
     assert item.item_id == f"held:malware:{royal.id}"
     assert "NOT LINKED" in block and 'context: "The Royal ransomware gang' in block
 
-    await adj.mark_held_reviewed(db_session, items)
+    await adj.mark_reviewed(db_session, entry, items)
     items, _ = await build_manifest(db_session, entry, _payload())
     assert not any(it.kind == "held" for it in items)
 
@@ -3664,13 +3672,15 @@ async def test_a_recheck_reviews_only_the_held_matches(db_session: AsyncSession,
 
 
 @pytest.mark.asyncio
-async def test_held_review_owed_after_a_late_settle(db_session: AsyncSession, feed):
+async def test_review_owed_after_a_late_settle(db_session: AsyncSession, feed):
     entry, _royal, held = await _held_royal(db_session, feed, reviewed=True)
     started = datetime.now(UTC)
-    assert not await adj.held_review_owed(db_session, entry.id, started)
+    scope = {"links", "observables"}
+    assert not await adj.review_owed(db_session, entry, started, scope)
     held.resolution, held.resolved_at = "promoted", datetime.now(UTC)
     await db_session.flush()
-    assert await adj.held_review_owed(db_session, entry.id, started)
+    assert await adj.review_owed(db_session, entry, started, scope)
+    assert not await adj.review_owed(db_session, entry, started, {"observables"})
 
 
 @pytest.mark.asyncio
@@ -3680,3 +3690,349 @@ async def test_created_trigger_counts_an_unjudged_held_reject(db_session: AsyncS
     held.reviewed_at = datetime.now(UTC)
     await db_session.flush()
     assert not await adj._created_something(db_session, entry.id, None)
+
+
+# ------------------------------------------------------------------ observable candidates
+
+
+def _cand(value, kind="domain", **extra):
+    return {"kind": kind, "value": value, "surface_form": value, "origin": "scan", **extra}
+
+
+def _capture(value, kind="domain", confidence="high"):
+    return {
+        "item_id": f"ioc:{kind}:{value}",
+        "verdict": "capture",
+        "confidence": confidence,
+        "reason": f"{value} is listed in the article's indicators",
+    }
+
+
+def _capture_rows():
+    return select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == adj.ACTION_IOC_CAPTURE)
+
+
+@pytest.mark.asyncio
+async def test_every_candidate_is_reviewed_scan_ones_too(db_session: AsyncSession, feed):
+    entry = await _make_entry(db_session, feed)
+    entry.observable_candidates = [_cand("beliefdesk.xyz", was_defanged=True), _cand("89.125.244.131", kind="ipv4")]
+    await db_session.flush()
+    items, block = await build_manifest(db_session, entry, _payload())
+    iocs = [it for it in items if it.kind == "ioc"]
+    assert [it.ioc_value for it in iocs] == ["beliefdesk.xyz", "89.125.244.131"]  # defanged first
+    assert all(it.staged for it in iocs) and "CANDIDATE: spotted by the pattern scan" in block
+
+    await adj.mark_reviewed(db_session, entry, items)
+    assert all(c.get("reviewed") for c in entry.observable_candidates)
+    items, _ = await build_manifest(db_session, entry, _payload())
+    assert not any(it.kind == "ioc" for it in items)
+
+
+def test_validate_capture_only_on_a_candidate():
+    staged = ReviewItem(item_id="ioc:domain:a.xyz", kind="ioc", line="", name="a.xyz", staged=True)
+    captured = ReviewItem(item_id="ioc:domain:b.xyz", kind="ioc", line="", name="b.xyz")
+    verdicts, stats = _validate_verdicts({"verdicts": [_capture("a.xyz"), _capture("b.xyz")]}, [staged, captured])
+    assert [v.verdict for v in verdicts] == ["capture", "keep"]
+    verdicts, stats = _validate_verdicts({"verdicts": []}, [staged])
+    assert stats["candidates_unanswered"] == 1
+
+
+@pytest.mark.asyncio
+async def test_shadow_capture_is_a_proposal_that_applies_and_restores(db_session: AsyncSession, feed):
+    from app.models.observable import EntryObservable, Observable
+
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    entry.observable_candidates = [_cand("beliefdesk.xyz", was_defanged=True, role="delivery")]
+    await db_session.flush()
+    _items, verdicts = await _verdicts_for(db_session, entry, [_capture("beliefdesk.xyz")])
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), await adj._settings(db_session))
+    await db_session.flush()
+    assert detail["shadowed"] == 1
+    assert await db_session.scalar(select(func.count()).select_from(Observable)) == 0
+    row = (await db_session.execute(_capture_rows())).scalar_one()
+    assert row.applied is False and row.entity_type == "observable" and row.entity_id is None
+
+    from app.services.proposal_apply import proposal_domain
+
+    assert proposal_domain("entity_maintenance", row.action) == "entities"
+
+    assert (await adj.apply_adjudication_row(db_session, row))["applied"] is True
+    await db_session.flush()
+    obs = (await db_session.execute(select(Observable))).scalar_one()
+    assert (obs.value, obs.created_via, obs.role, obs.needs_review) == (
+        "beliefdesk.xyz",
+        "adjudicator",
+        "delivery",
+        True,
+    )
+    sighting = (await db_session.execute(select(EntryObservable))).scalar_one()
+    assert sighting.source == "adjudicator" and sighting.was_defanged is True
+    assert entry.observable_candidates == []
+    assert row.entity_id == obs.id
+
+    assert (await adj.restore_adjudication_row(db_session, row))["deleted"] is True
+    await db_session.flush()
+    assert await db_session.scalar(select(func.count()).select_from(Observable)) == 0
+    [back] = entry.observable_candidates
+    assert back["value"] == "beliefdesk.xyz" and back["reviewed"] is True
+
+
+@pytest.mark.asyncio
+async def test_apply_mode_captures_at_high_confidence(db_session: AsyncSession, feed):
+    from app.models.observable import Observable
+
+    await _seed_settings(db_session, adjudication_mode="apply")
+    entry = await _make_entry(db_session, feed)
+    entry.observable_candidates = [_cand("beliefdesk.xyz"), _cand("inkact.xyz")]
+    await db_session.flush()
+    _items, verdicts = await _verdicts_for(
+        db_session, entry, [_capture("beliefdesk.xyz"), _capture("inkact.xyz", confidence="medium")]
+    )
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), await adj._settings(db_session))
+    await db_session.flush()
+    assert detail["applied"] == 1
+    assert [o.value for o in (await db_session.execute(select(Observable))).scalars()] == ["beliefdesk.xyz"]
+    pending = (await db_session.execute(_capture_rows().where(EntityMaintenanceLog.applied.is_(False)))).scalar_one()
+    assert pending.after["value"] == "inkact.xyz"
+
+
+@pytest.mark.asyncio
+async def test_capturing_a_never_capture_value_is_moot(db_session: AsyncSession, feed):
+    from app.models.observable import Observable
+    from app.services.proposal_apply import outcome_is_moot
+
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    db_session.add(Observable(kind="domain", value="beliefdesk.xyz", is_denied=True, created_via="manual"))
+    entry.observable_candidates = [_cand("beliefdesk.xyz")]
+    await db_session.flush()
+    _items, verdicts = await _verdicts_for(db_session, entry, [_capture("beliefdesk.xyz")])
+    await apply_verdicts(db_session, entry, verdicts, _payload(), await adj._settings(db_session))
+    row = (await db_session.execute(_capture_rows())).scalar_one()
+    outcome = await adj.apply_adjudication_row(db_session, row)
+    assert outcome == {"applied": False, "reason": "value refused"} and outcome_is_moot(row, outcome)
+
+
+@pytest.mark.asyncio
+async def test_candidates_past_the_cap_are_owed_a_recheck(db_session: AsyncSession, feed):
+    entry = await _make_entry(db_session, feed)
+    entry.observable_candidates = [_cand(f"host{i}.inkact.xyz") for i in range(adj._MAX_CANDIDATE_ITEMS + 3)]
+    await db_session.flush()
+    items, _ = await build_manifest(db_session, entry, _payload())
+    assert sum(1 for it in items if it.kind == "ioc") == adj._MAX_CANDIDATE_ITEMS
+    await adj.mark_reviewed(db_session, entry, items)
+    started = datetime.now(UTC)
+    assert await adj.review_owed(db_session, entry, started, {"observables"})
+    recheck, _ = await build_manifest(db_session, entry, _payload(), recheck_since=started)
+    assert len(recheck) == 3
+
+
+@pytest.mark.asyncio
+async def test_sweep_queues_recent_reviewed_articles_with_unjudged_candidates(db_session: AsyncSession, feed):
+    from datetime import timedelta
+
+    await _seed_settings(db_session)
+    fresh = await _make_entry(db_session, feed)
+    fresh.observable_candidates = [_cand("beliefdesk.xyz")]
+    judged = await _make_entry(db_session, feed)
+    judged.observable_candidates = [_cand("inkact.xyz", reviewed=True)]
+    old = await _make_entry(db_session, feed)
+    old.observable_candidates = [_cand("wishgrove.cfd")]
+    old.fetched_at = datetime.now(UTC) - timedelta(days=adj.CANDIDATE_REVIEW_DAYS + 1)
+    rows = {}
+    for e in (fresh, judged, old):
+        rows[e.id] = await _request(db_session, e)
+        rows[e.id].adjudication_status = adj.COMPLETED
+    await db_session.flush()
+
+    assert await adj.queue_candidate_reviews(db_session) == 1
+    assert rows[fresh.id].adjudication_status == adj.RECHECK
+    assert rows[judged.id].adjudication_status == adj.COMPLETED
+    assert rows[old.id].adjudication_status == adj.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_dropping_candidates_never_trips_the_breaker(db_session: AsyncSession, feed):
+    await _seed_settings(db_session, adjudication_mode="apply")
+    entry = await _make_entry(db_session, feed)
+    await _link_actor(db_session, entry, "Warlock", article_count=14)
+    entry.observable_candidates = [_cand(f"host{i}.inkact.xyz") for i in range(4)]
+    await db_session.flush()
+    drops = [
+        {"item_id": f"ioc:domain:host{i}.inkact.xyz", "verdict": "drop", "confidence": "high", "reason": "example"}
+        for i in range(4)
+    ]
+    _items, verdicts = await _verdicts_for(db_session, entry, drops)
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), await adj._settings(db_session))
+    assert detail["mode"] == "apply" and detail["breaker"] is False and detail["applied"] == 4
+    assert entry.observable_candidates == []
+
+
+@pytest.mark.asyncio
+async def test_processing_view_loads_with_no_entries_in_the_window(client, admin_headers, db_session: AsyncSession):
+    resp = await client.get("/api/engine/processing", headers=admin_headers, params={"window": "24h"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["entries"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_dismissed_verdict_is_not_filed_or_applied_again(db_session: AsyncSession, feed, admin_user):
+    from app.api.hygiene import dismiss_review_rows
+
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    storm = await _link_actor(db_session, entry, "Storm")
+    raw = [
+        {
+            "item_id": f"link:threat_actor:{storm.id}",
+            "verdict": "remove",
+            "confidence": "high",
+            "reason": "Storm here is weather",
+        }
+    ]
+    _items, verdicts = await _verdicts_for(db_session, entry, raw)
+    await apply_verdicts(db_session, entry, verdicts, _payload(), await adj._settings(db_session))
+    await db_session.flush()
+    [row] = (await db_session.execute(select(EntityLinkValidationLog))).scalars().all()
+    assert await dismiss_review_rows(db_session, [("link_validator", row)], admin_user.id) == 1
+
+    # The next review of the article says the same thing, in apply mode even:
+    # nothing is filed, and the link stays.
+    _items, verdicts = await _verdicts_for(db_session, entry, raw)
+    cfg = {**(await adj._settings(db_session)), "mode": "apply"}
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.flush()
+    assert detail["dismissed_skipped"] == 1 and detail["applied"] == 0 and detail["shadowed"] == 0
+    assert (await db_session.execute(select(EntityLinkValidationLog))).scalars().all() == []
+    linked = (
+        (await db_session.execute(select(EntryThreatActor).where(EntryThreatActor.entry_id == entry.id)))
+        .scalars()
+        .all()
+    )
+    assert [j.threat_actor_id for j in linked] == [storm.id]
+
+
+@pytest.mark.asyncio
+async def test_processing_view_takes_every_console_window(client, admin_headers, db_session: AsyncSession, feed):
+    await _make_entry(db_session, feed)
+    await db_session.commit()
+    for window in ("1h", "24h", "7d", "30d", "all"):
+        resp = await client.get("/api/engine/processing", headers=admin_headers, params={"window": window})
+        assert resp.status_code == 200, (window, resp.text)
+        assert resp.json()["stats"]["ingested"] >= 1 and len(resp.json()["stats"]["ingest_series"]) == 24
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_review_still_marks_its_candidates_judged(db_session: AsyncSession, feed, monkeypatch):
+    """A reply that answers one item twice writes nothing, but its candidates
+    must not stay unjudged: the sweep would reopen the article every 30
+    minutes for a month."""
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    row = await _request(db_session, entry)
+    storm = await _link_actor(db_session, entry, "Storm")
+    entry.observable_candidates = [_cand("beliefdesk.xyz")]
+    await db_session.flush()
+    keep = {"item_id": f"link:threat_actor:{storm.id}", "verdict": "keep", "confidence": "high", "reason": "named"}
+    detail = await _run_task_with(
+        db_session, monkeypatch, entry, {"_extraction_status": "success", "verdicts": [keep, keep]}
+    )
+    assert detail["skipped"] == "ai_bad_shape"
+    assert all(c.get("reviewed") for c in entry.observable_candidates)
+    row.adjudication_status = adj.COMPLETED
+    await db_session.flush()
+    assert await adj.queue_candidate_reviews(db_session) == 0
+
+
+@pytest.mark.asyncio
+async def test_candidate_sweep_waits_while_the_ai_queue_is_deep(db_session: AsyncSession, feed, monkeypatch):
+    await _seed_settings(db_session)
+
+    async def _deep() -> int:
+        return adj.RESWEEP_QUEUE_CEILING + 1
+
+    entry = await _make_entry(db_session, feed)
+    entry.observable_candidates = [_cand("beliefdesk.xyz")]
+    row = await _request(db_session, entry)
+    row.adjudication_status = adj.COMPLETED
+    await db_session.flush()
+    monkeypatch.setattr(adj, "_ai_queue_depth", _deep)
+    assert await adj.queue_candidate_reviews(db_session) == 0
+    assert row.adjudication_status == adj.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_capture_automations_run_once_per_article(db_session: AsyncSession, feed, monkeypatch):
+    await _seed_settings(db_session, adjudication_mode="apply")
+    queued: list = []
+    monkeypatch.setattr(
+        "app.workers.automation_tasks.dispatch_observable_capture_automations",
+        lambda entry_id, countdown=5: queued.append(entry_id),
+    )
+    entry = await _make_entry(db_session, feed)
+    entry.observable_candidates = [_cand("beliefdesk.xyz"), _cand("inkact.xyz"), _cand("wishgrove.cfd")]
+    await db_session.flush()
+    _items, verdicts = await _verdicts_for(
+        db_session, entry, [_capture("beliefdesk.xyz"), _capture("inkact.xyz"), _capture("wishgrove.cfd")]
+    )
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), await adj._settings(db_session))
+    assert detail["applied"] == 3 and queued == [entry.id]
+
+
+@pytest.mark.asyncio
+async def test_restoring_a_capture_keeps_an_observable_another_article_sights(db_session: AsyncSession, feed):
+    from app.intelligence.observables import record_sighting
+    from app.models.observable import EntryObservable, Observable
+
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    other = await _make_entry(db_session, feed)
+    entry.observable_candidates = [_cand("beliefdesk.xyz")]
+    await db_session.flush()
+    _items, verdicts = await _verdicts_for(db_session, entry, [_capture("beliefdesk.xyz")])
+    await apply_verdicts(db_session, entry, verdicts, _payload(), await adj._settings(db_session))
+    row = (await db_session.execute(_capture_rows())).scalar_one()
+    assert (await adj.apply_adjudication_row(db_session, row))["applied"] is True
+    await db_session.flush()
+    obs = (await db_session.execute(select(Observable))).scalar_one()
+    await record_sighting(db_session, other.id, obs, source="manual", surface_form="beliefdesk.xyz")
+    await db_session.flush()
+
+    assert not (await adj.restore_adjudication_row(db_session, row)).get("deleted")
+    await db_session.flush()
+    assert (await db_session.execute(select(Observable))).scalar_one().id == obs.id
+    sightings = (await db_session.execute(select(EntryObservable.entry_id))).scalars().all()
+    assert sightings == [other.id]
+    assert entry.observable_candidates[0]["value"] == "beliefdesk.xyz"
+
+
+def test_dismissals_are_recorded_only_for_verdicts_a_review_checks():
+    from app.api.hygiene import LINK_SOURCE, MAINT_SOURCE, _verdict_record
+
+    entry_id, eid = uuid.uuid4(), uuid.uuid4()
+
+    def maint(action, **after):
+        return EntityMaintenanceLog(
+            entity_type="threat_actor",
+            entity_id=eid,
+            action=action,
+            before={"entry_id": str(entry_id)},
+            after=after,
+            applied=False,
+        )
+
+    link = EntityLinkValidationLog(entity_type="malware", entity_id=eid, entry_id=entry_id, action="shadow_remove")
+    assert _verdict_record(LINK_SOURCE, link) == (adj.ACTION_UNLINK, "malware", eid, entry_id)
+    for action in (
+        adj.ACTION_VETO,
+        adj.ACTION_MERGE,
+        adj.ACTION_HELD_LINK,
+        adj.ACTION_EDGE_DEMOTE,
+        adj.ACTION_IOC_DROP,
+    ):
+        assert _verdict_record(MAINT_SOURCE, maint(action)) == (action, "threat_actor", eid, entry_id)
+    for action in (adj.ACTION_ASSESSMENT, adj.ACTION_IOC_CAPTURE, "normalize_name"):
+        assert _verdict_record(MAINT_SOURCE, maint(action)) is None
+    # a duplicate review's merge is remembered as a pair instead
+    assert _verdict_record(MAINT_SOURCE, maint(adj.ACTION_MERGE, origin="merge_review")) is None

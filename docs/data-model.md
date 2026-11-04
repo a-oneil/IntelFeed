@@ -110,7 +110,7 @@ One article, post, video or uploaded file.
 - `content_hash` (String 64) — SHA-256 of the normalized title plus the first 500 characters of text. Used to spot the same article arriving from another feed.
 - `image_url` — lead image
 - `extracted_urls` (JSONB) — links found in the content
-- `observable_candidates` (JSONB) — indicator-like strings found by pattern scanning. They stay here until a judgment step creates a ledger row (see [Observable — the IOC ledger](#observable--the-ioc-ledger)).
+- `observable_candidates` (JSONB) — indicator-like strings found by pattern scanning or staged by the analysis. The adjudicator captures or drops each one; a judged one carries `reviewed: true` (see [Observable — the IOC ledger](#observable--the-ioc-ledger)).
 - `metadata` (JSONB) — adapter-specific data (for example the GitHub `content_type`, Telegram `forwarded_from`, or an upload's `batch_id`)
 - Translation cache: `translated_html`, `translated_title`, `translation_source_language`, `translation_target_language`, `translated_at`
 - Signal engine: `priority_raw` (unbounded weighted sum, the sort key, indexed), `priority_score` (the same placed on a 0–10 scale, indexed), `scored_at`

@@ -1092,7 +1092,7 @@
  },
  {
   "name": "decide_proposals",
-  "description": "Apply a reviewed batch of Review-queue decisions in one call (POST /admin/hygiene/decisions). Each decision is {id: '<source>:<log_id>', decision: 'apply' | 'dismiss' | 'reclassify:<entity_type>'}. apply runs the row's own applier; dismiss deletes it (a reclassify dismissal covers the entity and stops new filings); reclassify converts the entity and closes every proposal about it. Duplicates settle server-side: a row an earlier decision closed comes back 'settled'; an apply whose outcome is already reached comes back 'resolved'. Returns one result per decision plus counts. Admin only.",
+  "description": "Apply a reviewed batch of Review-queue decisions in one call (POST /admin/hygiene/decisions). Each decision is {id: '<source>:<log_id>', decision: 'apply' | 'dismiss' | 'reclassify:<entity_type>'}. apply runs the row's own applier; dismiss removes it and the dismissal sticks (a reclassify covers the entity, an adjudicator verdict is not filed again for its article); reclassify converts the entity and closes every proposal about it. Duplicates settle server-side: a row an earlier decision closed comes back 'settled'; an apply whose outcome is already reached comes back 'resolved'. Returns one result per decision plus counts. Admin only.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -2495,7 +2495,7 @@
  },
  {
   "name": "get_hygiene_feed",
-  "description": "Chronological hygiene feed: a merge of the entity-link log and the entity-maintenance log, normalized (action, mode, applied, subject, reason, affected-entity links, origin). Filter by action code (comma-separate for several), log source, mode, origin (adjudicator = filed by the adjudicate stage, merge_review = the duplicate review, scan = the on-demand scans and analysts), pending-only, or a since timestamp. Read-only — applying or dismissing proposals happens in the Proposals queue.",
+  "description": "Chronological hygiene feed: a merge of the entity-link log and the entity-maintenance log, normalized (action, mode, applied, subject, reason, affected-entity links, origin). Filter by action code (comma-separate for several), log source, mode, origin (adjudicator = filed by the adjudicate stage, merge_review = the duplicate review, scan = the on-demand scans), pending-only, or a since timestamp. Read-only — applying or dismissing proposals happens in the Proposals queue.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -2526,7 +2526,7 @@
       "merge_review",
       "scan"
      ],
-     "description": "adjudicator = rows the adjudicate stage filed; merge_review = the duplicate review; scan = the on-demand scans and analysts"
+     "description": "adjudicator = rows the adjudicate stage filed; merge_review = the duplicate review; scan = the on-demand scans"
     },
     "pending": {
      "type": "boolean",
@@ -3774,7 +3774,7 @@
  },
  {
   "name": "list_review_groups",
-  "description": "The Engine › Review queue: every pending hygiene proposal (both logs) folded one row per entity, most proposals first. Each group gives the entity, its proposal count, per-kind counts (e.g. shadow_remove, adjudication_reclassify), proposed target types, merge targets, origin, the newest row's subject and reason, matched forms and a sample entry. Read a group's rows with get_review_rows; decide them with decide_proposals. `total`/`proposals` are the queue size. Admin only.",
+  "description": "The Engine › Review queue: every pending hygiene proposal (both logs) folded one row per entity, newest first unless `sort` says otherwise. Each group gives the entity, its proposal count, per-kind counts (e.g. shadow_remove, adjudication_reclassify), proposed target types, merge targets, origin, the highest verdict confidence, the newest row's subject and reason, matched forms and a sample entry; `facets` counts proposals per domain and per origin. Read a group's rows with get_review_rows; decide them with decide_proposals. `total`/`proposals` are the queue size. Admin only.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -3807,6 +3807,17 @@
       "scan"
      ],
      "description": "Who filed the proposals"
+    },
+    "sort": {
+     "type": "string",
+     "enum": [
+      "newest",
+      "count",
+      "oldest",
+      "confidence"
+     ],
+     "default": "newest",
+     "description": "newest, count (most proposals first), oldest, or confidence (highest first)"
     },
     "limit": {
      "type": "integer",
@@ -4799,7 +4810,7 @@
     },
     "captured_by": {
      "type": "string",
-     "description": "Capture door: ai_extraction, ttp_observable, ioc_list, publisher_ioc, manual"
+     "description": "Capture door: ai_extraction, ttp_observable, ioc_list, publisher_ioc, adjudicator, manual"
     },
     "infra_tag": {
      "type": "string",

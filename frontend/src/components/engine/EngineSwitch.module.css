@@ -21,6 +21,15 @@
   opacity: 0.6;
   cursor: default;
 }
+.secondary {
+  color: var(--text-primary);
+  border-color: var(--border);
+  background: transparent;
+}
+.secondary:hover {
+  border-color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
 .icon {
   font-size: 0.8em;
 }

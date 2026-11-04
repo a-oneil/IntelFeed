@@ -76,7 +76,7 @@ DELETABLE_TYPES = (set(AI_TYPES) | {"vendor", "product", "country"}) - {"observa
 _NO_DENY_TYPES = {"country"}
 
 _CONF_RANK = {"high": 3, "medium": 2, "low": 1}
-_WINDOW_DAYS = {"24h": 1, "7d": 7, "30d": 30, "all": None}
+_WINDOW_DAYS = {"1h": 1 / 24, "24h": 1, "7d": 7, "30d": 30, "all": None}
 
 Status = Literal["linked", "review", "orphan", "dupe", "stale"]
 # A stale entity: one article at most, no relationship, and nothing seen for
@@ -298,14 +298,15 @@ def _status(
 async def extraction_stats(
     window: str = Query(
         "7d",
-        pattern="^(24h|7d|30d|all)$",
+        pattern="^(1h|24h|7d|30d|all)$",
         description="Creation window for the created_window / created_prev_window counters.",
     ),
     _: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> ExtractionStats:
-    """Aggregate stats over AI-created entities: totals by type, review / orphan / likely-duplicate
-    counts, and how many were created in the requested window vs. the preceding one."""
+    """Aggregate stats over AI-created entities: review / orphan / likely-duplicate counts, how
+    many were created in the requested window vs. the preceding one, and the window's count per
+    type."""
     days = _WINDOW_DAYS[window]
     now = _now()
     rows = await _fetch_rows(db, list(AI_TYPES), None, None)
@@ -317,14 +318,15 @@ async def extraction_stats(
     by_type: dict[str, int] = defaultdict(int)
     created_window = created_prev = needs_review = orphaned = auto_confirmed = 0
     for r in rows:
-        by_type[r["entity_type"]] += 1
+        fs = r["first_seen_at"]
+        if win_start is None or fs >= win_start:
+            by_type[r["entity_type"]] += 1  # the list's window, so a type's count is what it opens
         if r["needs_review"]:
             needs_review += 1
         else:
             auto_confirmed += 1
         if r["article_count"] == 0:
             orphaned += 1
-        fs = r["first_seen_at"]
         if win_start is not None and fs >= win_start:
             created_window += 1
         elif win_start is not None and prev_start is not None and prev_start <= fs < win_start:
@@ -351,7 +353,9 @@ async def extraction_entities(
         pattern="^(all|linked|review|orphan|dupe|stale)$",
         description="Filter by computed lifecycle status (linked, review, orphan, dupe, stale).",
     ),
-    window: str = Query("7d", pattern="^(24h|7d|30d|all)$", description="Only entities first seen within this window."),
+    window: str = Query(
+        "7d", pattern="^(1h|24h|7d|30d|all)$", description="Only entities first seen within this window."
+    ),
     q: str | None = Query(None, description="Search name / aliases"),
     source_entry_id: uuid.UUID | None = Query(None, description="Only entities created from this entry"),
     sort_by: str = Query(

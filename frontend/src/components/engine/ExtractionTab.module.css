@@ -4,39 +4,6 @@
   gap: 16px;
 }
 
-/* ---- stat tiles ---- */
-.stats {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 12px;
-}
-.stat {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 12px 14px;
-}
-.statK {
-  color: var(--text-secondary);
-  font-size: var(--fs-sm);
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-}
-.statV {
-  font-family: var(--font-display);
-  font-size: var(--fs-2xl);
-  font-weight: 700;
-  margin-top: 6px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -1px;
-}
-.v_accent { color: var(--accent); }
-.v_warning { color: var(--warning); }
-.v_danger { color: var(--danger); }
-.v_success { color: var(--success); }
-.statD { font-size: var(--fs-sm); margin-top: 3px; }
-.up { color: var(--success); }
-.down { color: var(--danger); }
 .mut { color: var(--text-secondary); }
 
 /* ---- toolbar ---- */
@@ -67,50 +34,16 @@
   font-size: var(--fs-md);
   font-family: var(--font-body);
 }
-.chips { display: flex; gap: 6px; flex-wrap: wrap; }
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 11px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--r-full);
-  color: var(--text-secondary);
+.filt {
+  font: inherit;
   font-size: var(--fs-base);
-  cursor: pointer;
-  white-space: nowrap;
-  font-family: var(--font-body);
-}
-.chip:hover { border-color: var(--bg-hover); color: var(--text-primary); }
-.chipOn { background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: var(--accent); color: var(--accent); }
-.cnt { font-family: var(--font-display); font-size: var(--fs-sm); color: var(--text-muted); }
-.sw { width: 8px; height: 8px; border-radius: var(--r-sm); }
-.sw_threat_actor { background: var(--entity-actor); }
-.sw_malware { background: var(--entity-malware); }
-.sw_cve { background: var(--entity-cve); }
-.sw_tool { background: var(--entity-tool); }
-.sw_ttp { background: var(--entity-ttp); }
-.sw_observable { background: var(--entity-ioc); }
-
-.seg {
-  display: inline-flex;
+  color: var(--text-primary);
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  overflow: hidden;
-}
-.seg button {
-  padding: 6px 11px;
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  font-size: var(--fs-base);
+  padding: 6px 10px;
   cursor: pointer;
-  font-family: var(--font-body);
 }
-.seg button + button { border-left: 1px solid var(--border); }
-.segOn { background: var(--bg-tertiary); color: var(--text-primary) !important; }
 
 /* ---- bulk bar ---- */
 .bulkbar {
@@ -150,7 +83,8 @@
   background: var(--card-bg);
 }
 .tscroll { overflow-x: auto; }
-.table { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
+/* On a narrow screen the table scrolls sideways rather than squeezing its columns. */
+.table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: var(--fs-md); }
 .table thead th {
   text-align: left;
   padding: 10px 14px;
@@ -360,25 +294,21 @@
 .pager button:disabled { opacity: 0.4; cursor: not-allowed; }
 .pageInfo { font-family: var(--font-display); font-variant-numeric: tabular-nums; }
 
+@media (max-width: 720px) {
+  /* On a phone a filter row stays one line and scrolls sideways. */
+  .toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .toolbar > * {
+    flex: none;
+  }
+  .search {
+    width: 220px;
+  }
+}
+
 @media (max-width: 900px) {
-  .stats { grid-template-columns: repeat(2, 1fr); }
   .hideSm { display: none; }
 }
 
-/* ---- hide-CVEs toggle ---- */
-.toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 11px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  color: var(--text-secondary);
-  font-size: var(--fs-base);
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-}
-.toggle:hover { border-color: var(--bg-hover); color: var(--text-primary); }
-.toggle input { accent-color: var(--accent); cursor: pointer; margin: 0; }

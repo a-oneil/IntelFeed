@@ -507,8 +507,8 @@ export function OverviewTab({
                 {staged > 0 && (
                   <>
                     {" "}
-                    {staged === 1 ? "One article has" : `${staged} articles have`} indicators waiting for review —{" "}
-                    <Link to="/workbench/explore?section=observables&queue=1">open the candidates queue</Link>.
+                    {staged === 1 ? "One article has" : `${staged} articles have`} indicators the adjudicator has not
+                    judged yet.
                   </>
                 )}
               </div>
@@ -974,7 +974,7 @@ export function OverviewTab({
         .slice(0, 4)
         .map(([k, n]) => `${k.replace(/_/g, " ")} ${n}`)
         .join(" · ")
-    : digestOf("None captured yet", infraStaged > 0 ? `${plural(infraStaged, "article")} with indicators waiting for review` : null);
+    : digestOf("None captured yet", infraStaged > 0 ? `${plural(infraStaged, "article")} with indicators not yet judged` : null);
 
   const attributionTypes = new Map<string, number>();
   for (const r of backlinks?.reported_with ?? []) attributionTypes.set(r.entity_type, (attributionTypes.get(r.entity_type) ?? 0) + 1);

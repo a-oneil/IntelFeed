@@ -82,13 +82,15 @@
 }
 
 /* table */
+/* On a narrow screen the table scrolls sideways rather than squeezing its columns. */
 .tableWrap {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  overflow: hidden;
+  overflow-x: auto;
 }
 .table {
   width: 100%;
+  min-width: 760px;
   border-collapse: collapse;
   font-size: var(--fs-md);
 }
@@ -111,6 +113,10 @@
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
+}
+/* The entity column holds names and ids (CVE-2024-12345): wide enough not to break them. */
+.table tbody td:first-child {
+  min-width: 170px;
 }
 .table tbody tr:last-child td {
   border-bottom: none;
@@ -158,6 +164,7 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  text-align: left;
   appearance: none;
   border: none;
   background: none;
@@ -184,8 +191,10 @@
 /* A td must stay display:table-cell (flex here collapses the column and
    strands the leftover width as a gap); width:100% makes this the greedy
    column that absorbs the table's free space. */
+/* the reasoning: the column that grows, and never narrower than a readable line */
 .detail {
   width: 100%;
+  min-width: 280px;
 }
 .subject {
   display: block;
@@ -207,8 +216,11 @@
   flex-wrap: wrap;
 }
 .linkChip {
+  font: inherit;
   font-size: var(--fs-sm);
   font-weight: 600;
+  background: transparent;
+  cursor: pointer;
   padding: 1px 7px;
   border-radius: var(--r-full);
   border: 1px solid var(--border);
@@ -267,55 +279,11 @@
   color: var(--text-secondary);
 }
 
-/* The adjudicator's knobs, unfolded beside the mode switch. */
-.tuning {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--bg-secondary);
-}
-
+/* The table's empty state. */
 .empty {
   text-align: center;
   color: var(--text-secondary);
   padding: 28px 14px;
-}
-
-/* generate-proposals row */
-.genRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.genLabel {
-  font-size: var(--fs-sm);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-tertiary, var(--text-secondary));
-  font-weight: 600;
-  margin-right: 2px;
-}
-.genBtn {
-  font-size: var(--fs-base);
-  font-weight: 600;
-  padding: 5px 11px;
-  border-radius: var(--r-md);
-  border: 1px dashed var(--border);
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-.genBtn:hover:not(:disabled) {
-  color: var(--text-primary);
-  border-color: var(--text-tertiary, var(--text-secondary));
-}
-.genBtn:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 /* Who proposed the row — the adjudicate stage, vs the legacy jobs/scans. */
@@ -333,7 +301,48 @@
   vertical-align: middle;
 }
 
-/* Review tab facets */
+/* A filter's label and its control, kept together when the toolbar wraps. */
+.facet {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* On a phone a filter row stays one line and scrolls sideways. */
+@media (max-width: 720px) {
+  .toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .toolbar > * {
+    flex: none;
+  }
+}
+
+/* The verdict's confidence. */
+.conf {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+.confHigh {
+  color: var(--success);
+}
+.confMed {
+  color: var(--warning);
+}
+.confLow {
+  color: var(--text-muted);
+}
+
 .facetLabel {
   display: inline-flex;
   align-items: center;

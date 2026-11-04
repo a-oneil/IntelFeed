@@ -56,6 +56,7 @@ async def apply_removal(
     link: LinkRow,
     reason: str,
     ai_result_id: uuid.UUID | None,
+    verdict_confidence: str | None = None,
 ) -> bool:
     """Re-fetch junction row; if extracted_at unchanged, delete + decrement count + audit."""
     jmodel, emodel, fk_attr = ENTITY_TYPES[link.entity_type]
@@ -99,6 +100,7 @@ async def apply_removal(
         original_paragraph_indices=list(junction.paragraph_indices or []),
         original_extracted_at=junction.extracted_at,
         ai_result_id=ai_result_id,
+        verdict_confidence=verdict_confidence,
     )
     db.add(log_row)
     await db.delete(junction)
@@ -117,6 +119,7 @@ async def log_shadow_removal(
     link: LinkRow,
     reason: str,
     ai_result_id: uuid.UUID | None,
+    verdict_confidence: str | None = None,
 ) -> None:
     # One pending proposal per link: a re-review of the same entry (a resweep,
     # a re-analysis) must not file the same removal again.
@@ -146,6 +149,7 @@ async def log_shadow_removal(
             original_paragraph_indices=list(link.paragraph_indices),
             original_extracted_at=link.extracted_at,
             ai_result_id=ai_result_id,
+            verdict_confidence=verdict_confidence,
         )
     )
 
@@ -157,6 +161,7 @@ async def log_reclassification(
     reason: str,
     suggested_type: str | None,
     ai_result_id: uuid.UUID | None,
+    verdict_confidence: str | None = None,
 ) -> None:
     """Audit-log a RECLASSIFY decision. The junction row is left intact.
     Skipped when an analyst dismissed reclassifying this entity."""
@@ -179,6 +184,7 @@ async def log_reclassification(
             original_extracted_at=link.extracted_at,
             suggested_entity_type=suggested_type,
             ai_result_id=ai_result_id,
+            verdict_confidence=verdict_confidence,
         )
     )
 

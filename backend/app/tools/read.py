@@ -429,7 +429,9 @@ async def _get_observable(db: AsyncSession, user_id: uuid.UUID, observable: str,
             "status": {"type": "string", "description": "active, aging, or expired"},
             "captured_by": {
                 "type": "string",
-                "description": "Capture door: ai_extraction, ttp_observable, ioc_list, publisher_ioc, manual",
+                "description": (
+                    "Capture door: ai_extraction, ttp_observable, ioc_list, publisher_ioc, adjudicator, manual"
+                ),
             },
             "infra_tag": {
                 "type": "string",

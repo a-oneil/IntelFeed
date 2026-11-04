@@ -115,6 +115,12 @@ export function StagePanel({
               verdicts at ingest. Per-feed on/off is a chip in{" "}
               <strong>Plans</strong> and only bites when Pipeline Plans is on.
             </p>
+            <p className={styles.note}>
+              In <strong>apply</strong> mode a verdict still lands on the Review tab instead of being applied when it is
+              under the confidence floor, when it is a type change that has not reached consensus yet, when the article
+              tripped the circuit breaker (too many destructive verdicts in one review), or when it is an assessment
+              (those are only ever notes). The duplicate review always files its merges there.
+            </p>
             <SystemSettings filterGroups={["adjudication"]} flat hideGroupTitle />
           </>
         )}

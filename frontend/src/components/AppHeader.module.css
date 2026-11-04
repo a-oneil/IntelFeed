@@ -167,8 +167,10 @@
   filter: brightness(1.08);
 }
 
-/* Check-engine light — colour is the status, so hover keeps it. Healthy
-   stays the plain icon colour: the light only lights up when something's off. */
+/* Check-engine light, read like the one on a car's dashboard: healthy is the
+   plain unlit outline; errors light it up (the engine filled in the theme
+   colour, with a glow), retries light it amber. Colour is the status, so
+   hover keeps it. Stopped is "off": the outline struck through. */
 .engine_warn,
 .engine_warn:hover {
   color: var(--warning);
@@ -177,8 +179,26 @@
 .engine_err:hover {
   color: var(--accent);
 }
+.engine_warn svg,
+.engine_err svg {
+  fill: currentColor;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, currentColor 60%, transparent));
+}
 .engine_stopped,
 .engine_stopped:hover {
-  color: var(--accent-text);
-  background: var(--accent);
+  position: relative;
+  color: var(--accent);
+}
+.engine_stopped::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 1.6px;
+  border-radius: 1px;
+  background: currentColor;
+  /* A gap either side keeps the slash readable over the outline. */
+  box-shadow: 0 0 0 1.5px var(--bg-secondary);
+  transform: translate(-50%, -50%) rotate(-45deg);
 }

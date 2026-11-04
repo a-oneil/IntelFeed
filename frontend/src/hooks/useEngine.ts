@@ -101,11 +101,21 @@ export interface PipelineStageInfo {
   description: string;
   default_enabled: boolean;
   config_schema: Record<string, unknown>;
-  /** `queued` only on the synthetic analyze row: queue rows waiting on the AI worker. */
-  runs_24h: { success: number; error: number; retry: number; queued?: number };
+  /** `queued` only on the synthetic analyze row: queue rows waiting on the AI worker.
+   *  `new_error` / `new_retry` count only what came in after the check-engine
+   *  light was last cleared (the same as `error` / `retry` when it never was). */
+  runs_24h: {
+    success: number;
+    error: number;
+    retry: number;
+    new_error?: number;
+    new_retry?: number;
+    queued?: number;
+  };
 }
 
 export interface PipelineOverview {
+  health_cleared_at?: string | null;
   pipeline_engine_enabled: boolean;
   run_logging_enabled: boolean;
   stages: PipelineStageInfo[];
@@ -295,10 +305,6 @@ export interface ProcessingStats {
   errored: number;
   processing: number;
   by_stage_errors: Record<string, number>;
-  /** Observables precision funnel over the window: staged candidates vs
-   * judgment-confirmed sightings. */
-  observable_candidates?: number;
-  observable_confirmed?: number;
   median_latency_ms: number | null;
   p95_latency_ms: number | null;
   ingest_series: number[];
@@ -504,6 +510,8 @@ export interface EngineState {
   stopped: boolean;
   /** Tasks waiting on each queue; null when Redis couldn't be asked. */
   queued: Record<string, number | null>;
+  /** When an admin last cleared the check-engine light. */
+  health_cleared_at?: string | null;
 }
 
 const ENGINE_STATE_KEY = ["engine", "state"];
@@ -514,6 +522,18 @@ export function useEngineState(enabled = true, poll = 15_000) {
     queryFn: async () => (await api.get<EngineState>("/engine/state")).data,
     refetchInterval: poll,
     enabled,
+  });
+}
+
+/** Clears the check-engine light until a new error or retry comes in. */
+export function useClearEngineHealth() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => (await api.post<EngineState>("/engine/state/clear-health")).data,
+    onSuccess: (data) => {
+      qc.setQueryData(ENGINE_STATE_KEY, data);
+      qc.invalidateQueries({ queryKey: ["engine", "pipeline"] });
+    },
   });
 }
 
@@ -533,14 +553,19 @@ type EngineHealthLevel = "stopped" | "err" | "warn" | "ok";
 
 export interface EngineHealth {
   level: EngineHealthLevel;
-  /** Entries stuck on an errored stage, per stage. */
+  /** Entries stuck on an errored stage, per stage, since the last clear. */
   failing: { stage: string; count: number }[];
   retrying: number;
+  /** When the light was last cleared, and the errors still stuck from before it. */
+  clearedAt: string | null;
+  clearedErrors: number;
 }
 
 /** One status for the whole engine, for the header light. Stopped beats
  *  errors; errors are entries still stuck at a stage (a retry to green drops
- *  them), so a red light always has something to fix behind it.
+ *  them), so a red light always has something to fix behind it. An admin
+ *  can clear the light: it then counts only errors and retries newer than
+ *  the clear.
  *  The light sits on every page for every admin, so it polls once a minute;
  *  the Engine console's own observers poll faster while it is open and
  *  TanStack uses the shortest interval. */
@@ -548,10 +573,13 @@ export function useEngineHealth(enabled: boolean): EngineHealth | undefined {
   const { data: state } = useEngineState(enabled, 60_000);
   const { data: overview } = usePipelineOverview({ enabled, poll: 60_000 });
   if (!state || !overview) return undefined;
+  const newError = (s: PipelineStageInfo) => s.runs_24h.new_error ?? s.runs_24h.error;
   const failing = overview.stages
-    .filter((s) => s.runs_24h.error > 0)
-    .map((s) => ({ stage: s.name, count: s.runs_24h.error }));
-  const retrying = overview.stages.reduce((n, s) => n + s.runs_24h.retry, 0);
+    .filter((s) => newError(s) > 0)
+    .map((s) => ({ stage: s.name, count: newError(s) }));
+  const retrying = overview.stages.reduce((n, s) => n + (s.runs_24h.new_retry ?? s.runs_24h.retry), 0);
+  const clearedAt = overview.health_cleared_at ?? null;
+  const clearedErrors = clearedAt ? overview.stages.reduce((n, s) => n + s.runs_24h.error, 0) : 0;
   const level: EngineHealthLevel = state.stopped
     ? "stopped"
     : failing.length
@@ -559,5 +587,14 @@ export function useEngineHealth(enabled: boolean): EngineHealth | undefined {
       : retrying
         ? "warn"
         : "ok";
-  return { level, failing, retrying };
+  return { level, failing, retrying, clearedAt, clearedErrors };
+}
+
+/** The Engine console's time picker: one window for every tab but Review. */
+export const ENGINE_WINDOWS = ["1h", "24h", "7d", "30d", "all"] as const;
+export type EngineWindow = (typeof ENGINE_WINDOWS)[number];
+
+/** The window in hours, or undefined for "all". */
+export function engineWindowHours(w: EngineWindow): number | undefined {
+  return { "1h": 1, "24h": 24, "7d": 24 * 7, "30d": 24 * 30, all: undefined }[w];
 }

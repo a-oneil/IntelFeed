@@ -10,15 +10,24 @@ vi.mock("@/stores/authStore", () => ({ useIsAdmin: () => admin }));
 
 import { EngineStatusButton } from "../EngineStatusButton";
 
-const runs = (error = 0, retry = 0) => ({ success: 10, error, retry });
+const runs = (error = 0, retry = 0, newCounts?: { new_error: number; new_retry: number }) => ({
+  success: 10,
+  error,
+  retry,
+  ...newCounts,
+});
 
-function mockApi(stopped: boolean, stages: { name: string; runs_24h: ReturnType<typeof runs> }[]) {
+function mockApi(
+  stopped: boolean,
+  stages: { name: string; runs_24h: ReturnType<typeof runs> }[],
+  clearedAt: string | null = null,
+) {
   get.mockImplementation((url: string) =>
     Promise.resolve({
       data:
         url === "/engine/state"
-          ? { stopped, queued: {} }
-          : { pipeline_engine_enabled: true, run_logging_enabled: true, stages },
+          ? { stopped, queued: {}, health_cleared_at: clearedAt }
+          : { pipeline_engine_enabled: true, run_logging_enabled: true, health_cleared_at: clearedAt, stages },
     }),
   );
 }
@@ -54,6 +63,18 @@ describe("EngineStatusButton", () => {
 
   it("is red when entries are stuck on a stage", async () => {
     mockApi(false, [{ name: "extract", runs_24h: runs(13, 2) }]);
+    renderIt();
+    expect(await screen.findByRole("button", { name: "Engine errors" })).toHaveAttribute("data-level", "err");
+  });
+
+  it("is green after a clear while only older errors remain", async () => {
+    mockApi(false, [{ name: "extract", runs_24h: runs(13, 2, { new_error: 0, new_retry: 0 }) }], "2026-11-04T09:00:00Z");
+    renderIt();
+    expect(await screen.findByRole("button", { name: "Engine healthy" })).toHaveAttribute("data-level", "ok");
+  });
+
+  it("turns red again when a new error comes in after a clear", async () => {
+    mockApi(false, [{ name: "extract", runs_24h: runs(14, 2, { new_error: 1, new_retry: 0 }) }], "2026-11-04T09:00:00Z");
     renderIt();
     expect(await screen.findByRole("button", { name: "Engine errors" })).toHaveAttribute("data-level", "err");
   });

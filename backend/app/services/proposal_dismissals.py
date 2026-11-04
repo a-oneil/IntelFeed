@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.entity_link_validation_log import EntityLinkValidationLog
 from app.models.entity_maintenance import EntityMaintenanceLog
-from app.models.proposal_dismissal import KIND_NOT_DUPLICATE, KIND_RECLASSIFY, ProposalDismissal
+from app.models.proposal_dismissal import KIND_NOT_DUPLICATE, KIND_RECLASSIFY, KIND_VERDICT, ProposalDismissal
 
 LINK_RECLASSIFY = "needs_reclassification"
 MAINT_RECLASSIFY = "adjudication_reclassify"
@@ -78,6 +78,47 @@ async def dismiss_reclassify(
         .on_conflict_do_nothing(constraint="uq_proposal_dismissal")
     )
     return await clear_reclassify_proposals(db, entity_type, entity_id)
+
+
+async def remember_verdict_dismissals(
+    db: AsyncSession,
+    verdicts: list[tuple[str, str, uuid.UUID, uuid.UUID]],
+    user_id: uuid.UUID | None,
+) -> None:
+    """Record that an analyst dismissed these verdicts, each an (action,
+    entity type, entity id, article), so a later review of the article
+    neither files nor applies them again."""
+    for chunk in (verdicts[i : i + 1000] for i in range(0, len(verdicts), 1000)):
+        await db.execute(
+            pg_insert(ProposalDismissal)
+            .values(
+                [
+                    {
+                        "id": uuid.uuid4(),
+                        "kind": KIND_VERDICT,
+                        "entity_type": etype,
+                        "entity_id": eid,
+                        "other_key": f"{entry_id}:{action}",
+                        "created_by": user_id,
+                    }
+                    for action, etype, eid, entry_id in chunk
+                ]
+            )
+            .on_conflict_do_nothing(constraint="uq_proposal_dismissal")
+        )
+
+
+async def dismissed_verdicts(db: AsyncSession, entry_id: uuid.UUID) -> set[tuple[str, str, uuid.UUID]]:
+    """(action, entity_type, entity_id) of every verdict dismissed for this article."""
+    rows = (
+        await db.execute(
+            select(ProposalDismissal.other_key, ProposalDismissal.entity_type, ProposalDismissal.entity_id).where(
+                ProposalDismissal.kind == KIND_VERDICT,
+                ProposalDismissal.other_key.like(f"{entry_id}:%"),
+            )
+        )
+    ).all()
+    return {(key.split(":", 1)[1], etype, eid) for key, etype, eid in rows}
 
 
 def _pair(a: uuid.UUID, b: uuid.UUID) -> tuple[uuid.UUID, str]:

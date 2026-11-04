@@ -333,6 +333,18 @@ async def test_ai_observables_list_in_the_extraction_table(client, admin_headers
     assert stats.json()["by_type"]["observable"] == 1
 
 
+async def test_per_type_counts_follow_the_window(client, admin_headers, db_session):
+    from datetime import UTC, datetime, timedelta
+
+    await _ai_observable(db_session, "ipv4", "203.0.113.7")
+    await _ai_observable(db_session, "ipv4", "203.0.113.8", first_seen_at=datetime.now(UTC) - timedelta(days=3))
+    by_window = {}
+    for w in ("24h", "all"):
+        resp = await client.get(f"/api/engine/extraction/stats?window={w}", headers=admin_headers)
+        by_window[w] = resp.json()["by_type"].get("observable", 0)
+    assert by_window == {"24h": 1, "all": 2}
+
+
 async def test_denied_observables_are_hidden_from_the_table(client, admin_headers, db_session):
     await _ai_observable(db_session, "domain", "denied.example", is_denied=True)
 

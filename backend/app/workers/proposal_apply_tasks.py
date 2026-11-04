@@ -1,21 +1,21 @@
-"""Bulk "Apply all" for the Proposals lens, off the request thread.
+"""Bulk "Apply all" for the Review tab, off the request thread.
 
-One task per click. It drains the chosen queue in batches of
-``BATCH_SIZE`` through the same appliers the per-row buttons use, commits
-after every batch, and publishes progress to Redis so the console can show
-"Applying 1,240 / 5,249" and know when it is done. Runs on the default
-queue: nothing here calls an AI provider.
+One task per click. It reads the groups the tab's filters select once, then
+walks them a chunk at a time: each chunk's rows are applied in batches of
+``BATCH_SIZE`` through the same appliers a row's Apply uses
+(``app.api.hygiene.apply_review_rows``), committing after every batch, and
+progress goes to Redis so the console can show "Applying 1,240 / 5,249" and
+know when it is done. Runs on the default queue: nothing here calls an AI
+provider.
 
-Failed rows are reported and excluded from later batches, so a stuck row
-cannot pin the loop; the loop also stops when a batch selects nothing or the
-caller's ``limit`` is reached.
+Every row is tried once, so a row that fails or has nothing to do cannot pin
+the loop. Proposals filed after the job started wait for the next run.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-import uuid
 from datetime import UTC, datetime
 
 from app.workers.celery_app import celery_app
@@ -34,31 +34,21 @@ _SOFT_LIMIT = 3 * 60 * 60
     soft_time_limit=_SOFT_LIMIT,
     time_limit=_SOFT_LIMIT + 60,
 )
-def bulk_apply_proposals(
-    self,
-    job_id: str,
-    kind: str,
-    action: str | None = None,
-    entity_type: str | None = None,
-    mode: str = "apply",
-    limit: int | None = None,
-    domain: str | None = None,
-) -> dict:
-    return run_async(
-        _bulk_apply(job_id, kind, action=action, entity_type=entity_type, mode=mode, limit=limit, domain=domain)
+def bulk_apply_proposals(self, job_id: str, scope: dict, limit: int | None = None) -> dict:
+    return run_async(_bulk_apply(job_id, scope, limit=limit))
+
+
+async def _bulk_apply(job_id: str, scope: dict, *, limit: int | None) -> dict:
+    from app.api.hygiene import (
+        _GROUPS_PER_CHUNK,
+        ReviewScope,
+        _appliable,
+        _chunks,
+        _group_rows,
+        _scope_match,
+        apply_review_rows,
+        review_scope_groups,
     )
-
-
-async def _bulk_apply(
-    job_id: str,
-    kind: str,
-    *,
-    action: str | None,
-    entity_type: str | None,
-    mode: str,
-    limit: int | None,
-    domain: str | None = None,
-) -> dict:
     from app.services import proposal_apply as svc
 
     progress = await svc.read_progress(job_id)
@@ -66,54 +56,35 @@ async def _bulk_apply(
         # The request that queued us always writes the initial record; a
         # missing one means it expired (2 h) before a worker picked this up.
         logger.warning("bulk apply %s: no progress record, starting fresh", job_id)
-        progress = svc.new_progress(job_id, kind=kind, scope={"action": action, "entity_type": entity_type}, total=0)
+        progress = svc.new_progress(job_id, scope=scope, total=0)
     progress["status"] = "running"
     svc.write_progress_sync(progress)
 
+    review_scope = ReviewScope(**scope)
     started = time.monotonic()
-    failed_ids: set[uuid.UUID] = set()
-    remaining = limit
-    # "all" (the Review tab's one button) is the adjudicator's queue and then
-    # the reclassify advisories, under the same action/domain filters. The
-    # advisories only run when the filters do not exclude them.
-    wanted = svc.parse_actions(action)
-    phases = [kind] if kind != "all" else ["adjudication", "advisories"]
-    if kind == "all" and ((domain and domain != "entities") or (wanted and "needs_reclassification" not in wanted)):
-        phases = ["adjudication"]
+    left = limit
     try:
-        for phase in phases:
-            while True:
-                batch_limit = svc.BATCH_SIZE if remaining is None else min(svc.BATCH_SIZE, remaining)
-                if batch_limit <= 0:
-                    break
-                async with worker_session() as db:
-                    if phase == "adjudication":
-                        out = await svc.apply_adjudication_batch(
-                            db, action=action, domain=domain, limit=batch_limit, exclude_ids=failed_ids
-                        )
-                    elif phase == "advisories":
-                        out = await svc.apply_advisory_batch(
-                            db, entity_type=entity_type, mode=mode, limit=batch_limit, exclude_ids=failed_ids
-                        )
-                    else:
-                        raise ValueError(f"unknown bulk apply kind: {kind}")
+        match = _scope_match(review_scope)
+        async with worker_session() as db:
+            groups = await review_scope_groups(db, review_scope)
+        for chunk in _chunks(groups, _GROUPS_PER_CHUNK):
+            if left is not None and left <= 0:
+                break
+            async with worker_session() as db:
+                refs = _appliable(await _group_rows(db, chunk, match), include_reclassify=True)
+                if left is not None:
+                    refs = refs[:left]
+                for batch in _chunks(refs, svc.BATCH_SIZE):
+                    out = await apply_review_rows(db, batch, None)
                     await db.commit()
-
-                failed_ids |= out["failed_ids"]
-                progress["processed"] += out["processed"]
-                progress["applied"] += out["applied"]
-                progress["skipped"] += out["skipped"]
-                progress["error_count"] += len(out["errors"])
-                progress["errors"] = (progress["errors"] + out["errors"])[: svc.MAX_ERRORS_KEPT]
-                svc.write_progress_sync(progress)
-
-                if remaining is not None:
-                    remaining -= out["processed"]
-                if out["processed"] == 0:
-                    break
-                # Shadow-mode advisories are never consumed, so one pass is the job.
-                if phase == "advisories" and mode != "apply":
-                    break
+                    progress["processed"] += out["processed"]
+                    progress["applied"] += out["applied"]
+                    progress["skipped"] += out["skipped"]
+                    progress["error_count"] += out["failed"]
+                    progress["errors"] = (progress["errors"] + out["errors"])[: svc.MAX_ERRORS_KEPT]
+                    svc.write_progress_sync(progress)
+                if left is not None:
+                    left -= len(refs)
         progress["status"] = "done"
     except Exception as exc:  # the record must say why it stopped
         logger.exception("bulk apply %s failed", job_id)

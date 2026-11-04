@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import JobSchedules from "@/components/JobSchedules";
 import SystemSettings, { SettingsHighlightContext } from "@/components/SystemSettings";
 
-import { type BrowseView, EngineMatrix, type MatrixView } from "./EngineMatrix";
+import { type BrowseView, EngineMatrix, MATRIX_VIEWS, type MatrixView, type ReviewLens } from "./EngineMatrix";
 import { EngineStoppedBanner } from "./EngineSwitch";
 import { EnrichmentConsole } from "./EnrichmentConsole";
 import { MaintenancePanel } from "./MaintenancePanel";
@@ -22,6 +22,7 @@ const BROWSE_TITLES: Record<BrowseView, string> = {
 
 interface ConsoleState {
   view?: MatrixView;
+  lens?: ReviewLens;
   openStage?: string;
   stage?: string;
   status?: string;
@@ -32,9 +33,14 @@ interface ConsoleState {
   keyFor?: string;
 }
 
-// Legacy deep links from the old six-tab layout (?tab=) and the even older
-// Settings sections (?section=) — mapped onto the console's states.
+// Deep links: ?view= opens one of the console's tabs (?view=entities;
+// ?lens=history opens Review's History). The old six-tab layout (?tab=) and
+// the even older Settings sections (?section=) are mapped onto the
+// console's states.
 function legacyState(params: URLSearchParams): ConsoleState {
+  const view = params.get("view");
+  if (view && (MATRIX_VIEWS as readonly string[]).includes(view))
+    return { view: view as MatrixView, lens: params.get("lens") === "history" ? "history" : undefined };
   const tab = params.get("tab");
   const stage = params.get("stage");
   if (tab === "processing")
@@ -47,7 +53,7 @@ function legacyState(params: URLSearchParams): ConsoleState {
     return {};
   }
   if (tab === "autolinking") return { view: "links" };
-  if (tab === "extraction") return { view: "review" };
+  if (tab === "extraction") return { view: "entities" };
   if (tab === "jobs") return { browse: "jobs" };
   if (tab === "plans") return { browse: "plans" };
   switch (params.get("section")) {
@@ -173,6 +179,7 @@ export function EngineSection() {
         <EngineMatrix
           key={nonce}
           initialView={initial.view}
+          initialLens={initial.lens}
           initialOpenStage={initial.openStage}
           initialStage={initial.stage}
           initialStatus={initial.status}

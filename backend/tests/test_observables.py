@@ -329,33 +329,16 @@ async def test_store_observables_gates_ai_output(db_session):
 
 
 # ---------------------------------------------------------------------------
-# The analyst door (API)
+# The entry's observables (API)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_promote_and_list_endpoints(client, auth_headers, db_session):
+async def test_entry_observables_lists_the_ledger_rows_sighted_in_it(client, auth_headers, db_session):
     entry = await _make_entry(db_session)
+    obs = await get_or_create_observable(db_session, "ipv4", "193.149.176.201", via="manual", entry_id=entry.id)
+    await record_sighting(db_session, entry.id, obs, source="manual", surface_form="193.149.176[.]201")
     await db_session.commit()
-
-    resp = await client.post(
-        f"/api/entries/{entry.id}/observables/promote",
-        json={"kind": "ipv4", "value": "193.149.176.201", "surface_form": "193.149.176[.]201"},
-        headers=auth_headers,
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["kind"] == "ipv4"
-    assert body["value"] == "193.149.176.201"
-    assert body["created_via"] == "manual"
-    assert body["base_confidence"] == 1.0
-
-    resp = await client.post(
-        f"/api/entries/{entry.id}/observables/promote",
-        json={"kind": "ipv4", "value": "999.1.2.3"},
-        headers=auth_headers,
-    )
-    assert resp.status_code == 422
 
     listing = await client.get("/api/observables", headers=auth_headers)
     assert listing.status_code == 200
@@ -767,36 +750,6 @@ async def test_ioc_list_bulk_upgrades_passive_sighting(db_session):
 
 
 @pytest.mark.asyncio
-async def test_dismiss_candidate_is_entry_local(client, auth_headers, db_session):
-    entry = await _make_entry(db_session)
-    entry.observable_candidates = [
-        {"kind": "domain", "value": "learn.microsoft.com", "surface_form": "learn.microsoft.com", "origin": "scan"},
-        {"kind": "ipv4", "value": "45.13.7.2", "surface_form": "45.13.7.2", "origin": "scan"},
-    ]
-    await db_session.commit()
-
-    resp = await client.post(
-        f"/api/entries/{entry.id}/observables/dismiss",
-        json={"kind": "domain", "value": "learn.microsoft.com"},
-        headers=auth_headers,
-    )
-    assert resp.status_code == 204, resp.text
-    view = (await client.get(f"/api/entries/{entry.id}/observables", headers=auth_headers)).json()
-    assert [c["value"] for c in view["candidates"]] == ["45.13.7.2"]
-    # Entry-local only: nothing was tombstoned in the ledger.
-    from sqlalchemy import func, select
-
-    assert (await db_session.execute(select(func.count()).select_from(Observable))).scalar_one() == 0
-
-    again = await client.post(
-        f"/api/entries/{entry.id}/observables/dismiss",
-        json={"kind": "domain", "value": "learn.microsoft.com"},
-        headers=auth_headers,
-    )
-    assert again.status_code == 404
-
-
-@pytest.mark.asyncio
 async def test_reconcile_observable_counters(db_session):
     """Cascaded entry deletion drifts the increment-only counters; the nightly
     recount restores ground truth."""
@@ -999,11 +952,9 @@ async def test_feed_door_sets_role_from_path_fill_only(db_session):
 
 
 @pytest.mark.asyncio
-async def test_shadow_candidates_keep_the_ai_judgment_and_promote_carries_it(client, auth_headers, db_session):
-    """A shadow staging carries role/evidence/confidence, and the analyst's
-    promote confirms that judgment instead of minting a bare manual row."""
-    from sqlalchemy import select
-
+async def test_shadow_candidates_keep_the_ai_judgment(db_session):
+    """A shadow staging carries role/evidence/confidence, so a later capture
+    (the adjudicator's, or an analyst's promote) creates the row the AI meant."""
     from app.intelligence.observables import shadow_observables
 
     entry = await _make_entry(db_session)
@@ -1026,18 +977,6 @@ async def test_shadow_candidates_keep_the_ai_judgment_and_promote_carries_it(cli
     await db_session.refresh(entry)
     cand = next(c for c in entry.observable_candidates if c["kind"] == "domain")
     assert cand["role"] == "c2" and cand["evidence"].startswith("The implant") and cand["confidence"] == "high"
-
-    resp = await client.post(
-        f"/api/entries/{entry.id}/observables/promote",
-        json={"kind": "domain", "value": "c2[.]example-bad[.]net"},
-        headers=auth_headers,
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["role"] == "c2"
-    assert body["evidence"].startswith("The implant")
-    obs = (await db_session.execute(select(Observable).where(Observable.value == "c2.example-bad.net"))).scalar_one()
-    assert obs.created_via == "manual" and obs.role == "c2"
 
 
 # ---------------------------------------------------------------------------
@@ -1484,9 +1423,12 @@ def test_path_validator_rejects_bare_system_locations_and_single_segments():
 
 
 @pytest.mark.asyncio
-async def test_candidates_queue_hides_rows_todays_validators_reject(client, auth_headers, db_session):
+async def test_review_skips_candidates_todays_validators_reject(db_session):
+    """Candidates staged under older, looser rules are marked judged and never
+    reach the adjudicator; the valid one does."""
     from app.models.entry import Entry
     from app.models.feed import Feed
+    from app.services.entry_adjudication import _candidate_items
 
     feed = Feed(title="t", url=f"https://t.example/{uuid.uuid4()}", feed_type="rss")
     db_session.add(feed)
@@ -1505,11 +1447,11 @@ async def test_candidates_queue_hides_rows_todays_validators_reject(client, auth
         ],
     )
     db_session.add(entry)
-    await db_session.commit()
-    resp = await client.get("/api/observables/candidates", headers=auth_headers)
-    assert resp.status_code == 200
-    values = [r["value"] for r in resp.json() if r["latest_entry_id"] == str(entry.id)]
-    assert values == ["c2.uat-example.net"]
+    await db_session.flush()
+    items = await _candidate_items(db_session, entry, "x", None, set())
+    assert [it.ioc_value for it in items] == ["c2.uat-example.net"]
+    unjudged = [c["value"] for c in entry.observable_candidates if not c.get("reviewed")]
+    assert unjudged == ["c2.uat-example.net"]
 
 
 @pytest.mark.asyncio

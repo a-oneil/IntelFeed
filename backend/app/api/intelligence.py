@@ -10,7 +10,7 @@ import anyio
 import sqlalchemy as sa
 from fastapi import APIRouter, Body, Depends, File, Path, Query, Response, UploadFile
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import case, cast, delete, func, or_, select, tuple_, type_coerce
+from sqlalchemy import case, cast, delete, func, or_, select, type_coerce
 from sqlalchemy import false as sa_false
 from sqlalchemy import text as sa_text
 from sqlalchemy import update as sa_update
@@ -59,7 +59,7 @@ from app.models.intelligence_requirement import IntelligenceRequirement, Require
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.mitigation import EntryMitigation, Mitigation, TTPMitigation
 from app.models.note import Note
-from app.models.observable import ALL_KINDS, EntryObservable, Observable
+from app.models.observable import EntryObservable, Observable
 from app.models.product import EntryProduct, Product
 from app.models.ransomware import RansomwareVictim, VictimDisclosure
 from app.models.rule_coverage import RuleCoverage
@@ -101,11 +101,7 @@ from app.schemas.intelligence import (
     ExtractionResponse,
     MalwareFamilyResponse,
     MitigationResponse,
-    ObservableCandidateRow,
-    ObservableDismissRequest,
     ObservableEntryPayload,
-    ObservableNeverCaptureRequest,
-    ObservablePromoteRequest,
     ObservableResponse,
     ObservableUpdateRequest,
     ProductResponse,
@@ -5187,123 +5183,6 @@ async def observables_rollup(
     }
 
 
-@router.get("/observables/candidates", response_model=list[ObservableCandidateRow])
-async def list_observable_candidates(
-    limit: int = Query(100, ge=1, le=500, description="Max aggregated candidate rows"),
-    entry_window: int = Query(
-        400, ge=10, le=2000, description="How many recent candidate-bearing entries to aggregate"
-    ),
-    kind: str | None = Query(None, description="Filter to one kind"),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """The central review queue: regex nominations no judgment door confirmed.
-
-    Aggregated by (kind, value) across recent entries — a value nominated in
-    many articles is the one worth a look. Values already in the ledger
-    (confirmed or denied) are excluded.
-    """
-    rows = (
-        await db.execute(
-            select(Entry.id, Entry.title, Entry.published_at, Entry.observable_candidates)
-            .where(func.jsonb_array_length(Entry.observable_candidates) > 0)
-            .order_by(Entry.published_at.desc().nulls_last())
-            .limit(entry_window)
-        )
-    ).all()
-
-    from app.intelligence.observables import validate_kind_value
-
-    agg: dict[tuple[str, str], dict] = {}
-    rejected: dict[tuple[str, str], bool] = {}
-    for entry_id, title, published_at, candidates in rows:
-        for c in candidates or []:
-            c_kind, c_value = c.get("kind"), c.get("value")
-            if not c_kind or not c_value or (kind and c_kind != kind):
-                continue
-            key = (c_kind, c_value)
-            # Nominations staged under older, looser rules: a value today's
-            # validators reject could never be promoted, so it never shows.
-            if key not in agg:
-                if key not in rejected:
-                    rejected[key] = c_kind not in ALL_KINDS or validate_kind_value(c_kind, c_value) is None
-                if rejected[key]:
-                    continue
-            row = agg.get(key)
-            if row is None:
-                agg[key] = {
-                    "kind": c_kind,
-                    "value": c_value,
-                    "entry_count": 1,
-                    "was_defanged": bool(c.get("was_defanged")),
-                    "sample_surface": c.get("surface_form"),
-                    # Entries are scanned newest-first, so the first hit is the latest.
-                    "latest_entry_id": entry_id,
-                    "latest_entry_title": title,
-                    "latest_seen_at": published_at,
-                }
-            else:
-                row["entry_count"] += 1
-                row["was_defanged"] = row["was_defanged"] or bool(c.get("was_defanged"))
-
-    if not agg:
-        return []
-    known = (
-        await db.execute(
-            select(Observable.kind, Observable.value).where(
-                tuple_(Observable.kind, Observable.value).in_(list(agg.keys()))
-            )
-        )
-    ).all()
-    for pair in known:
-        agg.pop((pair.kind, pair.value), None)
-
-    ranked = sorted(agg.values(), key=lambda r: (-r["entry_count"], -int(r["was_defanged"])))
-    return [ObservableCandidateRow(**r) for r in ranked[:limit]]
-
-
-@router.post("/observables/never-capture", response_model=ObservableResponse)
-async def never_capture_observable(
-    payload: ObservableNeverCaptureRequest,
-    user: User = Depends(get_admin_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Tombstone a value: dismiss it from the candidates queue forever.
-
-    Creates (or reuses) the ledger row and marks it denied, so the observables
-    stage, every door, and the export all refuse it from now on.
-    """
-    from app.intelligence.observables import normalize_value
-    from app.models.observable import ALL_KINDS
-
-    if payload.kind not in ALL_KINDS:
-        raise AppError(code="invalid_kind", message=f"kind must be one of {sorted(ALL_KINDS)}", status_code=422)
-    canonical = normalize_value(payload.kind, payload.value)
-    if not canonical:
-        raise AppError(code="invalid_observable", message="Empty value", status_code=422)
-    existing = (
-        await db.execute(select(Observable).where(Observable.kind == payload.kind, Observable.value == canonical))
-    ).scalar_one_or_none()
-    if existing is None:
-        existing = Observable(
-            kind=payload.kind,
-            value=canonical,
-            created_via="manual",
-            base_confidence=0.0,
-            current_confidence=0.0,
-        )
-        db.add(existing)
-        await db.flush()
-    existing.is_denied = True
-    existing.status = "expired"
-    await db.commit()
-    from app.services.entity_indexer import delete_entity_document
-
-    delete_entity_document("observable", existing.id)
-    await db.refresh(existing)
-    return _observable_to_response(existing)
-
-
 @router.get("/observables/{observable_id}", response_model=ObservableResponse)
 async def get_observable(
     observable_id: uuid.UUID = Path(..., description="UUID of the observable"),
@@ -5472,8 +5351,8 @@ async def get_entry_observables(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """An entry's confirmed observables plus its unpromoted Tier-0 candidates."""
-    entry = await _get_entry(db, entry_id)
+    """The ledger rows sighted in an entry, strongest first."""
+    await _get_entry(db, entry_id)  # 404 for an unknown entry
     result = await db.execute(
         select(Observable, EntryObservable)
         .join(EntryObservable, EntryObservable.observable_id == Observable.id)
@@ -5484,98 +5363,7 @@ async def get_entry_observables(
         .limit(300)
     )
     items = [_observable_to_response(o, entry_link=link) for o, link in result.all()]
-    confirmed = {(i.kind, i.value) for i in items}
-    candidates = [c for c in (entry.observable_candidates or []) if (c.get("kind"), c.get("value")) not in confirmed]
-    return ObservableEntryPayload(items=items, candidates=candidates)
-
-
-@router.post("/entries/{entry_id}/observables/promote", response_model=ObservableResponse)
-async def promote_observable_candidate(
-    payload: ObservablePromoteRequest,
-    entry_id: uuid.UUID = Path(..., description="UUID of the entry the value was seen in"),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """The analyst door: turn a candidate (or any value) into a ledger row."""
-    from app.intelligence.observables import get_or_create_observable, record_sighting, validate_kind_value
-    from app.models.observable import ALL_KINDS
-
-    entry = await _get_entry(db, entry_id)
-    if payload.kind not in ALL_KINDS:
-        raise AppError(code="invalid_kind", message=f"kind must be one of {sorted(ALL_KINDS)}", status_code=422)
-    canonical = validate_kind_value(payload.kind, payload.value)
-    if canonical is None:
-        raise AppError(
-            code="invalid_observable",
-            message=f"'{payload.value}' is not a valid {payload.kind} value",
-            status_code=422,
-        )
-    # A staged candidate (an AI shadow nomination) already carries a judgment;
-    # the analyst's click confirms it rather than discarding it.
-    staged = next(
-        (
-            c
-            for c in (entry.observable_candidates or [])
-            if isinstance(c, dict) and c.get("kind") == payload.kind and c.get("value") == canonical
-        ),
-        {},
-    )
-    obs = await get_or_create_observable(
-        db,
-        payload.kind,
-        canonical,
-        via="manual",
-        entry_id=entry_id,
-        role=payload.role or staged.get("role"),
-        evidence=payload.evidence or staged.get("evidence"),
-        label=payload.label,
-        was_defanged=bool(staged.get("was_defanged")),
-    )
-    if obs is None:
-        raise AppError(code="observable_denied", message="This value is on the never-capture list", status_code=409)
-    await record_sighting(
-        db,
-        entry_id,
-        obs,
-        source="manual",
-        confidence=staged.get("confidence"),
-        surface_form=payload.surface_form or staged.get("surface_form") or payload.value,
-        was_defanged=bool(staged.get("was_defanged")),
-    )
-    await db.commit()
-    await db.refresh(obs)
-    from app.services.entity_indexer import index_single_entity
-    from app.workers.automation_tasks import dispatch_observable_capture_automations
-
-    try:
-        await index_single_entity("observable", obs)
-    except Exception:
-        logger.warning("Observable search indexing failed for %s", obs.id, exc_info=True)
-    # The analyst door is a capture too: on_observable_captured rules see it.
-    dispatch_observable_capture_automations(entry_id, countdown=0)
-    return _observable_to_response(obs)
-
-
-@router.post("/entries/{entry_id}/observables/dismiss", status_code=204)
-async def dismiss_observable_candidate(
-    payload: ObservableDismissRequest,
-    entry_id: uuid.UUID = Path(..., description="UUID of the entry carrying the candidate"),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Drop one candidate from this entry's nomination list.
-
-    Entry-local and available to every analyst — the value can nominate again
-    in other articles. Never-capture (admin) is the global tombstone rung.
-    """
-    entry = await _get_entry(db, entry_id)
-    before = list(entry.observable_candidates or [])
-    remaining = [c for c in before if not (c.get("kind") == payload.kind and c.get("value") == payload.value)]
-    if len(remaining) == len(before):
-        raise AppError(code="not_found", message="Candidate not found on this entry", status_code=404)
-    entry.observable_candidates = remaining
-    await db.commit()
-    return Response(status_code=204)
+    return ObservableEntryPayload(items=items)
 
 
 @router.delete("/entries/{entry_id}/observables/{observable_id}", status_code=204)

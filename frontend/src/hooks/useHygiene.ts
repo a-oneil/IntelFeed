@@ -124,13 +124,15 @@ export interface FeedRow {
   payload: Record<string, unknown>;
   actions: string[];
   links: FeedLink[];
-  /** Who proposed it: the post-analysis adjudicate stage (article in hand), the
-   *  catalogue-wide duplicate review (two profiles side by side), or a scan / an analyst. */
+  /** Who proposed it: the post-analysis adjudicate stage (article in hand; every
+   *  link-log row), the catalogue-wide duplicate review (two profiles side by side), or a scan. */
   origin: ProposalOrigin | null;
   /** What applying it changes (the Review tab's Domain facet). */
   domain: ProposalDomain;
   /** The article text around the match (bounded), when the row has an article. */
   context?: string | null;
+  /** The verdict's confidence, where the stage gave one. */
+  confidence?: Confidence | null;
 }
 
 export type ProposalOrigin = "adjudicator" | "merge_review" | "scan";
@@ -162,38 +164,6 @@ export interface FeedFilters {
   entity_id?: string;
   limit?: number;
   offset?: number;
-}
-
-export interface ApplyAdjudicationAllResult {
-  applied: number;
-  skipped: number;
-  errors: Array<{ log_id: string; action: string; error: string }>;
-}
-
-export interface OrphanRow {
-  entity_type: string;
-  entity_id: string;
-  name: string;
-  article_count: number;
-  first_seen_at: string | null;
-  last_seen_at: string | null;
-}
-
-export interface OrphanListResponse {
-  total: number;
-  items: OrphanRow[];
-  by_type: Record<string, number>;
-}
-
-export interface ApplyAdvisoriesResult {
-  mode: string;
-  advisories_considered: number;
-  distinct_sources: number;
-  applied: number;
-  skipped: number;
-  failed: number;
-  cleared_advisory_rows: number;
-  errors: Array<Record<string, string>>;
 }
 
 export interface PruneOrphansResult {
@@ -255,19 +225,6 @@ export function useHygieneFeed(filters: FeedFilters, opts: { enabled?: boolean }
   });
 }
 
-export function useOrphans(entityType?: string) {
-  return useQuery({
-    queryKey: [...HYGIENE_KEYS, "orphans", entityType ?? "all"],
-    queryFn: async () => {
-      const { data } = await api.get<OrphanListResponse>("/admin/hygiene/orphans", {
-        params: entityType ? { entity_type: entityType } : undefined,
-      });
-      return data;
-    },
-    staleTime: 60 * 1000,
-  });
-}
-
 export function usePruneOrphans() {
   const qc = useQueryClient();
   return useMutation({
@@ -289,26 +246,6 @@ export function usePruneOrphans() {
   });
 }
 
-export function useApplyAdvisories() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (body: {
-      limit?: number;
-      entity_type?: string;
-      mode?: "shadow" | "apply";
-    }) => {
-      const { data } = await api.post<ApplyAdvisoriesResult>(
-        "/admin/hygiene/apply-reclassify-advisories",
-        body,
-      );
-      return data;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
-    },
-  });
-}
-
 export interface ReclassifyGroupsActionResult {
   entities: number;
   cleared_rows: number;
@@ -318,57 +255,19 @@ export interface ReclassifyGroupsActionResult {
 
 type ReclassifyItem = { entity_type: string; entity_id: string; target_type?: string };
 
-function useReclassifyGroupsAction(action: "apply" | "dismiss") {
+/** Convert each entity to its target type and clear every proposal about it. */
+export function useApplyReclassifyGroups() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (items: ReclassifyItem[]) => {
-      const { data } = await api.post<ReclassifyGroupsActionResult>(`/admin/hygiene/reclassify-groups/${action}`, {
+      const { data } = await api.post<ReclassifyGroupsActionResult>("/admin/hygiene/reclassify-groups/apply", {
         items,
       });
       return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
-      if (action === "apply") {
-        qc.invalidateQueries({ queryKey: ["extraction"] });
-        qc.invalidateQueries({ queryKey: ["entity-links"] });
-      }
-    },
-  });
-}
-
-/** Convert each entity to its target type and clear every proposal about it. */
-export const useApplyReclassifyGroups = () => useReclassifyGroupsAction("apply");
-/** Clear every proposal about each entity and stop new ones being filed. */
-export const useDismissReclassifyGroups = () => useReclassifyGroupsAction("dismiss");
-
-export interface UnlinkActionResult {
-  done: number;
-  failed: number;
-  remaining: number;
-  errors: { id: string; error: string }[];
-}
-
-type UnlinkTarget = { items?: { entity_type: string; entity_id: string }[]; row_ids?: string[] };
-
-/** Remove the links (apply) or keep them (clear the proposals). Apply runs in
- *  server batches; this repeats until the groups are drained or a batch stalls. */
-export function useUnlinkAction() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ action, target }: { action: "apply" | "keep"; target: UnlinkTarget }) => {
-      const total: UnlinkActionResult = { done: 0, failed: 0, remaining: 0, errors: [] };
-      for (;;) {
-        const { data } = await api.post<UnlinkActionResult>(`/admin/hygiene/unlink-groups/${action}`, target);
-        total.done += data.done;
-        total.failed += data.failed;
-        total.remaining = data.remaining;
-        total.errors.push(...data.errors);
-        if (action === "keep" || data.remaining === 0 || data.done === 0) return total;
-      }
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
+      qc.invalidateQueries({ queryKey: ["extraction"] });
       qc.invalidateQueries({ queryKey: ["entity-links"] });
     },
   });
@@ -383,7 +282,6 @@ export interface ReviewGroup {
   entity_type: string;
   entity_id: string | null;
   name: string;
-  exists: boolean;
   linked: number | null;
   proposals: number;
   kinds: { action: string; count: number }[];
@@ -391,6 +289,8 @@ export interface ReviewGroup {
   merge_into: { target_type: string; target_id: string; name: string | null; count: number }[];
   domains: ProposalDomain[];
   origin: ProposalOrigin | "mixed";
+  /** The highest verdict confidence among its proposals, where one was given. */
+  confidence: Confidence | null;
   subject: string | null;
   reason: string | null;
   links: FeedLink[];
@@ -400,24 +300,32 @@ export interface ReviewGroup {
   row_ids: string[];
 }
 
-export interface ReviewGroupsFilters {
+export type Confidence = "high" | "medium" | "low";
+
+/** The Review tab's filters: which pending proposals a list or an action covers. */
+export interface ReviewScope {
   q?: string;
   entity_type?: string;
   action?: string;
   domain?: ProposalDomain;
   origin?: ProposalOrigin;
-  limit?: number;
-  offset?: number;
 }
 
-export function useReviewGroups(params: ReviewGroupsFilters) {
+export type ReviewSort = "newest" | "count" | "oldest" | "confidence";
+
+interface ReviewGroupsResponse {
+  groups: ReviewGroup[];
+  total: number;
+  proposals: number;
+  /** Proposals per domain under every other filter, and per origin likewise. */
+  facets: { domains: Partial<Record<ProposalDomain, number>>; origins: Partial<Record<ProposalOrigin, number>> };
+}
+
+export function useReviewGroups(params: ReviewScope & { sort?: ReviewSort; limit?: number; offset?: number }) {
   return useQuery({
     queryKey: [...HYGIENE_KEYS, "review-groups", params],
     queryFn: async () => {
-      const { data } = await api.get<{ groups: ReviewGroup[]; total: number; proposals: number }>(
-        "/admin/hygiene/review-groups",
-        { params },
-      );
+      const { data } = await api.get<ReviewGroupsResponse>("/admin/hygiene/review-groups", { params });
       return data;
     },
     placeholderData: keepPreviousData,
@@ -425,23 +333,65 @@ export function useReviewGroups(params: ReviewGroupsFilters) {
   });
 }
 
-export type ReviewGroupRef = { entity_type: string; entity_id: string | null; row_ids?: string[] };
+type ReviewGroupRef = { entity_type: string; entity_id: string | null; row_ids?: string[] };
 
-/** Settle rows the "leave it alone" way: keep links and type (and stop
- *  proposing the change), remember a duplicate-review pair as two things,
- *  drop every other pending proposal about the entity. */
-export function useDismissReviewGroups() {
+/** Everything applying or dismissing a proposal can change on screen. */
+export function invalidateAfterReview(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
+  qc.invalidateQueries({ queryKey: ["engine"] });
+  qc.invalidateQueries({ queryKey: ["entity-links"] });
+  qc.invalidateQueries({ queryKey: ["relationships"] });
+  qc.invalidateQueries({ queryKey: ["extraction"] });
+}
+
+/** Dismiss what the filters show: the named groups, or with no `items`
+ *  every proposal the filters select (Dismiss all). Each dismissal sticks:
+ *  a type change for the entity, a duplicate pair as two things, an
+ *  adjudicator verdict for its article. */
+export function useDismissReview() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (items: ReviewGroupRef[]) => {
-      const { data } = await api.post<{ entities: number; cleared_rows: number }>("/admin/hygiene/review-groups/dismiss", {
-        items,
-      });
+    mutationFn: async (body: ReviewScope & { items?: ReviewGroupRef[] }) => {
+      const { data } = await api.post<{ cleared_rows: number }>("/admin/hygiene/review-groups/dismiss", body);
       return data;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
+    onSuccess: () => invalidateAfterReview(qc),
+  });
+}
+
+interface ReviewApplyResult {
+  applied: number;
+  skipped: number;
+  failed: number;
+  errors: { id: string; error: string }[];
+}
+
+interface ReviewApplyBatch extends ReviewApplyResult {
+  has_more: boolean;
+  unapplied: string[];
+}
+
+/** Apply what the filters show for the named groups, in server batches,
+ *  until every row has been tried once: rows a batch leaves pending (failed,
+ *  or nothing to do) go back as `exclude`, so the next batch moves on. Type
+ *  changes are left to the chips; assessments are never applied. */
+export function useApplyReview() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: ReviewScope & { items: ReviewGroupRef[] }) => {
+      const total: ReviewApplyResult = { applied: 0, skipped: 0, failed: 0, errors: [] };
+      const exclude: string[] = [];
+      for (;;) {
+        const { data } = await api.post<ReviewApplyBatch>("/admin/hygiene/review-groups/apply", { ...body, exclude: [...exclude] });
+        total.applied += data.applied;
+        total.skipped += data.skipped;
+        total.failed += data.failed;
+        total.errors.push(...data.errors);
+        exclude.push(...data.unapplied);
+        if (!data.has_more || exclude.length > 5000) return total;
+      }
     },
+    onSuccess: () => invalidateAfterReview(qc),
   });
 }
 
@@ -473,49 +423,9 @@ export function useDismissFeedRow() {
   });
 }
 
-/** Bulk-discard pending proposals without applying them. Scope with
- *  action / source / origin, or pass {} to clear the whole pending queue. */
-export function useDismissProposals() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (body: {
-      action?: string;
-      source?: string;
-      origin?: ProposalOrigin;
-      domain?: ProposalDomain;
-    }) => {
-      const { data } = await api.post<{ dismissed: number }>("/admin/hygiene/dismiss-proposals", body);
-      return data;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
-    },
-  });
-}
-
-/** Apply every pending adjudicator proposal (both logs) through the stage's
- *  own apply path. `action` narrows to one `adjudication_*` code or `shadow_remove`. */
-export function useApplyAdjudicationAll() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (body: { action?: string; limit?: number }) => {
-      const { data } = await api.post<ApplyAdjudicationAllResult>("/admin/hygiene/adjudication/apply-all", body);
-      return data;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
-      qc.invalidateQueries({ queryKey: ["engine"] });
-      qc.invalidateQueries({ queryKey: ["entity-links"] });
-      qc.invalidateQueries({ queryKey: ["relationships"] });
-      qc.invalidateQueries({ queryKey: ["extraction"] });
-    },
-  });
-}
-
-/** A background "Apply all" over one proposals queue (see useStartBulkApply). */
+/** A background "Apply all" over what the filters show (see useStartBulkApply). */
 export interface BulkApplyProgress {
   job_id: string;
-  kind: "adjudication" | "advisories" | "all";
   scope: Record<string, unknown>;
   status: "queued" | "running" | "done" | "error";
   /** Rows in scope when the job was queued. */
@@ -531,19 +441,9 @@ export interface BulkApplyProgress {
   message: string | null;
 }
 
-export interface BulkApplyRequest {
-  /** "all" is the Review tab's one button: the adjudicator's queue, then the reclassify advisories. */
-  kind: "adjudication" | "advisories" | "all";
-  /** adjudication_* codes, shadow_remove and/or needs_reclassification, comma-separated; omit for all. */
-  action?: string;
-  domain?: ProposalDomain;
-  /** advisories only. */
-  entity_type?: string;
-  mode?: "shadow" | "apply";
-  limit?: number;
-}
+export type BulkApplyRequest = ReviewScope & { limit?: number };
 
-export const BULK_APPLY_KEY = ["hygiene", "bulk-apply"] as const;
+const BULK_APPLY_KEY = ["hygiene", "bulk-apply"] as const;
 
 /**
  * Queue a background Apply all. The whole backlog (thousands of rows on a
@@ -575,15 +475,6 @@ export function useBulkApplyProgress(jobId: string | null) {
     },
     staleTime: 0,
   });
-}
-
-/** Everything a bulk apply can change on screen. */
-export function invalidateAfterBulkApply(qc: ReturnType<typeof useQueryClient>) {
-  qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
-  qc.invalidateQueries({ queryKey: ["engine"] });
-  qc.invalidateQueries({ queryKey: ["entity-links"] });
-  qc.invalidateQueries({ queryKey: ["relationships"] });
-  qc.invalidateQueries({ queryKey: ["extraction"] });
 }
 
 export function useRunNameNormalization() {

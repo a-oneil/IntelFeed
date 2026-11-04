@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense, Fragment } from "react";
 import { useNavigate, useLocation, useSearchParams, Outlet } from "react-router-dom";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useIntelStore, type WorkspaceSection } from "@/stores/intelStore";
 import { useAuthStore } from "@/stores/authStore";
 import api from "@/api/client";
-import type { EntitySearchResult, ThreatActor, MalwareFamily, TTP, CVE, CWEResponse, ObservableResponse, ObservableCandidateRow, Country, Sector, Mitigation, OffensiveTool, Vendor, Product, DetectionRuleListItem, FacetBucket, RuleSearchResponse, IntelReport, IntelligenceRequirement, PaginatedResponse } from "@/api/types";
+import type { EntitySearchResult, ThreatActor, MalwareFamily, TTP, CVE, CWEResponse, ObservableResponse, Country, Sector, Mitigation, OffensiveTool, Vendor, Product, DetectionRuleListItem, FacetBucket, RuleSearchResponse, IntelReport, IntelligenceRequirement, PaginatedResponse } from "@/api/types";
 import { EntityTableSection, type ColumnDef } from "@/components/EntityTableSection";
 import { DataTable, type SortDir } from "@/components/table/DataTable";
 import { NameCell } from "@/components/table/cells";
@@ -59,12 +58,6 @@ import { SECTION_KEYS, VISITOR_HIDDEN_SECTIONS } from "@/components/WorkbenchNav
 import styles from "./WorkbenchPage.module.css";
 import lib from "./RuleLibrary.module.css";
 import { Chip, FacetSection, PageHeader, RailToggle, Segmented } from "@/components/primitives";
-import {
-  useDismissObservableCandidate,
-  useNeverCaptureObservable,
-  useObservableCandidates,
-  usePromoteObservable,
-} from "@/hooks/useIntelligence";
 const DockedThreadReader = lazy(() =>
   import("@/components/ThreadReader").then((m) => ({ default: m.ThreadReader }))
 );
@@ -72,7 +65,7 @@ const DockedEntryReader = lazy(() =>
   import("@/components/EntryReader").then((m) => ({ default: m.EntryReader }))
 );
 import { RouteFallback } from "@/components/RouteFallback";
-import { alertDialog, confirmDialog } from "@/utils/dialog";
+import { alertDialog } from "@/utils/dialog";
 import { useIsVisitor } from "@/stores/authStore";
 import { NotAvailable } from "@/components/NotAvailable";
 
@@ -1458,6 +1451,7 @@ const OBSERVABLE_VIA_CHOICES = [
   { value: "ttp_observable", label: "TTP observable" },
   { value: "ioc_list", label: "indicator feed" },
   { value: "publisher_ioc", label: "article IOC table" },
+  { value: "adjudicator", label: "adjudicator" },
   { value: "manual", label: "analyst" },
 ];
 
@@ -1730,264 +1724,48 @@ const CWE_COLUMNS: ColumnDef<CWEResponse>[] = [
   },
 ];
 
-function ObservableCandidatesQueue() {
-  const { data: candidates, isLoading } = useObservableCandidates(true);
-  const promote = usePromoteObservable();
-  const dismissCandidate = useDismissObservableCandidate();
-  const neverCapture = useNeverCaptureObservable();
-  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
-  const [handled, setHandled] = useState<Set<string>>(new Set());
-  const [checked, setChecked] = useState<Set<string>>(new Set());
-  const [bulkBusy, setBulkBusy] = useState(false);
-
-  const keyOf = (c: ObservableCandidateRow) => `${c.kind}:${c.value}`;
-  const rows = (candidates ?? []).filter((c) => !handled.has(keyOf(c)));
-  const markHandled = (c: ObservableCandidateRow) => {
-    setHandled((prev) => new Set(prev).add(keyOf(c)));
-    setChecked((prev) => {
-      const next = new Set(prev);
-      next.delete(keyOf(c));
-      return next;
-    });
-  };
-  const toggleChecked = (c: ObservableCandidateRow) =>
-    setChecked((prev) => {
-      const next = new Set(prev);
-      const k = keyOf(c);
-      if (next.has(k)) next.delete(k);
-      else next.add(k);
-      return next;
-    });
-  const allChecked = rows.length > 0 && checked.size === rows.length;
-  const selectedRows = rows.filter((c) => checked.has(keyOf(c)));
-
-  const runBulk = async (
-    action: (c: ObservableCandidateRow) => Promise<unknown>,
-    doneWord: string,
-  ) => {
-    if (!selectedRows.length) return;
-    setBulkBusy(true);
-    let ok = 0;
-    for (const c of selectedRows) {
-      try {
-        await action(c);
-        markHandled(c);
-        ok += 1;
-      } catch {
-        /* row stays; per-hook onError already toasts */
-      }
-    }
-    setBulkBusy(false);
-    if (ok) toast.success(`${doneWord} ${ok} candidate${ok === 1 ? "" : "s"}`);
-  };
-
-  return (
-    <div className={styles.candQueue}>
-      <div className={styles.candQueueHead}>
-        Candidates · {rows.length}{rows.length >= 500 ? "+" : ""} — values a pattern scan spotted but nothing has
-        confirmed, aggregated across the 400 most recent articles that raised one. Promote turns one into a ledger
-        row; dismiss drops it from its latest article; never-capture (admin) tombstones it everywhere.
-      </div>
-      {rows.length > 0 && (
-        <div className={styles.candBulkBar}>
-          <label className={styles.candBulkAll}>
-            <input
-              type="checkbox"
-              checked={allChecked}
-              onChange={() => setChecked(allChecked ? new Set() : new Set(rows.map(keyOf)))}
-            />
-            {checked.size ? `${checked.size} selected` : "select all"}
-          </label>
-          <button
-            className={styles.candPromote}
-            disabled={bulkBusy || !selectedRows.length}
-            onClick={() =>
-              runBulk(
-                (c) =>
-                  promote.mutateAsync({
-                    entryId: c.latest_entry_id!,
-                    kind: c.kind,
-                    value: c.value,
-                    surfaceForm: c.sample_surface ?? undefined,
-                  }),
-                "Promoted",
-              )
-            }
-          >
-            promote selected
-          </button>
-          <button
-            className={styles.candPromote}
-            disabled={bulkBusy || !selectedRows.length}
-            onClick={() =>
-              runBulk(
-                (c) => dismissCandidate.mutateAsync({ entryId: c.latest_entry_id!, kind: c.kind, value: c.value }),
-                "Dismissed",
-              )
-            }
-            title="Entry-local: drops each candidate from its latest article"
-          >
-            dismiss selected
-          </button>
-          {isAdmin && (
-            <button
-              className={styles.candNever}
-              disabled={bulkBusy || !selectedRows.length}
-              onClick={async () => {
-                if (
-                  !(await confirmDialog({
-                    title: "Tombstone values",
-                    message: `Tombstone ${selectedRows.length} value${selectedRows.length === 1 ? "" : "s"}? No door will capture them again.`,
-                    confirmLabel: "Tombstone",
-                    destructive: true,
-                  }))
-                )
-                  return;
-                void runBulk((c) => neverCapture.mutateAsync({ kind: c.kind, value: c.value }), "Tombstoned");
-              }}
-            >
-              never selected
-            </button>
-          )}
-        </div>
-      )}
-      {isLoading && <div className={styles.candQueueEmpty}>Loading…</div>}
-      {!isLoading && rows.length === 0 && (
-        <div className={styles.candQueueEmpty}>Queue is clear — nothing nominated and unjudged.</div>
-      )}
-      <div className={styles.candRows}>
-      {rows.map((c) => (
-        <div key={keyOf(c)} className={styles.candRow}>
-          <input
-            type="checkbox"
-            checked={checked.has(keyOf(c))}
-            onChange={() => toggleChecked(c)}
-            aria-label={`Select ${c.value}`}
-          />
-          <Chip tone="toned" tint="var(--entity-ioc)">{c.kind}</Chip>
-          <span
-            className={styles.candValue}
-            title={c.sample_surface && c.sample_surface !== c.value ? `${c.value} — seen as ${c.sample_surface}` : c.value}
-          >
-            {c.value}
-          </span>
-          {c.was_defanged && (
-            <span className={styles.candMark} title="Author defanged it — strong indicator signal">defanged</span>
-          )}
-          <span className={styles.candMeta}>
-            {c.entry_count} article{c.entry_count === 1 ? "" : "s"}
-            {c.latest_entry_title ? ` · ${c.latest_entry_title.slice(0, 48)}` : ""}
-          </span>
-          <button
-            className={styles.candPromote}
-            disabled={promote.isPending || !c.latest_entry_id}
-            onClick={() =>
-              promote.mutate(
-                {
-                  entryId: c.latest_entry_id!,
-                  kind: c.kind,
-                  value: c.value,
-                  surfaceForm: c.sample_surface ?? undefined,
-                },
-                { onSuccess: () => markHandled(c) },
-              )
-            }
-          >
-            promote
-          </button>
-          <button
-            className={styles.candPromote}
-            disabled={dismissCandidate.isPending || !c.latest_entry_id}
-            onClick={() =>
-              dismissCandidate.mutate(
-                { entryId: c.latest_entry_id!, kind: c.kind, value: c.value },
-                { onSuccess: () => markHandled(c) },
-              )
-            }
-            title={
-              c.entry_count > 1
-                ? `Drops it from the latest article; it still rides ${c.entry_count - 1} other${c.entry_count === 2 ? "" : "s"}`
-                : "Drops it from its article"
-            }
-          >
-            dismiss
-          </button>
-          {isAdmin && (
-            <button
-              className={styles.candNever}
-              disabled={neverCapture.isPending}
-              onClick={() =>
-                neverCapture.mutate({ kind: c.kind, value: c.value }, { onSuccess: () => markHandled(c) })
-              }
-              title="Tombstone: never capture or export this value"
-            >
-              never
-            </button>
-          )}
-        </div>
-      ))}
-      </div>
-    </div>
-  );
-}
-
 function ObservablesSection() {
-  // ?queue=1 deep-links straight into the candidates queue (the Engine
-  // console's attention chip lands here).
   const [searchParams, setSearchParams] = useSearchParams();
-  const [queueOpen, setQueueOpen] = useState(searchParams.get("queue") === "1");
-  const { data: queueRows } = useObservableCandidates(true);
   // ?linked_entity=<type>:<uuid> is the profile's "Open in observables
   // browser" pivot: only the infrastructure behind that entity.
   const linkedEntity = searchParams.get("linked_entity");
   const linkedType = linkedEntity?.split(":")[0];
 
   return (
-    <>
-      {queueOpen && <ObservableCandidatesQueue />}
-      <EntityTableSection<ObservableResponse>
-        title={linkedEntity ? `Observables · ${linkedType?.replace(/_/g, " ")} infrastructure` : "Observables"}
-        entityType="observable"
-        columns={OBSERVABLE_COLUMNS}
-        queryKey={linkedEntity ? `observables:${linkedEntity}` : "observables"}
-        endpoint="/observables"
-        extraQueryParams={linkedEntity ? { linked_entity: linkedEntity } : undefined}
-        defaultSort={{ key: "last_seen_at", dir: "desc" }}
-        emptyTitle={linkedEntity ? "No infrastructure behind this entity yet" : "No observables yet"}
-        emptyDesc={
-          linkedEntity
-            ? "Nothing is attributed to it or reported alongside it. IPs, domains and hashes found in articles about it will show here."
-            : "Ledger rows come from judgment: the one-pass analysis, curated ioc_list feeds, TTP observables, or promoting a candidate from an article's intel panel."
-        }
-        getId={(o) => o.id}
-        getLabel={(o) => o.label || o.value}
-        noun="observable"
-        nounPlural="observables"
-        filters={
-          <>
-            {linkedEntity && (
-              <button
-                className={`${styles.candToggle} ${styles.candToggleOn}`}
-                title="Clear the entity filter"
-                onClick={() => {
-                  const next = new URLSearchParams(searchParams);
-                  next.delete("linked_entity");
-                  setSearchParams(next, { replace: true });
-                }}
-              >
-                Linked to one {linkedType?.replace(/_/g, " ")} · clear
-              </button>
-            )}
-            <button
-              className={`${styles.candToggle} ${queueOpen ? styles.candToggleOn : ""}`}
-              onClick={() => setQueueOpen(!queueOpen)}
-            >
-              Candidates{queueRows?.length ? ` · ${queueRows.length}` : ""}
-            </button>
-          </>
-        }
-      />
-    </>
+    <EntityTableSection<ObservableResponse>
+      title={linkedEntity ? `Observables · ${linkedType?.replace(/_/g, " ")} infrastructure` : "Observables"}
+      entityType="observable"
+      columns={OBSERVABLE_COLUMNS}
+      queryKey={linkedEntity ? `observables:${linkedEntity}` : "observables"}
+      endpoint="/observables"
+      extraQueryParams={linkedEntity ? { linked_entity: linkedEntity } : undefined}
+      defaultSort={{ key: "last_seen_at", dir: "desc" }}
+      emptyTitle={linkedEntity ? "No infrastructure behind this entity yet" : "No observables yet"}
+      emptyDesc={
+        linkedEntity
+          ? "Nothing is attributed to it or reported alongside it. IPs, domains and hashes found in articles about it will show here."
+          : "Ledger rows come from judgment: the one-pass analysis, the adjudicator, curated ioc_list feeds, TTP observables and publishers' IOC files."
+      }
+      getId={(o) => o.id}
+      getLabel={(o) => o.label || o.value}
+      noun="observable"
+      nounPlural="observables"
+      filters={
+        linkedEntity ? (
+          <button
+            className={styles.linkedFilter}
+            title="Clear the entity filter"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete("linked_entity");
+              setSearchParams(next, { replace: true });
+            }}
+          >
+            Linked to one {linkedType?.replace(/_/g, " ")} · clear
+          </button>
+        ) : undefined
+      }
+    />
   );
 }
 

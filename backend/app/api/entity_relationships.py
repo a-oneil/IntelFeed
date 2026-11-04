@@ -115,17 +115,18 @@ async def _enrich_names(db: AsyncSession, relationships: list[EntityRelationship
 @router.get("", response_model=PaginatedResponse[EntityRelationshipResponse])
 async def list_entity_relationships(
     entity_type: str | None = Query(
-        None, description="With entity_id, only relationships where that entity is source or target."
+        None,
+        description="Only relationships with an entity of this type at either end; with entity_id, only that "
+        "entity's relationships.",
     ),
-    entity_id: uuid.UUID | None = Query(
-        None, description="Entity UUID to filter by (only applied together with entity_type)."
-    ),
+    entity_id: uuid.UUID | None = Query(None, description="Entity UUID to filter by (used together with entity_type)."),
     relationship_type: str | None = Query(
         None,
         description="Filter by verb (uses, exploits, targets, attributed_to, variant_of, "
         "communicates_with, delivers, drops, hosts, related_to).",
     ),
     evidence_entry_id: uuid.UUID | None = Query(None, description="Only relationships citing this entry as evidence."),
+    hours: int | None = Query(None, ge=1, le=87_600, description="Only relationships created within the last N hours."),
     include_rejected: bool = Query(False, description="Include analyst-rejected relationships (hidden by default)."),
     all_confidence: bool = Query(
         False, description="Ignore the min-confidence display setting and return every stored edge."
@@ -162,10 +163,21 @@ async def list_entity_relationships(
         )
         base = base.where(condition)
         count_base = count_base.where(condition)
+    elif entity_type:
+        condition = or_(EntityRelationship.source_type == entity_type, EntityRelationship.target_type == entity_type)
+        base = base.where(condition)
+        count_base = count_base.where(condition)
 
     if relationship_type:
         base = base.where(EntityRelationship.relationship_type == relationship_type)
         count_base = count_base.where(EntityRelationship.relationship_type == relationship_type)
+
+    if hours:
+        from datetime import UTC, datetime, timedelta
+
+        condition = EntityRelationship.created_at >= datetime.now(UTC) - timedelta(hours=hours)
+        base = base.where(condition)
+        count_base = count_base.where(condition)
 
     if evidence_entry_id is not None:
         condition = EntityRelationship.evidence_entry_ids.any(evidence_entry_id)

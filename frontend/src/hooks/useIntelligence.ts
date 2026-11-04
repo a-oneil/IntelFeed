@@ -1,5 +1,4 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import api from "@/api/client";
 import { useIsVisitor } from "@/stores/authStore";
 import type {
@@ -21,7 +20,6 @@ import type {
   DetectionRule,
   DetectionRuleListItem,
   Mitigation,
-  ObservableCandidateRow,
   ObservableEntryPayload,
   ObservableResponse,
   OffensiveTool,
@@ -956,70 +954,6 @@ export function useObservable(observableId: string | undefined) {
   });
 }
 
-export function useObservableCandidates(enabled: boolean, kind?: string) {
-  return useQuery({
-    queryKey: ["observable-candidates", kind ?? "all"],
-    queryFn: async () => {
-      const { data } = await api.get<ObservableCandidateRow[]>("/observables/candidates", {
-        params: { limit: 500, ...(kind && kind !== "all" ? { kind } : {}) },
-      });
-      return data;
-    },
-    enabled,
-  });
-}
-
-export function usePromoteObservable() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      entryId,
-      kind,
-      value,
-      surfaceForm,
-    }: {
-      entryId: string;
-      kind: string;
-      value: string;
-      surfaceForm?: string;
-    }) => {
-      const { data } = await api.post<ObservableResponse>(`/entries/${entryId}/observables/promote`, {
-        kind,
-        value,
-        surface_form: surfaceForm,
-      });
-      return data;
-    },
-    onSuccess: (_, vars) => {
-      qc.invalidateQueries({ queryKey: ["entry-observables", vars.entryId] });
-      qc.invalidateQueries({ queryKey: ["observables"] });
-      qc.invalidateQueries({ queryKey: ["observable-candidates"] });
-      // The Engine extraction tab lists ledger rows too.
-      qc.invalidateQueries({ queryKey: ["extraction"] });
-    },
-    onError: (err) => {
-      const detail = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(detail ?? "Promote failed");
-    },
-  });
-}
-
-/** Drop one candidate from one entry's nomination list — entry-local, any
- * analyst; never-capture (admin) is the global rung. */
-export function useDismissObservableCandidate() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ entryId, kind, value }: { entryId: string; kind: string; value: string }) => {
-      await api.post(`/entries/${entryId}/observables/dismiss`, { kind, value });
-    },
-    onSuccess: (_, vars) => {
-      qc.invalidateQueries({ queryKey: ["entry-observables", vars.entryId] });
-      qc.invalidateQueries({ queryKey: ["observable-candidates"] });
-    },
-    onError: () => toast.error("Dismiss failed"),
-  });
-}
-
 export function useUpdateObservable() {
   const qc = useQueryClient();
   return useMutation({
@@ -1072,22 +1006,6 @@ export function useDeleteObservable() {
     },
     onSuccess: (observableId) => {
       qc.removeQueries({ queryKey: ["observable", observableId] });
-      qc.invalidateQueries({ queryKey: ["observables"] });
-      qc.invalidateQueries({ queryKey: ["entry-observables"] });
-      qc.invalidateQueries({ queryKey: ["extraction"] });
-    },
-  });
-}
-
-export function useNeverCaptureObservable() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ kind, value }: { kind: string; value: string }) => {
-      const { data } = await api.post<ObservableResponse>("/observables/never-capture", { kind, value });
-      return data;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["observable-candidates"] });
       qc.invalidateQueries({ queryKey: ["observables"] });
       qc.invalidateQueries({ queryKey: ["entry-observables"] });
       qc.invalidateQueries({ queryKey: ["extraction"] });

@@ -195,9 +195,11 @@
 .scroll {
   overflow-x: auto;
 }
+/* On a narrow screen the table scrolls sideways rather than squeezing its columns. */
 .table {
   border-collapse: collapse;
   width: 100%;
+  min-width: 720px;
   font-size: var(--fs-base);
 }
 .table thead th {
@@ -414,38 +416,6 @@
   color: var(--accent);
 }
 
-/* ---- pending callout ---- */
-.pending {
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--warning);
-  border-radius: var(--r-md);
-  background: var(--card-bg, var(--bg-secondary));
-  padding: 14px 16px;
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.pending h3 {
-  margin: 0 0 3px;
-  font-size: var(--fs-md);
-}
-.pending p {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: var(--fs-base);
-  max-width: 70ch;
-}
-.pending b {
-  color: var(--warning);
-  font-variant-numeric: tabular-nums;
-}
-.pendingActs {
-  margin-left: auto;
-  display: flex;
-  gap: 8px;
-}
-
 /* ---- footer / pager ---- */
 .foot {
   display: flex;
@@ -502,5 +472,19 @@
 @media (max-width: 620px) {
   .kpis {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* On a phone a filter row stays one line and scrolls sideways. */
+@media (max-width: 720px) {
+  .filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .filters > * {
+    flex: none;
+  }
+  .filters .search {
+    width: 220px;
   }
 }

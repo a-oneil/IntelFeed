@@ -566,17 +566,13 @@ Observables are IOCs (indicators of compromise: hashes, IPs, domains, URLs and s
 | --- | --- | --- | --- |
 | GET | `/api/observables` | User | The ledger. `search`, `kind`, `role`, `status`, `created_via` (how it was captured), `infra_tag`, `min_confidence`, or `linked_entity=<type>:<uuid>`; sort by `report_count` or `feed_source_count` |
 | GET | `/api/observables/rollup` | User | Counts by kind and state |
-| GET | `/api/observables/candidates` | User | Suggested values nobody has confirmed yet |
 | GET | `/api/observables/{observable_id}` | User | One observable |
 | PATCH | `/api/observables/{observable_id}` | User (admin to change the never-capture flag) | Edit label, role, description, confidence |
 | DELETE | `/api/observables/{observable_id}` | User | Delete the row, its sightings and relationships. The value can be captured again later |
 | POST | `/api/observables/{observable_id}/deny` | Admin | Never capture or export this value again. Keeps the row as a marker |
-| POST | `/api/observables/never-capture` | Admin | Ban a value from the candidates queue for good |
 | GET | `/api/observables/{observable_id}/backlinks` | User | Who claims it, and what it was reported alongside |
 | GET | `/api/observables/{observable_id}/sightings.csv` | User | Every sighting as CSV |
-| GET | `/api/entries/{entry_id}/observables` | User | An article's confirmed observables and its candidates |
-| POST | `/api/entries/{entry_id}/observables/promote` | User | Confirm a candidate (`role`, `evidence`, `label`) |
-| POST | `/api/entries/{entry_id}/observables/dismiss` | User | Drop a candidate from this article |
+| GET | `/api/entries/{entry_id}/observables` | User | The observables sighted in an article |
 | DELETE | `/api/entries/{entry_id}/observables/{observable_id}` | User | Remove one sighting (the observable stays) |
 | GET | `/api/entities/{entity_type}/{entity_id}/infrastructure` | User | Observables behind an actor, malware, campaign or tool: `{claimed, reported_alongside, counts}`. `?format=csv` for a flat file |
 
@@ -730,7 +726,7 @@ Entity types: `ttp`, `cve`, `threat_actor`, `malware`, `campaign`, `country`, `t
 
 | Method | Path | Access | What it does |
 | --- | --- | --- | --- |
-| GET | `/api/entity-relationships` | Visitor | Paginated list. `entity_type` + `entity_id`, `relationship_type`, `include_rejected` |
+| GET | `/api/entity-relationships` | Visitor | Paginated list. `entity_type` (with `entity_id`, one entity's; alone, every edge with that type at either end), `relationship_type`, `include_rejected`, `hours` (created in the last N hours) |
 | GET | `/api/entity-relationships/by-entity/{entity_type}/{entity_id}` | Visitor | Every relationship for one entity |
 | GET | `/api/entity-relationships/claims/{entity_type}/{entity_id}` | User | Which enrichment sources claim each of the entity's connections (`by_target`, keyed `<type>-<id>`), linked claims per source (`sources`), and the names its sources gave that matched no entity or several (`held`, `held_count`) |
 | POST | `/api/entity-relationships/signals/{entity_type}` | Visitor | Body `{"ids": [...]}`: per id, the count and top 3 relationships. A POST because the id list is too long for a URL |
@@ -746,7 +742,7 @@ The links between articles and entities that the autolinker and extraction creat
 
 | Method | Path | Access | What it does |
 | --- | --- | --- | --- |
-| GET | `/api/entity-links` | Visitor | Every link, newest first |
+| GET | `/api/entity-links` | Visitor | Every link, newest first. `days` or `hours` limit it to recent links |
 | GET | `/api/entity-links/stats` | User | Totals by type and source, and the held-match queue size |
 | DELETE | `/api/entity-links/{entity_type}/{entity_id}/{entry_id}` | User | Remove one link |
 | POST | `/api/entity-links/bulk-unlink` | User | Remove up to 500 links |
@@ -799,30 +795,21 @@ Proposed fixes to entity data wait in review queues. Every route here is Admin. 
 | Method | Path | What it does |
 | --- | --- | --- |
 | GET | `/api/admin/hygiene/feed` | Every proposal from both logs, newest first (`entity_type` + `entity_id` narrow it to one entity). `context=true` adds each row's article text around the match (at most 320 characters); the Review tab asks for it on one entity's rows |
-| GET | `/api/admin/hygiene/review-groups` | Every pending proposal, one row per entity, with what each kind wants done |
+| GET | `/api/admin/hygiene/review-groups` | Every pending proposal, one row per entity, with what each kind wants done. Filters `action`, `origin`, `domain`, `entity_type`, `q`; `sort` = `newest` (default), `count`, `oldest` or `confidence`. `facets` gives proposals per domain and per origin under the other filters |
 | POST | `/api/admin/hygiene/decisions` | Decide many proposals in one call: `[{id: "<source>:<log_id>", decision: "apply" \| "dismiss" \| "reclassify:<type>"}]`, one result per row. A row an earlier decision already closed comes back `settled`; an apply with nothing left to do comes back `resolved` |
-| POST | `/api/admin/hygiene/review-groups/dismiss` | Settle each entity's row the leave-it-alone way and stop the proposals coming back |
+| POST | `/api/admin/hygiene/review-groups/apply` | Apply what the filters show for the named groups (`items`), or for every group without `items`, up to `limit` rows; `has_more` says to call again, passing the `unapplied` rows back in `exclude` so nothing is tried twice. Type changes only with `include_reclassify`; assessments never |
+| POST | `/api/admin/hygiene/review-groups/dismiss` | Dismiss what the filters show for the named groups, or for every group without `items` (Dismiss all). Each dismissal sticks |
 | POST | `/api/admin/hygiene/scan-duplicates` | Run the duplicate review now; its Merge proposals land in the queue |
 | GET | `/api/admin/hygiene/stats` | Queue counts and the adjudicate stage's mode |
-| DELETE | `/api/admin/hygiene/feed/{source}/{row_id}` | Delete one proposal row |
-| POST | `/api/admin/hygiene/dismiss-proposals` | Discard pending proposals without applying them |
+| DELETE | `/api/admin/hygiene/feed/{source}/{row_id}` | Dismiss one pending proposal; the dismissal sticks |
 | POST | `/api/admin/hygiene/adjudication/{log_id}/apply` | Apply one adjudicate-stage proposal |
 | POST | `/api/admin/hygiene/adjudication/{log_id}/restore` | Undo an applied one |
-| POST | `/api/admin/hygiene/adjudication/apply-all` | Apply up to `limit` pending proposals now |
-| POST | `/api/admin/hygiene/bulk-apply` | Apply a whole queue in the background |
+| POST | `/api/admin/hygiene/bulk-apply` | Apply everything the Review filters show, in the background |
 | GET | `/api/admin/hygiene/bulk-apply/{job_id}` | Progress of that job |
-| GET | `/api/admin/hygiene/reclassify-groups` | Pending type changes, one row per entity |
 | POST | `/api/admin/hygiene/reclassify-groups/apply` | Convert each entity to its proposed type |
-| POST | `/api/admin/hygiene/reclassify-groups/dismiss` | Drop those proposals and stop new ones |
-| POST | `/api/admin/hygiene/apply-reclassify-advisories` | Turn advisory type changes into real proposals |
-| GET | `/api/admin/hygiene/unlink-groups` | Pending link removals, one row per entity |
-| GET | `/api/admin/hygiene/unlink-groups/rows` | The articles behind one entity's removals |
-| POST | `/api/admin/hygiene/unlink-groups/apply` | Remove those links |
-| POST | `/api/admin/hygiene/unlink-groups/keep` | Keep the links and clear the proposals |
 | POST | `/api/admin/hygiene/link-log/{log_id}/restore` | Put back a removed link |
 | POST | `/api/admin/hygiene/link-log/{log_id}/apply-removal` | Carry out a proposed link removal |
-| GET | `/api/admin/hygiene/orphans` | Entities with no articles |
-| POST | `/api/admin/hygiene/orphans/prune` | Delete them |
+| POST | `/api/admin/hygiene/orphans/prune` | Delete entities with no articles |
 | POST | `/api/admin/hygiene/enrichment-gaps/enrich` | Have the AI research and fill one field |
 | POST | `/api/admin/hygiene/run-name-normalization` | Start the AI name check |
 | POST | `/api/admin/hygiene/normalize-name/{log_id}/apply` | Apply one rename or merge |
@@ -1353,7 +1340,7 @@ Instance settings, stored in the database and falling back to `.env`. All Admin.
 | --- | --- | --- | --- |
 | GET | `/api/engine/pipeline` | User | Pipeline stages, 24-hour activity and engine flags |
 | GET | `/api/engine/pipeline/stages/{stage}/runs` | User | Recent runs of one stage |
-| GET | `/api/engine/processing` | Admin | Per-article stage grid and window stats |
+| GET | `/api/engine/processing` | Admin | Per-article stage grid and window stats (`window` = 1h, 24h, 7d, 30d or all) |
 | GET | `/api/engine/entries/{entry_id}/runs` | User | Every stage run for one article |
 | GET | `/api/engine/entries/{entry_id}/adjudication` | User | What the adjudicate stage decided for one article |
 | POST | `/api/engine/entries/{entry_id}/stages/{stage}/retry` | Admin | Re-run one stage for one article |
@@ -1365,6 +1352,7 @@ Instance settings, stored in the database and falling back to `.env`. All Admin.
 | GET | `/api/engine/job-runs` | User | Recent scheduled job runs |
 | GET | `/api/engine/state` | User | Whether the engine is stopped, and tasks waiting on each queue |
 | PUT | `/api/engine/state` | Admin | Stop or start all background work |
+| POST | `/api/engine/state/clear-health` | Admin | Clear the header check-engine light until a new error or retry comes in |
 | GET | `/api/engine/signals/stats` | User | Signal firing rates, weights and the radar threshold |
 | PUT | `/api/engine/signals/settings` | Admin | Change signal weights or the radar threshold, then rescore |
 | GET | `/api/engine/entities/{entity_type}/{entity_id}/whats-new` | Visitor | Recent signals on an entity's articles |

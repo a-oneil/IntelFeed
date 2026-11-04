@@ -1719,16 +1719,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.obsCandidates {
-  margin-top: 6px;
-  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
-  padding-top: 4px;
-}
-
-.obsCandidateRow { opacity: 0.75; }
-.obsCandidateValue { color: var(--text-secondary); }
-
-.obsPromoteBtn {
+.obsCopyBtn {
   flex: none;
   font-size: 10px;
   font-weight: 600;
@@ -1739,8 +1730,7 @@
   padding: 1px 8px;
   cursor: pointer;
 }
-.obsPromoteBtn:hover { background: color-mix(in srgb, var(--entity-ioc, #d946ef) 12%, transparent); }
-.obsPromoteBtn:disabled { opacity: 0.5; cursor: default; }
+.obsCopyBtn:hover { background: color-mix(in srgb, var(--entity-ioc, #d946ef) 12%, transparent); }
 
 .obsCopyAllRow {
   display: flex;

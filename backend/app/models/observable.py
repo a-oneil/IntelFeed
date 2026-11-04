@@ -95,6 +95,7 @@ VIA_TTP = "ttp_observable"  # EntryTTP.observable_value upsert (host kinds)
 VIA_FEED = "ioc_list"  # curated indicator-list feed body
 VIA_MANUAL = "manual"  # analyst promote / create
 VIA_PUBLISHER = "publisher_ioc"  # the indicator file a write-up links to (Talos/Bitdefender/Datadog repos)
+VIA_ADJUDICATOR = "adjudicator"  # the post-analysis review captured an uncaptured candidate
 
 #: What the indicator was doing, per the analysis AI. Network roles name the
 #: infrastructure's job; host roles are tactic-shaped (what the artifact did on
@@ -203,7 +204,7 @@ class EntryObservable(Base):
         UUID(as_uuid=True), ForeignKey("observables.id", ondelete="CASCADE"), primary_key=True, index=True
     )
     confidence: Mapped[str | None] = mapped_column(String(10))
-    #: Which door recorded it: ai | ttp | feed | publisher | manual | sighting.
+    #: Which door recorded it: ai | ttp | feed | publisher | adjudicator | manual | sighting.
     #: (A rule-body door was removed on 2026-09-19: rules consume IOCs, they
     #: are not a source of them.)
     #: "sighting" is the pipeline exact-matching a known value in a new entry —

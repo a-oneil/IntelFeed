@@ -27,8 +27,6 @@ import {
   useEntryVendors,
   useEntryProducts,
   useEntryObservables,
-  usePromoteObservable,
-  useDismissObservableCandidate,
   useGenerateDetectionRules,
   useDetectionRules,
   useDetectionRule,
@@ -158,9 +156,7 @@ export default function WorkbenchPanel({
   const vendors = readOnly ? (preloadedData?.vendors || []) : hookVendors;
   const products = readOnly ? (preloadedData?.products || []) : hookProducts;
   const actualUrls = readOnly ? (preloadedData?.urls || []) : entryUrls;
-  const observablePayload: ObservableEntryPayload = readOnly
-    ? { items: [], candidates: [] }
-    : (hookObservables ?? { items: [], candidates: [] });
+  const observablePayload: ObservableEntryPayload = readOnly ? { items: [] } : (hookObservables ?? { items: [] });
 
   const extractTTPs = useExtractTTPs();
   const extractCVEs = useExtractCVEs();
@@ -453,7 +449,7 @@ export default function WorkbenchPanel({
         >
           <MitigationList mitigations={mitigations || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={editLocked} />
         </AccordionSection>
-        {(observablePayload.items.length > 0 || observablePayload.candidates.length > 0) && (
+        {observablePayload.items.length > 0 && (
           <AccordionSection
             title="Observables"
             count={observablePayload.items.length}
@@ -462,7 +458,7 @@ export default function WorkbenchPanel({
             onToggle={() => toggleSection("observables")}
             accentClass={styles.sectionAccentObservable}
           >
-            <ObservableList payload={observablePayload} entryId={entryId} readOnly={editLocked} />
+            <ObservableList payload={observablePayload} readOnly={editLocked} />
           </AccordionSection>
         )}
         <AccordionSection
@@ -844,21 +840,10 @@ const OBSERVABLE_KIND_GROUPS: Array<[string, string[]]> = [
   ["Emails", ["email"]],
 ];
 
-function ObservableList({
-  payload,
-  entryId,
-  readOnly,
-}: {
-  payload: ObservableEntryPayload;
-  entryId: string;
-  readOnly?: boolean;
-}) {
+function ObservableList({ payload, readOnly }: { payload: ObservableEntryPayload; readOnly?: boolean }) {
   const navigate = useNavigate();
-  const promote = usePromoteObservable();
-  const dismiss = useDismissObservableCandidate();
-  const [candidatesOpen, setCandidatesOpen] = useState(false);
   const [copiedAll, setCopiedAll] = useState<string | null>(null);
-  const { items, candidates } = payload;
+  const { items } = payload;
 
   const grouped = OBSERVABLE_KIND_GROUPS.map(
     ([label, kinds]) => [label, items.filter((i) => kinds.includes(i.kind))] as const,
@@ -919,45 +904,11 @@ function ObservableList({
           ))}
         </div>
       ))}
-      {candidates.length > 0 && !readOnly && (
-        <div className={styles.obsCandidates}>
-          <button className={styles.lowConfidenceToggle} onClick={() => setCandidatesOpen(!candidatesOpen)}>
-            Candidates · {candidates.length} — not captured{" "}
-            <span className="caret-glyph">{candidatesOpen ? "▴" : "▾"}</span>
-          </button>
-          {candidatesOpen &&
-            candidates.map((c) => (
-              <div key={`${c.kind}:${c.value}`} className={`${styles.entityCardRow} ${styles.obsCandidateRow}`}>
-                <span className={`${styles.entityValue} ${styles.obsValue} ${styles.obsCandidateValue}`} title={`${c.kind} — pattern nomination, judged by no door`}>
-                  {c.value}
-                </span>
-                <button
-                  className={styles.obsPromoteBtn}
-                  disabled={promote.isPending}
-                  onClick={() =>
-                    promote.mutate({ entryId, kind: c.kind, value: c.value, surfaceForm: c.surface_form })
-                  }
-                  title="Promote to the ledger (analyst door)"
-                >
-                  promote
-                </button>
-                <button
-                  className={styles.obsPromoteBtn}
-                  disabled={dismiss.isPending}
-                  onClick={() => dismiss.mutate({ entryId, kind: c.kind, value: c.value })}
-                  title="Dismiss from this article (the value can nominate again elsewhere)"
-                >
-                  dismiss
-                </button>
-              </div>
-            ))}
-        </div>
-      )}
       {items.length > 0 && (
         <div className={styles.obsCopyAllRow}>
           <span className={styles.obsKindLabel}>Copy all {items.length}</span>
           {(["plain", "defanged", "csv", "stix"] as const).map((mode) => (
-            <button key={mode} className={styles.obsPromoteBtn} onClick={() => copyAll(mode)}>
+            <button key={mode} className={styles.obsCopyBtn} onClick={() => copyAll(mode)}>
               {copiedAll === mode ? "✓" : mode}
             </button>
           ))}

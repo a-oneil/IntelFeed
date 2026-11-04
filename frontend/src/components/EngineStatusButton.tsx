@@ -14,6 +14,10 @@ export const ENGINE_ICON_PATH = "M7 6h6M10 6v3M5 9h10l2 2h2v-2h2v8h-2v-2h-2v3h-9
  *  size of the icons around it. */
 export const ENGINE_ICON_VIEWBOX = "2 2 20 20";
 
+function formatClearedAt(iso: string): string {
+  return `at ${new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
+}
+
 function describe(h: EngineHealth): { title: string; body: string } {
   switch (h.level) {
     case "stopped":
@@ -29,6 +33,14 @@ function describe(h: EngineHealth): { title: string; body: string } {
     case "warn":
       return { title: "Engine retrying", body: `${h.retrying.toLocaleString()} runs retried in the last 24 hours.` };
     default:
+      if (h.clearedAt && h.clearedErrors) {
+        return {
+          title: "Engine healthy",
+          body:
+            `Nothing new since you cleared the light ${formatClearedAt(h.clearedAt)}. ` +
+            `${h.clearedErrors.toLocaleString()} older ${h.clearedErrors === 1 ? "error is" : "errors are"} still in the Engine console.`,
+        };
+      }
       return { title: "Engine healthy", body: "Every stage ran clean in the last 24 hours." };
   }
 }

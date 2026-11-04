@@ -77,6 +77,7 @@ const VERDICT_LABEL: Record<string, string> = {
   demote: "demote",
   drop: "drop",
   link: "link",
+  capture: "capture",
 };
 
 /** The adjudicate stage's verdict for one drawer row, as a badge with the

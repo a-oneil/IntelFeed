@@ -321,9 +321,8 @@ SETTING_METADATA: dict[str, dict] = {
     "observables_ai_capture_mode": {
         "label": "AI Capture Mode",
         "description": (
-            "shadow (default): the one-pass AI's confirmed indicators land on each entry as promotable "
-            "candidates only — eyeball its judgment first. capture: confirmations become ledger rows "
-            "directly. The v1 lesson, applied to the new judge"
+            "capture (default): the one-pass AI's confirmed indicators become ledger rows directly. "
+            "shadow: they land on each entry as candidates for the adjudicator to capture or drop"
         ),
         "group": "observables",
         "options": ["shadow", "capture"],

@@ -7,8 +7,9 @@ reuse the routers' helpers and flush — the executor owns the transaction.
 
 Review-queue decisions are exposed as one admin tool (decide_proposals, the
 bulk decisions endpoint). Deliberately NOT exposed (admin plane, excluded by
-design): hygiene prune / scan / AI-review actions, the per-row and bulk
-apply-all endpoints, and the enrichment-gap dispatch endpoints.
+design): hygiene prune / scan / AI-review actions, the Review tab's
+group Apply / Dismiss and background Apply all, and the enrichment-gap
+dispatch endpoints.
 """
 
 import uuid
@@ -114,6 +115,7 @@ async def _list_entity_links(
         confidence=confidence,
         search=search,
         days=days,
+        hours=None,
         limit=max(1, min(limit, 500)),
         offset=max(0, offset),
         user=None,
@@ -658,7 +660,7 @@ async def _get_hygiene_stats(db: AsyncSession, user_id: uuid.UUID) -> dict:
         "Chronological hygiene feed: a merge of the entity-link log and the entity-maintenance log, normalized "
         "(action, mode, applied, subject, reason, affected-entity links, origin). Filter by action code "
         "(comma-separate for several), log source, mode, origin (adjudicator = filed by the adjudicate stage, "
-        "merge_review = the duplicate review, scan = the on-demand scans and analysts), pending-only, or a since "
+        "merge_review = the duplicate review, scan = the on-demand scans), pending-only, or a since "
         "timestamp. Read-only — applying or dismissing proposals happens in the Proposals queue."
     ),
     input_schema={
@@ -682,7 +684,7 @@ async def _get_hygiene_stats(db: AsyncSession, user_id: uuid.UUID) -> dict:
                 "type": "string",
                 "enum": ["adjudicator", "merge_review", "scan"],
                 "description": "adjudicator = rows the adjudicate stage filed; merge_review = the duplicate "
-                "review; scan = the on-demand scans and analysts",
+                "review; scan = the on-demand scans",
             },
             "pending": {
                 "type": "boolean",
@@ -751,10 +753,11 @@ _REVIEW_ORIGINS = ["adjudicator", "merge_review", "scan"]
 @_tool(
     name="list_review_groups",
     description=(
-        "The Engine › Review queue: every pending hygiene proposal (both logs) folded one row per entity, most "
-        "proposals first. Each group gives the entity, its proposal count, per-kind counts (e.g. shadow_remove, "
-        "adjudication_reclassify), proposed target types, merge targets, origin, the newest row's subject and "
-        "reason, matched forms and a sample entry. Read a group's rows with get_review_rows; decide them with "
+        "The Engine › Review queue: every pending hygiene proposal (both logs) folded one row per entity, newest "
+        "first unless `sort` says otherwise. Each group gives the entity, its proposal count, per-kind counts "
+        "(e.g. shadow_remove, adjudication_reclassify), proposed target types, merge targets, origin, the highest "
+        "verdict confidence, the newest row's subject and reason, matched forms and a sample entry; `facets` "
+        "counts proposals per domain and per origin. Read a group's rows with get_review_rows; decide them with "
         "decide_proposals. `total`/`proposals` are the queue size. Admin only."
     ),
     input_schema={
@@ -764,6 +767,12 @@ _REVIEW_ORIGINS = ["adjudicator", "merge_review", "scan"]
             "action": {"type": "string", "description": "Only these action codes, comma-separated"},
             "domain": {"type": "string", "enum": _REVIEW_DOMAINS, "description": "What applying would change"},
             "origin": {"type": "string", "enum": _REVIEW_ORIGINS, "description": "Who filed the proposals"},
+            "sort": {
+                "type": "string",
+                "enum": ["newest", "count", "oldest", "confidence"],
+                "default": "newest",
+                "description": "newest, count (most proposals first), oldest, or confidence (highest first)",
+            },
             "limit": {"type": "integer", "default": 50, "description": "Groups per page (1-200)"},
             "offset": {"type": "integer", "default": 0, "description": "Groups to skip"},
         },
@@ -778,6 +787,7 @@ async def _list_review_groups(
     action: str | None = None,
     domain: str | None = None,
     origin: str | None = None,
+    sort: str = "newest",
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
@@ -790,6 +800,7 @@ async def _list_review_groups(
             action=action,
             domain=domain,
             origin=origin,
+            sort=sort,
             limit=max(1, min(limit, 200)),
             offset=max(0, offset),
             user=None,
@@ -867,8 +878,9 @@ async def _get_review_rows(
     description=(
         "Apply a reviewed batch of Review-queue decisions in one call (POST /admin/hygiene/decisions). Each "
         "decision is {id: '<source>:<log_id>', decision: 'apply' | 'dismiss' | 'reclassify:<entity_type>'}. "
-        "apply runs the row's own applier; dismiss deletes it (a reclassify dismissal covers the entity and "
-        "stops new filings); reclassify converts the entity and closes every proposal about it. Duplicates "
+        "apply runs the row's own applier; dismiss removes it and the dismissal sticks (a reclassify covers the "
+        "entity, an adjudicator verdict is not filed again for its article); reclassify converts the entity and "
+        "closes every proposal about it. Duplicates "
         "settle server-side: a row an earlier decision closed comes back 'settled'; an apply whose outcome is "
         "already reached comes back 'resolved'. Returns one result per decision plus counts. Admin only."
     ),

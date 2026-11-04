@@ -29,6 +29,8 @@ const PAGE = 25;
 
 // The seven entity types the autolinker writes junction rows for.
 const LINK_TYPES = ["threat_actor", "malware", "tool", "vendor", "product", "ttp", "cve"];
+// Relationships also connect countries and observables.
+const RELATIONSHIP_TYPES = [...LINK_TYPES, "country", "observable"];
 // Labels for the raw junction `source` values.
 const SOURCE_LABELS: Record<string, string> = {
   auto_link: "Autolinker",
@@ -117,10 +119,13 @@ const linkKey = (l: EntityLink | LinkRef) => `${l.entity_type}|${l.entity_id}|${
 export function AutolinkingSection({
   embedded = false,
   view: viewProp,
+  hours,
 }: {
   /** Render inside the Engine console card: no KPI tiles, no view toggle
    *  (the parent's tabs control links vs relationships). */
   embedded?: boolean;
+  /** Only rows from the last N hours (the console's time picker); every row when unset. */
+  hours?: number;
   view?: View;
 }) {
   const navigate = useNavigate();
@@ -129,6 +134,10 @@ export function AutolinkingSection({
   useEffect(() => {
     if (viewProp) setView(viewProp);
   }, [viewProp]);
+  // A type only relationships have (country, observable) is no links filter.
+  useEffect(() => {
+    if (view === "links") setEntityType((t) => (LINK_TYPES.includes(t) ? t : ""));
+  }, [view]);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [entityType, setEntityType] = useState("");
@@ -147,22 +156,31 @@ export function AutolinkingSection({
   useEffect(() => {
     setOffset(0);
     setSelected(new Set());
-  }, [view, search, entityType, source, confidence]);
+  }, [view, search, entityType, source, confidence, hours]);
 
   const { data: stats } = useEntityLinkStats();
-  const linksQuery = useEntityLinks({
-    entity_type: entityType || undefined,
-    source: source || undefined,
-    confidence: confidence || undefined,
-    search: search || undefined,
-    limit: PAGE,
-    offset,
-  });
-  const relsQuery = useAllRelationships({
-    entity_type: entityType || undefined,
-    limit: PAGE,
-    offset,
-  });
+  // Only the view on screen asks for its rows.
+  const linksQuery = useEntityLinks(
+    {
+      entity_type: entityType || undefined,
+      source: source || undefined,
+      confidence: confidence || undefined,
+      search: search || undefined,
+      hours,
+      limit: PAGE,
+      offset,
+    },
+    view === "links",
+  );
+  const relsQuery = useAllRelationships(
+    {
+      entity_type: entityType || undefined,
+      hours,
+      limit: PAGE,
+      offset,
+    },
+    view === "relationships",
+  );
 
   const unlink = useUnlink();
   const bulkUnlink = useBulkUnlink();
@@ -273,7 +291,7 @@ export function AutolinkingSection({
         </span>
         <select className={styles.filt} value={entityType} onChange={(e) => setEntityType(e.target.value)}>
           <option value="">All entity types</option>
-          {LINK_TYPES.map((t) => (
+          {(view === "links" ? LINK_TYPES : RELATIONSHIP_TYPES).map((t) => (
             <option key={t} value={t}>
               {getEntityLabel(t)}
             </option>
@@ -492,28 +510,6 @@ export function AutolinkingSection({
           {active.isLoading && <div className={styles.empty}>Loading…</div>}
         </div>
       </div>
-
-      {/* pending callout (links view only) */}
-      {view === "links" && ((stats?.pending ?? 0) > 0 || (stats?.pending_dropped_ai_off ?? 0) > 0) && (
-        <div className={styles.pending}>
-          <div>
-            <h3>{(stats?.pending ?? 0).toLocaleString()} matches held for the analysis</h3>
-            <p>
-              Dictionary-word hits (like <span className={styles.surf}>Royal</span>{" "}
-              <span className={styles.surf}>Hive</span> <span className={styles.surf}>Turkey</span>) are held until the
-              article&apos;s analysis decides: linked if it names the entity, rejected if it doesn&apos;t. The adjudicator
-              then checks both calls, and any it would change show up in Review › Proposals.
-              {(stats?.pending_dropped_ai_off ?? 0) > 0 && (
-                <>
-                  {" "}
-                  <b>{stats?.pending_dropped_ai_off?.toLocaleString()}</b> were dropped in the last 30 days because
-                  their feed has AI off, so nothing would ever confirm them.
-                </>
-              )}
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* footer / pager */}
       <div className={styles.foot}>

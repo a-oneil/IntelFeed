@@ -1007,10 +1007,11 @@ TOOLS: dict[str, dict] = {
             "Apply a reviewed batch of Review-queue decisions in one call (POST "
             "/admin/hygiene/decisions). Each decision is {id: '<source>:<log_id>', decision: 'apply' "
             "| 'dismiss' | 'reclassify:<entity_type>'}. apply runs the row's own applier; dismiss "
-            "deletes it (a reclassify dismissal covers the entity and stops new filings); reclassify "
-            "converts the entity and closes every proposal about it. Duplicates settle server-side: a "
-            "row an earlier decision closed comes back 'settled'; an apply whose outcome is already "
-            "reached comes back 'resolved'. Returns one result per decision plus counts. Admin only."
+            "removes it and the dismissal sticks (a reclassify covers the entity, an adjudicator "
+            "verdict is not filed again for its article); reclassify converts the entity and closes "
+            "every proposal about it. Duplicates settle server-side: a row an earlier decision closed "
+            "comes back 'settled'; an apply whose outcome is already reached comes back 'resolved'. "
+            "Returns one result per decision plus counts. Admin only."
         ),
         "params": {
             "decisions": {
@@ -2073,8 +2074,8 @@ TOOLS: dict[str, dict] = {
             "log, normalized (action, mode, applied, subject, reason, affected-entity links, origin). "
             "Filter by action code (comma-separate for several), log source, mode, origin "
             "(adjudicator = filed by the adjudicate stage, merge_review = the duplicate review, scan "
-            "= the on-demand scans and analysts), pending-only, or a since timestamp. Read-only \u2014 "
-            "applying or dismissing proposals happens in the Proposals queue."
+            "= the on-demand scans), pending-only, or a since timestamp. Read-only \u2014 applying or "
+            "dismissing proposals happens in the Proposals queue."
         ),
         "params": {
             "action": {
@@ -3113,11 +3114,12 @@ TOOLS: dict[str, dict] = {
     "list_review_groups": {
         "description": (
             "The Engine \u203a Review queue: every pending hygiene proposal (both logs) folded one row per "
-            "entity, most proposals first. Each group gives the entity, its proposal count, per-kind "
-            "counts (e.g. shadow_remove, adjudication_reclassify), proposed target types, merge "
-            "targets, origin, the newest row's subject and reason, matched forms and a sample entry. "
-            "Read a group's rows with get_review_rows; decide them with decide_proposals. "
-            "`total`/`proposals` are the queue size. Admin only."
+            "entity, newest first unless `sort` says otherwise. Each group gives the entity, its "
+            "proposal count, per-kind counts (e.g. shadow_remove, adjudication_reclassify), proposed "
+            "target types, merge targets, origin, the highest verdict confidence, the newest row's "
+            "subject and reason, matched forms and a sample entry; `facets` counts proposals per "
+            "domain and per origin. Read a group's rows with get_review_rows; decide them with "
+            "decide_proposals. `total`/`proposals` are the queue size. Admin only."
         ),
         "params": {
             "q": {
@@ -3141,6 +3143,11 @@ TOOLS: dict[str, dict] = {
                 "type": 'str',
                 "default": None,
                 "enum": ['adjudicator', 'merge_review', 'scan'],
+            },
+            "sort": {
+                "type": 'str',
+                "default": 'newest',
+                "enum": ['newest', 'count', 'oldest', 'confidence'],
             },
             "limit": {
                 "type": 'int',

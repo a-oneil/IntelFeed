@@ -904,7 +904,14 @@ def parse_ioc_list_body(text: str, *, max_values: int = 5000) -> list[tuple[str,
 # ---------------------------------------------------------------------------
 
 #: Base confidence per creation door.
-BASE_CONFIDENCE = {"manual": 1.0, "publisher_ioc": 0.9, "ioc_list": 0.85, "ttp_observable": 0.85, "ai_extraction": 0.8}
+BASE_CONFIDENCE = {
+    "manual": 1.0,
+    "publisher_ioc": 0.9,
+    "ioc_list": 0.85,
+    "ttp_observable": 0.85,
+    "ai_extraction": 0.8,
+    "adjudicator": 0.8,
+}
 DEFANG_BONUS = 0.1
 _AGING_BELOW = 0.5
 _EXPIRED_BELOW = 0.15
@@ -937,7 +944,7 @@ def status_for(confidence: float) -> str:
 #: with trigger_mode=auto that takes the kind (Shodan InternetDB, Team Cymru
 #: and RDAP are keyless; VirusTotal once its key is configured).
 AUTO_ENRICH_KINDS = frozenset({"ipv4", "ipv6", "domain", "sha256", "md5", "sha1"})
-AUTO_ENRICH_DOORS = frozenset({"ai_extraction", "manual", "publisher_ioc"})
+AUTO_ENRICH_DOORS = frozenset({"ai_extraction", "manual", "publisher_ioc", "adjudicator"})
 #: A publisher's indicator file can carry hundreds of fresh rows for one
 #: article; only this many of them queue a reputation lookup (the rest stay
 #: available to the manual enrich button). Shodan InternetDB allows ~30/min.
@@ -1007,9 +1014,9 @@ async def get_or_create_observable(
             infra_tag=infra_tag,
             # AI-created rows carry the review flag so a capture-mode audit can
             # filter to them. The TTP door is the same model's output riding a
-            # different array, so it carries the flag too; feed/analyst doors
-            # are curator judgment already.
-            needs_review=via in ("ai_extraction", "ttp_observable"),
+            # different array, and the adjudicator's capture is a model's call
+            # too; feed/analyst doors are curator judgment already.
+            needs_review=via in ("ai_extraction", "ttp_observable", "adjudicator"),
         )
         .on_conflict_do_nothing(index_elements=["kind", "value"])
     )
@@ -1624,9 +1631,8 @@ async def shadow_observables(
     session: AsyncSession, entry_id, iocs: list[dict], scripts: list[dict] | None = None
 ) -> int:
     """Shadow mode for the AI door: validated confirmations land on the entry's
-    candidate list instead of the ledger — same one-click promote, zero rows —
-    so the model's judgment can be eyeballed for a while before capture is
-    switched on. The v1 lesson, applied to our own new judge."""
+    candidate list instead of the ledger, carrying their role and evidence,
+    for the adjudicator to capture or drop. No row is created here."""
     from app.models.entry import Entry
 
     entry = (await session.execute(select(Entry).where(Entry.id == entry_id))).scalar_one_or_none()
@@ -2146,8 +2152,8 @@ def _looks_like_command(line: str) -> bool:
 
 def scan_code_block_candidates(content_html: str | None, *, max_candidates: int = 20) -> list[Candidate]:
     """Host-kind candidates from the article's <pre>/<code> blocks — where
-    authors put commands — instead of prose regex. Nominations only: same
-    entry-local candidate tier, same one-click promote, never entities.
+    authors put commands — instead of prose regex. Nominations only: the same
+    entry-local candidate tier the adjudicator judges, never entities.
 
     Precision rules: a block that is mostly prose (fewer than half its
     non-trivial lines carry command syntax) nominates nothing; a cmdline

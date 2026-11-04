@@ -162,10 +162,18 @@ async def _submit_analysis_batches() -> dict | None:
                 await settle_held_on_analysed_entries(db)
         except Exception:
             logger.warning("held-match settle failed", exc_info=True)
+        # Reviewed articles still carrying candidates no review judged.
+        try:
+            from app.services.entry_adjudication import queue_candidate_reviews
+
+            async with db.begin_nested():
+                await queue_candidate_reviews(db)
+        except Exception:
+            logger.warning("candidate review sweep failed", exc_info=True)
 
         # Sibling sweep for the adjudicate stage: completed analyses whose
         # review decision never landed, over-budget rows waiting for a fresh
-        # hour, and reviews reopened above.
+        # hour, and the rechecks queued above.
         try:
             from app.services.entry_adjudication import resweep_adjudications
 
