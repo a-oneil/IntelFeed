@@ -4,7 +4,7 @@ A detection rule is a search or pattern your security tools run to spot an
 attack. This page covers drafting, editing and storing rules. Drafting with AI needs an AI provider; writing
 and storing rules by hand does not.
 
-![The Rules Library listing Sigma and SPL rules with severity, source CVE, and telemetry columns](../assets/screenshots/detection-rules.png)
+![The Rules Library listing Sigma and Nuclei rules with severity, source, ATT&CK and telemetry columns](../assets/screenshots/detection-rules.png)
 
 *The rule library, filterable by the telemetry you actually collect.*
 
@@ -83,7 +83,7 @@ report it and whether you have a rule for it.
 
 In **Workbench → Telemetry Sources**, tick the log sources you collect.
 IntelFeed compares each rule's required sources with your list, so you can tell
-"we have no rule" from "we have a rule that can't fire here".
+"no rule exists" from "a rule exists but can't fire here".
 
 ## Exporting
 

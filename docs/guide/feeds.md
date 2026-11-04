@@ -4,7 +4,7 @@ Feeds are where every article comes from. This page covers adding, sorting
 and tuning feeds, and spotting broken ones. Any signed-in user can add a feed;
 admin-only settings are marked.
 
-![The Engine feed health view showing 307 feeds split into healthy, stale and erroring, with a table of erroring feeds](../assets/screenshots/feeds.png)
+![The Engine feed health view: counts of healthy, stale, erroring, dead and empty feeds, with tables of the feeds that need attention](../assets/screenshots/feeds.png)
 
 *Feed health in the Engine console: which feeds are healthy, stale or erroring.*
 

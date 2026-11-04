@@ -6,7 +6,7 @@ creating and filling a campaign, and writing, versioning and exporting a report.
 
 AI drafting in reports needs an AI provider. Everything else works without one.
 
-![The Reports page with template starter cards above a table of drafted and published reports](../assets/screenshots/reports.png)
+![The Reports page with template starter cards above a table of saved reports](../assets/screenshots/reports.png)
 
 *Reports start from a template and carry a TLP marking and version history.*
 

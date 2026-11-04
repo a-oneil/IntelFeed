@@ -27,7 +27,7 @@ article to that entity's profile.
 
 ## Profile pages
 
-![The Scattered Spider profile page showing aliases, best-evidenced claims, an AI assessment, and a detection-gap panel](../assets/screenshots/entity-profile.png)
+![The Lazarus Group profile page showing aliases, best-evidenced claims, an AI assessment, latest developments and next steps](../assets/screenshots/entity-profile.png)
 
 *A profile page is built from every article that mentioned the entity.*
 
@@ -71,7 +71,7 @@ posts are the gang's claims, not confirmed breaches.
 Hover a value to see who claimed it, when, and whether other sources agree.
 
 **Enrichment** sources add data from outside services. An admin turns them on
-under **Settings → Engine**, in the enrich stage:
+under **Settings → Engine → Enrichment**:
 
 | Source | What it adds |
 |---|---|
@@ -112,7 +112,7 @@ Anything that looks like an indicator becomes a **candidate** on the article.
 Hashes and public IPs always do. Domains, URLs and email addresses do only when
 the author defanged them (`evil[.]com`, `hxxps://`). The adjudicator captures
 each candidate as an observable or drops it. When it isn't sure enough to act
-on its own, its call waits in Engine → Review → Proposals for you to apply or
+on its own, its call waits in **Settings → Engine → Review → Proposals** for you to apply or
 dismiss.
 
 Each observable records its source, the sentence behind it, and a confidence

@@ -17,11 +17,11 @@ The switches live in the `system_settings` database table (editable at Settings 
 | `signal_engine_shadow` | `true` | Compute and store signals and scores (`backend/app/config.py:59`) |
 | `signal_engine_surface` | `true` | Show them: Radar-ranked triage, entry-list chips, the `radar` sort, `entry_scored` SSE events (`backend/app/config.py:60`) |
 | `radar_personalization_enabled` | `false` | Re-order each analyst's own Radar using weights learned from their votes (`radar_personalization_min_samples` 5, `radar_personalization_window_days` 90) |
-| `pipeline_run_logging_enabled` | `true` | Write one `entry_pipeline_runs` row per stage run (`backend/app/config.py:109`) |
-| `pipeline_engine_enabled` | `false` | Use pipeline plans instead of each feed's own extraction switches (`backend/app/config.py:112`) |
+| `pipeline_run_logging_enabled` | `true` | Write one `entry_pipeline_runs` row per stage run (`backend/app/config.py:114`) |
+| `pipeline_engine_enabled` | `false` | Use pipeline plans instead of each feed's own extraction switches (`backend/app/config.py:117`) |
 | `adjudication_mode` | `apply` | The `adjudicate` stage: `off`, `shadow` (file verdicts as proposals) or `apply` (apply confident verdicts, file the rest) |
 
-Setting metadata is in `backend/app/services/system_settings.py`: `CONFIGURABLE_KEYS` (`backend/app/services/system_settings.py:26`) says which keys may be overridden and their type, `SETTING_METADATA` (`backend/app/services/system_settings.py:216`) holds labels and help text, and `_ENGINE_SECTION_GROUPS` (`backend/app/services/system_settings.py:1413`) places engine keys on console sections.
+Setting metadata is in `backend/app/services/system_settings.py`: `CONFIGURABLE_KEYS` (`backend/app/services/system_settings.py:26`) says which keys may be overridden and their type, `SETTING_METADATA` (`backend/app/services/system_settings.py:220`) holds labels and help text, and `_ENGINE_SECTION_GROUPS` (`backend/app/services/system_settings.py:1413`) places engine keys on console sections.
 
 Related docs: [entries.md](entries.md) (the full entry lifecycle), [intelligence-engine.md](intelligence-engine.md) (the autolinker and correlation code the stages call), [data-model.md](data-model.md) (table schemas), [workers-search-dashboards.md](workers-search-dashboards.md) (Celery and beat schedules).
 
@@ -68,7 +68,7 @@ From `PIPELINE_STAGES` (`backend/app/pipeline/registry.py:38`):
 | `enrich` | side | `enrichment_dispatch_tasks.dispatch_enrichment_jobs`. New entities queue `enrichment_jobs` rows; this beat task runs the due ones every 30 seconds on the `enrichment` queue. See [automation-ai-enrichment.md](automation-ai-enrichment.md#enrichment-job-queue) | on |
 | `automate` | side | `automation_tasks.run_entry_automations` | on |
 
-`stages_of_kind(kind)` (`backend/app/pipeline/registry.py:163`) is how the chord builders and the API read the registry, so no task name is hard-coded elsewhere. `backend/tests/test_pipeline_registry.py` checks that the chord built from the registry has the expected shape.
+`stages_of_kind(kind)` (`backend/app/pipeline/registry.py:166`) is how the chord builders and the API read the registry, so no task name is hard-coded elsewhere. `backend/tests/test_pipeline_registry.py` checks that the chord built from the registry has the expected shape.
 
 ---
 
@@ -123,7 +123,7 @@ Diagram: [diagrams/engine-pipeline-execution.md](diagrams/engine-pipeline-execut
 3. **Post stages.** When the header finishes, `entry_post_processing` (`backend/app/workers/feed_tasks.py:295`) starts a second chord: `cooccurrence`, `correlation` and `requirements`, with `score` as its callback. Plans only affect the parallel header; post and final stages always run.
 4. **Score.** `score_entry_task` runs once the co-occurrence edges, correlation events and requirement matches exist, because those are signal inputs.
 5. **Side stages.** `automate` is queued from the fetch loop for each new entry. `enrich` is queued when an entity is created.
-6. **AI analysis.** `score_entry_task` ends by calling `enqueue_entry_analysis` (`backend/app/services/entry_analysis.py`). It checks, in order: the global `ai_one_pass_enabled` switch, an existing request, a task assignment, the feed's AI policy, the junk gate, and echo reuse. It then writes the entry's `ai_analysis_requests` row. Feed-policy skips are recorded (`skipped_feed_ai`, `skipped_feed_none`) and re-checked by the 30-minute sweep once the feed allows AI. The analysis itself runs on the `ai` queue and writes no pipeline run, so the console's **analyze** column is drawn from that row. See [automation-ai-enrichment.md](automation-ai-enrichment.md#one-pass-entry-analysis-engine-phase-4).
+6. **AI analysis.** `score_entry_task` ends by calling `enqueue_entry_analysis` (`backend/app/services/entry_analysis.py`). It checks, in order: the global `ai_one_pass_enabled` switch, an existing request, a task assignment, the feed's AI policy, the junk gate, and echo reuse. It then writes the entry's `ai_analysis_requests` row. Feed-policy skips are recorded (`skipped_feed_ai`, `skipped_feed_none`) and re-checked by the 30-minute sweep once the feed allows AI. The analysis itself runs on the `ai` queue and writes no pipeline run, so the console's **analyze** column is drawn from that row. See [automation-ai-enrichment.md](automation-ai-enrichment.md#one-pass-entry-analysis).
 7. **Adjudicate.** Wherever an analysis lands (batch results, the sequential task, echo reuse, a manual run), `enqueue_adjudication` (`backend/app/services/entry_adjudication.py`) runs after the commit. It checks the mode, the feed plan, echo, the trigger, the score floor and the hourly budget, records the decision in `ai_analysis_requests.adjudication_status`, and queues `adjudicate_entry_task` on the `ai` queue.
 
 ### Per-stage run logging
@@ -226,11 +226,11 @@ These weights apply **when reading only** (`backend/app/services/radar_personali
 
 It needs `radar_personalization_enabled` (instance-wide) and the user's own opt-in (`User.settings["radar_personalized"]`). Settings → Reading → "Your Radar" shows each family's weight and votes, a toggle, and a reset. `GET`/`PUT`/`DELETE /api/engine/my-radar` back that panel. The reader's "Why it's ranked" card adds a *Tuned for you* row naming the families that moved the entry.
 
-**Radar threshold.** A value on the 0–10 scale. `get_radar_threshold()` (`backend/app/intelligence/signals.py:431`) returns the manual override (`intelfeed:signal_engine:threshold_override10`) if set, else the nightly auto value, else 8.0. An override left in the old raw-sum key `intelfeed:signal_engine:threshold_override` is converted on first read once real cutoffs exist. The threshold decides what the Radar shows and which entries get chips.
+**Radar threshold.** A value on the 0–10 scale. `get_radar_threshold()` (`backend/app/intelligence/signals.py:431`) returns the manual override (`intelfeed:signal_engine:threshold_override10`) if set, else the nightly auto value, else 8.0. An override in the raw-sum key `intelfeed:signal_engine:threshold_override` is converted to the 0–10 scale on first read once real cutoffs exist. The threshold decides what the Radar shows and which entries get chips.
 
 ### Redis state
 
-All tuning state is in Redis (key names at `backend/app/intelligence/signals.py:46-54`); Postgres holds only per-entry results. Losing these keys is safe: everything falls back to defaults and the nightly job rewrites them.
+All tuning state is in Redis (key names at `backend/app/intelligence/signals.py:46-55`); Postgres holds only per-entry results. Losing these keys is safe: everything falls back to defaults and the nightly job rewrites them.
 
 | Key | Written by | Read by |
 |---|---|---|
@@ -303,7 +303,7 @@ The console is at `/settings?section=engine` (admin only; `/workbench/engine` re
 
 Above the table: a pulse dot (red while any entry is stuck), an ingest sparkline, the window's counts, and a **Needs you** strip of shortcuts (stage errors, duplicate candidates, entities to reclassify, adjudication verdicts). At the right end sit the time window (1h, 24h, 7d, 30d or All), the setting finder, **Clear check engine** ([Clearing the check-engine light](#clearing-the-check-engine-light)) and the **Stop engine** button ([Stopping the engine](#stopping-the-engine)). The one window covers Entries (entries ingested in it), Entities (first seen in it), Links (extracted in it) and Relationships (created in it). Feeds and Review show what stands now, so the window hides there; the duplicate-candidates chip counts all time and opens Entities on All.
 
-Five more views open as full pages with a back button (`BrowseView`, `frontend/src/components/engine/EngineMatrix.tsx:42`): **Jobs** (schedules from `JOB_REGISTRY` plus Redis overrides in `JobSchedules.tsx`, and run history from `GET /api/engine/job-runs`), **Plans** (`PipelinePlans.tsx`), **Enrichment** (sources), **Maintenance** (`MaintenancePanel.tsx`: sweeps, resets and on-demand scanners), and **Publishing** (`PublishingPanel.tsx`: outbound observable feeds). The console keeps its open tab in the URL (`?view=`, and `?lens=history` on Review), so Back from a page it links to returns to that tab; old `?tab=` and `?section=` links are mapped onto these views (`legacyState`, `frontend/src/components/engine/EngineSection.tsx:40`). Every setting the console shows is listed in [engine-settings.md](engine-settings.md).
+Five more views open as full pages with a back button (`BrowseView`, `frontend/src/components/engine/EngineMatrix.tsx:46`): **Jobs** (schedules from `JOB_REGISTRY` plus Redis overrides in `JobSchedules.tsx`, and run history from `GET /api/engine/job-runs`), **Plans** (`PipelinePlans.tsx`), **Enrichment** (sources), **Maintenance** (`MaintenancePanel.tsx`: sweeps, resets and on-demand scanners), and **Publishing** (`PublishingPanel.tsx`: outbound observable feeds). The console keeps its open tab in the URL (`?view=`, and `?lens=history` on Review), so Back from a page it links to returns to that tab; `?tab=` and `?section=` links are mapped onto these views (`legacyState`, `frontend/src/components/engine/EngineSection.tsx:40`). Every setting the console shows is listed in [engine-settings.md](engine-settings.md).
 
 ### Stopping the engine
 
@@ -342,13 +342,13 @@ Celery signal handlers in `backend/app/workers/task_tracking.py` (`task_prerun`,
 
 ### Retention: `prune_engine_tables`
 
-`prune_engine_tables` (`backend/app/workers/maintenance.py:885`; job `prune-engine-tables`, daily 02:40 UTC) deletes rows older than `engine_run_retention_days` (default 30) from `entry_pipeline_runs`, `job_runs`, non-pending `ai_analysis_requests` and `ai_batch_jobs`, and deletes resolved `pending_autolink_matches`. Unresolved held matches expire after 14 days (their article never got an analysis). It also expires old link-validator proposals that nothing re-judges (`expire_legacy_link_proposals`, `backend/app/services/proposal_dismissals.py`). `entry_signals` is never pruned; signals live as long as their entry.
+`prune_engine_tables` (`backend/app/workers/maintenance.py:887`; job `prune-engine-tables`, daily 02:40 UTC) deletes rows older than `engine_run_retention_days` (default 30) from `entry_pipeline_runs`, `job_runs`, non-pending `ai_analysis_requests` and `ai_batch_jobs`, and deletes resolved `pending_autolink_matches`. Unresolved held matches expire after 14 days (their article never got an analysis). It also deletes pending link proposals older than 30 days that the adjudicator did not file, since nothing re-judges them (`expire_legacy_link_proposals`, `backend/app/services/proposal_dismissals.py`), and pending proposals about entities that are gone. `entry_signals` is never pruned; signals live as long as their entry.
 
 ---
 
 ## API endpoints
 
-The engine router is mounted at `/api/engine`. Every route needs a signed-in user except `whats-new`, which public read-only visitors may also read. Routes that change something, plus `/processing`, need an admin (`_require_admin`, `backend/app/api/engine.py:15`).
+The engine router is mounted at `/api/engine`. Every route needs a signed-in user except `whats-new`, which public read-only visitors may also read. Routes marked Admin below need an admin (`_require_admin`, `backend/app/api/engine.py:15`).
 
 | Method & path | Purpose |
 |---|---|
@@ -362,18 +362,20 @@ The engine router is mounted at `/api/engine`. Every route needs a signed-in use
 | `GET /entries/{entry_id}/runs` | Latest run per stage for one entry |
 | `GET /entries/{entry_id}/adjudication` | What the adjudicate stage decided for one entry |
 | `POST /entries/{entry_id}/stages/{stage}/retry` | Admin: re-run one retryable stage |
+| `POST /pipeline/retry-errors` | Admin: re-run every stage still stuck on an error (optional stage and ingest window) |
 | `GET /plans` | List pipeline plans |
 | `PUT /plans` | Admin: create or update a plan by scope (checks stage names, bumps the plan version) |
 | `DELETE /plans/{plan_id}` | Admin: delete a plan. Global plans cannot be deleted |
 | `GET /job-runs` | Recent job runs, optional `job_key` filter (limit ≤500) |
 | `GET /state` | Whether the engine is stopped, and how many tasks wait on each queue |
 | `PUT /state` | Admin: stop or start the engine (`{"stopped": true}`). See [Stopping the engine](#stopping-the-engine) |
+| `POST /state/clear-health` | Admin: clear the check-engine light. See [Clearing the check-engine light](#clearing-the-check-engine-light) |
 | `PUT /radar-feedback` | Vote on a Radar item (1 / −1 / 0 clears) |
 | `GET`/`PUT`/`DELETE /my-radar` | Your learned Radar weights: read, opt in or out, reset |
-| `GET`/`POST`/`DELETE /autolink/fp-names` | Admin writes: the false-positive name list (`autolinker_false_positive_names`). Vendors, products, tools and mitigations ignore it |
-| `GET`/`POST`/`DELETE /autolink/blocked-names` | Admin writes: hard blocks (`autolinker_blocked_surface_forms`), enforced for every entity type |
+| `GET`/`POST`/`DELETE /autolink/fp-names` | Admin: the false-positive name list (`autolinker_false_positive_names`). Vendors, products, tools and mitigations ignore it |
+| `GET`/`POST`/`DELETE /autolink/blocked-names` | Admin: hard blocks (`autolinker_blocked_surface_forms`), enforced for every entity type |
 
-A second router at `/api/engine/extraction` (`backend/app/api/extraction.py`) backs the Entities view: `GET /stats`, `GET /entities`, `POST /confirm`, `POST /not-duplicate`, `POST /delete`, and `GET`/`POST`/`DELETE /denylist`.
+A second router at `/api/engine/extraction` (`backend/app/api/extraction.py`) backs the Entities view: `GET /stats`, `GET /entities`, `POST /confirm`, `POST /not-duplicate`, `POST /delete`, and `GET`/`POST /denylist` plus `DELETE /denylist/{row_id}`.
 
 Related endpoints elsewhere:
 

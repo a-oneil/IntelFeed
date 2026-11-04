@@ -17,13 +17,14 @@ frontend/
 │   │   ├── client.ts        # Axios instance, token refresh, visitor write block
 │   │   └── types.ts         # API response types
 │   ├── stores/              # Zustand stores (see State Management)
-│   ├── hooks/               # 88 hook modules, mostly TanStack Query wrappers
+│   ├── hooks/               # 90 hook modules, mostly TanStack Query wrappers
 │   ├── utils/               # 44 helper modules
 │   ├── pages/               # Route-level pages
 │   ├── components/          # One .tsx + one .module.css per component;
-│   │                        # subfolders for larger areas (automation/, engine/,
-│   │                        # entityProfile/, primitives/, search/, table/,
-│   │                        # triage/, widgets/, onboarding/)
+│   │                        # subfolders for larger areas (automation/,
+│   │                        # coverageWorkspace/, engine/, entityProfile/,
+│   │                        # feedModal/, onboarding/, primitives/, ransomware/,
+│   │                        # ruleBench/, search/, table/, triage/, widgets/)
 │   └── test/setup.ts        # Vitest setup
 ├── tests/e2e/               # Playwright tests
 ├── vite.config.ts           # Build, dev server and Vitest config
@@ -79,7 +80,7 @@ All lazy-loaded:
   - `report/new`, `report/:id`: ReportBuilderPage
   - `report/exposure`: ExposureBuilderPage
 
-**Redirects** (kept so old links work):
+**Redirects:**
 - `/triage`, `/workbench/triage`, `/atlas`, `/dashboards` → `/workbench/dashboard` (`/triage` keeps its query string)
 - `/intelligence`, `/detection-workbench` → `/workbench/explore`
 - `/glossary` → `/workbench/explore?section=glossary`; `/workbench/rules` → `/workbench/explore?section=rules`
@@ -390,7 +391,7 @@ Examples: `OverviewWidget`, `FeedActivityChart`, `NewActorsWidget`, `DetectionCo
 - **AISettings:** the AI Configuration tabs: Providers, Prompts (`PromptWorkspace`), User keys and Cost. Includes `CopilotAuthCard`.
 - **UserKeysSection:** the User keys tab: whether people may use their own keys (Off, Optional, Required), allowed key types, private addresses, limits, which tasks may use personal keys, and everyone's keys.
 - **MyAISection:** Settings → My AI: this month's spend, your own keys, which key and model each task uses, the fallback switch and your cap. `utils/aiProvenance.ts` holds the wording for why a fallback happened.
-- **engine/EngineSection:** the Settings → Engine console (`/settings?section=engine`): one table card (entries, links, relationships, Review, stage settings) and the Jobs, Feeds, Plans, Enrichment, Publishing and Maintenance screens. Old `?tab=` and `?section=` links still open the right screen.
+- **engine/EngineSection:** the Settings → Engine console (`/settings?section=engine`): one table card (entries, links, relationships, Review, stage settings) and the Jobs, Feeds, Plans, Enrichment, Publishing and Maintenance screens. `?view=`, `?tab=` and `?section=` deep links open the matching screen.
 - **TagManager:** Settings → Tags: rename, recolor, merge and delete tags. **TagPicker** is the tag dropdown used in the reader, the report wizard and automation.
 - **TelegramSection** (in `SettingsPage.tsx`): admin steps for Telegram setup.
 
@@ -406,11 +407,11 @@ In `frontend/src/pages/`:
 - **ThreatsPage.tsx:** `/workbench/threats`, ranked by story. Its Vulnerabilities tab uses `FollowView` from `ExposurePage.tsx`.
 - **ExposureBuilderPage.tsx:** `/workbench/report/exposure`.
 - **SearchPage.tsx:** `/search`.
-- **DocumentationPage.tsx:** in-app docs (`useDocumentation`, with `MermaidDiagram` for diagrams).
+- **DocumentationPage.tsx:** in-app docs (`useDocumentation.ts`, with `MermaidDiagram` for diagrams).
 - **AutomationPage.tsx:** automation rules.
 - **DetectionWorkbenchPage.tsx**, **GlossaryPage.tsx:** shown inside the Workbench.
 - **RuleDetailPage.tsx:** one rule, its versions and tests.
-- **SettingsPage.tsx:** settings sections in three groups. You: Account, Appearance, My AI, Reading, Tags. Connect: Claude Code Skill, Feeds & Export, Telegram. Administration (admins only): AI Configuration, Engine, Logs, System, Users.
+- **SettingsPage.tsx:** settings sections in three groups. You: Account, Appearance, My AI, Reading, Tags. Connect: Claude Code Skill, Feeds & Export and Telegram (the last two admins only). Administration (admins only): AI Configuration, Engine, Logs, System, Users.
 - **CampaignsPage.tsx:** the campaign list.
 - **ReportBuilderPage.tsx:** write a report.
 - **LoginPage.tsx**, **RegisterPage.tsx**, **SharedEntryPage.tsx**, **SharedCopilotPage.tsx:** public pages.
@@ -419,7 +420,7 @@ In `frontend/src/pages/`:
 
 ## Hooks (Custom React Hooks)
 
-`frontend/src/hooks/` has 88 modules. Most wrap TanStack Query for one area of the API. A few to know:
+`frontend/src/hooks/` has 90 modules. Most wrap TanStack Query for one area of the API. A few to know:
 
 ### Data Fetching Hooks
 
@@ -489,7 +490,7 @@ getTokenAtCursor(query, cursorPos): CursorToken // for autocomplete
 removeFilterFromQuery(query, filterRaw): string // for removing a filter chip
 ```
 
-Example: `feed:xyz title:"New APT" is:starred after:2024-01-01`. Full grammar: [query-language.md](query-language.md).
+Example: `feed:xyz title:"New APT" is:starred date:>=2024-01-01`. Full grammar: [query-language.md](query-language.md).
 
 ### Others
 
@@ -613,4 +614,4 @@ pnpm build   # also type-checks
 pnpm test
 ```
 
-Pushing to `main` deploys: the production host runs `update.sh` every few minutes. See [operations.md](operations.md).
+If your production host runs `update.sh` on a schedule, a push to `main` is a deploy. See [operations.md](operations.md).

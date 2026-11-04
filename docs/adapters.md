@@ -697,7 +697,7 @@ a real Telegram account.
 | `include_media` | `true` | Download attachments. |
 | `media_types` | photo, video, document, audio | Which attachments to download. |
 | `extract_forwards` | `true` | Record where a forwarded message came from. |
-| `edit_probe_window` | 50 | How many recent messages to re-check for edits and deletes. 0 turns it off. |
+| `edit_probe_window` | 50 | How many recent messages to re-check for edits and deletes. 0 turns it off; blank means the default. |
 | `realtime` | `false` | Get new messages as they arrive (see [Telegram Operations](#telegram-operations)). |
 | `threat_actor_id`, `campaign_id`, `author_entity` | none | [Auto-attribution](#auto-attribution). |
 | `channel_id`, `channel_username`, `last_seen_id` | (kept by the adapter) | The resolved channel and the newest message seen. |
@@ -1025,7 +1025,7 @@ separate feeds.
 - The worker parses each item into **one normal entry** and sends it through
   the same entry pipeline as a polled entry. The AI analysis follows from its
   regular sweep. Entities the AI creates go through the same checks as
-  always and can be reviewed in Workbench → Engine → Extraction.
+  always and can be reviewed in Settings → Engine, in the **Entities** view.
 - **Every result is a status on the item, never a failed request:**
 
   | Status | Meaning |

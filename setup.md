@@ -9,18 +9,16 @@ Each code block says where it runs: **on the server** (over SSH), **in your brow
 | | |
 | --- | --- |
 | **OS** | Ubuntu 24.04 LTS or Amazon Linux 2023. Anything else current that runs Docker Engine with Compose v2 should behave the same, because everything runs in containers. |
-| **Memory** | **8 GB** is the smallest we'd run it on, with swap — see [Memory](#memory-and-swap) below. 16 GB if you'll also run local translation. |
+| **Memory** | **8 GB** at minimum, with swap — see [Memory](#memory-and-swap) below. 16 GB if you'll also run local translation. |
 | **Disk** | 30 GB or more. |
 | **Network** | `80/tcp` and `443/tcp` open to the internet (Caddy needs both to issue and renew the certificate); `22/tcp` for SSH from your own IP only. |
 | **DNS** | An `A` record for the hostname you'll serve, pointing at the host (step 2). |
 
 **On AWS:** a `t3.large` (8 GB) with a 30 GB+ gp3 volume and a security group allowing `22/tcp` from your IP and `80/tcp`, `443/tcp` from `0.0.0.0/0`.
 
-Note: AWS can be expensive... OVH offers a decent VPS with 8GB of ram for $60 a year.
-
 ### Memory and swap
 
-`docker-compose.prod.yml` caps each container's memory. The caps add up to about **11.4 GiB** for the default stack and about **13.4 GiB** with local translation (`libretranslate`, 2 GiB, behind the `translate` compose profile). They are ceilings, not what an idle stack uses, but a cold image build plus a busy ingest on an 8 GB host can run it out of memory.
+`docker-compose.prod.yml` caps each container's memory. The caps add up to about **11.8 GiB** for the default stack and about **13.8 GiB** with local translation (`libretranslate`, 2 GiB, behind the `translate` compose profile). They are ceilings, not what an idle stack uses, but a cold image build plus a busy ingest on an 8 GB host can run it out of memory.
 
 On an 8 GB host:
 
@@ -75,7 +73,7 @@ Generate real secrets and put them in `.env`:
 ```bash
 openssl rand -hex 32                                                           # SECRET_KEY
 openssl rand -base64 32 | tr '+/' '-_'                                         # ENCRYPTION_KEY (a Fernet key; needs no Python on the host)
-openssl rand -base64 24                                                        # POSTGRES_PASSWORD, REDIS_PASSWORD, MEILI_MASTER_KEY
+openssl rand -hex 24                                                           # POSTGRES_PASSWORD, REDIS_PASSWORD, MEILI_MASTER_KEY
 ```
 
 If you'd rather generate the Fernet key with the library (it needs `pip install cryptography` on the host): `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
@@ -132,6 +130,7 @@ A few settings are env-only (database and Redis connections, secrets, build stam
 On the server:
 
 ```bash
+mkdir -p tts_media ingest_files telegram_data telegram_media && sudo chown 1000:1000 tts_media ingest_files telegram_data telegram_media   # the containers write here as uid 1000
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
@@ -174,15 +173,15 @@ hunting for URLs:
 | Pack | Feeds | What's in it |
 | --- | --- | --- |
 | **Core** (pre-selected) | 37 | Security news, government/CERT advisories, NVD and vendor CVE bulletins, marquee vendor research, detection engineering |
-| More news & government | 16 | Second-tier press, regional CERTs, breach and leak-site trackers |
-| Vendor advisories | 13 | Distro, network and OSS product bulletins — high volume, CVE-shaped |
-| Vendor research | 62 | The long tail of vendor and lab research: campaigns, malware analysis, attribution |
+| More news & government | 17 | Second-tier press, regional CERTs, breach and leak-site trackers |
+| Vendor advisories | 12 | Distro, network and OSS product bulletins — high volume, CVE-shaped |
+| Vendor research | 61 | The long tail of vendor and lab research: campaigns, malware analysis, attribution |
 | Detection engineering | 12 | Building, testing and tuning detections |
-| Detection rule repositories | 20 | Sigma, Elastic, Splunk, YARA, Nuclei, Atomic Red Team. **Needs a GitHub token** |
-| Practitioner blogs | 39 | Independent researchers and responders |
-| Reddit | 10 | Security subreddits |
-| YouTube | 26 | Conference talks and technical channels |
-| Podcasts | 5 | Playable in the reader |
+| Detection rule repositories | 16 | Sigma, Elastic, Splunk, YARA, Nuclei, Atomic Red Team. **Needs a GitHub token** |
+| Practitioner blogs | 33 | Independent researchers and responders |
+| Reddit | 5 | Security subreddits |
+| YouTube | 22 | Conference talks and technical channels |
+| Podcasts | 3 | Playable in the reader |
 
 Nothing is created until you choose — it's your instance. Everything shipped polls hourly at most,
 because every install polls the same sources. Two things are deliberately **not** in any pack:
@@ -190,7 +189,7 @@ because every install polls the same sources. Two things are deliberately **not*
 - **Telegram channels**, which need `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` and the interactive login
   in step 12 below. Imported without that, they'd be permanently failing feeds.
 - **The GitHub repo pack, unless you set a token.** Unauthenticated GitHub API calls are capped at
-  60/hour and those 20 repositories will exhaust it. Set `github_token` under **Settings → Engine** (the Enrich stage).
+  60/hour and those 16 repositories will exhaust it. Set `github_token` under **Settings → Engine → Enrichment → Keys**.
 
 Headless installs get the same thing from the CLI (on the server):
 
@@ -243,13 +242,13 @@ To bring your existing database over:
 
 ```bash
 # On your own machine
-docker compose -f docker-compose.dev.yml exec db pg_dump -U intelfeed intelfeed | gzip > intelfeed_dump.gz
+docker compose -f docker-compose.dev.yml exec -T db pg_dump -U intelfeed --clean --if-exists --no-owner intelfeed | gzip > intelfeed_dump.gz
 scp intelfeed_dump.gz <user>@<server-ip>:~/intelfeed/
 ```
 
 ```bash
 # On the server — stop writers first to avoid conflicts
-docker compose -f docker-compose.prod.yml stop api celery-worker celery-beat
+docker compose -f docker-compose.prod.yml stop api celery-worker celery-worker-ai celery-worker-enrichment celery-beat telegram-listener
 gunzip -c intelfeed_dump.gz | docker compose -f docker-compose.prod.yml exec -T db psql -U intelfeed intelfeed
 docker compose -f docker-compose.prod.yml up -d
 ```
@@ -265,7 +264,7 @@ Telegram is a high-signal source for threat intel — ransomware leak sites publ
 Steps:
 
 1. Visit https://my.telegram.org → "API development tools" → create an application. Save the `api_id` and `api_hash`.
-2. Set the values in `.env` and restart the api + celery-worker services:
+2. Set the values in `.env` and restart the services that read them:
 
    ```
    TELEGRAM_API_ID=12345
@@ -273,7 +272,7 @@ Steps:
    ```
 
    ```bash
-   docker compose -f docker-compose.prod.yml up -d --build api celery-worker
+   docker compose -f docker-compose.prod.yml up -d api celery-worker telegram-listener
    ```
 
 3. Run the bootstrap script interactively (the `-it` flags are critical — Telethon prompts on stdin):
@@ -313,32 +312,17 @@ The `claude_code` AI provider runs the Claude Code CLI shipped inside the backen
 
 Until you bootstrap auth, each `claude -p` call exits with an auth-required error and the task that invoked it fails; nothing else is affected.
 
-**Prod (Ubuntu, SSH-only, no browser on the box)** — use the long-lived token flow:
+**Sign in from the app** (works on a server with no browser). In your browser, open **Settings → AI Configuration**, click **Configure** on the **Claude Code CLI** provider, then **Authenticate** on the **Copilot authentication** card. Open the sign-in link, authorize, and paste the code it gives you back into the card. The login is saved in the `claude_cli` volume.
 
-1. On any local machine with a browser, generate a long-lived OAuth token:
+Sanity-check, on the server:
 
-   ```bash
-   claude setup-token        # opens browser, returns sk-ant-oat01-... — copy the full token
-   ```
+```bash
+docker compose -f docker-compose.prod.yml exec celery-worker-ai claude --version
+docker compose -f docker-compose.prod.yml exec celery-worker-ai claude -p "say ok" --output-format json
+# should print {"result":"ok",...}
+```
 
-2. SSH to the prod host and paste the token into the container:
-
-   ```bash
-   ssh <user>@<your-host>
-   cd ~/intelfeed
-   docker compose -f docker-compose.prod.yml exec -it celery-worker-ai claude setup-token
-   # paste the sk-ant-oat01-... token when prompted; writes to /home/appuser/.claude
-   ```
-
-3. Sanity-check:
-
-   ```bash
-   docker compose -f docker-compose.prod.yml exec celery-worker-ai claude --version
-   docker compose -f docker-compose.prod.yml exec celery-worker-ai claude -p "say ok" --output-format json
-   # should print {"result":"ok",...}
-   ```
-
-**Dev (Mac with browser)** — interactive login works:
+**From a terminal** (dev stack), interactive login works too:
 
 ```bash
 docker compose -f docker-compose.dev.yml exec -it celery-worker-ai claude /login
@@ -347,7 +331,7 @@ docker compose -f docker-compose.dev.yml exec -it celery-worker-ai claude /login
 **Notes:**
 
 - The `claude_cli` named volume persists across rebuilds. Only `docker compose down -v` wipes it.
-- Tokens revoked at claude.ai require re-running setup-token. Credential health is checked every 30 minutes (`refresh_claude_auth_status`) and shown on the provider card at Settings → AI Configuration, which also offers in-app re-auth.
+- If the login expires or is revoked at claude.ai, click **Re-authenticate** on the same card. Credential health is checked every 30 minutes (`refresh_claude_auth_status`) and shown there.
 - Emergency fallback: set `ANTHROPIC_API_KEY` in `.env` to switch to pay-per-token billing if the OAuth token lapses. The provider auto-uses the env var when present.
 
 ## 15. (Optional) Add an AI provider

@@ -12,7 +12,7 @@ For a project overview and quickstart, see [`../readme.md`](../readme.md). To in
 
 - **[guide/](guide/README.md)** — The user guide: getting started, reading and triage, search, entities, the Priority Queue, the workbench, detection rules, campaigns and reports, automation and the copilot.
 - **[query-language.md](query-language.md)** — The search query syntax used by the search bar, command palette and saved searches.
-- **[cli-reference.md](cli-reference.md)** — The `intelfeed_cli.py` tool: 191 tools in the full CLI and 95 in the read-only lite CLI, with arguments, results and examples.
+- **[cli-reference.md](cli-reference.md)** — The `intelfeed_cli.py` tool: 196 tools in the full CLI and 97 in the read-only lite CLI, with arguments, results and examples.
 - **[../intelfeed-mcp/README.md](../intelfeed-mcp/README.md)** — The MCP server for local models (LM Studio and other MCP clients). It offers the same tools behind nine fixed tools, loads task guides on demand and keeps results small to fit a small context window.
 - **[android-app.md](android-app.md)** — The Android app: where to download it, what it does, and how it is built, signed and released.
 

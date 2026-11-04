@@ -41,7 +41,7 @@ Out of scope:
 - Findings that require an attacker to already be an authenticated admin. Admins
   can edit AI prompts, automation rules and system settings by design.
 - Vulnerabilities in a dependency with no IntelFeed-specific exploit path —
-  report those upstream. the `security` job in
+  report those upstream. The `security` job in
   `.github/workflows/ci.yml` audits dependencies weekly and Dependabot opens the upgrade PRs.
 - Anything about a deployment's own configuration: a missing reverse proxy, an
   exposed PostgreSQL port, a weak `SECRET_KEY`, a Meilisearch instance left
@@ -77,7 +77,7 @@ The same gates CI applies, on your own checkout:
 gitleaks dir . --config .gitleaks.toml --redact
 
 # Backend dependency advisories
-pip-audit -r <(cd backend && pip freeze | grep -v '^-e ')
+cd backend && pip-audit -r requirements-dev.lock --require-hashes --disable-pip && cd ..
 
 # Frontend dependency advisories, shipped tree only
 cd frontend && pnpm audit --prod --audit-level=high

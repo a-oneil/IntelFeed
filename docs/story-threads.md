@@ -4,7 +4,7 @@ For operators and contributors. It explains how story threads are built, how eac
 
 One news story often arrives twenty times from different outlets. A **story thread** groups those articles into one object: a spine that says what changed in each wave of coverage, the outlet that reported it first, and the re-reports folded under the article they repeat. The same vectors that build threads also power "find articles like this one".
 
-Without threads, the platform could only lower the score of repeats (the `feed_echo` signal, `_feed_echo` in `backend/app/intelligence/signals.py:761`) or group them on the fly by shared entities (`temporal_clusters()`, `backend/app/intelligence/correlation.py:3008`). Neither leaves anything you can name, read or come back to.
+Without threads, the platform could only lower the score of repeats (the `feed_echo` signal, `_feed_echo` in `backend/app/intelligence/signals.py:761`) or group them on the fly by shared entities (`temporal_clusters()`, `backend/app/intelligence/correlation.py:3014`). Neither leaves anything you can name, read or come back to.
 
 - [Vector substrate](#vector-substrate)
 - [How a thread is built](#how-a-thread-is-built)
@@ -49,9 +49,9 @@ It does nothing while `embeddings_enabled` is off. It runs on the **default** qu
 
 A thread that has had no new article for `thread_dormancy_days` becomes `dormant`: it stops accepting articles but keeps its history.
 
-Six guards, each learned from real data:
+Six guards:
 
-1. **Closest article, not centroid.** A centroid is an average. The average of a twenty-article thread drifts toward "vulnerability news" and then attracts every vulnerability article. Joining on the centroid alone once built a 103-article, three-week thread.
+1. **Closest article, not centroid.** A centroid is an average. The average of a twenty-article thread drifts toward "vulnerability news" and then attracts every vulnerability article, so joining on the centroid alone chains unrelated articles into one long thread.
 2. **Background entities are not identity.** "Linux" and "Windows" each sit on about 15% of a three-week window. Any entity on more than `AMBIENT_ENTITY_SHARE` (2%) of the window's articles is ignored in the shared-entity test. This is measured per window, and skipped when the window has fewer than `AMBIENT_MIN_WINDOW` (200) articles, where the numbers are noise.
 3. **One outlet is not corroboration.** Past `SAME_SOURCE_LIMIT` articles from one source domain, that outlet adds nothing more to the thread, in any role. Two unrelated Red Hat errata look like "0.9 cosine and no new entity" to an embedding, so echoes get no exemption.
 4. **Body floor, and a title test.** A large share of a typical window is template bulletin rows. The ones long enough to clear the floor (AusCERT's "package: CVSS (Max): 7.5" bulletins, Red Hat RHSA errata) are caught by `BULLETIN_TITLE_RE`.
@@ -86,7 +86,7 @@ Leaving members out is safe because a thread always scores at least as high as e
 - **The row's lead article** is its earliest article inside its main story, when one thread holds at least `THREAD_LEAD_SHARE` (half) of the row's articles. Within the story, an article that names the row's threat beats one that doesn't.
 - **Two rows fold into one** when a single thread holds `THREAD_MERGE_SHARE` (three quarters) of each and at least two of its articles, such as an operator and the payload it drops. Only open rows fold, and the absorbed rows are listed in `merged_from`. Two spellings of one threat still fold by name as well.
 - **Stories with no entity get a row.** A thread whose articles name no actor, malware or CVE cannot key an entity row, so `build_story_rows` gives it one: keyed by the thread's slug, with `is_story` set and `collect` as its action. Opening it opens the thread (in the Workbench's docked reader from the board; `/priority-queue?thread=<slug>` is its shareable address). It must carry something extractable (a technique, an observable, or a product in your stack), or a funding round would qualify as easily as a zero-day. Its unit count is its beats, and its tradecraft term is its technique count, capped at `STORY_TECHNIQUE_CAP` (6).
-- **`GET /api/threat-board/precedent?thread=<slug>`** answers "have we seen this shape before?" from thread centroids, above the same 0.7 floor that "more like this" uses. The drawer shows the top match.
+- **`GET /api/threat-board/precedent?thread=<slug>`** answers "has this shape been seen before?" from thread centroids, above the same 0.7 floor that "more like this" uses. The drawer shows the top match.
 - The nightly `threat_brief` folds its input to one article per story before prompting (`collect_brief_entries`, `backend/app/services/threat_brief.py:226`).
 
 **"More like this".** `GET /api/entries/{id}/similar` answers from the embedding index, and falls back to Meilisearch term overlap for entries that have no vector yet.

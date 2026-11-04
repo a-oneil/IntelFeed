@@ -37,12 +37,12 @@ Scans title, summary and each paragraph with an Aho-Corasick dictionary (fast se
 
 ## Beat-scheduled enrichment
 
-UTC defaults from `backend/app/workers/job_registry.py`; admins can override.
+UTC defaults from `backend/app/workers/job_registry.py` and the jobs each enrichment source declares in `backend/app/enrichment/`; admins can override.
 
 | Job | Schedule (UTC) | What it does |
 |---|---|---|
 | `sync-kev-feed` | every 6h | CISA Known Exploited Vulnerabilities list |
-| `cve-nvd-refresh` / `cve-nvd-backfill` | daily 12:00 / 01:30 | NVD CVE details |
+| `cve-nvd-refresh` / `cve-nvd-backfill` | hourly / daily 01:30 | NVD CVE details |
 | `resolve-cve-affected` | daily 03:35 | matches `cve_affected` CPE pairs to vendor and product entities |
 | `epss-bulk-sync` | daily 06:30 | EPSS exploit-probability scores |
 | `github-poc-scan` | daily 05:00 | public exploit code on GitHub |

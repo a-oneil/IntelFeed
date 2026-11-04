@@ -79,24 +79,24 @@ your collection.
   command palette
 - Configurable dashboards and widgets, a three-panel reader, runtime-switchable themes
 - Export to CSV and Markdown; outbound observable feeds (EDL blocklists, SIEM lookups, TAXII 2.1); token-gated public RSS re-publishing; shareable public links to articles and copilot conversations
-- REST API covering every feature, plus a zero-dependency CLI (180 tools) for scripting and agents
+- REST API covering every feature, plus a zero-dependency CLI (196 tools) for scripting and agents
 
 ## What it looks like
 
 **Read, and keep what you read.** Open an article and the entities it mentions are already linked —
 actors, malware, CVEs, techniques — with an extracted summary above the text.
 
-![An open article in the reader, with autolinked entities underlined in the body and an AI-written summary at the top](docs/assets/screenshots/reader-article.png)
+![An open article in the reader, with autolinked entities underlined in the body and CVE and detection-opportunity chips under the title](docs/assets/screenshots/reader-article.png)
 
 **A queue that ranks stories, not outlets.** The Priority Queue folds duplicate coverage of the same
 event into one story card, scored by how much it probably matters to you.
 
-![The Priority Queue showing story cards, each with a score, outlet and article counts, and entity chips](docs/assets/screenshots/priority-queue.png)
+![The Priority Queue mixing article and story cards, each with a 0–10 score, outlet and article counts, and entity chips](docs/assets/screenshots/priority-queue.png)
 
 **Entity profiles that accumulate.** Every article that mentions an actor feeds its profile: claims
 ranked by evidence, a coverage sparkline, detection gaps, and the reading that matters.
 
-![The Scattered Spider threat actor profile, showing aliases, best-evidenced claims, an AI assessment, and a detection-gap panel](docs/assets/screenshots/entity-profile.png)
+![The Lazarus Group threat actor profile, showing aliases, best-evidenced claims, an AI assessment, latest developments and next steps](docs/assets/screenshots/entity-profile.png)
 
 **A board of what's actually moving.** Threats ranks recent activity by attention and new tradecraft,
 with a one-click path from a threat to a drafted detection rule.
@@ -111,7 +111,7 @@ narrow by type, malware family, actor, or detection rule.
 **Detection content as a first-class library.** Rules across nine formats (the six above, plus CrowdStrike QL, Nuclei and Panther), filterable by telemetry you
 actually have, with coverage gaps called out.
 
-![The Rules Library listing Sigma and SPL detection rules with severity, source CVE, and telemetry columns](docs/assets/screenshots/detection-rules.png)
+![The Rules Library listing Sigma and Nuclei detection rules with severity, source, ATT&CK and telemetry columns](docs/assets/screenshots/detection-rules.png)
 
 **A dashboard you arrange.** Widgets for triage flow, the morning briefing, under-the-radar items, and
 entity counts, on a grid you lay out yourself.
@@ -144,9 +144,9 @@ cp .env.example .env
 Generate the secrets `.env` needs, then fill them in:
 
 ```bash
-openssl rand -hex 32                                                              # SECRET_KEY
-python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"  # ENCRYPTION_KEY
-openssl rand -base64 24                                                           # POSTGRES_PASSWORD, MEILI_MASTER_KEY
+openssl rand -hex 32                     # SECRET_KEY
+openssl rand -base64 32 | tr '+/' '-_'   # ENCRYPTION_KEY (a Fernet key)
+openssl rand -hex 24                     # POSTGRES_PASSWORD, MEILI_MASTER_KEY
 ```
 
 Then bring the stack up:
@@ -178,7 +178,7 @@ docker compose -f docker-compose.dev.yml exec api python scripts/seed/seed_feeds
 docker compose -f docker-compose.dev.yml exec api python scripts/seed/seed_feeds.py --all       # everything
 ```
 
-From there, add feeds under **Settings → Feeds** or import an OPML file, and configure an AI provider
+From there, add feeds under **Settings → Feeds & Export** or import an OPML file, and configure an AI provider
 under **Settings → AI Configuration** if you want summarization and extraction. Nearly everything
 else — thresholds, enrichment API keys, rate limits, the image proxy — is editable at runtime under
 **Settings → Engine** (backups and monitoring are under **Settings → System**); the database-backed
@@ -206,6 +206,29 @@ IntelFeed is maintained in spare time. Issues and pull requests are welcome and 
 reply, with no guaranteed response time. Report security problems privately: see
 [security.md](security.md).
 
+## Contributors
+
+Thanks to everyone who has put work into IntelFeed:
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="160">
+      <a href="https://github.com/a-oneil"><img src="https://github.com/a-oneil.png?size=100" width="80" alt=""><br><b>a-oneil</b></a><br>
+      Creator and maintainer
+    </td>
+    <td align="center" valign="top" width="160">
+      <a href="https://github.com/kwolfe22"><img src="https://github.com/kwolfe22.png?size=100" width="80" alt=""><br><b>Kurt Wolfe</b></a><br>
+      Android app, MCP server, per-user tags, Priority Queue, docs
+    </td>
+    <td align="center" valign="top" width="160">
+      <a href="https://github.com/samir-elhelw76"><img src="https://github.com/samir-elhelw76.png?size=100" width="80" alt=""><br><b>samir-elhelw76</b></a><br>
+      OpenAI-compatible AI provider
+    </td>
+  </tr>
+</table>
+
+This list is kept by hand. If you contribute, add yourself to it in your pull request.
+
 ## Built with Claude
 
 IntelFeed was built end-to-end with [Claude](https://claude.ai). Every line of it — backend,
@@ -220,6 +243,62 @@ in your own environment.
 
 Python 3.14 · FastAPI · SQLAlchemy (async) · Alembic · Celery + Redis · PostgreSQL 16 · Meilisearch ·
 React 19 · TypeScript · Vite · TanStack Query + Zustand · Docker Compose · Caddy
+
+## Acknowledgements
+
+IntelFeed depends on a lot of open-source software and public threat data. Thank you to the
+projects and teams below. Articles shown in IntelFeed belong to the sites that published them.
+
+**Open-source projects**
+
+- [Meilisearch](https://github.com/meilisearch/meilisearch) powers search
+- [pgvector](https://github.com/pgvector/pgvector) groups related articles into story threads
+- [Piper](https://github.com/OHF-Voice/piper1-gpl) reads articles aloud
+- [LibreTranslate](https://github.com/LibreTranslate/LibreTranslate) translates foreign-language articles
+- [Ollama](https://github.com/ollama/ollama) runs AI models locally
+- [PostgreSQL](https://www.postgresql.org), [Redis](https://redis.io) and [Caddy](https://caddyserver.com) are the database, task queue and web server
+
+**Data sources**
+
+Entity profiles, CVE details and indicator lookups are filled in from the sources below. Each one
+has its own license or terms of use. The ones marked *non-commercial* are free only for
+non-commercial use. Sources that need an API key stay off until you add one in
+Settings › Engine › Enrichment.
+
+| Source | What IntelFeed uses it for | Terms |
+| --- | --- | --- |
+| [MITRE ATT&CK®](https://attack.mitre.org) | Techniques, groups, software and their relationships | [ATT&CK terms of use](https://attack.mitre.org/resources/legal-and-branding/terms-of-use/) |
+| [CVE Program](https://www.cve.org) (cvelistV5) | CVE records | [CVE terms of use](https://www.cve.org/Legal/TermsOfUse) |
+| [NVD](https://nvd.nist.gov) | CVSS scores, weaknesses and affected products | [NVD terms of use](https://nvd.nist.gov/developers/terms-of-use) |
+| [MITRE CWE™](https://cwe.mitre.org) | Weakness catalog | [CWE terms of use](https://cwe.mitre.org/about/termsofuse.html) |
+| [CISA KEV](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) | Known exploited vulnerabilities | Public domain |
+| [VulnCheck KEV](https://vulncheck.com/kev) | Known exploited vulnerabilities | VulnCheck community terms |
+| [FIRST EPSS](https://www.first.org/epss/) | Exploit prediction scores | FIRST EPSS terms |
+| [OSV.dev](https://osv.dev) | Affected packages and fixed versions | CC BY 4.0 |
+| [Malpedia](https://malpedia.caad.fkie.fraunhofer.de) (Fraunhofer FKIE) | Malware and actor profiles | CC BY-NC-SA 3.0, *non-commercial* |
+| [MISP Galaxy](https://github.com/MISP/misp-galaxy) | Threat-actor countries, motives and targeted sectors | CC0 1.0 or BSD 2-Clause |
+| [Metasploit Framework](https://github.com/rapid7/metasploit-framework) | Which CVEs have a Metasploit module | BSD 3-Clause |
+| [ransomware.live](https://www.ransomware.live) | Leak-site victims, group profiles | ransomware.live API terms, *non-commercial* |
+| Cybergeist | Actor and malware profiles | No published license, *non-commercial* |
+| [abuse.ch](https://abuse.ch) | Malware, URL and IOC lookups | abuse.ch terms, *non-commercial* |
+| [GreyNoise](https://www.greynoise.io) | IP context | GreyNoise Community terms, *non-commercial* |
+| [Shodan InternetDB](https://internetdb.shodan.io) | IP ports and tags | Free for non-commercial use |
+| [VirusTotal](https://www.virustotal.com) | File, URL and domain lookups | VirusTotal public API terms, *non-commercial* |
+| [CVEdetails](https://www.cvedetails.com) | A second view of CVE exploit and scoring data | CVEdetails API subscription, *non-commercial* |
+| [Team Cymru](https://www.team-cymru.com/ip-asn-mapping) | IP-to-ASN mapping | Free service |
+| [RDAP](https://rdap.org) | Domain registration data | Each registry's terms |
+| [Tranco](https://tranco-list.eu) | Popular-domain list, to skip benign domains | Inputs under CC BY 3.0, CC BY-SA 4.0 and CC BY 4.0 |
+| [Wikipedia](https://www.wikipedia.org) and [Wikidata](https://www.wikidata.org) | Vendor and entity descriptions | CC BY-SA 4.0 / CC0 |
+| [GitHub](https://github.com) | Proof-of-concept repositories | GitHub terms of service |
+
+Required notices:
+
+- ATT&CK® content © The MITRE Corporation, reproduced and distributed with the permission of The
+  MITRE Corporation.
+- CVE® records © The MITRE Corporation. CWE™ is a trademark of The MITRE Corporation.
+- This product uses the NVD API but is not endorsed or certified by the NVD.
+- Tranco: V. Le Pochat et al., "Tranco: A Research-Oriented Top Sites Ranking Hardened Against
+  Manipulation," NDSS 2019.
 
 ## License
 

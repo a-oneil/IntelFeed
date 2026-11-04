@@ -11,7 +11,7 @@ Recipes for chat alerts, SIEM and firewall feeds, API pulls, AI providers and en
   - [2. Discord Notifications](#2-discord-notifications)
   - [3. Custom HTTP Webhook (Generic JSON)](#3-custom-http-webhook-generic-json)
   - [4. Microsoft Teams](#4-microsoft-teams)
-  - [5. Email Digest (via Webhook to Email Service)](#5-email-digest-via-webhook-to-email-service)
+  - [5. Email Digest](#5-email-digest)
   - [6. SIEM Ingestion](#6-siem-ingestion)
   - [7. MISP and Other Threat Intel Platforms](#7-misp-and-other-threat-intel-platforms)
   - [8. Detection Rule Export to GitHub / GitLab](#8-detection-rule-export-to-github--gitlab)
@@ -70,10 +70,11 @@ Response:
 
 ## Outbound Integrations: IntelFeed → External Systems
 
-**Automation rules** (sidebar → **Automation**: trigger, optional conditions, actions) send data out with two actions:
+**Automation rules** (sidebar → **Automation**: trigger, optional conditions, actions) send data out with three actions:
 
 - **Send Notification** posts a formatted message (`slack`, `discord`, `custom`).
 - **Run Webhook** POSTs JSON to any URL, optionally with headers and a custom payload.
+- **Send Email** emails through the instance mail server (recipe 5).
 
 URLs can be saved as presets in the rule builder.
 
@@ -234,9 +235,11 @@ Use **Run Webhook** with the URL of a Teams channel incoming webhook, and a payl
 
 ---
 
-### 5. Email Digest (via Webhook to Email Service)
+### 5. Email Digest
 
-IntelFeed doesn't send email; webhook a service that does (Zapier, n8n, AWS SES, SendGrid). With Zapier, create a Zap **Webhooks by Zapier (Catch Raw Hook) → Send Email**, copy the hook URL, and make a **Schedule (Cron)** rule in **Batch** mode ([recipe 21](#21-morning-briefing-scheduled-digest)) with **Send Notification** (platform `custom`) to that URL, or **Run Webhook** with a payload like:
+Set the mail server under **Settings → System** (`smtp_host`, `smtp_port`, `smtp_security`, `smtp_username`, `smtp_password`, `smtp_from_address`; **Send Test Email** checks them). Then add a **Send Email** action: `to` and optional `cc` (comma-separated), `subject_template` (default `[IntelFeed] {title}`), `body_template` with the template variables above, and `body_format` (`markdown` default, `html` or `text`). In a **Schedule (Cron)** rule in **Batch** mode ([recipe 21](#21-morning-briefing-scheduled-digest)) it sends one digest email. At most `smtp_max_per_hour` emails go out per hour across the instance. See [engine-settings.md](engine-settings.md) for the `smtp_*` settings.
+
+To send through a service instead (Zapier, n8n, AWS SES, SendGrid), use **Run Webhook** to its hook URL with a payload like:
 
 ```json
 {
@@ -314,7 +317,7 @@ IntelFeed **Run Webhook**:
 
 #### 6c. Microsoft Sentinel (Azure Log Analytics)
 
-The legacy Data Collector API needs requests signed with the workspace's shared key, which a webhook can't do. Send the default payload to a relay (Logic App, Azure Function, n8n) that signs and forwards it:
+The HTTP Data Collector API needs requests signed with the workspace's shared key, which a webhook can't do. Send the default payload to a relay (Logic App, Azure Function, n8n) that signs and forwards it:
 
 ```bash
 curl -X POST "https://YOUR_WORKSPACE.ods.opinsights.azure.com/api/logs?api-version=2016-04-01" \
@@ -696,10 +699,10 @@ AI providers live in **Settings → AI Configuration → Providers** (**+ Add**)
 
 | Provider type | Use for | Tool calling (copilot) |
 |---------------|---------|------------------------|
-| Claude (Anthropic API) | Hosted Claude with an API key | No |
+| Claude (Anthropic API) | Hosted Claude with an API key | Yes |
 | Claude Code CLI | Claude via subscription sign-in | Yes |
 | Ollama (self-hosted) | Local models | Yes |
-| OpenAI-compatible | OpenAI, LM Studio, vLLM, llama.cpp, OpenRouter, LiteLLM, Groq | No |
+| OpenAI-compatible | OpenAI, LM Studio, vLLM, llama.cpp, OpenRouter, LiteLLM, Groq | Yes, unless **Tool calling** is off in **Configure** |
 
 Copilot needs tool calling ([copilot.md](copilot.md)).
 
@@ -799,7 +802,7 @@ Model: `Qwen/Qwen2.5-7B-Instruct`.
 
 **Rate limits:** a `429` pauses the provider until `Retry-After` (or 60 seconds); queued work then resumes. OpenAI's `insufficient_quota` pauses it for an hour.
 
-**Not supported:** tool calling; the copilot and agentic tasks need Ollama or the Claude Code CLI.
+**Tool calling** is on by default. If the server or model rejects the `tools` parameter, turn **Tool calling** off in **Configure**; that provider then answers without tools, and the copilot can't be assigned to it.
 
 OpenRouter's health check doesn't validate the key, so a bad key passes **Test**.
 
@@ -807,7 +810,7 @@ OpenRouter's health check doesn't validate the key, so a bad key passes **Test**
 
 ### 18. Configure Enrichment Sources
 
-Enrichment adds outside data to CVEs, techniques, malware and indicators. Each source declares itself in its class (`backend/app/enrichment/adapters/`, `backend/app/enrichment/catalogs.py`, `wikidata.py`, `endoflife.py`, `capec.py`, `ctid.py`, `d3fend.py`, `etda.py`), listed in `backend/app/enrichment/registry.py`:
+Enrichment adds outside data to CVEs, techniques, malware and indicators. Each source declares itself in its class (`backend/app/enrichment/adapters/`, `backend/app/enrichment/catalogs.py`, `wikidata.py`, `endoflife.py`, `capec.py`, `ctid.py`, `d3fend.py`, `etda.py`, `github_repo.py`), listed in `backend/app/enrichment/registry.py`:
 
 | Source | Key | Default trigger | Default rate limit | Scheduled jobs | Adds |
 |--------|---------|-----------------|--------------------|----------------|------|
@@ -842,12 +845,13 @@ Enrichment adds outside data to CVEs, techniques, malware and indicators. Each s
 | CTID control mappings | No | — | 10/hour | Weekly | NIST 800-53 and CIS controls on techniques |
 | MITRE D3FEND | No | — | 10/hour | Weekly | Countermeasures for techniques |
 | ETDA Threat Group Cards | No | — | 10/hour | Weekly | Actor aliases, origin, MITRE id, targeted sectors and countries, tools, operations |
+| GitHub repository | No (optional token) | — | 60/hour, 5,000/hour with a token | Weekly | Tools' GitHub repositories: stars, last push, archived state, license, topics |
 
-Auto = looked up when a new entity appears; Manual = on request from an entity or indicator. The last twelve are catalog sources: they only run their jobs. Team Cymru, RDAP and the abuse.ch sources look up active observables only. The three abuse.ch sources share one free Auth-Key (https://auth.abuse.ch/): save it on any of them. Their export jobs send nothing about your indicators; a lookup sends the indicator to abuse.ch, so it runs only on request. abuse.ch's terms allow not-for-profit use (https://abuse.ch/terms-of-use/). Turning a source off also stops its jobs. A rate above what a source documents it allows is refused.
+Auto = looked up when a new entity appears; Manual = on request from an entity or indicator. The last thirteen are catalog sources: they only run their jobs. Team Cymru, RDAP and the abuse.ch sources look up active observables only. The three abuse.ch sources share one free Auth-Key (https://auth.abuse.ch/): save it on any of them. Their export jobs send nothing about your indicators; a lookup sends the indicator to abuse.ch, so it runs only on request. abuse.ch's terms allow not-for-profit use (https://abuse.ch/terms-of-use/). Turning a source off also stops its jobs. A rate above what a source documents it allows is refused.
 
-**To configure:** **Settings → Engine → Pipeline** → **enrich** stage: turn on sources, paste keys, optionally change rate limit and confidence threshold, save.
+**To configure:** **Settings → Engine → Enrichment**: turn on sources, paste keys, optionally change rate limit and confidence threshold, save.
 
-**Personal keys:** **Set My Key** on a source card stores your own key for your requests.
+**Personal keys:** **Your own key** in the Enrichment **Keys** view stores a key used for the lookups you start.
 
 ---
 
@@ -902,7 +906,7 @@ Conditions are fixed types (**Content Contains**, **Severity Above**, **Has Sign
 
 Trigger **Max entries** caps articles per run (1–500).
 
-For email, add a **Run Webhook** to an email relay (recipe 5):
+For email, add a **Send Email** action, or a **Run Webhook** to an email relay (recipe 5):
 
 ```json
 {
@@ -941,7 +945,7 @@ For email, add a **Run Webhook** to an email relay (recipe 5):
 | TIPs (TAXII 2.1) | Pull TAXII collection | STIX 2.1 | Scheduled pull |
 | MISP | Script against the REST API | MISP JSON | Scheduled |
 | Git | Pull rule export | ZIP / YAML | Scheduled |
-| Email | Webhook to an email service | JSON | Live or scheduled |
+| Email | Send Email (SMTP), or webhook to an email service | Email / JSON | Live or scheduled |
 | Any tool | REST API | JSON | Polling |
 | Other RSS readers | OPML import / export | XML | One-off |
 

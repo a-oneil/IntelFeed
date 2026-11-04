@@ -9,7 +9,7 @@ any search, add `sort:radar` to the query.
 
 ## What it looks like
 
-![Priority Queue story cards, each showing a score, outlet and article counts, and entity chips](../assets/screenshots/priority-queue.png)
+![Priority Queue article and story cards, each showing a 0–10 score, outlet and article counts, and entity chips](../assets/screenshots/priority-queue.png)
 
 *Each card is one story, not one article. Repeat coverage is folded in and counted.*
 

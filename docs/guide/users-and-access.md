@@ -49,7 +49,7 @@ or Inactive), **Feeds** (how many it subscribes to), **Last Login** and
 
 An inactive account can't sign in, and an open session stops working on its
 next request. Make someone **Inactive** when they leave to keep their name on
-their notes and comments.
+their notes.
 
 An admin can't remove their own admin role, or deactivate or delete their own
 account. Ask another admin.

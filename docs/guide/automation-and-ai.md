@@ -89,7 +89,7 @@ public read-only link (see [Notes and sharing](notes-and-sharing.md#share-links)
 **On the documentation page**, a second copilot, "Ask about IntelFeed", answers
 "how do I…" questions from the guide and developer docs and cites its page.
 
-Good uses: "what's trending in the last 24 hours", "which CVEs in our feeds are
+Good uses: "what's trending in the last 24 hours", "which CVEs in my feeds are
 known to be exploited". Check numbers,
 attribution, and anything going into a report.
 
@@ -131,9 +131,9 @@ Two things to know:
 
 **Settings → AI Configuration** has four tabs:
 
-- **Providers**: the AI services the instance can use, and which model runs
-  which task.
-- **Prompts**: the editable instructions for each task.
+- **Providers**: the AI services the instance can use.
+- **Prompts**: the editable instructions for each task, and which provider and
+  model runs it.
 - **User keys**: whether people may add their own keys (Off, Optional or
   Required), which types, whether private network addresses are allowed, the
   daily limits (per user's own key, per user on the instance's providers, and
@@ -148,7 +148,8 @@ a local model, analysis on a stronger one.
 **Adding a provider does not turn AI on by itself.** Each task needs an
 assignment naming a provider and a model. The AI step in the onboarding tour
 tests the provider and assigns the tasks for you. After that, change
-assignments on the Providers tab.
+assignments on the Prompts tab: pick a task, then its provider and model, or
+use **Assign all…** under the task list.
 
 Tasks that use tools, such as the copilot, run on any provider type: Claude
 Code, the Claude API, OpenAI-compatible and Ollama. An OpenAI-compatible

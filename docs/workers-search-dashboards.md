@@ -32,17 +32,17 @@ There are three queues:
 
 | Queue | Served by | Concurrency | What runs there |
 |-------|-----------|-------------|-----------------|
-| `celery` (default) | `celery-worker` | 4 in dev, 2 in prod | Everything not routed elsewhere |
+| `celery` (default) | `celery-worker` | 4 in dev, 2 in production | Everything not routed elsewhere |
 | `ai` | `celery-worker-ai` | 1 (`CLAUDE_CODE_CONCURRENCY`, default 1) | Tasks that call an AI provider |
 | `enrichment` | `celery-worker-enrichment` | 1 | `dispatch_enrichment_jobs`, the enrichment dispatcher |
 
 The `enrichment` worker runs one dispatcher tick at a time, so ticks never overlap, and a tick waiting on a throttled source never holds a default-worker slot.
 
-`celery-worker-ai` also drains the old `claude_code` queue name.
+`celery-worker-ai` also listens on a queue named `claude_code`, so a task sent to that queue name runs on the AI worker too.
 
 The `ai` worker runs one AI call at a time, whatever the provider. That paces a single Ollama GPU. It is also the only container that mounts the Claude Code CLI credentials, so CLI-provider tasks must run there.
 
-`task_routes` sends these tasks to `ai`: `run_entry_analysis_task` (one-pass entry analysis), `adjudicate_entry_task` and `backfill_entry_adjudications` (the adjudicate stage), `refresh_actor_profile`, `process_name_normalization_batch`, `ai_enrich_gap_batch`, `narrate_story_threads`, `run_copilot_stream`, `run_claude_auth` and `refresh_claude_auth_status`. Some jobs also send their AI work there by hand with `apply_async(queue="ai")`, for example `kickoff_assessment_backfill` and `kickoff_actor_profile_refresh`.
+`task_routes` sends these tasks to `ai`: `run_entry_analysis_task` (one-pass entry analysis), `adjudicate_entry_task` and `backfill_entry_adjudications` (the adjudicate stage), `refresh_actor_profile`, `process_name_normalization_batch`, `ai_enrich_gap_batch`, `review_duplicate_entities`, `narrate_story_threads`, `generate_threat_briefs`, `generate_daily_summaries`, `generate_reddit_digest`, `generate_full_report`, `run_copilot_stream`, `run_claude_auth` and `refresh_claude_auth_status`. Some jobs also send their AI work there by hand with `apply_async(queue="ai")`, for example `kickoff_assessment_backfill` and `kickoff_actor_profile_refresh`.
 
 **Any new task that calls an AI provider must be routed to `ai`.** On the default queue, a long AI call fills the worker's slots and blocks `poll_due_feeds`, which stops ingest.
 
@@ -94,9 +94,10 @@ All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means
 | `narrate_story_threads` | Daily 06:10 | Write the summary ("spine") for threads that changed since they were last narrated. AI (`ai` queue) |
 | `kickoff_assessment_backfill` | Daily 05:45 | Draft AI assessments for entities with linked articles but no description, and refresh its own drafts once enough new reporting arrives. Never overwrites text it did not write; skips CVEs, whose descriptions come from NVD. AI (`ai` queue) |
 | `kickoff_actor_profile_refresh` | Monday 03:00 | Refresh the descriptions of the most active threat actors. AI (`ai` queue) |
+| `review_duplicate_entities` | Daily 06:30 | Show the model the likeliest duplicate actors, malware and tools, and file a Merge proposal on the Review tab for each pair it calls the same. Nothing merges until a person applies it. AI (`ai` queue) |
 | `rank_threat_board` | Daily 04:20 | Recompute the Threats board ranking; reopen handled threats that show new tradecraft |
 | `promote_watchlist_threats` | Daily 04:30 | Pin watched actors and malware with recent activity onto the Threats board |
-| `generate_threat_briefs` | Daily 04:40 | Write the two-sentence story line for each open Threats and vulnerability row. AI (default queue) |
+| `generate_threat_briefs` | Daily 04:40 | Write the two-sentence story line for each open Threats and vulnerability row. AI (`ai` queue) |
 | `submit_analysis_batches` | Every 30 min | Send pending entries to one-pass AI analysis, highest priority first, within budget |
 | `poll_analysis_batches` | Every 10 min | Collect finished analysis batches: results, entity links, costs |
 | `recompute_signal_rates` | Daily 04:20 | Recompute 30-day signal firing rates (the self-tuning weights) and re-scale priority scores to 0–10 |
@@ -117,9 +118,9 @@ All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means
 | `run_malpedia_sync` | `malpedia` | Saturday 01:00 | Sync malware families from Malpedia; aliases pass the junk-alias filter |
 | `run_metasploit_sync` | `metasploit` | Sunday 03:45 | Map tracked CVEs to Metasploit modules and mark them weaponized |
 | `refresh_cwe_catalog` | `mitre_cwe` | Monday 03:45 | Re-pull the MITRE CWE catalog and re-match unmatched NVD weakness references |
-| `run_cve_nvd_refresh` | `nvd` | Daily 12:00 | Re-check NVD for CVSS changes |
+| `run_cve_nvd_refresh` | `nvd` | Hourly at :00 | Apply every NVD record changed since the last run (CVSS changes) to existing CVEs |
 | `run_cve_nvd_backfill` | `nvd` | Daily 01:30 | Look up NVD data (CVSS, description, affected products, references) for CVEs with no NVD record yet; stops starting lookups 2 minutes before its time limit. Backfill lane |
-| `reenrich_cve_nvd` | `nvd` | Daily 03:05 | Re-fetch NVD data for CVEs still missing it |
+| `reenrich_cve_nvd` | `nvd` | Daily 03:05 | Re-fetch NVD data for CVEs still missing it. Backfill lane |
 | `run_github_poc_scan` | `github_poc` | Daily 05:00 | Search GitHub for proof-of-concept exploits; stops starting searches 2 minutes before its time limit |
 | `run_wikipedia_bulk_sync` | `wikipedia` | Wednesday 04:00 | Add Wikipedia content to entities that lack it; stops 5 minutes before its time limit. Backfill lane |
 | `sync_cybergeist_feeds` | `cybergeist` | Daily 02:30 | Sync threat actor and malware lists from Cybergeist |
@@ -132,8 +133,15 @@ All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means
 | `run_capec_sync` | `capec` | Monday 04:00 | Refresh the CAPEC catalog and each technique's attack patterns |
 | `run_etda_sync` | `etda` | Tuesday 04:15 | Match ETDA Threat Group Cards to tracked actors: aliases, origin, targets, tools, operations |
 | `run_ransomware_group_profiles` | `ransomware_live` | Every 4 h at :50 | Techniques, tools and leak-site status for up to 10 tracked ransomware groups |
+| `run_cvelist_backfill` | `cvelist` | Hourly at :20 | Apply CVE records (CNA and CISA-ADP) from the cvelistV5 baseline to CVEs not checked for 90 days. Backfill lane |
+| `run_cvelist_delta_sync` | `cvelist` | Hourly at :40 | Apply the CVE records changed since the last run, from cvelistV5's hourly delta files |
+| `run_osv_delta_sync` | `osv` | Hourly at :40 | Apply the OSV records of tracked CVEs that changed since the last run |
+| `run_cymru_bulk_sync` | `cymru` | Every 6 h at :25 | Map the ledger's active IPs to their AS through Team Cymru bulk WHOIS |
+| `run_threatfox_sync` | `threatfox` | Daily 04:35 | Match the ledger's active observables against ThreatFox's IOC export: families, role and context |
+| `run_urlhaus_sync` | `urlhaus` | Every 6 h at :50 | Match the ledger's active URLs, domains and IPs against the URLhaus dump: status, tags and families |
+| `run_tranco_sync` | `tranco` | Daily 04:20 | Rank tracked domains against the Tranco top-1M list and flag top-10k ones for review |
 
-Each source declares its jobs in its manifest ([Source Jobs](automation-ai-enrichment.md#source-jobs)). A job skips while its source is switched off (`{"skipped": "source disabled"}`), and sends its requests through its source's gateway ([Source Gateway](automation-ai-enrichment.md#source-gateway)). A refusal (rate limited, breaker open, budget spent, backfill share used, paused) stops the job; it keeps what it did and records `stopped` in its stats. A key the source rejects fails the run, so Engine → Jobs shows why. Jobs marked "Backfill lane" (and `cvelist-backfill`) stop once their source has used 60% of its daily budget. Each source job's run details start with `fetched`, `changed` and `written`.
+Each source declares its jobs in its manifest ([Source Jobs](automation-ai-enrichment.md#source-jobs)). A job skips while its source is switched off (`{"skipped": "source disabled"}`), and sends its requests through its source's gateway ([Source Gateway](automation-ai-enrichment.md#source-gateway)). A refusal (rate limited, breaker open, budget spent, backfill share used, paused) stops the job; it keeps what it did and records `stopped` in its stats. A key the source rejects fails the run, so Engine → Jobs shows why. Jobs marked "Backfill lane" stop once their source has used 60% of its daily budget. Each source job's run details start with `fetched`, `changed` and `written`.
 
 When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker_vocabulary` and, 30 seconds later, `rescan_recent_entries` for the last 7 days. The delay lets the new dictionary load before old entries are re-scanned.
 
@@ -180,8 +188,8 @@ When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker
 
 | Task | Default schedule | What it does |
 |------|------------------|--------------|
-| `generate_daily_summaries` | Daily 06:00 | Write yesterday's shared daily summary shown in Triage. AI (default queue) |
-| `generate_reddit_digest` | Daily 07:00 | Write a digest of top Reddit security posts. AI (default queue) |
+| `generate_daily_summaries` | Daily 06:00 | Write yesterday's shared daily summary shown in Triage. AI (`ai` queue) |
+| `generate_reddit_digest` | Daily 07:00 | Write a digest of top Reddit security posts. AI (`ai` queue) |
 
 ### Beat Schedule and Runtime Overrides
 
@@ -367,7 +375,7 @@ Entity results either narrow the entry results (`AND`) or sit beside them (`OR`)
 
 - the query text, with `matchingStrategy: "all"` so every term must match;
 - the plan's filters, plus `id IN [...]` when entity or PostgreSQL filters narrowed the set (at most 500 IDs);
-- highlighting of `title` and `content_text` with `<mark>` tags, and a 200-character crop of `content_text` around matches;
+- highlighting of `title` and `content_text` with `<mark>` tags, and a 200-word crop of `content_text` around matches;
 - facets for `feed_type`, `feed_title`, `tags`, `media_type` and `language`, the five groups on the search page's facet rail.
 
 A query with `OR` between parts may become several **branches**. Each branch is searched and the results are merged.
@@ -593,10 +601,10 @@ Built from the `JOB_REGISTRY` defaults. Admins can change any of these in Engine
 04:00 ├─ run_wikipedia_bulk_sync (Wed) · run_capec_sync (Mon)
 04:10 ├─ evict_image_cache
 04:15 ├─ evict_tts_cache · run_ctid_sync (Sun) · run_etda_sync (Tue)
-04:20 ├─ recompute_signal_rates · rank_threat_board · rollup_targeted_sectors · cleanup_telegram_media (Sun)
+04:20 ├─ recompute_signal_rates · rank_threat_board · rollup_targeted_sectors · run_tranco_sync · cleanup_telegram_media (Sun)
 04:25 ├─ evict_old_telegram_media
 04:30 ├─ promote_watchlist_threats · run_wikidata_sync (Thu) · run_d3fend_sync (Sun)
-04:35 ├─ fit_user_signal_weights · evict_old_ingest_files
+04:35 ├─ fit_user_signal_weights · evict_old_ingest_files · run_threatfox_sync
 04:40 ├─ generate_threat_briefs
 04:45 ├─ archive_correlation_events
 04:50 ├─ backfill_rule_data_sources (Sun)
@@ -606,10 +614,9 @@ Built from the `JOB_REGISTRY` defaults. Admins can change any of these in Engine
 05:45 ├─ kickoff_assessment_backfill
 06:00 ├─ generate_daily_summaries
 06:10 ├─ narrate_story_threads
-06:30 ├─ run_epss_bulk_sync
+06:30 ├─ run_epss_bulk_sync · review_duplicate_entities
 07:00 ├─ generate_reddit_digest
-07:15 ├─ reconcile_meilisearch
-12:00 └─ run_cve_nvd_refresh
+07:15 └─ reconcile_meilisearch
 
 Recurring:
   Every 30 s      dispatch_enrichment_jobs
@@ -619,12 +626,13 @@ Recurring:
   Every 15 min    embed_pending_entries, sync_campaign_sources
   Every 30 min    sync_ransomware_victims, refresh_autolinker_vocabulary, refresh_claude_auth_status,
                   retry_untranslated_entries, submit_analysis_batches
-  Hourly (:10)    refresh_correlation_cache
+  Hourly          run_cve_nvd_refresh (:00), refresh_correlation_cache (:10), run_cvelist_backfill (:20),
+                  run_cvelist_delta_sync (:40), run_osv_delta_sync (:40)
   Every 2 h       rebuild_story_threads
   Every 4 h       build_telegram_forward_relationships (:20), sync_entity_search_indexes (:45),
                   run_ransomware_group_profiles (:50)
-  Every 6 h       sync_kev_feed (:15), check_feed_health (:30), rescore_recent_entries (:35),
-                  retro_sight_observables (:40)
+  Every 6 h       sync_kev_feed (:15), run_cymru_bulk_sync (:25), check_feed_health (:30),
+                  rescore_recent_entries (:35), retro_sight_observables (:40), run_urlhaus_sync (:50)
 
 Off by default:   rescore_all_entries (Run now only)
 ```

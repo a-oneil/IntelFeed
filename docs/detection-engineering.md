@@ -345,7 +345,7 @@ Drafts never count.
 
 Main functions:
 
-- `classify_techniques(db, technique_ids)`: matches rules on `source_ttps` (and, for older rows, technique IDs stored in `mitre_tactics`). Returns status, rule counts, missing sources and up to 5 example rules per technique.
+- `classify_techniques(db, technique_ids)`: matches rules on `source_ttps`, and also on technique IDs found in `mitre_tactics`, where some rules carry them. Returns status, rule counts, missing sources and up to 5 example rules per technique.
 - `classify_cves(db, cve_ids)`: the same, for CVEs. A rule references a CVE if `source_cves` contains it or the title mentions it.
 - `summarize(classification)`: totals and a `coverage_percentage`.
 - `entry_opportunity_tiers(...)`: per entry, `actionable_gap` (a technique has no rule at all), `telemetry_gap` (rules exist but are blocked by telemetry) or `None`.
@@ -444,7 +444,7 @@ You list the log sources you collect at Workbench **Detection → Telemetry Sour
 | `PUT`, `DELETE /telemetry-sources/{id}` | Edit and remove a source |
 | `GET /telemetry-sources/catalog` | The built-in catalog of common sources, for the checkbox picker |
 | `POST /telemetry-sources/sync` | Admin only. Match the inventory to a list of ticked catalog names (creates, enables or disables rows) |
-| `GET /telemetry-sources/taxonomy` | An older flat list of data-source names by category |
+| `GET /telemetry-sources/taxonomy` | A flat list of data-source names by category |
 | `POST /telemetry-sources/check-feasibility` | Which of a list of data sources you collect |
 | `GET /telemetry-sources/telemetry-gaps` | Rules blocked by missing telemetry |
 

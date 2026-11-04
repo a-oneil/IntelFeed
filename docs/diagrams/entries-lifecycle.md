@@ -96,8 +96,8 @@ flowchart TD
         VOCAB["Load Aho-Corasick vocabulary<br/>(Redis-versioned singleton:<br/>intelfeed:autolinker:vocab_version)<br/>actors, malware, countries + aliases;<br/>vendors, products, tools, mitigations<br/>FP filtering: min name length ·<br/>false-positive names CSV ·<br/>is_junk_alias() · LOLBin/binary filter<br/>(.exe/.dll/.sys)"]
 
         VOCAB --> SPLIT["split_into_paragraphs()<br/>title, summary, paragraphs"]
-        SPLIT --> AC_SCAN["Phase 1: Aho-Corasick scan<br/>word-boundary check +<br/>ambiguity filter (short names<br/>must be capitalized)"]
-        AC_SCAN --> REGEX_SCAN["Phase 2: Regex scan<br/>CVE-YYYY-NNNN<br/>TNNNN(.NNN) — validated against<br/>MITRE catalog, revoked IDs remapped"]
+        SPLIT --> AC_SCAN["Step 1: Aho-Corasick scan<br/>word-boundary check +<br/>ambiguity filter (short names<br/>must be capitalized)"]
+        AC_SCAN --> REGEX_SCAN["Step 2: Regex scan<br/>CVE-YYYY-NNNN<br/>TNNNN(.NNN) — validated against<br/>MITRE catalog, revoked IDs remapped"]
         REGEX_SCAN --> CONFIDENCE_W["Confidence scoring:<br/>canonical → high, alias → medium<br/>downgraded by feed<br/>reliability_rating weight"]
         CONFIDENCE_W --> STORE_LINKS["Store junction records<br/>EntryThreatActor / EntryMalware /<br/>EntryCountry / EntryCVE / EntryTTP /<br/>EntryVendor / EntryProduct /<br/>EntryTool / EntryMitigation<br/>ON CONFLICT DO NOTHING —<br/>provisional dictionary-word matches<br/>held in pending_autolink_matches<br/>(linked or rejected by the one-pass AI analysis,<br/>then checked by the adjudicator)"]
         STORE_LINKS --> UPDATE_STATS["Update entity stats<br/>article_count++<br/>last_seen_at = now"]
@@ -113,7 +113,7 @@ flowchart TD
         AI_PASS --> CVE_STORE["Store CVEs (cve_id unique)<br/>new CVE → enrichment_jobs row<br/>(NVD fills CVSS, severity, description,<br/>CPEs, references from the queue)"]
 
         EXTRACT_TASK --> RULE_EXTRACT{"feed.extract_detection_rules?"}
-        RULE_EXTRACT -- "Yes" --> RULE_PARSE["extract_rules_from_content()<br/>Detects: Sigma (YAML) ·<br/>Elastic TOML (→ elastic_ql / kql) ·<br/>YARA · Snort/Suricata · Splunk SPL"]
+        RULE_EXTRACT -- "Yes" --> RULE_PARSE["extract_rules_from_content()<br/>Detects: Sigma (YAML) ·<br/>Elastic TOML (→ elastic_ql / kql) ·<br/>YARA · Snort/Suricata ·<br/>SPL / KQL / EQL / ES|QL from code blocks"]
         RULE_PARSE --> RULE_STORE["store_extracted_rules()<br/>→ DetectionRule + version v1"]
 
         TTP_STORE --> SYNC_IDX["index_entities()<br/>(only the entities this entry touched)"]
@@ -122,7 +122,7 @@ flowchart TD
 
     subgraph ENRICHMENT["⑨ Enrichment (auto + Celery Beat schedules)"]
         ENRICH_PIPE["enrichment_jobs rows for new entities,<br/>run every 30s by dispatch_enrichment_jobs →<br/>EnrichmentSource adapters:<br/>NVD, OSV, CVEDetails, Wikipedia, …"]
-        SCHEDULED["Beat-scheduled syncs:<br/>sync-kev-feed — every 6h<br/>cve-nvd-refresh — daily 12:00 UTC<br/>cve-nvd-backfill — daily 01:30 UTC<br/>epss-bulk-sync — daily 06:30 UTC<br/>github-poc-scan — daily 05:00 UTC<br/>cybergeist sync — daily 02:30 UTC<br/>mitre-attack-sync — weekly Sun 03:00<br/>malpedia-sync — weekly Sat 01:00<br/>wikipedia-bulk-sync — weekly Wed 04:00"]
+        SCHEDULED["Beat-scheduled syncs:<br/>sync-kev-feed — every 6h<br/>cve-nvd-refresh — hourly<br/>cve-nvd-backfill — daily 01:30 UTC<br/>epss-bulk-sync — daily 06:30 UTC<br/>github-poc-scan — daily 05:00 UTC<br/>cybergeist sync — daily 02:30 UTC<br/>mitre-attack-sync — weekly Sun 03:00<br/>malpedia-sync — weekly Sat 01:00<br/>wikipedia-bulk-sync — weekly Wed 04:00"]
     end
 
     TTP_STORE -.-> ENRICH_PIPE
@@ -157,7 +157,7 @@ flowchart TD
         SCORE_TASK --> SIG_SCORE["Signal engine writes<br/>Entry.priority_score + entry_signals"]
         SIG_SCORE --> ENQ["enqueue_entry_analysis()<br/>→ one-pass AI batch queue<br/>(ai_one_pass_enabled + budget)"]
         ENQ -.->|"analysis lands"| ADJ["adjudicate_entry_task<br/>(ai queue) — AI review of what the<br/>analysis wrote; adjudication_mode"]
-        SIG_SCORE --> TRIAGE["Triage queue (services/triage.py)<br/>legacy composite, or the stored<br/>priority_score when the signal<br/>engine is surfaced"]
+        SIG_SCORE --> TRIAGE["Triage queue (services/triage.py)<br/>composite score, or the stored<br/>priority_score when<br/>signal_engine_surface is on"]
         SIG_SCORE --> PQ["Priority Queue<br/>GET /entries/priority-queue —<br/>radar-ranked unread with open<br/>story threads folded in as rows"]
     end
 

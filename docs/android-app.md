@@ -1,7 +1,5 @@
 # IntelFeed for Android
 
-*Last verified: 2026-10-27 (app version 1.5, build 6)*
-
 This page is for anyone who wants to install the Android app, or build and
 release it. It covers what the app does, how to get it, how to build it, and
 how CI publishes a new version.
@@ -31,17 +29,13 @@ Each app version is published on the repo's
    login and settings.
 
 The app shows its version at the bottom of **Settings**, for example
-"IntelFeed for Android 1.5 (build 6)".
-
-While the repo is private, downloading a release needs a GitHub account with
-access to it.
+"IntelFeed for Android 1.8 (build 9)".
 
 Once a day the app asks GitHub for the newest release
 (`notifications/AppUpdates.kt`) and, when it is newer than the installed
 version, posts one "IntelFeed <version> is available" notification; tapping it
 opens the release page. The request goes straight from the phone to
-`api.github.com` with no token, so it works signed in or not, and it finds
-nothing while the repo is private. Settings → **App updates** turns the notice
+`api.github.com` with no token, so it works signed in or not. Settings → **App updates** turns the notice
 off and has a "Check for an app update" button.
 
 Every CI run of the `android` job also attaches the APK it built to the run
@@ -68,10 +62,6 @@ try a build from a PR that is not merged yet.
 | **Share to IntelFeed** | Share an http(s) link from a browser and pick "Add to IntelFeed". After you confirm, the app adds the page as an article (`POST /api/entries/ingest/url`). |
 | **Languages** | English, Spanish, French, German, Ukrainian, Russian, Chinese, Japanese, Portuguese and Italian (`ui/i18n/AppStrings.kt`). |
 
-Every endpoint the app calls is listed in the Retrofit interface
-`android/app/src/main/java/com/example/intelfeed/data/network/IntelFeedApi.kt`
-(111 at version 1.5). The app uses no endpoint that the web app does not also
-use.
 
 ---
 
@@ -178,7 +168,7 @@ Android Gradle plugin looks for `debug.keystore`. After the build it compares
 the certificate in the APK with the one in the keystore and fails the job if
 they differ, so a release can never ship with a key the phones do not have.
 
-Releases start at 1.3, the first version signed with the shared key.
+Every release from 1.3 up is signed with the shared key.
 
 To set the secret (repo admin, once):
 
@@ -198,8 +188,7 @@ or the other way round, put the shared keystore at that path. Back up the
 existing file first: it is the debug key for every Android project built on
 that machine.
 
-The released APK is a **debug build** signed with a debug key. That works
-while the only users are the developers' phones, but it means the app is
+The released APK is a **debug build** signed with a debug key, so the app is
 debuggable, not minified, and logs request lines. Moving to a release build
 needs a real signing key, a one-time reinstall for everyone, and
 `assembleRelease` in CI.

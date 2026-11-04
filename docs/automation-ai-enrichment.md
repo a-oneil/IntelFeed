@@ -29,7 +29,7 @@ For contributors and operators. After reading this you will know how automation 
   - [Task Execution & Results](#task-execution--results)
   - [Error Handling & Retries](#error-handling--retries)
   - [Streaming](#streaming)
-  - [One-Pass Entry Analysis](#one-pass-entry-analysis-engine-phase-4)
+  - [One-Pass Entry Analysis](#one-pass-entry-analysis)
 - [Part 3: Enrichment Pipeline](#part-3-enrichment-pipeline)
   - [Architecture Overview](#architecture-overview)
   - [Data Models](#data-models)
@@ -53,7 +53,7 @@ Three backend subsystems act on intelligence without a person clicking:
 
 1. **Automation engine** (`backend/app/automation/`): rules you write. When an entry matches, the rule runs a list of actions (tag it, notify Slack, run an AI task, and so on).
 2. **AI provider system** (`backend/app/ai/`): one interface over several model backends. A *task* (for example "summarize an article") is assigned to a *provider* (for example your Ollama server). A provider does nothing until a task is assigned to it.
-3. **Enrichment pipeline** (`backend/app/enrichment/`): pulls extra facts about entities (CVEs, actors, malware, IP addresses) from 18 outside sources and stores the results.
+3. **Enrichment pipeline** (`backend/app/enrichment/`): pulls extra facts about entities (CVEs, actors, malware, IP addresses) from 32 outside sources and stores the results.
 
 ---
 
@@ -349,8 +349,9 @@ Built-in tasks are seeded at startup from `backend/app/ai/prompts/defaults.py`:
 
 | Task | Category | What it does |
 |---|---|---|
-| `entry_analysis` | extraction | One-pass analysis of each new article (see [below](#one-pass-entry-analysis-engine-phase-4)). Default `max_tokens` 10000 |
+| `entry_analysis` | extraction | One-pass analysis of each new article (see [below](#one-pass-entry-analysis)). Default `max_tokens` 10000 |
 | `entry_adjudication` | extraction | Reviews what `entry_analysis` wrote (links, new entities, relationships, observables) and returns only the verdicts it would change. Runs as the `adjudicate` pipeline stage, no tools, `max_tokens` 4096 |
+| `entity_merge_review` | extraction | The daily duplicate review: says whether two similar actors, malware families or tools are one entity. A "same" verdict becomes a Merge proposal on the Engine Review tab. `max_tokens` 2048 |
 | `ttp_mapping` | extraction | Maps text to MITRE ATT&CK techniques |
 | `article_summary` | analysis | Summary of one entry |
 | `threat_assessment` | analysis | Quick assessment and recommended actions |
@@ -364,7 +365,7 @@ Built-in tasks are seeded at startup from `backend/app/ai/prompts/defaults.py`:
 | `report_section` and `report_section_{exposure, flash_alert, actor_profile, campaign_tracker, landscape, detection}` | generation | Report sections, one task per report family |
 | `actor_profile_refresh`, `entity_name_normalization`, `entity_enrichment_research` | maintenance | Entity maintenance (`backend/app/workers/entity_maintenance_tasks.py`). Seeded for the `claude_code` provider; `entity_enrichment_research` needs a tool-capable provider |
 
-Eight older per-type extraction tasks (`threat_actor_id`, `malware_id`, `tool_extraction`, `country_id`, `sector_id`, `article_metadata`, `mitigation_extraction`, `cve_extraction`) are marked deprecated. They stay in the database so their old results remain readable, they are hidden from run pickers, and the seeder keeps their assignments disabled.
+Eight per-type extraction tasks (`threat_actor_id`, `malware_id`, `tool_extraction`, `country_id`, `sector_id`, `article_metadata`, `mitigation_extraction`, `cve_extraction`) are marked deprecated, because `entry_analysis` does their work. They stay in the database so their stored results remain readable, they are hidden from run pickers, and the seeder keeps their assignments disabled.
 
 Default models when the seeder creates an assignment: extraction tasks use Haiku, analysis tasks Sonnet, `detection_rules` and `entry_qa` Opus (`DEFAULT_MODEL_ASSIGNMENTS`).
 
@@ -375,13 +376,13 @@ An assignment links one task to one provider and model (`ai_task_assignments`, `
 Two functions decide who answers:
 
 - `get_task_assignment()` (`backend/app/ai/engine.py:839`) returns the site's enabled assignment whose provider is active and not paused. Background work uses this.
-- `resolve_assignment(db, caller, task_name)` (`backend/app/ai/engine.py:609`) is what everything else calls. It returns a `Resolved` (task, provider, model, merged config, and `source`: `"site"` or `"user"`), or `None` when nothing can answer. For any caller that is not a signed-in person, or while personal keys are off, it is just the site assignment. For a person with personal keys on, it adds their own key on top ([Personal Keys](#personal-keys--the-lookup)).
+- `resolve_assignment(db, caller, task_name)` (`backend/app/ai/engine.py:627`) is what everything else calls. It returns a `Resolved` (task, provider, model, merged config, and `source`: `"site"` or `"user"`), or `None` when nothing can answer. For any caller that is not a signed-in person, or while personal keys are off, it is just the site assignment. For a person with personal keys on, it adds their own key on top ([Personal Keys](#personal-keys--the-lookup)).
 
 `run_task()` resolves first, then checks for a cached answer, then calls the provider. Code that streams (copilot, rule chat) or calls a provider directly (the shared Ask Agent, rule conversion, the workspace tool) resolves the same way. Report generation runs the lookup when the report is queued (`preflight_report`, `backend/app/ai/engine.py:745`), so a refusal comes back as the request's error before anything is written.
 
 ### The `ai` queue
 
-Every Celery task that calls an AI provider is routed to the `ai` queue (`task_routes` in `backend/app/workers/celery_app.py`): entry analysis, adjudication and its backfill, actor profile refresh, name normalization, AI gap enrichment, thread spines, copilot turns, and the two Claude sign-in tasks. Only the `celery-worker-ai` service reads that queue, at concurrency 1 (`CLAUDE_CODE_CONCURRENCY`). This keeps AI calls one at a time, which paces a single Ollama GPU and protects the Claude CLI's OAuth session. It is also the only container that mounts the CLI credentials.
+Every Celery task that calls an AI provider is routed to the `ai` queue (`task_routes` in `backend/app/workers/celery_app.py`): entry analysis, adjudication and its backfill, actor profile refresh, name normalization, AI gap enrichment, duplicate review, thread spines, the written products (threat briefs, daily summaries, the Reddit digest, full reports), copilot turns, and the two Claude sign-in tasks. Only the `celery-worker-ai` service reads that queue, at concurrency 1 (`CLAUDE_CODE_CONCURRENCY`). This keeps AI calls one at a time, which paces a single Ollama GPU and protects the Claude CLI's OAuth session. It is also the only container that mounts the CLI credentials.
 
 **A new task that calls a provider must be added to `task_routes`.** Left on the default queue, a slow AI call can fill the default worker and stop feed polling.
 
@@ -404,7 +405,7 @@ The kind is saved in `ai_results.caller_kind`. The cost dashboard's By-user tabl
 
 ### Personal Keys & The Lookup
 
-An admin can let people register their own AI keys and have the tasks *they* start run on them. Seven settings in the `ai` group control this (Settings → AI Configuration → User keys; defaults in `backend/app/config.py:88-106`):
+An admin can let people register their own AI keys and have the tasks *they* start run on them. Seven settings in the `ai` group control this (Settings → AI Configuration → User keys; defaults in `backend/app/config.py:89-111`):
 
 | Setting | Default | What it does |
 |---|---|---|
@@ -526,9 +527,9 @@ On a quota error the provider is paused until the reset time the provider gave (
 
 A stream has no `AIResponse` to price, so each provider saves its stream's usage in `last_stream_usage` (`backend/app/ai/providers/base.py`): the Anthropic SDK's final message, Ollama's `done` chunk, or an OpenAI-compatible server's trailing usage chunk when it sends one. Copilot and rule chat read it after the stream ends and record the turn with real token counts (priced from the cost table when there is no dollar figure), so a streamed turn on a personal key counts toward its monthly cap.
 
-### One-Pass Entry Analysis (engine phase 4)
+### One-Pass Entry Analysis
 
-One `entry_analysis` call per article replaces the old per-type extraction tasks. Its output (summary, actors, malware, tools, TTPs, CVEs, countries, sectors, observables, relationships and more) is fanned out to the same store functions (`store_entry_analysis`, `backend/app/services/entry_analysis.py`).
+One `entry_analysis` call per article does the work of the deprecated per-type extraction tasks. Its output (summary, actors, malware, tools, TTPs, CVEs, countries, sectors, observables, relationships and more) is fanned out to the same store functions (`store_entry_analysis`, `backend/app/services/entry_analysis.py`).
 
 How an article gets analyzed (switch: `ai_one_pass_enabled`, default on):
 
@@ -563,7 +564,7 @@ Sources are configured at Settings → Engine → Enrichment (`/api/enrichment/s
 
 ### Data Models
 
-All five tables are in `backend/app/models/enrichment.py`.
+All six tables are in `backend/app/models/enrichment.py` (`entity_relation_claims` is described under [Relations](#relations)).
 
 **`enrichment_sources`**: one row per source. `source_type` (unique), `display_name`, `is_enabled` (a new row starts on when the source has jobs or its manifest sets `default_enabled`; while off, the source is looked up by nothing, its jobs skip and its queued lookups wait), `trigger_mode` (`auto` / `manual`; a `shares_ioc` source's new row is `manual` unless its manifest says `auto`), `api_key_encrypted`, `rate_limit_config` (`requests_per_period`, `period_seconds`), `config`, `min_confidence_threshold` (`low` / `medium` / `high`), `daily_budget` (NULL = unlimited; new rows get the manifest quota's budget), `last_synced_at`, `health_status`. The gateway counts each day's requests in Redis.
 
@@ -589,16 +590,16 @@ A `scope` (column → values) narrows the entities a source looks up on its own:
 
 | `source_type` | Display name | Kind | Entity types | Default trigger | Key? | Default rate | Ceiling | Egress |
 |---|---|---|---|---|---|---|---|---|
-| `epss` | FIRST EPSS | lookup | cve | manual | No | 100 / 60 s | — | low |
+| `epss` | FIRST EPSS | lookup | cve | auto | No | 100 / 60 s | — | low |
 | `nvd` | NVD API 2.0 | lookup | cve | auto | No (optional) | 5 / 30 s; 50 / 30 s with a key; one request at a time | the same | low |
-| `cisa_kev` | CISA KEV | lookup | cve | manual | No | 100 / 60 s | — | none |
+| `cisa_kev` | CISA KEV | lookup | cve | auto | No | 100 / 60 s | — | none |
 | `mitre_attack` | MITRE ATT&CK | lookup | ttp, threat_actor, malware, tool, mitigation | manual | No | 10 / 3600 s | — | none |
 | `vulncheck` | VulnCheck KEV | lookup | cve | manual | Yes | 1000 / 60 s | 1000 / 60 s | low |
 | `osv` | OSV | lookup | cve | auto | No | 100 / 60 s | — | low |
 | `malpedia` | Malpedia | lookup | malware, tool, threat_actor | manual | No (optional) | 30 / 60 s | — | low |
 | `github_poc` | GitHub PoC | lookup | cve | manual | No (optional token) | 10 / 60 s; 30 / 60 s with a token | the same | low |
 | `cvedetails` | CVEDetails | lookup | cve | auto | Yes | 60 / 60 s | — | low |
-| `cvelist` | CVE List (cvelistV5) | lookup | cve | manual | No | 30 / 60 s | — | none |
+| `cvelist` | CVE List (cvelistV5) | lookup | cve | auto | No | 30 / 60 s | — | none |
 | `wikipedia` | Wikipedia | lookup | threat_actor, malware, tool, country, vendor, product, ttp, mitigation, cve, cwe | auto | No | 20 / 60 s | — | low |
 | `virustotal` | VirusTotal v3 | lookup | observable (ipv4, domain, md5, sha1, sha256) | manual | Yes | 4 / 60 s | — | shares_ioc |
 | `greynoise` | GreyNoise Community | lookup | observable (ipv4; active) | auto | No (optional key) | 10 / 3600 s | — | shares_ioc |
@@ -622,7 +623,7 @@ A `scope` (column → values) narrows the entities a source looks up on its own:
 | `etda` | ETDA Threat Group Cards | catalog | threat_actor | manual | No | 10 / 3600 s | — | none |
 | `github_repo` | GitHub repository | catalog | tool | manual | No (optional token) | 60 / 3600 s; 5000 / 3600 s with a token | 60 / 3600 s | low |
 
-The ceiling is the most the source documents it allows; `PUT /api/enrichment/sources/{id}` refuses a `rate_limit_config` above it with a 400 (`rate_above_ceiling`). Each manifest's comment cites the documented limit. A keyed rate (GitHub PoC) applies when the source has a key and its row's rate is still the keyless default, so an admin's own rate stands. The gateway also holds every rate to the ceiling of the quota in use (keyed with a key, keyless without), so a stored rate above that ceiling (one saved under a key that is since gone, for example) never runs above what the source allows: it runs at the ceiling's rate over the row's own period. A catalog source has no lookup: it lists no entity types for manual enrichment, and its test button answers 400.
+The ceiling is the most the source documents it allows; `PUT /api/enrichment/sources/{id}` refuses a `rate_limit_config` above it with a 400 (`rate_above_ceiling`). Each manifest's comment cites the documented limit. A keyed rate (NVD, GitHub PoC, GitHub repository) applies when the source has a key and its row's rate is still the keyless default, so an admin's own rate stands. The gateway also holds every rate to the ceiling of the quota in use (keyed with a key, keyless without), so a stored rate above that ceiling (one saved under a key that is since gone, for example) never runs above what the source allows: it runs at the ceiling's rate over the row's own period. A catalog source has no lookup: it lists no entity types for manual enrichment, and its test button answers 400.
 
 An adapter sets `default_trigger_mode`, and optionally `shared_key_group` and `throttle_statuses` (the HTTP statuses that mean "slow down"; default 429 and 503). It implements `enrich(entity_type, value) -> EnrichmentData(raw_response, parsed_data, ttl_hours=...)` and may override `check_health()`. A source that makes writes its outputs can't declare (NVD's record and affected products, a CVE record's affected versions) gives them in an `apply_record` hook, which runs for its lookups and its jobs alike. `claim_refs` names the part of an answer a column's claims come from (cvelist's `cvelist:cna` and `cvelist:adp` scores). Adapters make every HTTP request through `self.http(timeout=...)`, a client on the source's [gateway](#source-gateway); none builds its own `httpx` client. A test (`test_enrichment_code_never_builds_its_own_client` in `backend/tests/test_enrichment_gateway.py`) scans every module under `app/enrichment`, `app/workers` and `app/intelligence` and fails on any direct `httpx`, `requests`, `aiohttp` or `urllib` call outside a short allow list. `check_health()` calls the same endpoint as `enrich()`. `supported_entity_types` and `requires_api_key` read the manifest.
 
@@ -770,7 +771,7 @@ While enrichment is [paused](#enrichment-console), a tick claims nothing. A `run
 
 Scheduled jobs resolve their key through the same function (`gateway_for`), so a job and a per-entity lookup with the same key always share one gateway allowance.
 
-ThreatFox, URLhaus and MalwareBazaar set `shared_key_group = "abuse_ch"` (`SHARED_KEY_GROUPS`, `backend/app/enrichment/registry.py:121`): one abuse.ch key serves all three, and they draw on one gateway allowance for it. Queued jobs run in a worker with no user, so they use the shared key, except a `manual`-lane job, which uses the key of the person who asked.
+ThreatFox, URLhaus and MalwareBazaar set `shared_key_group = "abuse_ch"` (`SHARED_KEY_GROUPS`, `backend/app/enrichment/registry.py:127`): one abuse.ch key serves all three, and they draw on one gateway allowance for it. Queued jobs run in a worker with no user, so they use the shared key, except a `manual`-lane job, which uses the key of the person who asked.
 
 ### API Keys
 
@@ -845,8 +846,8 @@ A `success` result is reused until `expires_at`. Each adapter picks its TTL per 
 2. **Circuit breaker.** While it is open, requests are refused (`breaker_open`).
 3. **Rate limit and daily budget**, in one Redis script. The rate limit is a token bucket: `requests_per_period` tokens that refill over `period_seconds` (the source's `rate_limit_config`). The budget is `daily_budget` requests per UTC day (NULL = no limit). A request takes a token and is counted against the budget, or does neither, so refused requests cost nothing. The same script counts each sent request in an hourly counter per source type, `enrichment:gw:stats:{source_type}:{YYYYMMDDHH}`, kept 48 hours; the console reads these.
 4. **Short wait.** If the next token is at most 2 seconds away the request waits for it; otherwise it is refused (`rate_limited`). Scheduled jobs wait up to 120 seconds (`JOB_TOKEN_WAIT`), so the bucket paces them through their backlog.
-5. **User-Agent.** Every request says `IntelFeed/<version> (+<public URL>)`, using `PUBLIC_BASE_URL` (or the project page when it's blank).
-6. **The answer.** A throttle status (429 or 503; NVD and GitHub PoC add 403, their `throttle_statuses`) opens the breaker for the `Retry-After` time (seconds or a date), or for a backoff that starts at 60 seconds and doubles up to an hour when there is none, and the request ends as `rate_limited`. Three 5xx answers or connection errors in a row open it for the same backoff. Any other answer closes it.
+5. **User-Agent.** Every request says `IntelFeed/<version> (<public URL>) httpx/<version>`, using `PUBLIC_BASE_URL` (or the project page when it's blank).
+6. **The answer.** A throttle status (429 or 503; NVD, GitHub PoC and CVE List add 403, their `throttle_statuses`) opens the breaker for the `Retry-After` time (seconds or a date), or for a backoff that starts at 60 seconds and doubles up to an hour when there is none, and the request ends as `rate_limited`. Three 5xx answers or connection errors in a row open it for the same backoff. Any other answer closes it.
 
 The bucket, budget and breaker belong to the credential, not the source type: they are keyed by the adapter's `shared_key_group` when it has one, else by `source_type`, plus a short hash of the API key when one is used. A user's own key has its own allowance; sources sharing one key share one. The keys live under `enrichment:gw:` in Redis.
 
@@ -858,7 +859,7 @@ Team Cymru answers over DNS and bulk WHOIS, not HTTP, so its adapter takes each 
 
 Wikipedia goes through the gateway too: `wikipediaapi` takes the gateway's transport for the httpx client it builds, with its own retries off.
 
-**Jobs.** A job (NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia, CVE List, Wikidata, endoflife.date) uses its source row's rate limit, budget and key, so it shares one allowance with the per-entity lookups under the same key. The NVD sweeps fall back to the `nvd_api_key` setting and the GitHub PoC scan to `github_token` when the row has no key; a different key has its own allowance. The catalog sources' jobs (MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, ransomware.live, Tranco, CAPEC, CTID, D3FEND, ETDA) use their rows the same way.
+**Jobs.** A job (NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia, CVE List, OSV, Team Cymru, ThreatFox, URLhaus) uses its source row's rate limit, budget and key, so it shares one allowance with the per-entity lookups under the same key. The NVD sweeps fall back to the `nvd_api_key` setting and the GitHub PoC scan to `github_token` when the row has no key; a different key has its own allowance. The catalog sources' jobs (MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, ransomware.live, Wikidata, endoflife.date, Tranco, CAPEC, CTID, D3FEND, ETDA, GitHub repository) use their rows the same way.
 
 When the gateway refuses (`rate_limited`, `breaker_open`, `budget_exhausted`, `paused`), a job stops, commits what it has done, and records the reason as `stopped` in its stats, which land in the run's details in the Jobs view. The run still counts as a success. Loop jobs also stop with `stopped: "out_of_time"` before their time limit. `gateway_unavailable` fails the run.
 
@@ -866,7 +867,7 @@ NVD allows 50 requests per 30 seconds with a key and 5 without. The NVD row's de
 
 ### Daily Budgets
 
-Every source starts with a budget of about twice the requests a busy day sends (the `daily_budget` of its manifest's `quota`): CVE List 12,000, NVD 5,000, Wikipedia 2,000, OSV 2,000, GitHub PoC 1,000, Malpedia 1,000, Team Cymru 4,000 (two queries per IP over DNS, one per bulk connection), RDAP 2,000 (two requests per domain: rdap.org's redirect and the registry), Shodan 1,000, CVEDetails 1,000, VulnCheck 1,000, endoflife.date 1,000, EPSS 500, CISA KEV 500, VirusTotal 500 (its free tier), ThreatFox, URLhaus and MalwareBazaar 500 (one budget for the three: see below), Wikidata 500, ransomware.live 200, MITRE ATT&CK 100, GreyNoise 100, and 50 each for MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, CAPEC, CTID and D3FEND, ETDA; Tranco 20. An admin can change or clear one under Settings → Engine → Enrichment. A source that runs out stops until midnight UTC, jobs included. Every request the gateway sends counts; cached results are free. Sources in one `shared_key_group` using the same key count against one budget: each stops when the group's requests today reach its own `daily_budget`, so ThreatFox, URLhaus and MalwareBazaar together send at most 500 a day. The console's source detail (`used_today`, labelled with the group) and the source list's `daily_budget_used` show today's use under the source's key, the whole group's for a grouped source, and `GET /api/enrichment/sources/{id}/health` shows the tokens left in its bucket.
+Every source starts with a budget of about twice the requests a busy day sends (the `daily_budget` of its manifest's `quota`): CVE List 12,000, NVD 5,000, Wikipedia 2,000, OSV 2,000, GitHub PoC 1,000, Malpedia 1,000, Team Cymru 4,000 (two queries per IP over DNS, one per bulk connection), RDAP 2,000 (two requests per domain: rdap.org's redirect and the registry), Shodan 1,000, CVEDetails 1,000, VulnCheck 1,000, endoflife.date 1,000, EPSS 500, CISA KEV 500, VirusTotal 500 (its free tier), ThreatFox, URLhaus and MalwareBazaar 500 (one budget for the three: see below), Wikidata 500, GitHub repository 500, ransomware.live 200, MITRE ATT&CK 100, GreyNoise 100, 50 each for MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, CAPEC, CTID and D3FEND, and 20 each for ETDA and Tranco. An admin can change or clear one under Settings → Engine → Enrichment. A source that runs out stops until midnight UTC, jobs included. Every request the gateway sends counts; cached results are free. Sources in one `shared_key_group` using the same key count against one budget: each stops when the group's requests today reach its own `daily_budget`, so ThreatFox, URLhaus and MalwareBazaar together send at most 500 a day. The console's source detail (`used_today`, labelled with the group) and the source list's `daily_budget_used` show today's use under the source's key, the whole group's for a grouped source, and `GET /api/enrichment/sources/{id}/health` shows the tokens left in its bucket.
 
 ### Enrichment Console
 
@@ -933,7 +934,7 @@ The bulk catch-up jobs (`cve-nvd-backfill`, `reenrich-cve-nvd`, `cvelist-backfil
 | `misp-galaxy-sync` | `misp_galaxy` | Sunday 03:30 | Reference actor aliases from the MISP Galaxy, and the blank country, motive, description and target sectors of tracked actors, through the field map |
 | `metasploit-sync` | `metasploit` | Sunday 03:45 | Maps CVEs to Metasploit modules through the field map and raises their exploit status to weaponized |
 | `osv-delta-sync` | `osv` | Hourly at :40 | Reads OSV's change list (`modified_id.csv`, newest first) back to the `osv` row's `last_synced_at` (2 days on a first run) and applies the changed records of CVEs IntelFeed tracks, fetched one by one from OSV's bucket, oldest first. A refused run resumes after the last record it applied |
-| `refresh-cwe-catalog` | `mitre_cwe` | Monday 03:45 | The MITRE CWE catalog, and NVD weakness references that now match |
+| `refresh-cwe-catalog` | `mitre_cwe` | Monday 03:45 | The MITRE CWE catalog, and links the unmatched NVD weakness references that match it |
 | `malpedia-sync` | `malpedia` | Saturday 01:00 | Malware families; on its own day because it writes the actor rows the Sunday syncs also write |
 | `wikipedia-bulk-sync` | `wikipedia` | Wednesday 04:00 | Wikipedia content for entities that lack it and have no answer that still stands, as many as fit in 55 minutes. A name with no article (or an off-topic one) gets a "not found" answer for 30 days, so the next runs move on; the time left bounds each entity's whole fetch, not just its first request |
 | `sync-cybergeist-feeds` | `cybergeist` | Daily 02:30 | Threat actors and malware from the Cybergeist feeds |
@@ -1044,7 +1045,7 @@ Each technique D3FEND counters gets a "Countermeasures" table (defensive techniq
 
 ### ETDA Threat Group Cards
 
-`etda-sync` (`backend/app/enrichment/etda.py`) downloads ThaiCERT's Threat Group Cards in one request: the export at `apt.etda.or.th/cgi-bin/getcard.cgi?g=all&o=j`, about 2 MB of JSON for some 500 cards. The per-name card API no longer finds groups by name, so the job never uses it.
+`etda-sync` (`backend/app/enrichment/etda.py`) downloads ThaiCERT's Threat Group Cards in one request: the export at `apt.etda.or.th/cgi-bin/getcard.cgi?g=all&o=j`, about 2 MB of JSON for some 500 cards. The per-name card API doesn't find groups by name, so the job never uses it.
 
 A card matches an actor IntelFeed already tracks; no actor is ever created.
 
@@ -1126,7 +1127,7 @@ abuse.ch's terms (https://abuse.ch/terms-of-use/) allow not-for-profit use withi
            return EnrichmentData(raw_response=data, parsed_data={...})
    ```
 
-2. Export it from `backend/app/enrichment/adapters/__init__.py` and add it to `ADAPTER_REGISTRY` in `backend/app/enrichment/registry.py`. Its seed row and any `jobs` come from the manifest. A source with jobs only (no `enrich()`) extends `Source` in `backend/app/enrichment/catalogs.py` and goes in `CATALOG_REGISTRY`.
+2. Export it from `backend/app/enrichment/adapters/__init__.py` and add it to `ADAPTER_REGISTRY` in `backend/app/enrichment/registry.py`. Its seed row and any `jobs` come from the manifest. A source with jobs only (no `enrich()`) extends `Source` (`backend/app/enrichment/base.py`), like the ones in `backend/app/enrichment/catalogs.py`, and goes in `CATALOG_REGISTRY`.
 3. It then appears under Settings → Engine → Enrichment, off until someone turns it on (on from the start when it has jobs), and marked new for two weeks. Give it an `about` sentence: the console shows it at the top of the source's panel. A key it needs appears under Keys on its own.
 
 ### Adding a New AI Task

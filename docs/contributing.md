@@ -32,8 +32,8 @@ cp .env.example .env
 
 # Generate secrets and paste them into .env
 openssl rand -hex 32         # SECRET_KEY
-python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"   # ENCRYPTION_KEY
-openssl rand -base64 24      # POSTGRES_PASSWORD, MEILI_MASTER_KEY
+openssl rand -base64 32 | tr '+/' '-_'   # ENCRYPTION_KEY (a Fernet key)
+openssl rand -hex 24         # POSTGRES_PASSWORD, MEILI_MASTER_KEY
 
 docker compose -f docker-compose.dev.yml up
 ```
@@ -64,8 +64,8 @@ frontend/             React + TypeScript (Vite, CSS Modules, TanStack Query, Zus
 android/              Native Android client (see docs/android-app.md)
 db/                   PostgreSQL 16 image with pgvector
 piper/                Text-to-speech sidecar
-intelfeed-skill/      Claude skill + CLI with every registry tool (191)
-intelfeed-lite-skill/ Read-only skill + CLI (95 tools)
+intelfeed-skill/      Claude skill + CLI with every registry tool (196)
+intelfeed-lite-skill/ Read-only skill + CLI (97 tools)
 intelfeed-mcp/        MCP server for local models, over the same tool registry
 docs/                 Documentation (also shown in the app; mounted into the api container)
 scripts/              seed/ maintenance/ telegram/ ops/ dev/ (see scripts/README.md)
@@ -693,8 +693,8 @@ docker compose -f docker-compose.dev.yml exec api python scripts/maintenance/pur
 
 ## Skills, CLI & MCP
 
-- **`intelfeed-skill/`** — Claude skill and CLI with every tool in the registry (191).
-- **`intelfeed-lite-skill/`** — the read-only version (95 tools).
+- **`intelfeed-skill/`** — Claude skill and CLI with every tool in the registry (196).
+- **`intelfeed-lite-skill/`** — the read-only version (97 tools).
 - **`intelfeed-mcp/`** — the same registry served over MCP for local models. See [intelfeed-mcp/README.md](../intelfeed-mcp/README.md).
 
 Each skill has its own zero-dependency `scripts/intelfeed_cli.py`. Both CLIs and the MCP server's `registry.json` are generated from `backend/app/tools/`. Do not edit them by hand; run `python3 scripts/dev/sync_skill_clis.py` after changing a tool.
@@ -716,7 +716,7 @@ Full reference: [cli-reference.md](cli-reference.md).
 
 ## Releasing & Deploying
 
-Merging to `main` is a deploy: the production host runs `update.sh` every 2 minutes. It pulls, rebuilds only when an image's inputs changed, and the API applies new migrations when it starts. Details are in [operations.md](operations.md#update--deployment); the first install is in [setup.md](../setup.md).
+Merging to `main` is a deploy on any host that runs `update.sh` from cron. It pulls, rebuilds only when an image's inputs changed, and the API applies new migrations when it starts. Details are in [operations.md](operations.md#update--deployment); the first install is in [setup.md](../setup.md).
 
 Before a risky change, take a backup on the production host, from the repo folder:
 

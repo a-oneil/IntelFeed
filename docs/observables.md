@@ -188,7 +188,7 @@ Shodan, GreyNoise, VirusTotal and the abuse.ch lookups send the indicator to a t
 
 ## Lifecycle and jobs
 
-Confidence = `base × 0.5^(days since last sighting / half-life)`. `status_for()` (`backend/app/intelligence/observables.py:930`) derives status: `active`, `aging` below 0.5, `expired` below 0.15. `retro_sight_observable()` (`backend/app/intelligence/observables.py:2213`) searches recent entries when a row is created, so promoted candidates keep their history.
+Confidence = `base × 0.5^(days since last sighting / half-life)`. `status_for()` (`backend/app/intelligence/observables.py:930`) derives status: `active`, `aging` below 0.5, `expired` below 0.15. `retro_sight_observable()` (`backend/app/intelligence/observables.py:2212`) searches recent entries when a row is created, so promoted candidates keep their history.
 
 | Job | When (UTC) | Does |
 |---|---|---|
