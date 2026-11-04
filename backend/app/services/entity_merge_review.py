@@ -366,7 +366,7 @@ def pairs_block(cands: list[Candidate]) -> str:
         if c.alias_hit:
             signals.append("one side's name or alias equals the other's")
         if c.a.get("mitre_id") and c.a.get("mitre_id", "").upper() == (c.b.get("mitre_id") or "").upper():
-            signals.append(f"same MITRE ID {c.a['mitre_id']}")
+            signals.append(f"same MITRE ID {c.a['mitre_id'].upper()}")
         if c.shared_entries:
             signals.append(f"{c.shared_entries} shared article{'s' if c.shared_entries != 1 else ''}")
         lines.append(f"pair_id={c.pair_id}  type={c.entity_type}")

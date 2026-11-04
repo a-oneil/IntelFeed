@@ -3642,7 +3642,10 @@ async def review_groups(
                     ReviewGroupTarget(type=t, count=n)
                     for t, n in sorted(d["reclassify_to"].items(), key=lambda kv: (-kv[1], kv[0]))
                 ],
-                merge_into=[ReviewGroupMerge(**m) for m in sorted(d["merge_into"].values(), key=lambda m: -m["count"])],
+                merge_into=[
+                    ReviewGroupMerge(**m)
+                    for m in sorted(d["merge_into"].values(), key=lambda m: (-m["count"], m["name"] or ""))
+                ],
                 domains=g["domains"],
                 origin=origins[0] if len(origins) == 1 else "mixed",
                 confidence=_CONF_NAME.get(g["confidence"]),
