@@ -1,20 +1,25 @@
-"""Reconcile pending autolink matches against one-pass AI analysis results.
+"""Settle held autolink matches against the article's one-pass analysis.
 
 The autolinker holds dictionary-word matches ("Royal" in "Royal Navy", "Inc"
 in a copyright footer) in ``pending_autolink_matches`` instead of linking
-instantly. When the one-pass ``entry_analysis`` payload lands, this module
-compares each pending entity's name/aliases against the entities the AI read
-out of the article:
+them. The analysis settles each one by comparing the held entity's name and
+aliases with the entities it read out of the article:
 
-- **Promoted** — the AI extracted a matching name: the junction row is created
-  through the normal ``store_autolink_matches`` path (identical confidence
-  weighting, article_count/last_seen_at bumps).
-- **Rejected** — the AI analyzed the article and did not mention the entity:
-  the row is marked rejected and a ``FalsePositiveRecord`` with
-  ``extraction_source="ai_reconcile"`` records the contextual verdict for the
-  hygiene tooling.
+- **Promoted** — the analysis named it: the junction row is created through
+  the normal ``store_autolink_matches`` path (same confidence weighting,
+  article_count/last_seen_at bumps).
+- **Rejected** — the analysis read the article and did not name it. A
+  ``FalsePositiveRecord`` with ``extraction_source="ai_reconcile"`` records
+  the call.
 
-Entries that never get an AI pass leave their pending rows unresolved; the
+This runs when the analysis lands (``store_entry_analysis``) and, for matches
+held on an article whose analysis already ran (a re-scan after a new entity
+or alias), from ``settle_held_on_analysed_entries`` against the stored
+payload. The adjudicator then checks both outcomes: a promoted match is an
+ordinary link it may propose removing; a rejected one is a ``held`` review
+item it may propose linking (``entry_adjudication``).
+
+Matches on an article that never gets an analysis stay unresolved; the
 engine-tables prune job expires them.
 """
 
@@ -22,7 +27,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -73,7 +78,6 @@ def _held_models() -> dict:
 
 async def reconcile_pending_autolinks(db: AsyncSession, entry_id: uuid.UUID, parsed: dict) -> dict:
     """Promote or reject unresolved pending matches for an entry. Returns counts."""
-    from app.intelligence.autolinker import store_autolink_matches
     from app.models.pending_autolink import PendingAutolinkMatch
 
     entity_models = _held_models()
@@ -81,10 +85,14 @@ async def reconcile_pending_autolinks(db: AsyncSession, entry_id: uuid.UUID, par
     rows = (
         (
             await db.execute(
-                select(PendingAutolinkMatch).where(
+                select(PendingAutolinkMatch)
+                .where(
                     PendingAutolinkMatch.entry_id == entry_id,
                     PendingAutolinkMatch.resolved_at.is_(None),
                 )
+                # The analysis and the 30-minute settle can reach the same
+                # article at once; whichever locks a row first settles it.
+                .with_for_update(skip_locked=True)
             )
         )
         .scalars()
@@ -100,9 +108,11 @@ async def reconcile_pending_autolinks(db: AsyncSession, entry_id: uuid.UUID, par
         model = entity_models.get(row.entity_type)
         entity = await db.get(model, row.entity_id) if model else None
         if entity is None:
-            # Entity deleted/merged since the scan — nothing to link, no verdict.
+            # Entity deleted/merged since the scan — nothing to link, no
+            # verdict, and nothing for the adjudicator to check.
             row.resolution = "rejected"
             row.resolved_at = now
+            row.reviewed_at = now
             counts["rejected"] += 1
             continue
 
@@ -112,25 +122,7 @@ async def reconcile_pending_autolinks(db: AsyncSession, entry_id: uuid.UUID, par
         ai_names = _payload_names(parsed, _PAYLOAD_KEYS_BY_TYPE.get(row.entity_type, ()))
 
         if entity_names & ai_names:
-            match = {
-                "entity_type": row.entity_type,
-                "entity_id": str(row.entity_id),
-                "canonical_name": row.canonical_name,
-                "surface_form": (row.matched_names or [row.canonical_name])[0],
-                "surface_forms": list(row.matched_names or []),
-                "confidence": row.confidence or "medium",
-                "source": "auto_link",
-                "paragraph_indices": list(row.paragraph_indices or []),
-            }
-            await store_autolink_matches(
-                db,
-                entry_id,
-                [match],
-                source_confidence_weight=row.source_weight or 1.0,
-                allow_provisional=True,
-            )
-            row.resolution = "promoted"
-            row.resolved_at = now
+            await promote_held(db, row, now)
             counts["promoted"] += 1
         else:
             row.resolution = "rejected"
@@ -168,65 +160,96 @@ async def _system_user_id(db: AsyncSession) -> uuid.UUID | None:
     return await get_system_user_id(db)
 
 
-async def resolve_pending_manually(db: AsyncSession, rows: list, promote: bool, user_id: uuid.UUID | None) -> dict:
-    """An analyst's verdict on held matches: promote creates the junction rows
-    through the same path the AI reconciler uses; reject marks them rejected
-    and records the false positive against each article."""
+async def promote_held(db: AsyncSession, row, now: datetime | None = None) -> None:
+    """Link a held match: create its junction row and mark it promoted. A
+    reject recorded for it earlier (the analysis's false-positive marker on
+    this article) is removed, since the call it recorded no longer stands."""
+    from sqlalchemy import delete
+
     from app.intelligence.autolinker import store_autolink_matches
     from app.models.false_positive_record import FalsePositiveRecord
 
-    now = datetime.now(UTC)
-    counts = {"promoted": 0, "rejected": 0}
-    entity_models = _held_models()
-    for row in rows:
-        if row.resolved_at is not None:
-            continue
-        model = entity_models.get(row.entity_type)
-        if model is None or await db.get(model, row.entity_id) is None:
-            # Entity deleted/merged/converted since the scan: nothing to link,
-            # and no false-positive verdict against an id that no longer exists.
-            row.resolution = "rejected"
-            row.resolved_at = now
-            counts["rejected"] += 1
-            continue
-        if promote:
-            match = {
-                "entity_type": row.entity_type,
-                "entity_id": str(row.entity_id),
-                "canonical_name": row.canonical_name,
-                "surface_form": (row.matched_names or [row.canonical_name])[0],
-                "surface_forms": list(row.matched_names or []),
-                "confidence": row.confidence or "medium",
-                "source": "auto_link",
-                "paragraph_indices": list(row.paragraph_indices or []),
-            }
-            await store_autolink_matches(
-                db,
-                row.entry_id,
-                [match],
-                source_confidence_weight=row.source_weight or 1.0,
-                allow_provisional=True,
+    match = {
+        "entity_type": row.entity_type,
+        "entity_id": str(row.entity_id),
+        "canonical_name": row.canonical_name,
+        "surface_form": (row.matched_names or [row.canonical_name])[0],
+        "surface_forms": list(row.matched_names or []),
+        "confidence": row.confidence or "medium",
+        "source": "auto_link",
+        "paragraph_indices": list(row.paragraph_indices or []),
+    }
+    await store_autolink_matches(
+        db,
+        row.entry_id,
+        [match],
+        source_confidence_weight=row.source_weight or 1.0,
+        allow_provisional=True,
+    )
+    if row.resolution == "rejected":
+        await db.execute(
+            delete(FalsePositiveRecord).where(
+                FalsePositiveRecord.entity_type == row.entity_type,
+                FalsePositiveRecord.entity_id == row.entity_id,
+                FalsePositiveRecord.source_entry_id == row.entry_id,
+                FalsePositiveRecord.extraction_source == "ai_reconcile",
             )
-            row.resolution = "promoted"
-            counts["promoted"] += 1
-        else:
-            row.resolution = "rejected"
-            counts["rejected"] += 1
-            if user_id:
-                db.add(
-                    FalsePositiveRecord(
-                        entity_type=row.entity_type,
-                        entity_id=row.entity_id,
-                        entity_value=row.canonical_name,
-                        source_entry_id=row.entry_id,
-                        reason="Analyst rejected a held autolink match",
-                        marked_by=user_id,
-                        extraction_source="analyst",
-                    )
-                )
-        row.resolved_at = now
+        )
+    row.resolution = "promoted"
+    row.resolved_at = now or datetime.now(UTC)
+
+
+async def settle_held_on_analysed_entries(db: AsyncSession, limit: int = 200) -> dict:
+    """Settle matches held on articles that already have an analysis.
+
+    A match is usually held before the article is analysed, and the analysis
+    settles it when it lands. A re-scan (a new entity or alias, a backfill)
+    holds matches on articles analysed long ago, which nothing would settle,
+    so this runs them against the stored payload instead. Each article it
+    touches has its adjudication reopened, so the adjudicator checks the new
+    links and rejects, and nothing else. Runs every 30 minutes from
+    ``submit_analysis_batches``.
+    Returns counts."""
+    from app.models.ai_result import AIResult
+    from app.models.ai_task import AITask
+    from app.models.pending_autolink import PendingAutolinkMatch
+    from app.services.entry_adjudication import reopen_adjudication
+
+    analysed = select(AIResult.target_id).where(
+        AIResult.target_type == "entry",
+        AIResult.is_current.is_(True),
+        AIResult.task_id == select(AITask.id).where(AITask.name == "entry_analysis").scalar_subquery(),
+    )
+    entry_ids = list(
+        (
+            await db.execute(
+                select(PendingAutolinkMatch.entry_id)
+                .where(PendingAutolinkMatch.resolved_at.is_(None), PendingAutolinkMatch.entry_id.in_(analysed))
+                .group_by(PendingAutolinkMatch.entry_id)
+                .order_by(func.min(PendingAutolinkMatch.created_at))
+                .limit(limit)
+            )
+        ).scalars()
+    )
+    if not entry_ids:
+        return {"entries": 0, "promoted": 0, "rejected": 0}
+
+    from app.services.entry_analysis import _current_analysis_result
+
+    since = datetime.now(UTC)
+    totals = {"entries": 0, "promoted": 0, "rejected": 0}
+    for entry_id in entry_ids:
+        result, _task = await _current_analysis_result(db, entry_id)
+        if result is None or not isinstance(result.parsed_result, dict):
+            continue
+        counts = await reconcile_pending_autolinks(db, entry_id, result.parsed_result)
+        if counts["promoted"] or counts["rejected"]:
+            totals["entries"] += 1
+            totals["promoted"] += counts["promoted"]
+            totals["rejected"] += counts["rejected"]
+            await reopen_adjudication(db, entry_id, since)
     await db.flush()
-    return counts
+    return totals
 
 
 async def move_held_matches(

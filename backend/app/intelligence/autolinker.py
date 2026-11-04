@@ -203,7 +203,7 @@ def is_provisional_form(entity_type: str, form: str) -> bool:
 def pending_tier_enabled() -> bool:
     """Pending tier requires its own flag AND the one-pass AI analysis.
 
-    The AI reconciler is the only promotion path — with `ai_one_pass_enabled`
+    The AI analysis is the only promotion path — with `ai_one_pass_enabled`
     off, holding dictionary-word matches would mean those entities never link
     at all, so the tier auto-disables and matching falls back to the legacy
     instant-link behavior (capitalization guard only).
@@ -1208,9 +1208,10 @@ async def store_autolink_matches(
     """Store auto-link matches as junction records. Returns list of stored matches.
 
     Matches flagged ``provisional`` (dictionary-word surface forms) are diverted
-    to ``pending_autolink_matches`` instead of becoming junction rows — the AI
-    reconciler promotes or rejects them later. ``allow_provisional=True`` is the
-    reconciler's promotion path: it commits provisional matches directly.
+    to ``pending_autolink_matches`` instead of becoming junction rows — the
+    article's analysis links or rejects them later (``autolink_reconcile``).
+    ``allow_provisional=True`` is the promotion path: it commits provisional
+    matches directly.
 
     On an entry the AI will never read (its feed's AI is off, or its mode is
     "none") nothing would confirm a held match, so provisional matches are
@@ -1221,6 +1222,25 @@ async def store_autolink_matches(
     if not allow_provisional:
         provisional = [m for m in matches if m.get("provisional")]
         matches = [m for m in matches if not m.get("provisional")]
+        if provisional:
+            # Already settled as a link on this article (by the analysis, the
+            # adjudicator or an analyst): a re-scan that deleted the autolinks
+            # first must put the link back, not hold the match again — the
+            # held row's unique key would keep the new hold from ever landing.
+            settled = set(
+                (
+                    await db.execute(
+                        select(PendingAutolinkMatch.entity_type, PendingAutolinkMatch.entity_id).where(
+                            PendingAutolinkMatch.entry_id == entry_id,
+                            PendingAutolinkMatch.resolution == "promoted",
+                        )
+                    )
+                ).all()
+            )
+            if settled:
+                relink = [m for m in provisional if (m["entity_type"], uuid.UUID(m["entity_id"])) in settled]
+                provisional = [m for m in provisional if m not in relink]
+                matches += relink
         if provisional:
             from app.services.ai_eligibility import entry_will_get_ai_analysis
 

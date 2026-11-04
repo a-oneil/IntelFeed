@@ -19,7 +19,6 @@ from app.models.entity_link_validation_log import EntityLinkValidationLog
 from app.models.entity_maintenance import EntityMaintenanceLog
 from app.models.entry import Entry
 from app.models.malware_family import EntryMalware, MalwareFamily
-from app.models.pending_autolink import PendingAutolinkMatch
 from app.models.threat_actor import ThreatActor
 from app.models.tool import EntryTool, Tool
 
@@ -222,53 +221,6 @@ async def test_not_duplicate_drops_the_pair(client, admin_headers, db_session):
     assert resp.status_code == 200, resp.text
     after = (await client.get("/api/engine/extraction/stats?window=all", headers=admin_headers)).json()
     assert after["likely_duplicates"] == 0
-
-
-async def test_pending_matches_list_and_resolve(client, admin_headers, db_session, test_feed):
-    royal = MalwareFamily(name="Royal")
-    db_session.add(royal)
-    await db_session.flush()
-    entries = await _entries(db_session, test_feed, 2)
-    for e in entries:
-        db_session.add(
-            PendingAutolinkMatch(
-                entry_id=e.id,
-                entity_type="malware",
-                entity_id=royal.id,
-                canonical_name="Royal",
-                matched_names=["Royal"],
-                paragraph_indices=[0],
-                confidence="high",
-            )
-        )
-    await db_session.commit()
-
-    body = (await client.get("/api/entity-links/pending", headers=admin_headers)).json()
-    assert body["total_matches"] == 2
-    g = body["groups"][0]
-    assert g["name"] == "Royal" and g["count"] == 2 and len(g["entries"]) == 2
-
-    # Reject one by row id, link the rest by entity.
-    resp = await client.post(
-        "/api/entity-links/pending/resolve",
-        json={"resolution": "reject", "ids": [g["entries"][0]["id"]]},
-        headers=admin_headers,
-    )
-    assert resp.json() == {"promoted": 0, "rejected": 1}
-    resp = await client.post(
-        "/api/entity-links/pending/resolve",
-        json={"resolution": "promote", "entity_type": "malware", "entity_id": str(royal.id)},
-        headers=admin_headers,
-    )
-    assert resp.json() == {"promoted": 1, "rejected": 0}
-
-    linked = (
-        await db_session.execute(
-            select(func.count()).select_from(EntryMalware).where(EntryMalware.malware_family_id == royal.id)
-        )
-    ).scalar_one()
-    assert linked == 1
-    assert (await client.get("/api/entity-links/pending", headers=admin_headers)).json()["total_matches"] == 0
 
 
 async def _seed_unlinks(db_session, feed):

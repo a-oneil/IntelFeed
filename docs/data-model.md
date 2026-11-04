@@ -279,7 +279,7 @@ These tables stop duplicate and junk entities from being created.
 - **`known_alias_map`** — alias lists from MISP Galaxy and MITRE ATT&CK intrusion sets, refreshed weekly by `misp-galaxy-sync` and `mitre-attack-sync` (each sync replaces its own source's rows). It lets the resolver map "Secret Blizzard" to Turla without asking the AI. Unique on `(source, normalized_canonical, normalized_alias)`.
 - **`entity_name_denylist`** — names that may not be created as a given entity type. Columns: `display_name`, `reason`, `source`, `active`. Unique on `(entity_type, normalized_name)`.
 - **`proposal_dismissals`** — analyst decisions that stop a cleanup proposal from coming back. `kind='reclassify'` stops reclassify proposals for `(entity_type, entity_id)`. `kind='not_duplicate'` drops the pair `(entity_id, other_key)` from the likely-duplicate check. Unique on `(kind, entity_type, entity_id, other_key)`.
-- **`pending_autolink_matches`** — autolinker matches on dictionary words ("Royal", "Hive", "Turkey") that wait for the one-pass AI to confirm them, instead of becoming links straight away. `resolution` records the outcome: `promoted`, `rejected`, or `dropped_ai_off`. `prune_engine_tables` deletes old rows. Unique on `(entry_id, entity_type, entity_id)`.
+- **`pending_autolink_matches`** — autolinker matches on dictionary words ("Royal", "Hive", "Turkey") that wait for the one-pass AI to decide, instead of becoming links straight away. `resolution` records the outcome: `promoted` or `rejected`. `reviewed_at` is set once the adjudicator has judged a reject. `prune_engine_tables` deletes old rows. Unique on `(entry_id, entity_type, entity_id)`.
 
 #### EntityMaintenanceLog & ActorDescriptionHistory
 

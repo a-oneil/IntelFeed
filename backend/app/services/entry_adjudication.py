@@ -5,8 +5,8 @@ After the one-pass ``entry_analysis`` payload has been fanned out to rows
 second, smaller AI call that re-reads the article next to a manifest of
 everything that was written to it — entity links of every source, entities
 minted by this entry (with their nearest catalogue names pre-fetched),
-pending-tier promotions, relationship claims, AI observables — and answers
-one question per item: is this right?
+pending-tier promotions, held matches the analysis rejected, relationship
+claims, AI observables — and answers one question per item: is this right?
 
 Three pieces, all entry-scoped:
 
@@ -63,13 +63,15 @@ TRIGGERS = ("all", "created")
 CONFIDENCES = ("high", "medium", "low")
 _CONF_RANK = {"low": 0, "medium": 1, "high": 2}
 
-VERDICTS = {"keep", "remove", "reclassify", "veto", "merge", "demote", "drop"}
+VERDICTS = {"keep", "remove", "reclassify", "veto", "merge", "demote", "drop", "link"}
 # Which verdicts each item kind accepts. veto/merge are additionally gated on
 # the item being minted by this entry (see _validate_verdicts).
 VALID_FOR_KIND: dict[str, set[str]] = {
     "link": {"keep", "remove", "reclassify", "veto", "merge"},
     "edge": {"keep", "demote"},
     "ioc": {"keep", "drop"},
+    # A held match the analysis rejected: keep the reject, or link it.
+    "held": {"keep", "link"},
 }
 # Verdicts that count toward the circuit breaker: the ones that take
 # something away. A merge keeps the data under the catalogue name the model
@@ -103,6 +105,9 @@ ACTION_MERGE = "adjudication_merge"
 ACTION_EDGE_DEMOTE = "adjudication_edge_demote"
 ACTION_IOC_DROP = "adjudication_ioc_drop"
 ACTION_ASSESSMENT = "adjudication_assessment"
+# A held match the analysis rejected that the review says the article is
+# about. Applying it creates the link; restoring it removes the link again.
+ACTION_HELD_LINK = "adjudication_held_link"
 # History, never a proposal: the audit line an analyst's Restore writes. It
 # carries its own code so it cannot be mistaken for a fresh verdict — the
 # action codes above persist from proposal through apply (only `applied`
@@ -117,6 +122,7 @@ ADJUDICATION_PROPOSAL_ACTIONS = {
     ACTION_EDGE_DEMOTE,
     ACTION_IOC_DROP,
     ACTION_ASSESSMENT,
+    ACTION_HELD_LINK,
 }
 # Everything the stage writes, proposals and history alike — what `origin`
 # filters on.
@@ -148,6 +154,7 @@ RESTORED_GUARD_DAYS = 90
 _MAX_LINKS = 60
 _MAX_EDGES = 10
 _MAX_IOCS = 25
+_MAX_HELD = 15
 # Relationship sources the reviewer may judge. Analyst edges (confirmed,
 # created, rejected) and external-feed imports (MITRE) are settled by hand.
 REVIEWABLE_EDGE_SOURCES = ("auto_extracted", "co_occurrence")
@@ -167,6 +174,9 @@ SKIPPED_BUDGET = "skipped_budget"
 # The provider is paused (quota); re-enqueued by the resweep like budget.
 SKIPPED_PAUSED = "skipped_paused"
 PENDING = "pending"
+# Reviewed once, but the article has gained links or held-match rejects since
+# (settle_held_on_analysed_entries): the resweep queues it again.
+RECHECK = "recheck"
 COMPLETED = "completed"
 FAILED = "failed"
 
@@ -232,13 +242,37 @@ async def _request_row(db: AsyncSession, entry_id: uuid.UUID):
 
 async def _created_something(db: AsyncSession, entry_id: uuid.UUID, counts: dict | None) -> bool:
     """The `created` trigger: did the analysis mint an entity, assert a link
-    or edge, promote a pending match, or capture an observable? Counts come
-    from store_entry_analysis when available; the DB is the fallback (the
-    self-heal sweep has no counts)."""
+    or edge, promote or reject a pending match, or capture an observable?
+    Counts come from store_entry_analysis when available; the DB is the
+    fallback (the self-heal sweep has no counts)."""
     counts = counts or {}
     if any(
-        counts.get(k) for k in ("relationships", "autolinks_promoted", "observables", "scripts", "host_observables")
+        counts.get(k)
+        for k in (
+            "relationships",
+            "autolinks_promoted",
+            "autolinks_rejected",
+            "observables",
+            "scripts",
+            "host_observables",
+        )
     ):
+        return True
+
+    from app.models.pending_autolink import PendingAutolinkMatch
+
+    # A held match the analysis rejected that the review has not judged yet.
+    if (
+        await db.execute(
+            select(PendingAutolinkMatch.id)
+            .where(
+                PendingAutolinkMatch.entry_id == entry_id,
+                PendingAutolinkMatch.resolution == "rejected",
+                PendingAutolinkMatch.reviewed_at.is_(None),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none():
         return True
 
     from app.models.country import EntryCountry
@@ -333,17 +367,25 @@ async def enqueue_adjudication(
     parsed: dict | None,
     *,
     backfill: bool = False,
+    recheck: bool = False,
 ) -> str:
     """Decide whether the entry gets a review and record it. Returns the
     status written (``pending`` or a ``skipped_*``). The caller commits and,
     on ``pending``, calls ``dispatch_adjudication``. ``backfill`` entries only
-    draw on their share of the hourly budget (live entries come first)."""
+    draw on their share of the hourly budget (live entries come first).
+
+    ``recheck`` keeps the row's ``adjudication_recheck_since``, so the review
+    judges only the held matches settled since then; it skips the `created`
+    trigger, which those matches already meet. Any other enqueue is a full
+    review and clears it."""
     from app.models.entry import Entry
     from app.models.feed import Feed
     from app.pipeline.plans import resolve_feed_plan
 
     cfg = await _settings(db)
     row = await _request_row(db, entry_id)
+    if not recheck:
+        row.adjudication_recheck_since = None
 
     async def _write(status: str) -> str:
         row.adjudication_status = status
@@ -368,7 +410,7 @@ async def enqueue_adjudication(
     if parsed and parsed.get("_reused_from"):
         return await _write(SKIPPED_ECHO)
 
-    if cfg["trigger"] == "created" and not await _created_something(db, entry_id, stored_counts):
+    if not recheck and cfg["trigger"] == "created" and not await _created_something(db, entry_id, stored_counts):
         return await _write(SKIPPED_NOTHING_NEW)
 
     if cfg["min_score"] > 0 and float(entry.priority_score or 0.0) < cfg["min_score"]:
@@ -414,6 +456,50 @@ async def enqueue_and_dispatch(
     return status
 
 
+async def reopen_adjudication(db: AsyncSession, entry_id: uuid.UUID, since: datetime) -> None:
+    """Owe an article a review of the held matches settled at or after
+    ``since`` (``settle_held_on_analysed_entries``). The resweep queues it as
+    a recheck, which judges only those matches.
+
+    Left alone: an article whose full review is still to come (no decision
+    yet), one with a review queued or running (it checks for late settles
+    when it finishes), and one the feed's plan or an echo keeps out of
+    review. An article whose request row was pruned gets a new one."""
+    from app.models.ai_analysis import AIAnalysisRequest
+
+    row = (
+        await db.execute(select(AIAnalysisRequest).where(AIAnalysisRequest.entry_id == entry_id))
+    ).scalar_one_or_none()
+    if row is None:
+        row = await _request_row(db, entry_id)
+    elif row.adjudication_status in (None, PENDING, SKIPPED_PLAN, SKIPPED_ECHO):
+        return
+    if row.adjudication_status == RECHECK and row.adjudication_recheck_since:
+        since = min(since, row.adjudication_recheck_since)
+    row.adjudication_status = RECHECK
+    row.adjudication_recheck_since = since
+    db.add(row)
+
+
+async def held_review_owed(db: AsyncSession, entry_id: uuid.UUID, since: datetime) -> bool:
+    """True when the article has held matches the review has not judged: a
+    reject not yet reviewed, or a match linked at or after ``since``."""
+    from app.models.pending_autolink import PendingAutolinkMatch
+
+    found = await db.scalar(
+        select(PendingAutolinkMatch.id)
+        .where(
+            PendingAutolinkMatch.entry_id == entry_id,
+            or_(
+                (PendingAutolinkMatch.resolution == "rejected") & PendingAutolinkMatch.reviewed_at.is_(None),
+                (PendingAutolinkMatch.resolution == "promoted") & (PendingAutolinkMatch.resolved_at >= since),
+            ),
+        )
+        .limit(1)
+    )
+    return found is not None
+
+
 async def _ai_queue_depth() -> int:
     """Tasks waiting on the ai queue (the Celery broker's list). 0 when Redis
     is unreachable, so the sweep errs toward running."""
@@ -435,6 +521,7 @@ async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
     - completed analyses whose review decision never landed (crash between
       the analysis commit and the enqueue);
     - rows waiting on budget or a paused provider (a new hour, a new try);
+    - reviewed rows reopened for a recheck (``reopen_adjudication``);
     - ``pending`` rows queued longer than STALE_PENDING_HOURS with no run —
       a lost task (dispatch failure, worker crash, retries exhausted).
 
@@ -465,7 +552,7 @@ async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
                     AIAnalysisRequest.status.in_(["completed", "reused_echo"]),
                     or_(
                         (AIAnalysisRequest.adjudication_status.is_(None)) & (AIAnalysisRequest.completed_at < stale),
-                        AIAnalysisRequest.adjudication_status.in_([SKIPPED_BUDGET, SKIPPED_PAUSED]),
+                        AIAnalysisRequest.adjudication_status.in_([SKIPPED_BUDGET, SKIPPED_PAUSED, RECHECK]),
                         (AIAnalysisRequest.adjudication_status == PENDING)
                         & (AIAnalysisRequest.adjudication_queued_at < lost),
                     ),
@@ -485,7 +572,9 @@ async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
             row.adjudication_status = FAILED
             db.add(row)
             continue
-        status = await enqueue_adjudication(db, row.entry_id, None, parsed)
+        # A recheck is catch-up work, so it draws on the backfill's share.
+        recheck = row.adjudication_recheck_since is not None
+        status = await enqueue_adjudication(db, row.entry_id, None, parsed, backfill=recheck, recheck=recheck)
         if status == PENDING:
             dispatch_adjudication(row.entry_id, countdown=30)
             swept += 1
@@ -542,7 +631,7 @@ async def _current_analysis(db: AsyncSession, entry_id: uuid.UUID):
 @dataclass
 class ReviewItem:
     item_id: str
-    kind: str  # link | edge | ioc | assessment | note (rendered, never judged)
+    kind: str  # link | held | edge | ioc | assessment | note (rendered, never judged)
     line: str
     entity_type: str | None = None
     entity_id: uuid.UUID | None = None
@@ -570,6 +659,8 @@ class ReviewItem:
     staged: bool = False
     # edge
     edge_id: uuid.UUID | None = None
+    # held: the pending_autolink_matches row
+    held_id: uuid.UUID | None = None
 
 
 # (junction model, entity model, fk attr, entity_type slug)
@@ -1120,6 +1211,113 @@ async def _link_items(
     return items
 
 
+async def _held_items(db: AsyncSession, entry, text: str) -> list[ReviewItem]:
+    """Held matches the analysis rejected on this article and the review has
+    not judged yet. The name is also an ordinary word, so the analysis's
+    reject is usually right ("Royal Navy"); the review may overturn it when
+    the article is about the entity after all."""
+    from app.intelligence.autolinker import split_into_paragraphs
+    from app.models.pending_autolink import PendingAutolinkMatch
+    from app.services.sanitizer import entry_text_with_translation
+
+    rows = (
+        (
+            await db.execute(
+                select(PendingAutolinkMatch)
+                .where(
+                    PendingAutolinkMatch.entry_id == entry.id,
+                    PendingAutolinkMatch.resolution == "rejected",
+                    PendingAutolinkMatch.reviewed_at.is_(None),
+                )
+                .order_by(PendingAutolinkMatch.created_at)
+                .limit(_MAX_HELD)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return []
+    title, content_text = entry_text_with_translation(entry)
+    paragraph_map = dict(split_into_paragraphs(title, entry.summary or "", content_text))
+    items: list[ReviewItem] = []
+    for row in rows:
+        model = _model_for(row.entity_type)
+        entity = await db.get(model, row.entity_id) if model else None
+        if entity is None or (await _junction_for(db, row.entity_type, entry.id, row.entity_id))[0] is not None:
+            # Merged or deleted since, or linked another way (an analyst, a
+            # new entity's backlink): either way there is nothing to judge.
+            row.reviewed_at = datetime.now(UTC)
+            continue
+        forms = list(dict.fromkeys(row.matched_names or [])) or [row.canonical_name]
+        item = ReviewItem(
+            item_id=f"held:{row.entity_type}:{row.entity_id}",
+            kind="held",
+            line="",
+            entity_type=row.entity_type,
+            entity_id=row.entity_id,
+            name=entity.name,
+            source="auto_link",
+            confidence=row.confidence,
+            matched_names=forms,
+            paragraph_indices=list(row.paragraph_indices or []),
+            held_id=row.id,
+        )
+        count = int(getattr(entity, "article_count", 0) or 0)
+        line = (
+            f"{item.item_id}  {entity.name} ({row.entity_type}) · NOT LINKED: the name is also an ordinary word, "
+            f"and the analysis did not name it in this article · {count} article{'s' if count != 1 else ''}"
+            f"\n    matched as: {', '.join(forms[:3])}"
+        )
+        aliases = list(getattr(entity, "aliases", None) or [])[:3]
+        if aliases:
+            line += f"\n    aliases: {', '.join(aliases)}"
+        snippet = _snippet(paragraph_map, forms, item.paragraph_indices, text)
+        if snippet:
+            line += f'\n    context: "{snippet}"'
+        item.line = line
+        items.append(item)
+    return items
+
+
+async def _recheck_items(db: AsyncSession, entry, scope: set[str], text: str, since: datetime) -> list[ReviewItem]:
+    """A recheck's manifest: links held matches created at or after ``since``,
+    and the rejects not yet judged (see build_manifest)."""
+    from app.models.pending_autolink import PendingAutolinkMatch
+
+    if "links" not in scope:
+        return []
+    linked = set(
+        (
+            await db.execute(
+                select(PendingAutolinkMatch.entity_type, PendingAutolinkMatch.entity_id).where(
+                    PendingAutolinkMatch.entry_id == entry.id,
+                    PendingAutolinkMatch.resolution == "promoted",
+                    PendingAutolinkMatch.resolved_at >= since,
+                )
+            )
+        ).all()
+    )
+    items: list[ReviewItem] = []
+    if linked:
+        items += [it for it in await _link_items(db, entry, scope, text) if (it.entity_type, it.entity_id) in linked]
+    return items + await _held_items(db, entry, text)
+
+
+async def mark_held_reviewed(db: AsyncSession, items: list[ReviewItem]) -> None:
+    """Record that the review judged these held matches, so the next review
+    of the article does not ask again."""
+    from app.models.pending_autolink import PendingAutolinkMatch
+
+    ids = [it.held_id for it in items if it.kind == "held" and it.held_id]
+    if ids:
+        await db.execute(
+            sa_update(PendingAutolinkMatch)
+            .where(PendingAutolinkMatch.id.in_(ids))
+            .values(reviewed_at=datetime.now(UTC))
+        )
+
+
 # Proposal actions of the retired merge engine and stale sweep (migration
 # b1c2d3e4f5a6 deletes their pending rows; this covers anything older).
 LEGACY_MAINT_ACTIONS = ("merge_cluster_summary", "stale_entity_review")
@@ -1408,22 +1606,34 @@ async def build_manifest(
     scope: set[str] | None = None,
     legacy_out: list | None = None,
     dropped_out: list | None = None,
+    recheck_since: datetime | None = None,
 ) -> tuple[list[ReviewItem], str]:
     """Review items for the entry + the rendered prompt block. ``legacy_out``
     collects the retired jobs' pending rows the manifest rendered as earlier
     suggestions, so the caller can supersede exactly those after the review
     (taken before the model runs: the reviewer's own rows are never among them).
-    ``dropped_out`` collects the link and edge items the per-entry caps left out."""
+    ``dropped_out`` collects the link and edge items the per-entry caps left out.
+
+    With ``recheck_since`` the article was reviewed before, and only its held
+    matches changed: the manifest is the links those matches created at or
+    after that moment plus the rejects not yet judged. Everything else was
+    judged already, and judging it again would re-file what an analyst
+    dismissed."""
     from app.services.entry_analysis import analysis_content_text
 
     scope = scope or {"links", "entities", "relationships", "observables"}
     text = analysis_content_text(entry)
+    if recheck_since is not None:
+        items = await _recheck_items(db, entry, scope, text, recheck_since)
+        return items, "\n".join(it.line for it in items)
     items: list[ReviewItem] = []
     if "links" in scope or "entities" in scope:
         # `_link_items` reads the scope itself: `entities` decides whether a
         # minted row is reviewed as new, `links` whether established rows are
         # in the manifest at all.
         items += await _link_items(db, entry, scope, text, legacy_out, dropped_out)
+    if "links" in scope:
+        items += await _held_items(db, entry, text)
     if "relationships" in scope:
         items += await _edge_items(db, entry, dropped_out)
     if "observables" in scope:
@@ -1458,17 +1668,25 @@ async def build_manifest(
 
 
 async def build_variables(
-    db: AsyncSession, entry, parsed: dict | None, cfg: dict, dropped_out: list | None = None
+    db: AsyncSession,
+    entry,
+    parsed: dict | None,
+    cfg: dict,
+    dropped_out: list | None = None,
+    recheck_since: datetime | None = None,
 ) -> tuple[list[ReviewItem], dict, list]:
     """(items, prompt variables, legacy rows to supersede after the review).
-    ``dropped_out`` collects the link items the per-entry cap left out."""
+    ``dropped_out`` collects the link items the per-entry cap left out;
+    ``recheck_since`` scopes the manifest to a recheck (see build_manifest)."""
     from app.models.feed import Feed
     from app.services.analysis_window import analysis_content_window
     from app.services.entry_analysis import analysis_content_text
     from app.services.system_settings import get_setting
 
     legacy: list = []
-    items, block = await build_manifest(db, entry, parsed, cfg["scope"], legacy_out=legacy, dropped_out=dropped_out)
+    items, block = await build_manifest(
+        db, entry, parsed, cfg["scope"], legacy_out=legacy, dropped_out=dropped_out, recheck_since=recheck_since
+    )
     tail_reserve = float(await get_setting("observables_analysis_tail_reserve", db) or 0.0)
     feed_title = (await db.execute(select(Feed.title).where(Feed.id == entry.feed_id))).scalar_one_or_none() or ""
     variables = {
@@ -1579,8 +1797,9 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
     raw = result.get("verdicts")
     # unknown: item ids not in the manifest; coerced: verdicts the item's kind
     # or state does not accept (treated as keep).
-    # unnamed_reason / affirming_reason: removes and demotes whose reason does
-    # not name the item, destructive verdicts whose reason argues for it.
+    # unnamed_reason / affirming_reason: removes, demotes and links whose
+    # reason does not name the item, destructive verdicts whose reason argues
+    # for it.
     # bystander_reason: link removes argued from the entity being a defender.
     stats = {
         "unknown": 0,
@@ -1639,7 +1858,7 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
             # Voided, not coerced: like a copied reason, these are not about
             # their own item (or not against it), so they are not explicit.
             explicit = True
-            if verdict in ("remove", "demote") and not _reason_names_item(reason, item):
+            if verdict in ("remove", "demote", "link") and not _reason_names_item(reason, item):
                 verdict, explicit = "keep", False
                 stats["unnamed_reason"] += 1
             elif verdict in DESTRUCTIVE and _reason_affirms(reason):
@@ -1667,7 +1886,7 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
     # count as a keep, which is corroboration.
     by_reason: dict[tuple[str, str], list[str]] = {}
     for item_id, v in verdicts.items():
-        if v.item.kind in ("link", "ioc", "edge") and v.verdict != "keep" and v.reason.strip():
+        if v.item.kind in ("link", "held", "ioc", "edge") and v.verdict != "keep" and v.reason.strip():
             by_reason.setdefault((v.item.kind, " ".join(v.reason.lower().split())), []).append(item_id)
     stats["copied_reason"] = 0
     for ids in by_reason.values():
@@ -1823,6 +2042,70 @@ async def _unlink(db: AsyncSession, entity_type: str, entry_id: uuid.UUID, entit
             .values(article_count=func.greatest(emodel.article_count - 1, 0))
         )
     return snap
+
+
+HELD_LINKED = "linked"
+HELD_ALREADY_LINKED = "already linked"
+HELD_ENTITY_GONE = "entity gone"
+
+
+def _held_snapshot(item: ReviewItem, row) -> dict:
+    """What a held-link proposal needs to link without its held row, which the
+    engine-tables prune may delete before anyone applies the proposal."""
+    return {
+        "id": str(item.held_id),
+        "canonical_name": row.canonical_name if row else item.name,
+        "matched_names": list(item.matched_names),
+        "paragraph_indices": list(item.paragraph_indices),
+        "confidence": item.confidence,
+        "source_weight": (row.source_weight if row else None) or 1.0,
+    }
+
+
+async def _link_held(db: AsyncSession, entry_id: uuid.UUID, entity_type: str, entity_id: uuid.UUID, held: dict) -> str:
+    """Link a held match the analysis rejected. Returns HELD_LINKED when this
+    created the link; HELD_ALREADY_LINKED when the article was linked to the
+    entity some other way (nothing created, so nothing for a restore to
+    remove); HELD_ENTITY_GONE when the entity no longer exists."""
+    from app.intelligence.autolink_reconcile import promote_held
+    from app.intelligence.autolinker import store_autolink_matches
+    from app.models.pending_autolink import PendingAutolinkMatch
+
+    row = await db.get(PendingAutolinkMatch, uuid.UUID(held["id"])) if held.get("id") else None
+    now = datetime.now(UTC)
+    if (await _junction_for(db, entity_type, entry_id, entity_id))[0] is not None:
+        if row is not None and row.resolution != "promoted":
+            row.resolution, row.resolved_at = "promoted", now
+            row.reviewed_at = row.reviewed_at or now
+        return HELD_ALREADY_LINKED
+    model = _model_for(entity_type)
+    if model is None or await db.get(model, entity_id) is None:
+        return HELD_ENTITY_GONE
+    if row is not None:
+        await promote_held(db, row, now)
+        row.reviewed_at = row.reviewed_at or now
+    else:
+        forms = list(held.get("matched_names") or []) or [held.get("canonical_name") or ""]
+        await store_autolink_matches(
+            db,
+            entry_id,
+            [
+                {
+                    "entity_type": entity_type,
+                    "entity_id": str(entity_id),
+                    "canonical_name": held.get("canonical_name") or forms[0],
+                    "surface_form": forms[0],
+                    "surface_forms": forms,
+                    "confidence": held.get("confidence") or "medium",
+                    "source": "auto_link",
+                    "paragraph_indices": list(held.get("paragraph_indices") or []),
+                }
+            ],
+            source_confidence_weight=float(held.get("source_weight") or 1.0),
+            allow_provisional=True,
+        )
+    await db.flush()
+    return HELD_LINKED
 
 
 async def _relink(db: AsyncSession, entity_type: str, entry_id: uuid.UUID, entity_id: uuid.UUID, snap: dict) -> bool:
@@ -2281,7 +2564,7 @@ async def apply_verdicts(
     # is advisory in both modes, so it never counts as applied — but it is a
     # pending proposal, and leaving it out made `shadowed` read 0 on a run that
     # filed nothing but advisories. The breaker still counts only `destructive`.
-    changes = [v for v in verdicts if v.verdict in DESTRUCTIVE | {"merge", "reclassify"}]
+    changes = [v for v in verdicts if v.verdict in DESTRUCTIVE | {"merge", "reclassify", "link"}]
     items_n = len([v for v in verdicts if v.item.kind != "assessment"])
     ratio = (len(destructive) / items_n) if items_n else 0.0
     breaker = ratio > cfg["breaker_pct"]
@@ -2489,6 +2772,24 @@ async def apply_verdicts(
                         )
                 else:
                     _log(ACTION_MERGE, item, {"entity": snapshot}, after, applied=False)
+        elif item.kind == "held" and v.verdict == "link":
+            from app.models.pending_autolink import PendingAutolinkMatch
+
+            held_row = await db.get(PendingAutolinkMatch, item.held_id) if item.held_id else None
+            before = {"entity": {"name": item.name}, "held": _held_snapshot(item, held_row)}
+            if do_apply:
+                linked = await _link_held(
+                    db,
+                    entry.id,
+                    item.entity_type or "",
+                    item.entity_id,  # type: ignore[arg-type]
+                    before["held"],
+                )
+                if linked == HELD_LINKED:
+                    applied_n += 1
+                    _log(ACTION_HELD_LINK, item, before, {**after_base, "created_link": True}, applied=True)
+            elif not await _proposal_pending(db, ACTION_HELD_LINK, item.entity_type or "", item.entity_id, entry.id):
+                _log(ACTION_HELD_LINK, item, before, after_base, applied=False)
         elif item.kind == "edge" and v.verdict == "demote":
             if do_apply:
                 before = await _demote_edge(db, item.edge_id, reason)  # type: ignore[arg-type]
@@ -2682,6 +2983,11 @@ async def apply_adjudication_row(db: AsyncSession, row) -> dict:
         snap = await _drop_ioc(db, entry, after.get("kind") or "", after.get("value") or "", observable_id)
         if snap:
             before.update(snap)
+    elif row.action == ACTION_HELD_LINK and row.entity_id:
+        linked = await _link_held(db, entry.id, row.entity_type, row.entity_id, before.get("held") or {})
+        if linked != HELD_LINKED:
+            return {"applied": False, "reason": linked}
+        after["created_link"] = True
     elif row.action == ACTION_ASSESSMENT:
         return {"applied": False, "reason": "assessment flags are informational"}
     else:
@@ -2740,6 +3046,17 @@ async def restore_adjudication_row(db: AsyncSession, row) -> dict:
             return {"restored": False, "reason": "entity gone and no snapshot"}
         relinked = await _relink(db, entity_type, entry.id, row.entity_id, before.get("junction") or {})
         outcome = {"restored": True, "relinked": relinked, "recreated": after.get("deleted", False)}
+    elif row.action == ACTION_HELD_LINK and row.entity_id:
+        from app.models.pending_autolink import PendingAutolinkMatch
+
+        # Only a link this verdict created; one that was there already stays.
+        snap = await _unlink(db, row.entity_type, entry.id, row.entity_id) if after.get("created_link") else None
+        held_id = (before.get("held") or {}).get("id")
+        held = await db.get(PendingAutolinkMatch, uuid.UUID(held_id)) if held_id else None
+        if held is not None:
+            held.resolution = "rejected"
+            db.add(held)
+        outcome = {"restored": True, "unlinked": snap is not None}
     elif row.action == ACTION_EDGE_DEMOTE and row.entity_id:
         edge = await db.get(EntityRelationship, row.entity_id)
         if edge is None:

@@ -125,9 +125,9 @@ async def _list_entity_links(
 @_tool(
     name="get_entity_link_stats",
     description=(
-        "Autolinking health signals: total entry→entity links by entity type and provenance source, the "
-        "held-match (pending autolink) queue depth and how many held matches are high-confidence ready, plus "
-        "the count of non-rejected entity↔entity relationships."
+        "Autolinking health signals: total entry→entity links by entity type and provenance source, how "
+        "many held matches (pending autolinks) are waiting for their article's analysis, plus the count of "
+        "non-rejected entity↔entity relationships."
     ),
     input_schema={"properties": {}},
     mutating=False,

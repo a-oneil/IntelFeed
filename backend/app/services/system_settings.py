@@ -296,8 +296,9 @@ SETTING_METADATA: dict[str, dict] = {
         "label": "Pending Autolink Tier",
         "description": (
             "Hold actor/malware/tool/country matches on common-English-word names "
-            "(e.g. Royal, Hive) as pending until the one-pass AI analysis confirms "
-            "the entity is actually discussed; unconfirmed matches never become links"
+            "(e.g. Royal, Hive) until the article's one-pass AI analysis decides: "
+            "linked when the analysis names the entity, rejected when it doesn't. "
+            "The adjudicator then checks both calls"
         ),
         "group": "intelligence",
     },

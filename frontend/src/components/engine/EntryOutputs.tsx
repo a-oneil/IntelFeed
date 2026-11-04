@@ -76,6 +76,7 @@ const VERDICT_LABEL: Record<string, string> = {
   merge: "merge",
   demote: "demote",
   drop: "drop",
+  link: "link",
 };
 
 /** The adjudicate stage's verdict for one drawer row, as a badge with the
@@ -188,10 +189,13 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
           }${adjMode === "apply" ? " · applied" : " · proposals only"}`
       : adjStatus === "pending"
         ? "AI review: queued"
-        : adjStatus?.startsWith("skipped_")
-          ? `AI review: skipped — ${skipReason(adjStatus.replace("skipped_", ""))}`
-          : null;
+        : adjStatus === "recheck"
+          ? "AI review: reviewed; queued again to check held matches settled since"
+          : adjStatus?.startsWith("skipped_")
+            ? `AI review: skipped — ${skipReason(adjStatus.replace("skipped_", ""))}`
+            : null;
   const iocVerdicts = (adjQ.data?.verdicts ?? []).filter((v) => v.kind === "ioc");
+  const heldVerdicts = (adjQ.data?.verdicts ?? []).filter((v) => v.kind === "held");
   const assessment = (adjQ.data?.verdicts ?? []).find((v) => v.kind === "assessment");
 
   return (
@@ -374,6 +378,22 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
               </div>
             );
           })}
+        </>
+      )}
+
+      {/* Held matches the analysis rejected and the review would link. Until
+          the verdict is applied there is no link row to badge, so each gets
+          its own row: the entity, the badge and the reason. */}
+      {heldVerdicts.length > 0 && (
+        <>
+          <p className={styles.ozSub}>Held matches — review verdicts ({heldVerdicts.length})</p>
+          {heldVerdicts.map((v) => (
+            <div key={v.item_id} className={styles.orow} data-testid="held-verdict">
+              {v.entity_type && v.entity_id && <EntityChip type={v.entity_type} id={v.entity_id} name={v.name} />}
+              <VerdictBadge verdict={v} entryId={entryId} />
+              {v.reason && <span className={styles.popMuted}>{v.reason}</span>}
+            </div>
+          ))}
         </>
       )}
 

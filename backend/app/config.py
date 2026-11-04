@@ -273,8 +273,9 @@ class Settings(BaseSettings):
     autolinker_ambiguous_max_occurrences: int = 3
     # Pending tier: actor/malware/tool/country matches whose only surface forms are
     # common English words (bundled dictionary) are held in pending_autolink_matches
-    # instead of linking immediately; the one-pass AI analysis promotes or rejects
-    # them. Disable to restore instant linking for dictionary-word names.
+    # instead of linking immediately; the one-pass AI analysis links or rejects
+    # them and the adjudicator checks that call. Disable to restore instant
+    # linking for dictionary-word names.
     autolink_pending_tier_enabled: bool = True
     observables_decay_enabled: bool = True
     observables_candidate_max: int = 200

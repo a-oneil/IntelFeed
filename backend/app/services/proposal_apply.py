@@ -13,7 +13,7 @@ Two queues, two batch functions:
 
 * ``apply_adjudication_batch`` — the adjudicate stage's pending proposals:
   entity-maintenance rows (unlink / reclassify / veto / merge / demote /
-  drop) through ``apply_adjudication_row``, and its link-removal proposals
+  drop / held link) through ``apply_adjudication_row``, and its link-removal proposals
   through ``apply_link_removal_row``. Assessment flags are informational
   and skipped.
 * ``apply_advisory_batch`` — the link validator's ``needs_reclassification``
@@ -58,7 +58,7 @@ BULK_APPLY_KINDS = ("adjudication", "advisories", "all")
 # Observables are an entity type, so dropping one is an entities proposal.
 DOMAINS = ("links", "entities", "relationships")
 _MAINT_DOMAIN_ACTIONS: dict[str, frozenset[str]] = {
-    "links": frozenset({"adjudication_unlink"}),
+    "links": frozenset({"adjudication_unlink", "adjudication_held_link"}),
     "relationships": frozenset({"adjudication_edge_demote"}),
 }
 _LINK_LOG_LINK_ACTIONS = frozenset({"shadow_remove", "removed", "restored"})
@@ -201,9 +201,10 @@ async def apply_link_removal_row(db: AsyncSession, row: EntityLinkValidationLog)
 
 
 # What an apply that changes nothing reports when its outcome is already
-# reached: the link, edge or entity it acts on is gone, or an analyst rejected
-# the edge. Such a proposal is resolved, not left pending.
-MOOT_REASONS = frozenset({"entry gone", "edge gone or analyst-rejected", "entity gone"})
+# reached: the link, edge or entity it acts on is gone, the article is
+# already linked to the entity a held-link proposal names, or an analyst
+# rejected the edge. Such a proposal is resolved, not left pending.
+MOOT_REASONS = frozenset({"entry gone", "edge gone or analyst-rejected", "entity gone", "already linked"})
 
 
 def outcome_is_moot(row: EntityMaintenanceLog, outcome: dict) -> bool:

@@ -33,7 +33,7 @@ Scans title, summary and each paragraph with an Aho-Corasick dictionary (fast se
 - **What it knows:** actors, malware and countries with aliases, plus vendors, products, tools and mitigations; vocabulary versioned in Redis for all workers.
 - **What it filters out:** names under a minimum length, known false-positive names, junk aliases (`is_junk_alias()`), and Windows binary names (LOLBins such as `.exe` and `.dll`).
 - **Confidence:** exact canonical names score above aliases; both drop for feeds with weak reliability.
-- **Dictionary words** like "Royal" or "Hive" wait in `pending_autolink_matches` until the one-pass AI confirms them.
+- **Dictionary words** like "Royal" or "Hive" wait in `pending_autolink_matches` until the one-pass AI links or rejects them; the adjudicator then checks that call.
 
 ## Beat-scheduled enrichment
 

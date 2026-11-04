@@ -327,16 +327,16 @@ Settings → Engine → **Maintenance** (groups `maintenance` and `retention`). 
 
 ### Adjudicate stage (post-analysis AI review)
 
-After an article's AI analysis is saved, a second, smaller AI call reviews it. It re-reads the article next to a list of everything the analysis wrote: entity links, new entities (with similar existing names), held matches, relationships and observables. For each item it wants to change, it returns a verdict: remove, reclassify, veto, merge, demote or drop. Items it leaves out are kept, so a clean review returns an empty list.
+After an article's AI analysis is saved, a second, smaller AI call reviews it. It re-reads the article next to a list of everything the analysis wrote: entity links, new entities (with similar existing names), held matches the analysis linked or rejected, relationships and observables. For each item it wants to change, it returns a verdict: remove, reclassify, veto, merge, demote, drop, or link (a held match the analysis rejected). Items it leaves out are kept, so a clean review returns an empty list.
 
-The list sent to the AI holds at most 60 entity links, 10 relationships and 25 observables. When there are more, the items only this review can judge go first: new entities, then held matches, then AI claims, then plain autolink matches. The rest are recorded in the run's `detail.uncapped_links` and `detail.uncapped_edges`.
+The list sent to the AI holds at most 60 entity links, 15 rejected held matches, 10 relationships and 25 observables. When there are more, the items only this review can judge go first: new entities, then held matches, then AI claims, then plain autolink matches. The rest are recorded in the run's `detail.uncapped_links` and `detail.uncapped_edges`.
 
 Code: `backend/app/services/entry_adjudication.py` and `backend/app/workers/adjudication_tasks.py`. Stage `adjudicate` (kind `post_analysis`), task `adjudicate_entry_task` on the `ai` queue. It starts when an analysis is saved, not on a schedule. Its AI task is `entry_adjudication` (Settings → AI Configuration → Prompts).
 
 | Setting | Type / default | What it does |
 |---|---|---|
 | `adjudication_mode` | `off` \| `shadow` \| `apply`, default `apply` | Master switch. `shadow` files every verdict as a proposal on Review › Proposals and changes nothing. `apply` acts on verdicts at or above the confidence floor; weaker ones become proposals. The Proposed/Applied switch on Review › Proposals sets `shadow` or `apply`; `off` is set on the Adjudicate stage panel. Pipeline plans can only turn it off for some feeds. |
-| `adjudication_trigger` | `all` \| `created`, default `all` | `all` reviews every analysed article. `created` reviews only articles whose analysis created or claimed something (an entity, an AI link, a TTP, a relationship, a promoted match or an observable). Use `created` if reviews can't keep up. |
+| `adjudication_trigger` | `all` \| `created`, default `all` | `all` reviews every analysed article. `created` reviews only articles whose analysis created or claimed something (an entity, an AI link, a TTP, a relationship, a held match it linked or rejected, or an observable). Use `created` if reviews can't keep up. |
 | `adjudication_max_per_hour` | int, `0` | Most reviews started per hour. `0` means no limit; the single AI worker is then the only pacing. Set a limit to cap spend on a paid provider, or to stop reviews delaying article analysis on the same worker. With a limit, the backfill gets at most half of each hour's budget. |
 | `adjudication_min_priority_score` | float, `0` | Skip articles below this priority score (0–10). Keep it at 0: low-scoring CVE articles are the main source of junk tool entities. |
 | `adjudication_apply_min_confidence` | `high` \| `medium` \| `low`, default `high` | In apply mode, verdicts below this are filed as proposals instead. |
@@ -357,9 +357,9 @@ Code: `backend/app/services/entry_adjudication.py` and `backend/app/workers/adju
 | `skipped_budget` | Over `adjudication_max_per_hour` |
 | `skipped_paused` | The AI provider hit its quota |
 
-Rows that pass become `pending`, then `completed`, or `failed` once retries run out. A manual retry from the Engine table skips every check except the master switch.
+Rows that pass become `pending`, then `completed`, or `failed` once retries run out. A reviewed article whose held matches are settled later (a re-scan after the analysis, or a settle that lands while its review runs) is set to `recheck`, with `adjudication_recheck_since`. A recheck judges only the links those matches created and the rejects not yet judged, draws on the backfill's share of the hourly budget, and skips the `created` trigger. A manual retry from the Engine table skips every check except the master switch.
 
-**Resweep.** Every 30 minutes (inside `submit_analysis_batches`), `resweep_adjudications` re-queues, newest first: analyses with no review after two hours, `skipped_budget` and `skipped_paused` rows, and `pending` rows stuck for six hours. It does nothing while the `ai` queue holds more than 200 tasks (`RESWEEP_QUEUE_CEILING`). A duplicate task for a finished review exits without calling the AI.
+**Resweep.** Every 30 minutes (inside `submit_analysis_batches`), `resweep_adjudications` re-queues, newest first: analyses with no review after two hours, `skipped_budget`, `skipped_paused` and `recheck` rows, and `pending` rows stuck for six hours. It does nothing while the `ai` queue holds more than 200 tasks (`RESWEEP_QUEUE_CEILING`). A duplicate task for a finished review exits without calling the AI.
 
 **What the reviewer never changes:** links an analyst rejected, and actor, malware, vendor, product or country links an analyst restored in the last 90 days. Veto deletes an entity only if this article created it and nothing else uses it; otherwise it just removes the link. A relationship becomes *confirmed* only after the reviewer explicitly keeps it, at or above the confidence floor, on `relationship_evidence_promote_count` different articles (`reviewer_kept_entry_ids`). Silence does not count as agreement.
 

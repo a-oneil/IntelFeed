@@ -30,7 +30,6 @@ import { AutolinkingSection } from "./AutolinkingSection";
 import { EngineSettingsSearch } from "./EngineSettingsSearch";
 import { EngineSwitch } from "./EngineSwitch";
 import { EntryOutputs } from "./EntryOutputs";
-import { HeldLinksQueue } from "./CleanupGroups";
 import { ExtractionTab } from "./ExtractionTab";
 import { ProposalsQueue } from "./ProposalsQueue";
 import type { ProposalDomain, ProposalOrigin } from "@/hooks/useHygiene";
@@ -45,7 +44,7 @@ export type BrowseView = "jobs" | "plans" | "enrichment" | "maintenance" | "publ
 /** The card's data views — all engine data lives in the one table card. */
 export type MatrixView = "entries" | "links" | "relationships" | "review" | "feeds";
 /** The Review tab's lenses: the proposals queue, AI-created entity curation, applied history. */
-export type ReviewLens = "proposals" | "held" | "entities" | "history";
+export type ReviewLens = "proposals" | "entities" | "history";
 // The Action filter value that narrows the Review queue to type changes.
 const RECLASSIFY_ACTIONS = "needs_reclassification,adjudication_reclassify";
 
@@ -629,25 +628,8 @@ export function EngineMatrix({
       onClick: () => openProposals({ origin: "adjudicator" }),
       hint: {
         title: "Adjudication verdicts",
-        body: "What the post-analysis review wants changed: links to remove, new entities to veto or merge, edges to demote, observables to drop. In shadow mode these are suggestions until you apply them.",
+        body: "What the post-analysis review wants changed: links to remove, held matches to link, new entities to veto or merge, edges to demote, observables to drop. In shadow mode these are suggestions until you apply them.",
         aside: "Opens Review filtered to the adjudicator.",
-      },
-    },
-    {
-      key: "pending",
-      n: linkStats?.pending,
-      label: "pending links",
-      cls: m.aInfo,
-      active: view === "review" && reviewLens === "held",
-      clear: () => setReviewLens("proposals"),
-      onClick: () => {
-        switchView("review");
-        setReviewLens("held");
-      },
-      hint: {
-        title: "Pending links",
-        body: "Matches the autolinker isn't willing to commit to — usually a name that's also an ordinary word.",
-        aside: "They stay out of the graph until AI or you confirm them.",
       },
     },
     {
@@ -1028,10 +1010,6 @@ export function EngineMatrix({
                       Proposals
                       {hygieneStats?.pending_total ? <span className={m.viewCnt}>{hygieneStats.pending_total.toLocaleString()}</span> : null}
                     </button>
-                    <button className={reviewLens === "held" ? m.lensOn : ""} onClick={() => setReviewLens("held")}>
-                      Held links
-                      {linkStats?.pending ? <span className={m.viewCnt}>{linkStats.pending.toLocaleString()}</span> : null}
-                    </button>
                     <button className={reviewLens === "entities" ? m.lensOn : ""} onClick={() => setReviewLens("entities")}>
                       New entities
                       {extractionStats ? <span className={m.viewCnt}>{extractionStats.total_created.toLocaleString()}</span> : null}
@@ -1043,9 +1021,7 @@ export function EngineMatrix({
                   <span className={m.subLensHint}>
                     {reviewLens === "proposals"
                       ? "Everything the adjudicator, the duplicate review and the scans want changed, one row per entity. Its buttons settle every article's copy at once; every apply stays undoable from History."
-                      : reviewLens === "held"
-                          ? "Matches the autolinker won't commit to until AI or you confirm them."
-                          : reviewLens === "entities"
+                      : reviewLens === "entities"
                         ? "Entities the analysis created that nobody has confirmed yet. Confirm, merge, convert or delete."
                         : "Everything that was applied, by a person or by the stage in apply mode. Restore puts it back."}
                   </span>
@@ -1062,7 +1038,6 @@ export function EngineMatrix({
                   initialDomain={proposalsDomain}
                 />
               )}
-              {view === "review" && reviewLens === "held" && <HeldLinksQueue />}
               {view === "review" && reviewLens === "history" && <ProposalsQueue lens="history" key="hist" />}
               {view === "review" && reviewLens === "entities" && (
                 <ExtractionTab embedded key={entStatus} initialStatus={entStatus} />

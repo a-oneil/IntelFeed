@@ -1915,8 +1915,8 @@ TOOLS: dict[str, dict] = {
     "get_entity_link_stats": {
         "description": (
             "Autolinking health signals: total entry\u2192entity links by entity type and provenance "
-            "source, the held-match (pending autolink) queue depth and how many held matches are "
-            "high-confidence ready, plus the count of non-rejected entity\u2194entity relationships."
+            "source, how many held matches (pending autolinks) are waiting for their article's "
+            "analysis, plus the count of non-rejected entity\u2194entity relationships."
         ),
         "params": {},
     },

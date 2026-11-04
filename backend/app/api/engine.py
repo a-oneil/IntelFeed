@@ -639,6 +639,7 @@ async def entry_adjudication(
     from app.services.entry_adjudication import (
         ACTION_ASSESSMENT,
         ACTION_EDGE_DEMOTE,
+        ACTION_HELD_LINK,
         ACTION_IOC_DROP,
         ACTION_MERGE,
         ACTION_RECLASSIFY,
@@ -725,6 +726,7 @@ async def entry_adjudication(
         ACTION_EDGE_DEMOTE: "demote",
         ACTION_IOC_DROP: "drop",
         ACTION_ASSESSMENT: "assessment",
+        ACTION_HELD_LINK: "link",
     }
     for r in maint_rows:
         after = r.after or {}
@@ -734,6 +736,8 @@ async def entry_adjudication(
             item_id, kind = f"ioc:{after.get('kind')}:{after.get('value')}", "ioc"
         elif r.action == ACTION_ASSESSMENT:
             item_id, kind = "assessment", "assessment"
+        elif r.action == ACTION_HELD_LINK:
+            item_id, kind = f"held:{r.entity_type}:{r.entity_id}", "held"
         else:
             item_id, kind = f"link:{r.entity_type}:{r.entity_id}", "link"
         verdict = verdict_by_action.get(r.action, r.action)
@@ -749,6 +753,7 @@ async def entry_adjudication(
                 "reason": r.reasoning,
                 "suggested_type": after.get("suggested_type"),
                 "merge_into": after.get("merge_into"),
+                "name": ((r.before or {}).get("entity") or {}).get("name"),
                 "applied": bool(r.applied),
                 # An analyst already put this one back: neither Apply nor
                 # Restore is on offer any more.

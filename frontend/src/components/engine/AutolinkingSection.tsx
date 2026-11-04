@@ -231,7 +231,7 @@ export function AutolinkingSection({
               color="var(--entity-malware)"
             />
             <Kpi cap="Analyst" val={stats?.by_source?.manual} sub="manually linked" color="var(--success)" />
-            <Kpi cap="Pending links" val={stats?.pending} sub="held for confirmation" color="var(--warning)" />
+            <Kpi cap="Held matches" val={stats?.pending} sub="waiting for the analysis" color="var(--warning)" />
             <Kpi cap="Relationships" val={stats?.relationships_total} sub="entity → entity edges" color="var(--entity-ttp)" />
           </div>
 
@@ -497,12 +497,12 @@ export function AutolinkingSection({
       {view === "links" && ((stats?.pending ?? 0) > 0 || (stats?.pending_dropped_ai_off ?? 0) > 0) && (
         <div className={styles.pending}>
           <div>
-            <h3>{(stats?.pending ?? 0).toLocaleString()} matches held for confirmation</h3>
+            <h3>{(stats?.pending ?? 0).toLocaleString()} matches held for the analysis</h3>
             <p>
               Dictionary-word hits (like <span className={styles.surf}>Royal</span>{" "}
-              <span className={styles.surf}>Hive</span> <span className={styles.surf}>Turkey</span>) are parked in the
-              pending tier and won&apos;t become real links until AI or an analyst confirms them.{" "}
-              <b>{stats?.pending_ready ?? 0}</b> are ready to auto-promote at high confidence.
+              <span className={styles.surf}>Hive</span> <span className={styles.surf}>Turkey</span>) are held until the
+              article&apos;s analysis decides: linked if it names the entity, rejected if it doesn&apos;t. The adjudicator
+              then checks both calls, and any it would change show up in Review › Proposals.
               {(stats?.pending_dropped_ai_off ?? 0) > 0 && (
                 <>
                   {" "}

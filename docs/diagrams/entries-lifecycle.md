@@ -99,7 +99,7 @@ flowchart TD
         SPLIT --> AC_SCAN["Phase 1: Aho-Corasick scan<br/>word-boundary check +<br/>ambiguity filter (short names<br/>must be capitalized)"]
         AC_SCAN --> REGEX_SCAN["Phase 2: Regex scan<br/>CVE-YYYY-NNNN<br/>TNNNN(.NNN) — validated against<br/>MITRE catalog, revoked IDs remapped"]
         REGEX_SCAN --> CONFIDENCE_W["Confidence scoring:<br/>canonical → high, alias → medium<br/>downgraded by feed<br/>reliability_rating weight"]
-        CONFIDENCE_W --> STORE_LINKS["Store junction records<br/>EntryThreatActor / EntryMalware /<br/>EntryCountry / EntryCVE / EntryTTP /<br/>EntryVendor / EntryProduct /<br/>EntryTool / EntryMitigation<br/>ON CONFLICT DO NOTHING —<br/>provisional dictionary-word matches<br/>held in pending_autolink_matches<br/>(promoted or rejected by the one-pass AI analysis)"]
+        CONFIDENCE_W --> STORE_LINKS["Store junction records<br/>EntryThreatActor / EntryMalware /<br/>EntryCountry / EntryCVE / EntryTTP /<br/>EntryVendor / EntryProduct /<br/>EntryTool / EntryMitigation<br/>ON CONFLICT DO NOTHING —<br/>provisional dictionary-word matches<br/>held in pending_autolink_matches<br/>(linked or rejected by the one-pass AI analysis,<br/>then checked by the adjudicator)"]
         STORE_LINKS --> UPDATE_STATS["Update entity stats<br/>article_count++<br/>last_seen_at = now"]
     end
 

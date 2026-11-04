@@ -2149,6 +2149,7 @@ async def test_resweep_requeues_budget_paused_and_lost_rows(db_session: AsyncSes
         ("budget", adj.SKIPPED_BUDGET, None),
         ("paused", adj.SKIPPED_PAUSED, None),
         ("lost", adj.PENDING, long_ago),
+        ("recheck", adj.RECHECK, None),
         ("queued", adj.PENDING, datetime.now(UTC)),
         ("done", adj.COMPLETED, None),
     ):
@@ -2161,8 +2162,8 @@ async def test_resweep_requeues_budget_paused_and_lost_rows(db_session: AsyncSes
 
     result = await adj.resweep_adjudications(db_session)
     await db_session.flush()
-    assert result["swept"] == 3
-    for label in ("budget", "paused", "lost"):
+    assert result["swept"] == 4
+    for label in ("budget", "paused", "lost", "recheck"):
         await db_session.refresh(rows[label])
         assert rows[label].adjudication_status == adj.PENDING, label
         assert rows[label].entry_id in dispatched
@@ -3344,3 +3345,338 @@ async def test_a_second_review_does_not_file_the_same_edge_demote_again(db_sessi
 )
 def test_value_pattern_finds_bracketed_url_separators(text):
     assert adj._value_pattern("https://evil.example/a").search(text)
+
+
+# ------------------------------------------------------------------ held matches
+
+
+async def _held_royal(db_session, feed, *, resolution="rejected", reviewed=False, royal=None):
+    """An article about the Royal ransomware gang whose held "Royal" match the
+    analysis rejected (or has not settled yet, with resolution=None). Pass
+    ``royal`` to hold the same entity on another article."""
+    entry = await _make_entry(db_session, feed)
+    entry.content_text = "The Royal ransomware gang hit a regional hospital.\n\nRecovery took two weeks."
+    if royal is None:
+        royal = MalwareFamily(name="Royal", article_count=4)
+        db_session.add(royal)
+        await db_session.flush()
+    held = PendingAutolinkMatch(
+        entry_id=entry.id,
+        entity_type="malware",
+        entity_id=royal.id,
+        canonical_name="Royal",
+        matched_names=["Royal"],
+        paragraph_indices=[1],
+        confidence="medium",
+        resolution=resolution,
+        resolved_at=datetime.now(UTC) if resolution else None,
+        reviewed_at=datetime.now(UTC) if reviewed else None,
+    )
+    db_session.add(held)
+    await db_session.flush()
+    return entry, royal, held
+
+
+def _link_royal(royal, confidence="high"):
+    return [
+        {
+            "item_id": f"held:malware:{royal.id}",
+            "verdict": "link",
+            "confidence": confidence,
+            "reason": "Royal is named as the ransomware gang behind the attack",
+        }
+    ]
+
+
+async def _royal_links(db_session, entry):
+    return (await db_session.execute(select(EntryMalware).where(EntryMalware.entry_id == entry.id))).scalars().all()
+
+
+def _held_link_rows():
+    return select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == adj.ACTION_HELD_LINK)
+
+
+@pytest.mark.asyncio
+async def test_manifest_lists_a_rejected_held_match_until_it_is_reviewed(db_session: AsyncSession, feed):
+    entry, royal, _held = await _held_royal(db_session, feed)
+    items, block = await build_manifest(db_session, entry, _payload())
+    [item] = [it for it in items if it.kind == "held"]
+    assert item.item_id == f"held:malware:{royal.id}"
+    assert "NOT LINKED" in block and 'context: "The Royal ransomware gang' in block
+
+    await adj.mark_held_reviewed(db_session, items)
+    items, _ = await build_manifest(db_session, entry, _payload())
+    assert not any(it.kind == "held" for it in items)
+
+
+@pytest.mark.asyncio
+async def test_manifest_skips_unsettled_and_promoted_held_matches(db_session: AsyncSession, feed):
+    royal = None
+    for resolution in (None, "promoted"):
+        entry, royal, _held = await _held_royal(db_session, feed, resolution=resolution, royal=royal)
+        items, _ = await build_manifest(db_session, entry, _payload())
+        assert not any(it.kind == "held" for it in items), resolution
+
+
+@pytest.mark.asyncio
+async def test_a_reject_linked_another_way_is_not_reviewed_and_never_unlinked(db_session: AsyncSession, feed):
+    await _seed_settings(db_session)
+    entry, royal, held = await _held_royal(db_session, feed)
+    # An analyst (or a new entity's backlink) linked it directly.
+    db_session.add(EntryMalware(entry_id=entry.id, malware_family_id=royal.id, source="manual", confidence="high"))
+    await db_session.flush()
+
+    items, _ = await build_manifest(db_session, entry, _payload())
+    assert not any(it.kind == "held" for it in items)
+    assert held.reviewed_at is not None
+
+    # A proposal filed before the analyst linked it is moot, and leaves the link alone.
+    db_session.add(
+        EntityMaintenanceLog(
+            entity_type="malware",
+            entity_id=royal.id,
+            action=adj.ACTION_HELD_LINK,
+            mode="shadow",
+            before={"entry_id": str(entry.id), "entity": {"name": "Royal"}, "held": {"id": str(held.id)}},
+            after={"reason": "Royal is the gang", "confidence": "high"},
+            applied=False,
+        )
+    )
+    await db_session.flush()
+    row = (await db_session.execute(_held_link_rows())).scalar_one()
+    outcome = await adj.apply_adjudication_row(db_session, row)
+    assert outcome == {"applied": False, "reason": "already linked"}
+    from app.services.proposal_apply import outcome_is_moot
+
+    assert outcome_is_moot(row, outcome)
+    assert [j.source for j in await _royal_links(db_session, entry)] == ["manual"]
+
+
+def test_validate_link_only_on_held_items_and_only_when_the_reason_names_it():
+    held = ReviewItem(item_id="held:malware:x", kind="held", line="", entity_type="malware", name="Royal")
+    link = _item("link:threat_actor:y")
+    link.name = "Storm"
+    verdicts, _ = _validate_verdicts(
+        {
+            "verdicts": [
+                {"item_id": "held:malware:x", "verdict": "link", "confidence": "high", "reason": "the Royal gang"},
+                {"item_id": "link:threat_actor:y", "verdict": "link", "confidence": "high", "reason": "Storm"},
+            ]
+        },
+        [held, link],
+    )
+    assert [v.verdict for v in verdicts] == ["link", "keep"]
+
+    verdicts, stats = _validate_verdicts(
+        {"verdicts": [{"item_id": "held:malware:x", "verdict": "link", "confidence": "high", "reason": "a gang"}]},
+        [held],
+    )
+    assert verdicts[0].verdict == "keep" and stats["unnamed_reason"] == 1
+
+
+@pytest.mark.asyncio
+async def test_shadow_held_link_is_a_proposal_that_applies_and_restores(db_session: AsyncSession, feed, admin_user):
+    from app.models.false_positive_record import FalsePositiveRecord
+
+    await _seed_settings(db_session)
+    entry, royal, held = await _held_royal(db_session, feed)
+    db_session.add(
+        FalsePositiveRecord(
+            entity_type="malware",
+            entity_id=royal.id,
+            entity_value="Royal",
+            source_entry_id=entry.id,
+            marked_by=admin_user.id,
+            extraction_source="ai_reconcile",
+        )
+    )
+    await db_session.flush()
+    _items, verdicts = await _verdicts_for(db_session, entry, _link_royal(royal))
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), await adj._settings(db_session))
+    await db_session.flush()
+
+    assert detail["shadowed"] == 1 and detail["applied"] == 0
+    assert await _royal_links(db_session, entry) == []
+    row = (await db_session.execute(_held_link_rows())).scalar_one()
+    assert row.applied is False and row.before["entity"]["name"] == "Royal"
+    assert row.before["held"]["paragraph_indices"] == [1]
+
+    # The same verdict on a second review is not filed twice.
+    await apply_verdicts(db_session, entry, verdicts, _payload(), await adj._settings(db_session))
+    await db_session.flush()
+    assert len((await db_session.execute(_held_link_rows())).scalars().all()) == 1
+
+    assert (await adj.apply_adjudication_row(db_session, row))["applied"] is True
+    await db_session.flush()
+    assert [j.malware_family_id for j in await _royal_links(db_session, entry)] == [royal.id]
+    assert row.after["created_link"] is True
+    await db_session.refresh(held)
+    assert held.resolution == "promoted"
+    assert await db_session.scalar(select(func.count()).select_from(FalsePositiveRecord)) == 0
+
+    assert (await adj.restore_adjudication_row(db_session, row))["restored"] is True
+    await db_session.flush()
+    assert await _royal_links(db_session, entry) == []
+    await db_session.refresh(held)
+    assert held.resolution == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_a_held_link_proposal_still_links_after_its_held_row_is_pruned(db_session: AsyncSession, feed):
+    await _seed_settings(db_session)
+    entry, royal, held = await _held_royal(db_session, feed)
+    _items, verdicts = await _verdicts_for(db_session, entry, _link_royal(royal))
+    await apply_verdicts(db_session, entry, verdicts, _payload(), await adj._settings(db_session))
+    await db_session.delete(held)
+    await db_session.flush()
+
+    row = (await db_session.execute(_held_link_rows())).scalar_one()
+    assert (await adj.apply_adjudication_row(db_session, row))["applied"] is True
+    await db_session.flush()
+    [link] = await _royal_links(db_session, entry)
+    assert link.matched_names == ["Royal"] and link.paragraph_indices == [1]
+
+
+@pytest.mark.asyncio
+async def test_apply_mode_links_a_held_match_at_high_confidence_only(db_session: AsyncSession, feed):
+    await _seed_settings(db_session, adjudication_mode="apply")
+    entry, royal, held = await _held_royal(db_session, feed)
+    _items, verdicts = await _verdicts_for(db_session, entry, _link_royal(royal, confidence="medium"))
+    await apply_verdicts(db_session, entry, verdicts, _payload(), await adj._settings(db_session))
+    await db_session.flush()
+    assert await _royal_links(db_session, entry) == []
+
+    _items, verdicts = await _verdicts_for(db_session, entry, _link_royal(royal))
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), await adj._settings(db_session))
+    await db_session.flush()
+    assert detail["applied"] == 1
+    assert [j.malware_family_id for j in await _royal_links(db_session, entry)] == [royal.id]
+    applied = (await db_session.execute(_held_link_rows().where(EntityMaintenanceLog.applied.is_(True)))).scalar_one()
+    assert applied.before["held"]["id"] == str(held.id) and applied.after["created_link"] is True
+
+
+@pytest.mark.asyncio
+async def test_held_link_is_a_links_proposal():
+    from app.services.proposal_apply import proposal_domain
+
+    assert proposal_domain("entity_maintenance", adj.ACTION_HELD_LINK) == "links"
+
+
+async def _analysed(db_session, entry, payload):
+    from app.models.ai_result import AIResult
+    from app.models.ai_task import AITask
+
+    task = (await db_session.execute(select(AITask).where(AITask.name == "entry_analysis"))).scalar_one_or_none()
+    if task is None:
+        task = AITask(
+            name="entry_analysis", display_name="t", description="", category="extraction", default_prompt_template="x"
+        )
+        db_session.add(task)
+        await db_session.flush()
+    db_session.add(
+        AIResult(
+            entry_id=entry.id,
+            target_type="entry",
+            target_id=entry.id,
+            is_current=True,
+            task_id=task.id,
+            prompt_used="",
+            raw_response="",
+            parsed_result=payload,
+        )
+    )
+    await db_session.flush()
+
+
+@pytest.mark.asyncio
+async def test_settle_runs_late_holds_against_the_stored_analysis(db_session: AsyncSession, feed):
+    from app.intelligence.autolink_reconcile import settle_held_on_analysed_entries
+
+    named, royal, held_named = await _held_royal(db_session, feed, resolution=None)
+    other, _royal, held_other = await _held_royal(db_session, feed, resolution=None, royal=royal)
+    _waiting, _royal, held_waiting = await _held_royal(db_session, feed, resolution=None, royal=royal)
+    await _analysed(db_session, named, _payload(malware=[{"name": "Royal"}]))
+    await _analysed(db_session, other, _payload())
+    for entry in (named, other):
+        row = await _request(db_session, entry)
+        row.adjudication_status = adj.COMPLETED
+    await db_session.flush()
+
+    totals = await settle_held_on_analysed_entries(db_session)
+    assert totals == {"entries": 2, "promoted": 1, "rejected": 1}
+    assert held_named.resolution == "promoted" and held_other.resolution == "rejected"
+    assert held_waiting.resolution is None  # its analysis has not run; it settles when it lands
+    assert [j.malware_family_id for j in await _royal_links(db_session, named)] == [royal.id]
+    for entry in (named, other):
+        req = (
+            await db_session.execute(select(AIAnalysisRequest).where(AIAnalysisRequest.entry_id == entry.id))
+        ).scalar_one()
+        assert req.adjudication_status == adj.RECHECK and req.adjudication_recheck_since is not None
+
+
+@pytest.mark.asyncio
+async def test_reopen_gives_a_pruned_article_a_request_row_and_leaves_queued_ones(db_session: AsyncSession, feed):
+    since = datetime.now(UTC)
+    pruned = await _make_entry(db_session, feed)
+    await adj.reopen_adjudication(db_session, pruned.id, since)
+    req = (
+        await db_session.execute(select(AIAnalysisRequest).where(AIAnalysisRequest.entry_id == pruned.id))
+    ).scalar_one()
+    assert req.adjudication_status == adj.RECHECK and req.adjudication_recheck_since == since
+
+    entry = await _make_entry(db_session, feed)
+    row = await _request(db_session, entry)
+    for status in (adj.PENDING, adj.SKIPPED_PLAN, adj.SKIPPED_ECHO, None):
+        row.adjudication_status = status
+        await adj.reopen_adjudication(db_session, entry.id, since)
+        assert row.adjudication_status == status
+    row.adjudication_status = adj.SKIPPED_OFF
+    await adj.reopen_adjudication(db_session, entry.id, since)
+    assert row.adjudication_status == adj.RECHECK
+
+
+@pytest.mark.asyncio
+async def test_a_recheck_reviews_only_the_held_matches(db_session: AsyncSession, feed):
+    entry, royal, held = await _held_royal(db_session, feed, resolution="promoted")
+    await _link_actor(db_session, entry, "Warlock")
+    since = held.resolved_at
+    db_session.add(EntryMalware(entry_id=entry.id, malware_family_id=royal.id, source="auto_link"))
+    other = MalwareFamily(name="Hive")
+    db_session.add(other)
+    await db_session.flush()
+    db_session.add(
+        PendingAutolinkMatch(
+            entry_id=entry.id,
+            entity_type="malware",
+            entity_id=other.id,
+            canonical_name="Hive",
+            matched_names=["Hive"],
+            resolution="rejected",
+            resolved_at=datetime.now(UTC),
+        )
+    )
+    await db_session.flush()
+
+    full, _ = await build_manifest(db_session, entry, _payload())
+    assert any(it.name == "Warlock" for it in full)
+    items, _ = await build_manifest(db_session, entry, _payload(), recheck_since=since)
+    assert {it.item_id for it in items} == {f"link:malware:{royal.id}", f"held:malware:{other.id}"}
+
+
+@pytest.mark.asyncio
+async def test_held_review_owed_after_a_late_settle(db_session: AsyncSession, feed):
+    entry, _royal, held = await _held_royal(db_session, feed, reviewed=True)
+    started = datetime.now(UTC)
+    assert not await adj.held_review_owed(db_session, entry.id, started)
+    held.resolution, held.resolved_at = "promoted", datetime.now(UTC)
+    await db_session.flush()
+    assert await adj.held_review_owed(db_session, entry.id, started)
+
+
+@pytest.mark.asyncio
+async def test_created_trigger_counts_an_unjudged_held_reject(db_session: AsyncSession, feed):
+    entry, _royal, held = await _held_royal(db_session, feed)
+    assert await adj._created_something(db_session, entry.id, None)
+    held.reviewed_at = datetime.now(UTC)
+    await db_session.flush()
+    assert not await adj._created_something(db_session, entry.id, None)

@@ -52,7 +52,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { EntityRowActions } from "./EntityRowActions";
 import styles from "./ProposalsQueue.module.css";
-import cg from "./CleanupGroups.module.css";
+import cg from "./ProposalGroups.module.css";
 import { confirmDialog } from "@/utils/dialog";
 
 export type ReviewLens = "queue" | "history";
@@ -72,6 +72,7 @@ const CHANGE_META: Record<string, { label: string; cls: string }> = {
   adjudication_veto: { label: "Veto entity", cls: styles.tRemove },
   adjudication_merge: { label: "Merge", cls: styles.tMerge },
   adjudication_unlink: { label: "Unlink", cls: styles.tRemove },
+  adjudication_held_link: { label: "Link", cls: styles.tVlink },
   adjudication_reclassify: { label: "Reclassify (review)", cls: styles.tRecl },
   adjudication_edge_demote: { label: "Demote edge", cls: styles.tRecl },
   adjudication_ioc_drop: { label: "Drop observable", cls: styles.tRecl },
@@ -102,6 +103,7 @@ const DOMAIN_LABELS: Record<ProposalDomain, string> = {
 const QUEUE_FILTERS = [
   { value: "", label: "Any change" },
   { value: "adjudication_unlink,shadow_remove", label: "Unlink / remove link" },
+  { value: "adjudication_held_link", label: "Link held match" },
   { value: "adjudication_edge_demote", label: "Demote edge" },
   { value: "needs_reclassification,adjudication_reclassify", label: "Reclassify" },
   { value: "adjudication_veto", label: "Veto entity" },
@@ -695,6 +697,7 @@ export function ProposalsQueue({
     const kinds = g.kinds.filter((k) => !RECLASSIFY_KINDS.has(k.action)).map((k) => k.action);
     if (kinds.length === 0) return null;
     if (kinds.every((k) => UNLINK_KINDS.has(k))) return "Remove links";
+    if (kinds.every((k) => k === "adjudication_held_link")) return "Link";
     if (kinds.length === 1 && kinds[0] === "adjudication_merge") return "Merge";
     if (kinds.length === 1 && kinds[0] === "adjudication_veto") return "Delete";
     return "Apply";
