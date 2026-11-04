@@ -2029,7 +2029,7 @@ TOOLS: dict[str, dict] = {
             "window": {
                 "type": 'str',
                 "default": '7d',
-                "enum": ['24h', '30d', '7d', 'all'],
+                "enum": ['1h', '24h', '30d', '7d', 'all'],
             },
         },
     },
@@ -2991,7 +2991,7 @@ TOOLS: dict[str, dict] = {
             "window": {
                 "type": 'str',
                 "default": '7d',
-                "enum": ['24h', '30d', '7d', 'all'],
+                "enum": ['1h', '24h', '30d', '7d', 'all'],
             },
             "q": {
                 "type": 'str',
