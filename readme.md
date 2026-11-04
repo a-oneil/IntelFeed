@@ -5,7 +5,7 @@
 <p align="center">
 A self-hosted, security-focused RSS aggregator and threat intelligence platform. Built for security
 analysts and detection engineers to consume threat feeds, extract TTPs/CVEs, correlate entities, and
-generate detection rules.
+generate detection rules or reports.
 </p>
 
 <p align="center">
