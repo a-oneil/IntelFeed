@@ -15,7 +15,7 @@ from app.models.entry_signal import EntrySignal
 from app.models.feed import Feed
 from app.models.malware_family import EntryMalware
 from app.models.threat_actor import EntryThreatActor
-from app.services.entry_analysis import enqueue_entry_analysis, store_entry_analysis
+from app.services.entry_analysis import enqueue_entry_analysis, sectors_with_evidence, store_entry_analysis
 
 SAMPLE_PARSED = {
     "summary": "APT-Test deployed NewLocker ransomware via CVE exploitation.",
@@ -31,7 +31,7 @@ SAMPLE_PARSED = {
     "malware": [{"name": "NewLocker", "malware_type": "ransomware", "confidence": "high"}],
     "tools": [],
     "countries": [],
-    "sectors": [{"name": "healthcare", "confidence": "medium"}],
+    "sectors": [{"name": "healthcare", "evidence": "a regional hospital network", "confidence": "medium"}],
     "mitigations": [],
     "severity_assessment": {"level": "high", "rationale": "active exploitation"},
     "novelty_note": "First public report of NewLocker.",
@@ -76,7 +76,9 @@ async def _make_entry(db_session, feed, *, title, content="Ransomware attack det
 
 @pytest.mark.asyncio
 async def test_store_entry_analysis_fans_out(db_session, feed):
-    entry = await _make_entry(db_session, feed, title="Fan-out entry")
+    entry = await _make_entry(
+        db_session, feed, title="Fan-out entry", content="NewLocker hit a Regional  Hospital network last week."
+    )
     counts = await store_entry_analysis(db_session, entry.id, SAMPLE_PARSED)
 
     assert counts["threat_actors"] == 1
@@ -511,3 +513,75 @@ async def test_manual_analysis_clears_a_stale_queue_row(db_session, feed, analys
     ).scalar_one()
     assert (row.status, row.error) == ("completed", None)
     assert row.completed_at is not None
+
+
+LEAK_POST = (
+    "Scarlettgroup has just published a new victim : sigsauer.com\n"
+    "SIG SAUER is a leading firearms manufacturer specializing in pistols, rifles, ammunition, optics."
+)
+
+
+def test_sector_needs_a_quote_from_the_article():
+    kept = sectors_with_evidence(
+        [
+            {"name": "Manufacturing", "evidence": "a leading \u201cfirearms\u201d  manufacturer", "confidence": "high"},
+            {"name": "Healthcare", "evidence": "hospitals across the region", "confidence": "high"},
+            {"name": "Retail", "evidence": "", "confidence": "high"},
+            {"name": "Energy", "confidence": "high"},
+        ],
+        LEAK_POST.replace("firearms", "\u201cfirearms\u201d"),
+    )
+    assert [s["name"] for s in kept] == ["Manufacturing"]
+
+
+def test_an_ellipsis_quote_must_match_in_every_part():
+    text = "The campaign hit banks in Brazil and, later, several universities in Chile."
+    ok = {"name": "Education", "evidence": "hit banks ... several universities", "confidence": "high"}
+    bad = {"name": "Healthcare", "evidence": "hit banks ... several hospitals", "confidence": "high"}
+    assert sectors_with_evidence([ok, bad], text) == [ok]
+
+
+def test_the_whole_list_handed_back_stores_nothing():
+    """The 231 Ransomware.live posts: twelve names, each 'high', each with the one real sentence."""
+    names = [
+        "Agriculture",
+        "Education",
+        "Energy",
+        "Financial Services",
+        "Government",
+        "Healthcare",
+        "Hospitality",
+        "Manufacturing",
+        "Professional Services",
+        "Retail",
+        "Technology",
+        "Transportation",
+    ]
+    echoed = [{"name": n, "evidence": "a leading firearms manufacturer", "confidence": "high"} for n in names]
+    assert sectors_with_evidence(echoed, LEAK_POST) == []
+
+
+def test_one_quote_pasted_under_many_sectors_backs_none():
+    quote = "a leading firearms manufacturer"
+    three = [{"name": n, "evidence": quote, "confidence": "high"} for n in ("Manufacturing", "Defense", "Retail")]
+    assert sectors_with_evidence(three, LEAK_POST) == []
+    # Two sectors from one sentence is ordinary ("defense and aerospace manufacturer").
+    two = three[:2]
+    assert sectors_with_evidence(two, LEAK_POST) == two
+
+
+@pytest.mark.asyncio
+async def test_unquoted_sectors_are_not_stored(db_session, feed):
+    entry = await _make_entry(db_session, feed, title="Scarlettgroup victim", content=LEAK_POST)
+    parsed = {
+        **SAMPLE_PARSED,
+        "threat_actors": [],
+        "malware": [],
+        "ttps": [],
+        "sectors": [
+            {"name": "Manufacturing", "evidence": "leading firearms manufacturer", "confidence": "high"},
+            {"name": "Agriculture", "evidence": "farms and agribusiness", "confidence": "high"},
+        ],
+    }
+    counts = await store_entry_analysis(db_session, entry.id, parsed)
+    assert counts["sectors"] == 1 and counts["sectors_unquoted"] == 1

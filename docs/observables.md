@@ -88,7 +88,7 @@ Host rules (`_plausible_cmdline`, `_plausible_path_atom`, and the branches of `v
 
 ## What the AI sees: the analysis window
 
-`build_analysis_variables()` (`backend/app/services/entry_analysis.py:61`) renders the article for the prompt via `analysis_window.py`:
+`build_analysis_variables()` (`backend/app/services/entry_analysis.py:101`) renders the article for the prompt via `analysis_window.py`:
 
 - HTML is flattened with structure kept: table rows become `cell | cell` (a hash stays by its "loader" description), headings get their own line (an empty `<h2 id="indicators-of-compromise">` renders its id), `<pre>` keeps line breaks.
 - If the body exceeds `ai_analysis_content_max_chars`, the **indicator appendix** (an IOC heading past the first 20% of the body, an indicator table header, or else the trailing region with three or more hash, IP or defanged candidates) is appended after the article start behind a marker line. It gets up to `observables_analysis_tail_reserve` (default 0.4) of the budget. Indicator-only lines are capped per kind (10 per hash kind, 15 per network kind); the publisher door handles full IOC files.

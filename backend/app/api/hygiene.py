@@ -1833,11 +1833,16 @@ async def scan_alias_hygiene(
     fix is a simple alias trim; the missed-merge case still gets a trim
     (merge engine will catch the real merge on its next pass).
     """
-    # Wipe stale unapplied proposals so each scan returns the current state.
+    # Wipe this scan's stale unapplied proposals so each scan returns the
+    # current state. The adjudicator's and the duplicate review's alias trims
+    # share the action code; they are not the scan's to clear.
     await db.execute(
         EntityMaintenanceLog.__table__.delete().where(
             EntityMaintenanceLog.action == "alias_collision",
             EntityMaintenanceLog.applied.is_(False),
+            EntityMaintenanceLog.after["kind"].astext.in_(
+                ["case_duplicate", "alias_equals_canonical", "matches_other_entity"]
+            ),
         )
     )
 
@@ -3637,7 +3642,10 @@ async def review_groups(
                     ReviewGroupTarget(type=t, count=n)
                     for t, n in sorted(d["reclassify_to"].items(), key=lambda kv: (-kv[1], kv[0]))
                 ],
-                merge_into=[ReviewGroupMerge(**m) for m in sorted(d["merge_into"].values(), key=lambda m: -m["count"])],
+                merge_into=[
+                    ReviewGroupMerge(**m)
+                    for m in sorted(d["merge_into"].values(), key=lambda m: (-m["count"], m["name"] or ""))
+                ],
                 domains=g["domains"],
                 origin=origins[0] if len(origins) == 1 else "mixed",
                 confidence=_CONF_NAME.get(g["confidence"]),

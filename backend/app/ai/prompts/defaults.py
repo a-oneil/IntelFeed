@@ -1859,7 +1859,7 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 	- A report covering several malware families often has one ATT&CK table per family. A table belongs to the family whose section it sits under; never credit its techniques to the other families in the report.
 	- Also set `telemetry` to where a defender would SEE this activity: endpoint, dns, netflow, proxy, firewall, vpn, identity, cloudtrail, email_gw, or ot. Cloud/identity/network activity is not an endpoint story — "attackers created a malicious OAuth app" is identity, "beacons over TLS" is netflow. Empty string only when genuinely unclear.
 - `countries`: role must be one of origin, target, infrastructure, mentioned.
-- `sectors`: victim/targeted industry sectors only.
+- `sectors`: victim/targeted industry sectors only, each with `evidence`: the exact words from the article (copied, at most 120 characters) that show this sector was hit — "a leading firearms manufacturer" for Manufacturing. No such words, no sector: never list sectors because the list allows them, and an article about one victim names one sector.
 - `mitigations`: concrete defensive measures the article recommends, with MITRE M-IDs when clearly applicable.
 - `confidence` is "high", "medium", or "low" for every extracted item.
 - `severity_assessment.level` is one of "critical", "high", "medium", "low", "informational" — how urgent this is for a defender.
@@ -2036,9 +2036,10 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
                         "type": "object",
                         "properties": {
                             "name": {"type": "string", "enum": _SECTOR_ENUM},
+                            "evidence": {"type": "string"},
                             "confidence": {"type": "string"},
                         },
-                        "required": ["name", "confidence"],
+                        "required": ["name", "evidence", "confidence"],
                     },
                 },
                 "mitigations": {
@@ -2347,17 +2348,21 @@ VERDICTS
   unsure     — the evidence shown does not settle it. Prefer unsure over a guess: a wrong merge destroys a profile, a missed one just waits.
 
 RULES
-  - A shared alias is strong evidence of same unless the alias is a generic word or a known collision.
+  - Your own knowledge comes first. The aliases are this catalogue's data, and many were added by AI extraction from a single article — a wrong one makes two unrelated entries look identical (Ryuk carrying "ALPHV", which is BlackCat's name). When a shared alias contradicts what you know, the alias is wrong: answer different.
+  - Each shared name is listed with where it came from. An alias from mitre_attack, malpedia, an analyst or seed data is strong evidence of same. An UNSOURCED alias proves nothing on its own: say same only if you know independently that the two names are one thing; otherwise unsure.
+  - Different mitre_ids mean MITRE tracks two entries (such pairs are not shown). The same mitre_id on both is strong evidence of same.
+  - Vendor names for overlapping clusters are not the same group unless the vendors say so: "overlaps with" or "shares infrastructure with" is different or unsure, not same.
+  - bad_alias: when a shared alias is wrong, give it exactly as listed and the side it is on (bad_alias_side "a" or "b"), so it can be removed. Leave both "" otherwise, and always on a same verdict.
   - Shared articles alone are weak evidence: reports name several actors and families together.
   - A name that differs only by spacing, case, punctuation or a version suffix is usually the same family; a different number in an APT/TA/UNC/G-style designation is a different group.
-  - confidence: high when you are certain from your own knowledge or the aliases make it unambiguous, medium when the profiles line up but you are inferring, low when you are guessing (a low 'same' is never applied).
+  - confidence: high when you are certain from your own knowledge or a sourced alias or MITRE ID makes it unambiguous — never on an unsourced alias alone; medium when the profiles line up but you are inferring, low when you are guessing (a low 'same' is never applied).
   - reason: one short factual sentence naming the deciding fact.
 """,
         "default_prompt_template": """PAIRS UNDER REVIEW ({{ pair_count }})
 
 {{ pairs_block }}
 
-Return strict JSON matching the provided schema: one decision per pair_id, in order, with verdict, keep ("a" or "b", only meaningful for same), confidence and reason.
+Return strict JSON matching the provided schema: one decision per pair_id, in order, with verdict, keep ("a" or "b", only meaningful for same), confidence, reason, and bad_alias / bad_alias_side ("" unless a shared alias is wrong).
 """,
         "output_schema": {
             "type": "object",
@@ -2367,13 +2372,23 @@ Return strict JSON matching the provided schema: one decision per pair_id, in or
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "required": ["pair_id", "verdict", "keep", "confidence", "reason"],
+                        "required": [
+                            "pair_id",
+                            "verdict",
+                            "keep",
+                            "confidence",
+                            "reason",
+                            "bad_alias",
+                            "bad_alias_side",
+                        ],
                         "properties": {
                             "pair_id": {"type": "string"},
                             "verdict": {"type": "string", "enum": ["same", "different", "unsure"]},
                             "keep": {"type": "string", "enum": ["a", "b", ""]},
                             "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
                             "reason": {"type": "string"},
+                            "bad_alias": {"type": "string"},
+                            "bad_alias_side": {"type": "string", "enum": ["a", "b", ""]},
                         },
                     },
                 },

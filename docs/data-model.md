@@ -1060,7 +1060,7 @@ Junction tables link entries to entities (many to many). Each has a composite pr
 
 All of them also carry `extracted_at`.
 
-`entry_sectors` is the exception to the key pattern. Its primary key is `(entry_id, sector)`, where `sector` is the slug, and it also has a `sector_id` foreign key that is unique per entry. Only the one-pass AI analysis writes it (`store_sectors`). Sectors are never autolinked, so every row is a judgment, not a word match.
+`entry_sectors` is the exception to the key pattern. Its primary key is `(entry_id, sector)`, where `sector` is the slug, and it also has a `sector_id` foreign key that is unique per entry. Only the one-pass AI analysis writes it (`store_sectors`). Sectors are never autolinked, so every row is a judgment, not a word match. The analysis must quote the words that show each sector was hit; a sector whose quote is not in the article, one quote pasted under more than two sectors, or a reply naming ten or more sectors is not stored (`sectors_with_evidence`).
 
 `entry_tags` has its own `id` key; see [EntryTag](#entrytag).
 
