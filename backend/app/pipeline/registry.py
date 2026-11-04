@@ -1,4 +1,4 @@
-"""Pipeline stage registry — the entry processing chain as data (engine phase 6).
+"""Pipeline stage registry — the entry processing chain as data.
 
 Mirrors the enrichment adapter registry pattern: stages are code-defined here,
 composition/config is data-defined via PipelinePlan rows (feed > category >
@@ -140,7 +140,7 @@ PIPELINE_STAGES: dict[str, StageDef] = {
             "asserted edges, observables — with the article in hand; verdicts are filed as proposals "
             "(shadow) or applied inline. Replaces the nightly hygiene jobs"
         ),
-        # Enabled in the registry so that, with pipeline plans off (prod today),
+        # Enabled in the registry so that, with pipeline plans off (the default),
         # the adjudication_mode setting alone decides; plans only subtract feeds.
         default_enabled=True,
         config_schema={"mode": {"type": "string", "setting": "adjudication_mode"}},

@@ -26,8 +26,11 @@ class OSVAdapter(EnrichmentAdapter):
     # api.osv.dev publishes no request limit.
     quota = Quota(100, 60, daily_budget=2000)
     egress = Egress.LOW
-    license = License("CC BY 4.0", attribution="OSV.dev")
+    # On and auto from the start, so a new CVE is looked up when it arrives
+    # instead of waiting for the source's scheduled job.
+    default_enabled = True
     default_trigger_mode = "auto"
+    license = License("CC BY 4.0", attribution="OSV.dev")
     jobs = (
         Job(
             "osv-delta-sync",

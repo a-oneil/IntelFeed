@@ -88,9 +88,9 @@ export function StagePanel({
           <>
             <p className={styles.note}>
               The ledger's safety posture. <strong>AI capture mode</strong> is the big one:{" "}
-              <strong>shadow</strong> (default) stages every AI-confirmed indicator as an entry
-              candidate for review; <strong>capture</strong> lets AI confirmations create ledger
-              rows directly. Outbound blocklists/TAXII live under <strong>Publishing</strong>{" "}
+              <strong>shadow</strong> stages every AI-confirmed indicator as an entry candidate for
+              review; <strong>capture</strong> (default) lets AI confirmations create ledger rows
+              directly. Outbound blocklists/TAXII live under <strong>Publishing</strong>{" "}
               (top-right).
             </p>
             <SystemSettings

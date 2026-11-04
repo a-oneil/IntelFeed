@@ -17,6 +17,10 @@ class CISAKEVAdapter(EnrichmentAdapter):
     # One JSON file; a lookup downloads the whole catalog.
     quota = Quota(100, 60, daily_budget=500)
     egress = Egress.NONE
+    # On and auto from the start, so a new CVE is looked up when it arrives
+    # instead of waiting for the source's scheduled job.
+    default_enabled = True
+    default_trigger_mode = "auto"
     license = License("CISA KEV (public domain)", attribution="CISA Known Exploited Vulnerabilities Catalog")
     jobs = (
         Job(

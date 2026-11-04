@@ -19,7 +19,7 @@ image proxy use to get past bot walls: redirects are followed one hop at a time
 and each hop's connection is pinned with CURLOPT_RESOLVE.
 
 Private ranges are refused unless ``outbound_allow_private_networks`` is on
-(a homelab that reads feeds from its own LAN). Loopback, 0.0.0.0 and
+(an install that reads feeds from its own LAN). Loopback, 0.0.0.0 and
 link-local are refused regardless; see ``outbound.is_never_reachable``.
 """
 

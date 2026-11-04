@@ -38,7 +38,6 @@ const ACTION_TYPES = [
   { value: "create_note", label: "Create Note" },
   { value: "create_intel_report", label: "Create Intel Report" },
   { value: "chain_rule", label: "Chain Rule" },
-  { value: "export_to", label: "Export" },
 ];
 
 const NOTIFICATION_PLATFORMS = [
@@ -51,11 +50,6 @@ const EMAIL_BODY_FORMATS = [
   { value: "markdown", label: "Markdown" },
   { value: "html", label: "HTML" },
   { value: "text", label: "Plain text" },
-];
-
-const EXPORT_FORMATS = [
-  { value: "csv", label: "CSV" },
-  { value: "markdown", label: "Markdown" },
 ];
 
 interface ActionNodeData {
@@ -853,51 +847,6 @@ export const ActionNode = memo(function ActionNode({ data }: NodeProps) {
           </div>
         )}
 
-        {actionType === "export_to" && (
-          <div className={styles.fieldGroup}>
-            <label className={styles.fieldLabel}>Format</label>
-            <select
-              value={(config?.format as string) ?? ""}
-              onChange={(e) =>
-                onUpdate?.({
-                  config: { ...config, format: e.target.value },
-                })
-              }
-              className={styles.select}
-            >
-              <option value="">Select format...</option>
-              {EXPORT_FORMATS.map((f) => (
-                <option key={f.value} value={f.value}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-            <label className={styles.fieldLabel}>Destination</label>
-            <input
-              type="text"
-              value={(config?.destination as string) ?? ""}
-              onChange={(e) =>
-                onUpdate?.({
-                  config: { ...config, destination: e.target.value },
-                })
-              }
-              placeholder="webhook"
-              className={styles.input}
-            />
-            <label className={styles.fieldLabel}>Webhook URL</label>
-            <input
-              type="text"
-              value={(config?.webhook_url as string) ?? ""}
-              onChange={(e) =>
-                onUpdate?.({
-                  config: { ...config, webhook_url: e.target.value },
-                })
-              }
-              placeholder="https://..."
-              className={styles.input}
-            />
-          </div>
-        )}
       </div>
 
       <Handle type="target" position={Position.Left} className={styles.handle} />

@@ -30,9 +30,12 @@ fi
 
 DB_USER="${POSTGRES_USER:-intelfeed}"
 DB_NAME="${POSTGRES_DB:-intelfeed}"
+# Everything that holds a database connection. One left running makes
+# DROP DATABASE fail.
+DB_SERVICES=(api celery-worker celery-worker-ai celery-worker-enrichment celery-beat telegram-listener)
 
 echo "[restore] Stopping API and worker services..."
-docker compose -f "$COMPOSE_FILE" stop api celery-worker celery-beat 2>/dev/null || true
+docker compose -f "$COMPOSE_FILE" stop "${DB_SERVICES[@]}" 2>/dev/null || true
 
 echo "[restore] Dropping and recreating database..."
 docker compose -f "$COMPOSE_FILE" exec -T db psql -U "$DB_USER" -d postgres \
@@ -59,4 +62,4 @@ fi
 
 echo "[restore] Database restored successfully."
 echo "[restore] Starting services..."
-docker compose -f "$COMPOSE_FILE" start api celery-worker celery-beat
+docker compose -f "$COMPOSE_FILE" start "${DB_SERVICES[@]}"

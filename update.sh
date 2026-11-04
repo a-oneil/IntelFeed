@@ -124,19 +124,16 @@ else
 fi
 
 if [ "$needs_build" = true ]; then
-    # Generated read-aloud audio (Piper) is written by the appuser (uid 1000)
-    # inside the api/worker containers to this bind-mounted dir. A fresh dir is
-    # created root-owned by Docker, so ensure uid 1000 can write (idempotent;
-    # mirrors the telegram_media/backups ownership handling).
-    mkdir -p "$REPO_DIR/tts_media"
-    if [ "$(stat -c %u "$REPO_DIR/tts_media" 2>/dev/null)" != "1000" ]; then
-        sudo chown -R 1000:1000 "$REPO_DIR/tts_media" || log "WARN: could not chown tts_media" "warning"
-    fi
-    # Same for the originals behind manual uploads (api writes, celery-worker reads).
-    mkdir -p "$REPO_DIR/ingest_files"
-    if [ "$(stat -c %u "$REPO_DIR/ingest_files" 2>/dev/null)" != "1000" ]; then
-        sudo chown -R 1000:1000 "$REPO_DIR/ingest_files" || log "WARN: could not chown ingest_files" "warning"
-    fi
+    # The api and worker containers write to these bind-mounted dirs as the
+    # appuser (uid 1000): read-aloud audio, the originals behind manual uploads,
+    # and the Telegram session and media. Docker creates a missing dir
+    # root-owned, so make sure uid 1000 owns each one (idempotent).
+    for dir in tts_media ingest_files telegram_data telegram_media; do
+        mkdir -p "$REPO_DIR/$dir"
+        if [ "$(stat -c %u "$REPO_DIR/$dir" 2>/dev/null)" != "1000" ]; then
+            sudo chown -R 1000:1000 "$REPO_DIR/$dir" || log "WARN: could not chown $dir" "warning"
+        fi
+    done
 
     # Build before touching anything that is running. The db image is built from
     # ./db (postgres + pgvector), so a build failure here has to mean "no update
