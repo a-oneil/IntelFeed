@@ -280,6 +280,15 @@ async def store_entry_analysis(db: AsyncSession, entry_id: uuid.UUID, parsed: di
     except Exception:
         logger.warning("Observable store failed for entry %s", entry_id, exc_info=True)
 
+    if parsed.get("information_rating"):
+        from app.services.info_rating import store_ai_rating
+
+        try:
+            if (score := await store_ai_rating(db, entry_id, parsed["information_rating"])) is not None:
+                counts["info_rating"] = score
+        except Exception:
+            logger.warning("Information rating store failed for entry %s", entry_id, exc_info=True)
+
     if any(parsed.get(k) for k in ("report_type", "victim_organizations", "timeline", "patch")):
         from app.intelligence.enrichment import store_article_metadata
 

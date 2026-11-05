@@ -8,7 +8,10 @@ describe("tagCeiling", () => {
     expect(tagCeiling("C")).toBe("medium");
     expect(tagCeiling("D")).toBe("medium");
     expect(tagCeiling("E")).toBe("low");
-    expect(tagCeiling("F")).toBe("low");
+  });
+
+  it("treats F (cannot be judged) like unrated, not worse than E", () => {
+    expect(tagCeiling("F")).toBe(tagCeiling(null));
   });
 
   it("treats an unrated feed like a D", () => {

@@ -94,6 +94,8 @@ export const FIELD_GROUPS: QueryFieldGroup[] = [
           "weaponized_poc",
         ],
       },
+      { token: "info:", hint: "Article credibility (1–6)", values: ["1", "2", "3", "4", "5", "6"] },
+      { token: "grade:", hint: "Feed letter + article number, e.g. B2" },
       { token: "feed.reliability:", hint: "Source grade (A–F)" },
       { token: "feed.timeliness:", hint: "Source grade (A–F)" },
       { token: "feed.relevance:", hint: "Source grade (A–F)" },
@@ -371,7 +373,7 @@ const NAMESPACE_ENTITY: Record<string, string> = {
 /** Entry-grammar fields — the feeds domain, not an entity. */
 const ENTRY_FIELDS = new Set([
   "title", "content", "author", "feed", "category", "tag", "type", "media",
-  "lang", "date", "is", "url", "words", "signal",
+  "lang", "date", "is", "url", "words", "signal", "info", "grade",
 ]);
 
 /**

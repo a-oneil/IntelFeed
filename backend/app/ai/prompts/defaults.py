@@ -1864,6 +1864,10 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 - `confidence` is "high", "medium", or "low" for every extracted item.
 - `severity_assessment.level` is one of "critical", "high", "medium", "low", "informational" — how urgent this is for a defender.
 - `novelty_note`: one sentence on what is NEW in this article versus generally-known information (or empty string).
+- `information_rating`: how credible THIS article's information is, judged from the article alone — not from the outlet's reputation, and not from what you know elsewhere. You cannot see other sources, so never answer 1 ("confirmed"); the platform awards that itself when an independent outlet reports the same story.
+	- `access` — how close the author is to what they report: "firsthand" (their own incident response, telemetry, malware samples, research or disclosure), "secondhand" (relaying another party's report, a press release, a court filing, a leak-site post), or "unclear".
+	- `score` — 2 Probably true: logical, specific and backed by evidence the article shows (artefacts, data, named primary sources), claims hedged where they should be. 3 Possibly true: reasonably logical but thin — secondhand with attribution, few specifics, some claims unsupported. 4 Doubtfully true: possible but unsupported or poorly reasoned — anonymous claims, a threat actor's own boasts, speculation presented as fact, certainty the evidence does not carry. 5 Improbable: illogical or contradicts itself. 6 Cannot be judged: nothing to judge (a product page, an opinion piece, a bare headline or link, a job post).
+	- `rationale` — one short sentence naming what decided the score.
 - `summary`: 2-3 sentences, factual, no hype.
 - `report_type`: one of news, advisory, incident_report, malware_analysis, research, vendor_marketing, opinion.
 - `victim_organizations`: named victim organizations only (never vendors or researchers).
@@ -2064,6 +2068,15 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
                     "required": ["level", "rationale"],
                 },
                 "novelty_note": {"type": "string"},
+                "information_rating": {
+                    "type": "object",
+                    "properties": {
+                        "access": {"type": "string", "enum": ["firsthand", "secondhand", "unclear"]},
+                        "score": {"type": "integer", "enum": [2, 3, 4, 5, 6]},
+                        "rationale": {"type": "string"},
+                    },
+                    "required": ["access", "score", "rationale"],
+                },
                 "report_type": {"type": "string"},
                 "victim_organizations": {"type": "array", "items": {"type": "string"}},
                 "timeline": {
@@ -2198,6 +2211,7 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
                 "mitigations",
                 "severity_assessment",
                 "novelty_note",
+                "information_rating",
                 "report_type",
                 "victim_organizations",
                 "timeline",

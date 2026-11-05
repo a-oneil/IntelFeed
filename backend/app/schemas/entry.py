@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class EntryMediaBrief(BaseModel):
@@ -54,6 +54,10 @@ class EntryResponse(BaseModel):
     # entries this analyst's own fitted weights actually moved). See
     # app/services/radar_personalization.py. {lift, families: [{family, weight, delta}]}
     personal: dict | None = None
+    # Information credibility, 1-6 (the number half of an Admiralty grade;
+    # the letter is the feed's reliability_rating). See app/services/info_rating.py.
+    info_rating: int | None = None
+    info_rating_by: str | None = None  # ai | analyst
 
     model_config = {"from_attributes": True}
 
@@ -81,6 +85,11 @@ class EntryDetailResponse(EntryResponse):
     # When is_echo is true, the earlier entry this one echoes (resolved from the
     # feed_echo signal's ``duplicate_of`` payload). Null if the original is gone.
     echo_of: "EchoOf | None" = None
+    # The AI's own score from the article alone (before corroboration), how
+    # close the author was to the events, and why — or the analyst's note.
+    info_rating_ai: int | None = None
+    info_rating_access: str | None = None
+    info_rating_note: str | None = None
 
 
 class TranslateEntryResponse(BaseModel):
@@ -106,6 +115,21 @@ class EchoOf(BaseModel):
     published_at: datetime | None = None
     shared: int | None = None
     total: int | None = None
+
+
+class InfoRatingRequest(BaseModel):
+    # 1-6, or null to hand the article back to the AI's rating.
+    rating: int | None = Field(default=None, ge=1, le=6)
+    note: str | None = Field(default=None, max_length=500)
+
+    model_config = ConfigDict(json_schema_extra={"example": {"rating": 2, "note": "Matches our own telemetry"}})
+
+
+class InfoRatingResponse(BaseModel):
+    info_rating: int | None
+    info_rating_by: str | None
+    info_rating_ai: int | None
+    info_rating_note: str | None
 
 
 class MarkAllReadRequest(BaseModel):

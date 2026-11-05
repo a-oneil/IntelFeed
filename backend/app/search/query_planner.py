@@ -34,6 +34,8 @@ ENTRY_FIELDS = frozenset(
         "signal",
         "url",
         "words",
+        "info",
+        "grade",
         "feed.reliability",
         "feed.timeliness",
         "feed.relevance",
@@ -805,7 +807,7 @@ def _handle_entry_field(
     if f in _DEFERRED_FILTER_FIELDS:
         return  # registered by the branch expansion, which knows where it sits
 
-    if f in ("signal", "url"):
+    if f in ("signal", "url", "info", "grade"):
         # Entry-scoped: resolves to a set of entry IDs, which cannot live in a
         # Meilisearch filter string. The OR group travels with it so the sets
         # can be unioned at resolution time instead of always intersecting.
@@ -1114,6 +1116,15 @@ async def resolve_entry_filters(db, plan: ExecutionPlan) -> None:
                 stmt = select(EntrySignal.entry_id).where(func.lower(EntrySignal.signal_type) == value.lower())
         elif kind == "url":
             stmt = select(Entry.id).where(Entry.url.ilike(to_sql_pattern(value), escape="\\"))
+        elif kind == "info":
+            stmt = select(Entry.id).where(_info_rating_clause(Entry.info_rating, value))
+        elif kind == "grade":
+            # `grade:B2` — the feed's letter and the article's number together.
+            letter, number = value[:1].upper(), value[1:]
+            stmt = select(Entry.id)
+            if letter.isalpha():
+                stmt = stmt.join(Feed, Feed.id == Entry.feed_id).where(func.upper(Feed.reliability_rating) == letter)
+            stmt = stmt.where(_info_rating_clause(Entry.info_rating, number or "*"))
         elif kind == "is.translated":
             stmt = select(Entry.id).where(Entry.translated_at.isnot(None))
         elif kind == "is.image":
@@ -1127,6 +1138,36 @@ async def resolve_entry_filters(db, plan: ExecutionPlan) -> None:
 
     _apply_entry_id_filters(plan, resolved)
     plan.has_entry_queries = True
+
+
+def _info_rating_clause(column, value: str):
+    """`info:2`, `info:<=2`, `info:1..3` — the 1-6 credibility number. Anything
+    unparseable matches nothing rather than everything."""
+    from sqlalchemy import false
+
+    def num(raw: str) -> int | None:
+        return int(raw) if raw.strip().isdigit() else None
+
+    value = value.strip()
+    if value == "*":
+        return column.isnot(None)
+    if ".." in value:
+        low, _, high = value.partition("..")
+        lo, hi = num(low), num(high)
+        if lo is None and hi is None:
+            return false()
+        clause = column.isnot(None)
+        if lo is not None:
+            clause = clause & (column >= lo)
+        if hi is not None:
+            clause = clause & (column <= hi)
+        return clause
+    for prefix, op in ((">=", "__ge__"), ("<=", "__le__"), (">", "__gt__"), ("<", "__lt__")):
+        if value.startswith(prefix):
+            n = num(value[len(prefix) :])
+            return getattr(column, op)(n) if n is not None else false()
+    n = num(value)
+    return column == n if n is not None else false()
 
 
 def _apply_entry_id_filters(plan: ExecutionPlan, resolved: list[tuple[PendingEntryFilter, set[str]]]) -> None:

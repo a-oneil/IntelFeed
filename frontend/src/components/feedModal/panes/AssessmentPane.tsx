@@ -57,8 +57,9 @@ export function AssessmentPane({ form }: { form: FeedForm }) {
             ))}
           </select>
           <span className={styles.hint}>
-            How much you trust what it reports. Entity matches from a
-            low-rated source carry less weight.
+            How much you trust this source over time. A is rare outside
+            government sources; most good commercial sources are B. Each
+            article gets its own 1–6 credibility number on top of this.
           </span>
         </div>
 

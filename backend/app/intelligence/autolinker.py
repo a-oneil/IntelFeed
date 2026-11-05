@@ -233,9 +233,13 @@ def _surface_form_filtered(entity_type: str, form: str) -> bool:
 
 
 def reliability_to_weight(rating: str | None) -> float:
-    """Map a feed's A-F reliability rating to an autolink confidence multiplier."""
-    weights = {"A": 1.0, "B": 0.85, "C": 0.7, "D": 0.5, "E": 0.3, "F": 0.15}
-    return weights.get(rating, 0.5)  # Unrated defaults to 0.5
+    """Map a feed's A-F reliability rating to an autolink confidence multiplier.
+
+    F is "cannot be judged" — no basis either way, not worse than E — so it
+    weighs the same as an unrated feed.
+    """
+    weights = {"A": 1.0, "B": 0.85, "C": 0.7, "D": 0.5, "E": 0.3}
+    return weights.get(rating, 0.5)
 
 
 # Daily Redis counters of dictionary-word matches dropped because the entry's

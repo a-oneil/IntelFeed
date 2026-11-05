@@ -306,6 +306,8 @@ def test_reliability_weight_is_shared_with_ingest():
 
     assert _reliability_to_weight("A") == autolinker_mod.reliability_to_weight("A") == 1.0
     assert _reliability_to_weight(None) == autolinker_mod.reliability_to_weight(None) == 0.5
+    # F is "cannot be judged": no basis either way, so it weighs like unrated, not below E.
+    assert autolinker_mod.reliability_to_weight("F") == autolinker_mod.reliability_to_weight(None)
 
 
 @pytest.mark.asyncio

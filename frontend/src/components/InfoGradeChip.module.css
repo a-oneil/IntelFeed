@@ -1,0 +1,134 @@
+.wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.chip {
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  letter-spacing: 0.02em;
+}
+
+.high {
+  background: color-mix(in srgb, var(--success) 20%, transparent);
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 50%, transparent);
+}
+
+.mid {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 50%, transparent);
+}
+
+.low {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 50%, transparent);
+}
+
+.unjudged {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px dashed var(--text-muted);
+}
+
+.popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: max-content;
+  min-width: 260px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 10px 12px;
+  background: var(--bg-elevated, var(--bg-secondary));
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.key {
+  flex: none;
+  width: 1.25em;
+  text-align: center;
+  font-weight: 700;
+}
+
+.sub {
+  display: block;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.note {
+  display: block;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  font-style: italic;
+  margin-top: 2px;
+}
+
+.pickLabel {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.pick {
+  display: flex;
+  gap: 4px;
+}
+
+.pickBtn {
+  flex: 1;
+  font: inherit;
+  font-weight: 600;
+  padding: 4px 0;
+  background: var(--bg-tertiary, var(--bg-secondary));
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.pickBtn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.picked {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text, #fff);
+}
+
+.reset {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--accent);
+  cursor: pointer;
+}
