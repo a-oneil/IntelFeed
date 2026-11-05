@@ -35,6 +35,26 @@ Scans title, summary and each paragraph with an Aho-Corasick dictionary (fast se
 - **Confidence:** exact canonical names score above aliases; both drop for feeds with weak reliability.
 - **Dictionary words** like "Royal" or "Hive" wait in `pending_autolink_matches` until the one-pass AI links or rejects them; the adjudicator then checks that call.
 
+### Admiralty grade
+
+Each article from a rated feed shows a two-part grade such as **B2** next to its date in the reader. Articles from a feed with no reliability rating show no grade.
+
+- **The letter (A–F)** rates the source over time. It is the feed's reliability, set under Edit Feed → Assessment. A is rare outside government sources; most good commercial sources are B.
+- **The number (1–6)** rates this one article. It never comes from the feed's letter, so a B feed can publish a 4.
+
+| Number | Meaning | Who decides |
+|---|---|---|
+| 1 Confirmed | Another independent outlet reports the same story | The platform: a 2 or 3 becomes 1 when its story thread holds a different outlet's article. Copies (echoes) and the same outlet don't count, nor do articles rated 4–6. |
+| 2 Probably true | Logical, specific, backed by evidence it shows | The one-pass AI, from the article alone |
+| 3 Possibly true | Reasonably logical but thin or secondhand | The one-pass AI |
+| 4 Doubtfully true | Possible but unsupported: anonymous claims, an actor's boasts, speculation | The one-pass AI |
+| 5 Improbable | Illogical or self-contradicting | The one-pass AI |
+| 6 Cannot be judged | Nothing to judge: marketing, opinion, a bare link | The one-pass AI |
+
+The AI also records whether the author saw events firsthand or is relaying someone else, and one sentence of reasoning. Click the grade to see it. Any signed-in user can set the number by hand there; that rating is shared, stamped with the user's name, and stays put through re-analysis until someone resets it. Confirmation is re-checked after every story-thread sweep (`backend/app/workers/thread_tasks.py`), so an article can become confirmed days later. Code: `backend/app/services/info_rating.py`.
+
+Only articles analyzed after this feature shipped have a number; older ones show a dash in place of the number (B–) until re-analyzed or rated by hand. The grade is display and search only (`info:`, `grade:`); it does not change scoring or tag confidence.
+
 ## Beat-scheduled enrichment
 
 UTC defaults from `backend/app/workers/job_registry.py` and the jobs each enrichment source declares in `backend/app/enrichment/`; admins can override.

@@ -21,6 +21,7 @@ vi.mock("@/hooks/useEntries", () => ({
   useMarkUnread: vi.fn(() => ({ mutate: vi.fn() })),
   useSimilarEntries: vi.fn(() => ({ data: [] })),
   useTranslateEntry: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useSetInfoRating: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }));
 
 vi.mock("@/hooks/useFeeds", () => ({

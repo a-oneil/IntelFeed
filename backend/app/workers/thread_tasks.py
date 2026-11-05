@@ -68,6 +68,11 @@ async def _rebuild_story_threads(limit: int | None = None) -> dict:
         for thread_id in stale:
             await ensure_spine(db, thread_id, allow_ai=False)
         stats["spined"] = len(stale)
+        # Membership just moved, so "confirmed by another outlet" may have too.
+        from app.services.info_rating import sync_corroboration
+
+        stats["info_ratings_changed"] = await sync_corroboration(db)
+        await db.commit()
 
     # Outside the session: the rescore reads committed membership.
     if changed:

@@ -165,6 +165,10 @@ export interface Entry {
   // whose CVEs affect the vendors/products the user runs)
   exposure?: EntryExposure | null;
   personal?: EntryPersonalization | null;
+  // Information credibility 1–6 — the number half of an Admiralty grade (the
+  // letter is the feed's reliability_rating). Rated per article.
+  info_rating?: number | null;
+  info_rating_by?: "ai" | "analyst" | null;
 }
 
 export type ExposurePosture = "blind" | "no_rule" | "defended";
@@ -212,6 +216,11 @@ export interface EntryDetail extends Entry {
   priority_raw?: number | null;
   // When is_echo is true, the earlier entry this one echoes (near-duplicate of)
   echo_of?: EchoOf | null;
+  // The AI's score from the article alone (before corroboration), how close
+  // the author was to the events, and the AI's reason or the analyst's note.
+  info_rating_ai?: number | null;
+  info_rating_access?: "firsthand" | "secondhand" | "unclear" | null;
+  info_rating_note?: string | null;
 }
 
 export interface EchoOf {

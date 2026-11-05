@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, SmallInteger, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -48,6 +48,16 @@ class Entry(Base):
     priority_score: Mapped[float | None] = mapped_column(Float, index=True)
     priority_raw: Mapped[float | None] = mapped_column(Float, index=True)
     scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Information credibility, the number half of an Admiralty grade (1-6).
+    # Rated per article, never inherited from the feed's A-F letter. The AI
+    # scores 2-6 from the article alone; corroboration by another independent
+    # outlet in the same story thread lifts a 2 or 3 to 1; an analyst's rating
+    # overrides both. See app/services/info_rating.py.
+    info_rating: Mapped[int | None] = mapped_column(SmallInteger)
+    info_rating_ai: Mapped[int | None] = mapped_column(SmallInteger)
+    info_rating_by: Mapped[str | None] = mapped_column(String(10))  # ai | analyst
+    info_rating_access: Mapped[str | None] = mapped_column(String(12))  # firsthand | secondhand | unclear
+    info_rating_note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (

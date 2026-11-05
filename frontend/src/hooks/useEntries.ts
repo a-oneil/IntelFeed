@@ -321,6 +321,21 @@ export function useToggleStar() {
   });
 }
 
+/** Set an article's 1–6 credibility by hand, or `null` to go back to the AI's. */
+export function useSetInfoRating() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ entryId, rating }: { entryId: string; rating: number | null }) => {
+      const res = await api.put(`/entries/${entryId}/info-rating`, { rating });
+      return res.data;
+    },
+    onSuccess: (_data, { entryId }) => {
+      queryClient.invalidateQueries({ queryKey: ["entries"] });
+      queryClient.invalidateQueries({ queryKey: ["entry", entryId] });
+    },
+  });
+}
+
 export function useToggleBookmark() {
   const queryClient = useQueryClient();
   return useMutation({

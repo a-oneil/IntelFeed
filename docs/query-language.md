@@ -59,6 +59,8 @@ The list of fields the search understands is `ENTRY_FIELDS` and `ENTITY_FIELDS` 
 | `is` | status | `is:starred`, `is:unread` ([all values](#status-flags)) |
 | `sort` | ordering | `sort:newest`, `sort:radar` ([all values](#sorting)) |
 | `signal` | exact | `signal:kev_added` |
+| `info` | number 1–6 | `info:1`, `info:<=2`, `info:1..3` |
+| `grade` | letter + number | `grade:B2` |
 | `feed.reliability`, `feed.timeliness`, `feed.relevance` | letter grade | `feed.reliability:B` |
 | **CVE** | | |
 | `cve` | entity | `cve:CVE-2024-1234` |
@@ -220,6 +222,13 @@ category:"Vendor Blogs"
 
 ```text
 feed.reliability:A
+```
+
+`info:` matches the article's own credibility number, 1 (confirmed by another outlet) to 6 (cannot be judged); it takes `<`, `>` and `..` ranges. `grade:` matches the feed's letter and the article's number together. Articles with no number never match. See [Admiralty grade](entries.md#admiralty-grade).
+
+```text
+info:<=2               # confirmed or probably true
+grade:B1               # usually reliable source, confirmed story
 ```
 
 #### Tags, Type, Media, Language

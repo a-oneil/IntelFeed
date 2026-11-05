@@ -36,7 +36,7 @@ import { InlineEntityHighlighter, type HighlightEntity, type HighlightEntityMeta
 import { actorMeta, malwareMeta, vendorMeta, productMeta, toolMeta, countryMeta, mitigationMeta, cweMeta, observableMeta } from "@/utils/entityPopoverMeta";
 import { RuleEntryCard } from "@/components/RuleEntryCard";
 import { IntelLevelBadge } from "@/components/IntelLevelBadge";
-import { ReliabilityBadge } from "@/components/ReliabilityBadge";
+import { InfoGradeChip } from "@/components/InfoGradeChip";
 import { EntryIntelBadges } from "@/components/EntryIntelBadges";
 import { SelectionContextMenu } from "@/components/SelectionContextMenu";
 import { CreateEntityPanel } from "@/components/CreateEntityPanel";
@@ -757,12 +757,19 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                 );
               })()}
               {entry.feed_title}
-              {(() => {
-                const sub = feedsData?.items.find((s) => s.id === entry.feed_id);
-                if (!sub) return null;
-                return <ReliabilityBadge rating={sub.reliability_rating} size="md" />;
-              })()}
             </FeedNameMenuButton>
+            {/* The feed's reliability letter lives in the grade (B2), so the
+                feed name carries no separate badge. */}
+            <InfoGradeChip
+              entryId={entry.id}
+              reliability={feedsData?.items.find((s) => s.id === entry.feed_id)?.reliability_rating}
+              rating={entry.info_rating}
+              ratingBy={entry.info_rating_by}
+              aiRating={entry.info_rating_ai}
+              access={entry.info_rating_access}
+              note={entry.info_rating_note}
+              readOnly={isVisitor}
+            />
             {/* The timestamp doubles as the way into the pipeline status popover
                 (signed-in only: a visitor gets the date). */}
             {isVisitor ? (

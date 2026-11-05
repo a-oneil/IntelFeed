@@ -570,7 +570,7 @@ Each feed has switches that decide what the pipeline does with its articles. Edi
 
 The observables stage has no switch of its own, but `_scan_entry_observables` skips feeds set to `none`. Its tuning is in the global `observables_*` settings.
 
-**The AI pass has its own gates.** `enqueue_entry_analysis()` (`backend/app/services/entry_analysis.py:392`) queues an entry only when `ai_one_pass_enabled` is on, the feed's mode is not `none`, and `ai_analysis_enabled` is true. Use `ai_analysis_enabled = false` to keep matching a noisy source against your catalog without letting the AI create entities from it. Apart from `none`, the mode has no effect on the AI.
+**The AI pass has its own gates.** `enqueue_entry_analysis()` (`backend/app/services/entry_analysis.py:401`) queues an entry only when `ai_one_pass_enabled` is on, the feed's mode is not `none`, and `ai_analysis_enabled` is true. Use `ai_analysis_enabled = false` to keep matching a noisy source against your catalog without letting the AI create entities from it. Apart from `none`, the mode has no effect on the AI.
 
 ### The two pipelines
 

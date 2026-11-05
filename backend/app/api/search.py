@@ -871,6 +871,8 @@ FIELD_SUGGESTIONS = [
     {"text": "signal:", "description": "Signal-engine reason (under_reported, kev_added, …)", "category": "entry"},
     {"text": "url:", "description": "Article link contains", "category": "entry"},
     {"text": "words:", "description": "Article length (e.g. >1500)", "category": "entry"},
+    {"text": "info:", "description": "Article credibility 1-6 (1 confirmed, 6 cannot judge)", "category": "entry"},
+    {"text": "grade:", "description": "Admiralty grade: feed letter + article number (B2, C3)", "category": "entry"},
     {"text": "feed.reliability:", "description": "Source reliability grade (A-F)", "category": "entry"},
     {"text": "feed.timeliness:", "description": "Source timeliness grade", "category": "entry"},
     {"text": "feed.relevance:", "description": "Source relevance grade", "category": "entry"},
@@ -884,6 +886,8 @@ FIELD_SUGGESTIONS = [
 STATIC_VALUES = {
     "is": list(IS_FILTER_VALUES),
     "sort": sorted(VALID_SORTS),
+    "info": ["1", "2", "3", "4", "5", "6"],
+    "grade": [f"{letter}{number}" for letter in "ABCDEF" for number in range(1, 7)],
     "cve.severity": ["critical", "high", "medium", "low"],
     "rule.type": ["sigma", "splunk_spl", "crowdstrike_ql", "elastic_ql", "kql"],
     "campaign.status": ["active", "monitoring", "closed", "historical"],

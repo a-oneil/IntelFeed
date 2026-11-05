@@ -40,6 +40,8 @@ from app.schemas.entry import (
     EntryDuplicate,
     EntryMediaBrief,
     EntryResponse,
+    InfoRatingRequest,
+    InfoRatingResponse,
     MarkAllReadRequest,
     TranslateEntryResponse,
 )
@@ -1042,6 +1044,8 @@ async def _entry_page(
                 is_echo=entry.id in echo_entries,
                 exposure=exposure_map.get(entry.id),
                 personal=personal_map.get(entry.id),
+                info_rating=entry.info_rating,
+                info_rating_by=entry.info_rating_by,
             )
         )
 
@@ -2649,6 +2653,39 @@ async def get_entry(
         echo_of=echo_of,
         exposure=exposure,
         personal=personal,
+        info_rating=entry.info_rating,
+        info_rating_by=entry.info_rating_by,
+        info_rating_ai=entry.info_rating_ai,
+        info_rating_access=entry.info_rating_access,
+        info_rating_note=entry.info_rating_note,
+    )
+
+
+@router.put("/{entry_id}/info-rating", response_model=InfoRatingResponse)
+async def set_info_rating(
+    body: InfoRatingRequest,
+    entry_id: uuid.UUID = Path(..., description="Entry UUID"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the article's information-credibility number (1-6) by hand.
+
+    The rating is shared: every user sees it, stamped with who set it. Send
+    `rating: null` to drop the override and go back to the AI's rating.
+    """
+    from app.services.info_rating import set_analyst_rating
+
+    entry = await db.get(Entry, entry_id)
+    if entry is None:
+        raise AppError(code="not_found", message="Entry not found", status_code=404)
+    await set_analyst_rating(db, entry_id, body.rating, body.note, user.username)
+    await db.flush()
+    await db.refresh(entry)
+    return InfoRatingResponse(
+        info_rating=entry.info_rating,
+        info_rating_by=entry.info_rating_by,
+        info_rating_ai=entry.info_rating_ai,
+        info_rating_note=entry.info_rating_note,
     )
 
 

@@ -201,6 +201,8 @@ These filter articles.
 | `signal:` | `signal:under_reported`, `signal:kev_added`, `signal:novel_entity` | Why the signal engine ranked the article |
 | `url:` | `url:github.com` | |
 | `words:` | `words:>1500`, `words:500..2000` | Article length |
+| `info:` | `info:1`, `info:<=2` | Article credibility, 1 (confirmed) to 6 (cannot be judged) |
+| `grade:` | `grade:B2` | Feed letter + article number |
 | `feed.reliability:` | `feed.reliability:B` | Source grade (Admiralty code). Also `feed.timeliness:` and `feed.relevance:` |
 | `sort:` | `sort:newest` | `relevance`, `newest`, `oldest`, `radar`, `title_asc`, `title_desc`, `shortest`, `longest` |
 
