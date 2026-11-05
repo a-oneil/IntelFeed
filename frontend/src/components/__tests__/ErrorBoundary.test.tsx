@@ -47,30 +47,81 @@ describe("ErrorBoundary", () => {
     expect(screen.getByText("Test explosion")).toBeInTheDocument();
   });
 
-  it("resets state and re-renders children when Try Again is clicked", () => {
-    let shouldThrow = true;
-
-    function ConditionalChild() {
-      if (shouldThrow) {
-        throw new Error("Temporary failure");
-      }
-      return <div>Recovered child</div>;
-    }
+  it("reloads the page when Try Again is clicked", () => {
+    const reload = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...originalLocation, reload },
+    });
 
     render(
       <ErrorBoundary>
-        <ConditionalChild />
+        <ProblemChild />
       </ErrorBoundary>
     );
-
-    expect(screen.getByText("Something went wrong")).toBeInTheDocument();
-
-    // Fix the child before clicking Try Again
-    shouldThrow = false;
     fireEvent.click(screen.getByText("Try Again"));
 
-    expect(screen.getByText("Recovered child")).toBeInTheDocument();
-    expect(screen.queryByText("Something went wrong")).not.toBeInTheDocument();
+    expect(reload).toHaveBeenCalledOnce();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: originalLocation,
+    });
+  });
+
+  describe("stale chunk after a deploy", () => {
+    const originalLocation = window.location;
+    let reload: ReturnType<typeof vi.fn>;
+
+    function ChunkFail(): never {
+      throw new TypeError(
+        "error loading dynamically imported module: https://intelfeed.cc/assets/SettingsPage-Bi0eanzo.js"
+      );
+    }
+
+    beforeEach(() => {
+      sessionStorage.clear();
+      reload = vi.fn();
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: { ...originalLocation, reload },
+      });
+    });
+    afterEach(() => {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    });
+
+    it("reloads once on its own", () => {
+      render(
+        <ErrorBoundary>
+          <ChunkFail />
+        </ErrorBoundary>
+      );
+      expect(reload).toHaveBeenCalledOnce();
+    });
+
+    it("does not loop when the chunk is still missing after the reload", () => {
+      sessionStorage.setItem("intelfeed-chunk-reload-at", String(Date.now()));
+      render(
+        <ErrorBoundary>
+          <ChunkFail />
+        </ErrorBoundary>
+      );
+      expect(reload).not.toHaveBeenCalled();
+      expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    });
+
+    it("leaves other errors alone", () => {
+      render(
+        <ErrorBoundary>
+          <ProblemChild />
+        </ErrorBoundary>
+      );
+      expect(reload).not.toHaveBeenCalled();
+    });
   });
 
   it("renders custom fallback when provided", () => {
