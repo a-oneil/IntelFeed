@@ -565,10 +565,14 @@ export interface EngineHealth {
  *  errors; errors are entries still stuck at a stage (a retry to green drops
  *  them), so a red light always has something to fix behind it. An admin
  *  can clear the light: it then counts only errors and retries newer than
- *  the clear.
+ *  the clear. Fewer than ERROR_LIGHT_THRESHOLD stuck entries in all don't
+ *  turn it red: a stray failure is noise, ten is a pattern.
  *  The light sits on every page for every admin, so it polls once a minute;
  *  the Engine console's own observers poll faster while it is open and
  *  TanStack uses the shortest interval. */
+/** Stuck entries, across every stage, before the light turns red. */
+export const ERROR_LIGHT_THRESHOLD = 10;
+
 export function useEngineHealth(enabled: boolean): EngineHealth | undefined {
   const { data: state } = useEngineState(enabled, 60_000);
   const { data: overview } = usePipelineOverview({ enabled, poll: 60_000 });
@@ -580,9 +584,10 @@ export function useEngineHealth(enabled: boolean): EngineHealth | undefined {
   const retrying = overview.stages.reduce((n, s) => n + (s.runs_24h.new_retry ?? s.runs_24h.retry), 0);
   const clearedAt = overview.health_cleared_at ?? null;
   const clearedErrors = clearedAt ? overview.stages.reduce((n, s) => n + s.runs_24h.error, 0) : 0;
+  const failingTotal = failing.reduce((n, f) => n + f.count, 0);
   const level: EngineHealthLevel = state.stopped
     ? "stopped"
-    : failing.length
+    : failingTotal >= ERROR_LIGHT_THRESHOLD
       ? "err"
       : retrying
         ? "warn"

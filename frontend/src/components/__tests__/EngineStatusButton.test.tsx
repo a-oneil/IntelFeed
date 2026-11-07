@@ -67,14 +67,32 @@ describe("EngineStatusButton", () => {
     expect(await screen.findByRole("button", { name: "Engine errors" })).toHaveAttribute("data-level", "err");
   });
 
+  it("stays green with fewer than ten stuck entries", async () => {
+    mockApi(false, [
+      { name: "extract", runs_24h: runs(5) },
+      { name: "enrich", runs_24h: runs(4) },
+    ]);
+    renderIt();
+    expect(await screen.findByRole("button", { name: "Engine healthy" })).toHaveAttribute("data-level", "ok");
+  });
+
+  it("turns red at ten stuck entries across stages", async () => {
+    mockApi(false, [
+      { name: "extract", runs_24h: runs(6) },
+      { name: "enrich", runs_24h: runs(4) },
+    ]);
+    renderIt();
+    expect(await screen.findByRole("button", { name: "Engine errors" })).toHaveAttribute("data-level", "err");
+  });
+
   it("is green after a clear while only older errors remain", async () => {
     mockApi(false, [{ name: "extract", runs_24h: runs(13, 2, { new_error: 0, new_retry: 0 }) }], "2026-11-04T09:00:00Z");
     renderIt();
     expect(await screen.findByRole("button", { name: "Engine healthy" })).toHaveAttribute("data-level", "ok");
   });
 
-  it("turns red again when a new error comes in after a clear", async () => {
-    mockApi(false, [{ name: "extract", runs_24h: runs(14, 2, { new_error: 1, new_retry: 0 }) }], "2026-11-04T09:00:00Z");
+  it("turns red again when ten new errors come in after a clear", async () => {
+    mockApi(false, [{ name: "extract", runs_24h: runs(23, 2, { new_error: 10, new_retry: 0 }) }], "2026-11-04T09:00:00Z");
     renderIt();
     expect(await screen.findByRole("button", { name: "Engine errors" })).toHaveAttribute("data-level", "err");
   });
