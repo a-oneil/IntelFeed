@@ -556,6 +556,8 @@ export interface EngineHealth {
   /** Entries stuck on an errored stage, per stage, since the last clear. */
   failing: { stage: string; count: number }[];
   retrying: number;
+  /** Retried runs per stage, since the last clear. */
+  retryingStages: { stage: string; count: number }[];
   /** When the light was last cleared, and the errors still stuck from before it. */
   clearedAt: string | null;
   clearedErrors: number;
@@ -565,10 +567,14 @@ export interface EngineHealth {
  *  errors; errors are entries still stuck at a stage (a retry to green drops
  *  them), so a red light always has something to fix behind it. An admin
  *  can clear the light: it then counts only errors and retries newer than
- *  the clear.
+ *  the clear. Fewer than ERROR_LIGHT_THRESHOLD stuck entries in all don't
+ *  turn it red: a stray failure is noise, ten is a pattern.
  *  The light sits on every page for every admin, so it polls once a minute;
  *  the Engine console's own observers poll faster while it is open and
  *  TanStack uses the shortest interval. */
+/** Stuck entries, across every stage, before the light turns red. */
+export const ERROR_LIGHT_THRESHOLD = 10;
+
 export function useEngineHealth(enabled: boolean): EngineHealth | undefined {
   const { data: state } = useEngineState(enabled, 60_000);
   const { data: overview } = usePipelineOverview({ enabled, poll: 60_000 });
@@ -577,17 +583,22 @@ export function useEngineHealth(enabled: boolean): EngineHealth | undefined {
   const failing = overview.stages
     .filter((s) => newError(s) > 0)
     .map((s) => ({ stage: s.name, count: newError(s) }));
-  const retrying = overview.stages.reduce((n, s) => n + (s.runs_24h.new_retry ?? s.runs_24h.retry), 0);
+  const newRetry = (s: PipelineStageInfo) => s.runs_24h.new_retry ?? s.runs_24h.retry;
+  const retryingStages = overview.stages
+    .filter((s) => newRetry(s) > 0)
+    .map((s) => ({ stage: s.name, count: newRetry(s) }));
+  const retrying = retryingStages.reduce((n, s) => n + s.count, 0);
   const clearedAt = overview.health_cleared_at ?? null;
   const clearedErrors = clearedAt ? overview.stages.reduce((n, s) => n + s.runs_24h.error, 0) : 0;
+  const failingTotal = failing.reduce((n, f) => n + f.count, 0);
   const level: EngineHealthLevel = state.stopped
     ? "stopped"
-    : failing.length
+    : failingTotal >= ERROR_LIGHT_THRESHOLD
       ? "err"
       : retrying
         ? "warn"
         : "ok";
-  return { level, failing, retrying, clearedAt, clearedErrors };
+  return { level, failing, retrying, retryingStages, clearedAt, clearedErrors };
 }
 
 /** The Engine console's time picker: one window for every tab but Review. */

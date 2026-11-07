@@ -15,7 +15,7 @@ const confirm = vi.fn();
 vi.mock("@/utils/dialog", () => ({ confirmDialog: (...args: unknown[]) => confirm(...args) }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { EngineStoppedBanner, EngineSwitch } from "../engine/EngineSwitch";
+import { CheckEngineBanner, EngineStoppedBanner, EngineSwitch } from "../engine/EngineSwitch";
 
 function renderIt() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -70,5 +70,57 @@ describe("EngineSwitch", () => {
 
     expect(put).toHaveBeenCalledWith("/engine/state", { stopped: false });
     expect(await screen.findByRole("button", { name: /stop engine/i })).toBeInTheDocument();
+  });
+});
+
+describe("CheckEngineBanner", () => {
+  const stage = (name: string, error = 0, retry = 0) => ({ name, runs_24h: { success: 5, error, retry } });
+  function mockApi(stopped: boolean, stages: ReturnType<typeof stage>[]) {
+    get.mockImplementation((url: string) =>
+      Promise.resolve({
+        data:
+          url === "/engine/state"
+            ? { stopped, queued: {} }
+            : { pipeline_engine_enabled: true, run_logging_enabled: true, stages },
+      }),
+    );
+  }
+  function renderBanner(onOpenStage = vi.fn()) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <CheckEngineBanner labelFor={(s) => s.toUpperCase()} onOpenStage={onOpenStage} />
+      </QueryClientProvider>,
+    );
+    return onOpenStage;
+  }
+  beforeEach(() => get.mockReset());
+
+  it("says which stages are stuck and opens one on click", async () => {
+    mockApi(false, [stage("extract", 7), stage("enrich", 5)]);
+    const onOpenStage = renderBanner();
+    expect(await screen.findByRole("status")).toHaveTextContent("12 entries are stuck");
+    await userEvent.click(screen.getByRole("button", { name: /ENRICH 5/ }));
+    expect(onOpenStage).toHaveBeenCalledWith("enrich");
+  });
+
+  it("explains retries when the light is amber", async () => {
+    mockApi(false, [stage("extract", 2, 3)]);
+    renderBanner();
+    expect(await screen.findByRole("status")).toHaveTextContent("3 runs were retried");
+  });
+
+  it("is hidden while the light is green", async () => {
+    mockApi(false, [stage("extract", 4)]);
+    renderBanner();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("is hidden while the engine is stopped", async () => {
+    mockApi(true, [stage("extract", 20)]);
+    renderBanner();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });

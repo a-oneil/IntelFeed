@@ -24,6 +24,14 @@
   background: var(--danger);
   box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 55%, transparent);
 }
+.hdotWarn {
+  background: var(--warning);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--warning) 55%, transparent);
+}
+.hdotStopped {
+  background: var(--text-muted);
+  box-shadow: none;
+}
 .hspark {
   width: 56px;
   height: 18px;

@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 
-import { useEngineHealth, type EngineHealth } from "@/hooks/useEngine";
+import { ERROR_LIGHT_THRESHOLD, useEngineHealth, type EngineHealth } from "@/hooks/useEngine";
 import { useIsAdmin } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 
@@ -33,6 +33,13 @@ function describe(h: EngineHealth): { title: string; body: string } {
     case "warn":
       return { title: "Engine retrying", body: `${h.retrying.toLocaleString()} runs retried in the last 24 hours.` };
     default:
+      if (h.failing.length) {
+        const total = h.failing.reduce((n, f) => n + f.count, 0);
+        return {
+          title: "Engine healthy",
+          body: `${total.toLocaleString()} ${total === 1 ? "entry is" : "entries are"} stuck at a stage, under the ${ERROR_LIGHT_THRESHOLD} it takes to turn the light red.`,
+        };
+      }
       if (h.clearedAt && h.clearedErrors) {
         return {
           title: "Engine healthy",
