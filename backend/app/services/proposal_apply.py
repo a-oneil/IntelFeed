@@ -177,6 +177,63 @@ async def apply_link_removal_row(db: AsyncSession, row: EntityLinkValidationLog)
     return False
 
 
+async def trim_alias_row(db: AsyncSession, row: EntityMaintenanceLog) -> dict:
+    """Apply one alias_collision proposal: trim the alias from the entity,
+    unlink what only that alias matched, recount, and write the applied row.
+    Idempotent: an entity or alias already gone marks the proposal applied
+    with ``skipped``. Returns {applied, skipped, entity_id, removed_alias}."""
+    from app.api.entity_merge import ENTITY_TYPE_REGISTRY
+    from app.api.hygiene import CASCADE_SPECS
+
+    bad_alias = (row.after or {}).get("bad_alias")
+    spec = ENTITY_TYPE_REGISTRY.get(row.entity_type)
+    if not bad_alias or not spec:
+        raise AppError(code="invalid", message="proposal has no alias or an unsupported type", status_code=400)
+    model = spec["model"]
+    entity = (await db.execute(select(model).where(model.id == row.entity_id))).scalar_one_or_none()
+    current = list(getattr(entity, "aliases", None) or [])
+    new_aliases = [a for a in current if a != bad_alias]
+    if entity is None or len(new_aliases) == len(current):
+        row.applied = True
+        db.add(row)
+        await db.flush()
+        return {"applied": True, "skipped": True, "entity_id": row.entity_id, "removed_alias": bad_alias}
+    # Unlink what only that alias matched and recount, like an alias edit on the profile;
+    # otherwise the wrong links (and the inflated count) outlive the alias.
+    unlinked = 0
+    cascade = CASCADE_SPECS.get(row.entity_type)
+    if cascade is not None:
+        from app.api.entity_profiles import _unlink_entries_for_removed_aliases
+
+        junction = cascade["junction"]
+        unlinked = await _unlink_entries_for_removed_aliases(
+            db, current, new_aliases, junction, getattr(junction, cascade["junction_fk"]), entity.id, entity=entity
+        )
+    entity.aliases = new_aliases
+    row.applied = True
+    db.add(row)
+    db.add(
+        EntityMaintenanceLog(
+            entity_type=row.entity_type,
+            entity_id=entity.id,
+            action="alias_collision",
+            mode="apply",
+            before={"entity": {"id": str(entity.id), "name": entity.name, "aliases": current}},
+            after={
+                "bad_alias": bad_alias,
+                "kind": (row.after or {}).get("kind"),
+                "aliases_after": new_aliases,
+                "unlinked_entries": unlinked,
+                "promoted_from": str(row.id),
+            },
+            reasoning=f"Promoted from alias_collision proposal {row.id}.",
+            applied=True,
+        )
+    )
+    await db.flush()
+    return {"applied": True, "skipped": False, "entity_id": entity.id, "removed_alias": bad_alias}
+
+
 # What an apply that changes nothing reports when its outcome is already
 # reached: the link, edge or entity it acts on is gone, the article is
 # already linked to the entity a held-link proposal names, a capture's value

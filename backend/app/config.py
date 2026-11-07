@@ -308,6 +308,9 @@ class Settings(BaseSettings):
     # in apply mode (1 = the first high-confidence verdict converts the entity).
     adjudication_reclassify_consensus: int = 2
     adjudication_circuit_breaker_pct: float = 0.5
+    # The per-article breaker only judges a run with at least this many items:
+    # on a one- or two-item recheck a single remove is already 100%.
+    adjudication_circuit_breaker_min_items: int = 5
     # Daily duplicate review (services/entity_merge_review.py): likely-duplicate
     # pairs of existing actors / malware / tools judged by the model; "same"
     # becomes a Merge proposal on the Review tab. 0 pairs = off.

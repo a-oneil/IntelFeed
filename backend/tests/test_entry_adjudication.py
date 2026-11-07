@@ -828,6 +828,13 @@ def test_validate_drops_destructive_verdicts_whose_reason_argues_for_the_record(
         ("Microsoft Defender for Endpoint is the victim environment the malware runs in.", True),
         ("Microsoft Defender for Endpoint appears only in a 'Related:' headline at the foot of the page.", False),
         ("Microsoft Defender for Endpoint is named only in the author bio, not as a threat actor.", False),
+        (
+            "The article mentions 'Microsoft Defender for Endpoint' only as a security product being disabled by"
+            " malware, not as a tool being abused or a threat actor.",
+            True,
+        ),
+        ("Microsoft Defender for Endpoint appears only as a target of credential theft, not as an adversary.", True),
+        ("Microsoft Defender for Endpoint appears only in an advert at the end, not as an adversary.", False),
     ],
 )
 def test_a_link_remove_argued_from_the_entity_being_a_defender_is_voided(reason, kept):
@@ -1564,36 +1571,160 @@ async def test_apply_demotes_edge_like_the_nightly_job_and_drops_iocs(db_session
     assert (await db_session.get(Observable, obs.id)).sighting_count == 0
 
 
-@pytest.mark.asyncio
-async def test_apply_breaker_downgrades_whole_run_to_proposals(db_session: AsyncSession, feed):
-    await _seed_settings(db_session, adjudication_mode="apply")
-    entry = await _make_entry(db_session, feed)
-    a = await _link_actor(db_session, entry, "Storm")
-    b = await _link_actor(db_session, entry, "Nightspire")
+_BREAKER_NAMES = ["Storm", "Nightspire", "Driftwood", "Ashgrove", "Kestrel"]
+
+
+async def _remove_all(db_session: AsyncSession, entry, names: list[str]):
+    actors = [await _link_actor(db_session, entry, n) for n in names]
     _items, verdicts = await _verdicts_for(
         db_session,
         entry,
         [
-            {"item_id": f"link:threat_actor:{a.id}", "verdict": "remove", "confidence": "high", "reason": "Storm r"},
-            {
-                "item_id": f"link:threat_actor:{b.id}",
-                "verdict": "remove",
-                "confidence": "high",
-                "reason": "Nightspire r",
-            },
+            {"item_id": f"link:threat_actor:{a.id}", "verdict": "remove", "confidence": "high", "reason": f"{n} r"}
+            for a, n in zip(actors, names, strict=True)
         ],
     )
-    cfg = await adj._settings(db_session)  # breaker 0.5; 2/2 destructive trips it
+    return verdicts
+
+
+async def _linked_actors(db_session: AsyncSession, entry) -> int:
+    return len(
+        (await db_session.execute(select(EntryThreatActor).where(EntryThreatActor.entry_id == entry.id)))
+        .scalars()
+        .all()
+    )
+
+
+@pytest.mark.asyncio
+async def test_apply_breaker_downgrades_whole_run_to_proposals(db_session: AsyncSession, feed):
+    await _seed_settings(db_session, adjudication_mode="apply")
+    entry = await _make_entry(db_session, feed)
+    verdicts = await _remove_all(db_session, entry, _BREAKER_NAMES)
+    cfg = await adj._settings(db_session)  # breaker 0.5, min 5 items; 5/5 destructive trips it
     detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
     assert detail["breaker"] and detail["mode"] == "shadow" and detail["applied"] == 0
-    assert (
-        len(
-            (await db_session.execute(select(EntryThreatActor).where(EntryThreatActor.entry_id == entry.id)))
-            .scalars()
-            .all()
+    assert await _linked_actors(db_session, entry) == 5
+
+
+@pytest.mark.asyncio
+async def test_apply_breaker_ignores_runs_below_min_items(db_session: AsyncSession, feed):
+    """A two-item recheck that removes both is 100% destructive, but two
+    verdicts are not a pattern: each applies on its own confidence."""
+    await _seed_settings(db_session, adjudication_mode="apply")
+    entry = await _make_entry(db_session, feed)
+    verdicts = await _remove_all(db_session, entry, _BREAKER_NAMES[:2])
+    cfg = await adj._settings(db_session)
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    assert not detail["breaker"] and detail["mode"] == "apply" and detail["applied"] == 2
+    assert await _linked_actors(db_session, entry) == 0
+
+
+async def _pending_link_proposals(db_session: AsyncSession, entry) -> int:
+    return (
+        await db_session.execute(
+            select(func.count())
+            .select_from(EntityLinkValidationLog)
+            .where(EntityLinkValidationLog.entry_id == entry.id, EntityLinkValidationLog.action == "shadow_remove")
         )
-        == 2
+    ).scalar_one()
+
+
+async def _held_first_look(db_session: AsyncSession, feed):
+    """An apply-mode review whose five removes trip the breaker: five pending
+    proposals the article's second look has to settle."""
+    await _seed_settings(db_session, adjudication_mode="apply")
+    entry = await _make_entry(db_session, feed)
+    await _adjudication_result(db_session, entry)
+    verdicts = await _remove_all(db_session, entry, _BREAKER_NAMES)
+    cfg = await adj._settings(db_session)
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.flush()
+    assert detail["breaker"] and detail["applied"] == 0 and "second_look" not in detail
+    assert await _pending_link_proposals(db_session, entry) == 5
+    return entry, cfg
+
+
+@pytest.mark.asyncio
+async def test_second_look_applies_what_it_repeats_and_closes_the_rest(db_session: AsyncSession, feed):
+    entry, cfg = await _held_first_look(db_session, feed)
+    request = await _request(db_session, entry)
+    assert await adj.owe_second_look(db_session, request, entry)
+    assert request.adjudication_status == adj.RECHECK and request.adjudication_recheck_since is None
+
+    actors = {a.name: a for a in (await db_session.execute(select(ThreatActor))).scalars()}
+    _items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [
+            {
+                "item_id": f"link:threat_actor:{actors[n].id}",
+                "verdict": "remove",
+                "confidence": "high",
+                "reason": f"{n} x",
+            }
+            for n in _BREAKER_NAMES[:2]
+        ],
     )
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.flush()
+
+    assert detail["second_look"] and detail["mode"] == "apply"
+    assert detail["confirmed"] == 2 and detail["closed"] == 3 and detail["applied"] == 2
+    assert detail["shadowed"] == 0
+    assert await _linked_actors(db_session, entry) == 3
+    assert await _pending_link_proposals(db_session, entry) == 0
+    assert await adj.earlier_proposals(db_session, entry.id) == {}
+    assert not await adj.owe_second_look(db_session, request, entry)
+
+
+@pytest.mark.asyncio
+async def test_second_look_files_nothing_new(db_session: AsyncSession, feed):
+    entry, cfg = await _held_first_look(db_session, feed)
+    late = await _link_actor(db_session, entry, "Latecomer")
+    _items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [
+            {
+                "item_id": f"link:threat_actor:{late.id}",
+                "verdict": "remove",
+                "confidence": "medium",
+                "reason": "Latecomer x",
+            }
+        ],
+    )
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.flush()
+
+    # Under the floor and never filed; the five earlier verdicts it did not repeat close.
+    assert detail["second_look"] and detail["unfiled"] == 1 and detail["closed"] == 5
+    assert await _linked_actors(db_session, entry) == 6
+    assert await _pending_link_proposals(db_session, entry) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_recheck_is_never_a_second_look(db_session: AsyncSession, feed):
+    """A recheck judges only the held matches settled since: it must not close
+    earlier verdicts about links it was never shown."""
+    entry, cfg = await _held_first_look(db_session, feed)
+    detail = await apply_verdicts(db_session, entry, [], _payload(), cfg, recheck=True)
+    assert "second_look" not in detail
+    assert await _pending_link_proposals(db_session, entry) == 5
+
+
+@pytest.mark.asyncio
+async def test_backlog_owes_a_second_look_to_articles_with_pending_verdicts(db_session: AsyncSession, feed):
+    entry, _cfg = await _held_first_look(db_session, feed)
+    request = await _request(db_session, entry)
+    request.adjudication_status = adj.COMPLETED
+    clean = await _make_entry(db_session, feed)
+    other = await _request(db_session, clean)
+    other.adjudication_status = adj.COMPLETED
+    await db_session.flush()
+
+    assert await adj.queue_second_look_backlog(db_session) == 1
+    assert request.adjudication_status == adj.RECHECK and request.adjudication_recheck_since is None
+    assert other.adjudication_status == adj.COMPLETED
 
 
 @pytest.mark.asyncio

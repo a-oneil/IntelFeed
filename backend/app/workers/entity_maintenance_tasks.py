@@ -1410,6 +1410,7 @@ async def _review_duplicate_entities_async() -> dict:
         TASK_NAME as MERGE_REVIEW_TASK,
     )
     from app.services.entity_merge_review import (
+        close_unmatched,
         file_verdicts,
         find_merge_candidates,
         pairs_block,
@@ -1433,11 +1434,22 @@ async def _review_duplicate_entities_async() -> dict:
         if not system_user_id:
             return {"status": "no_admin_user"}
 
+        unmatched: list = []
         candidates = await find_merge_candidates(
-            db, limit=batch_size, min_similarity=min_similarity, retry_days=retry_days
+            db, limit=batch_size, min_similarity=min_similarity, retry_days=retry_days, unmatched_out=unmatched
         )
+        closed = await close_unmatched(db, unmatched)
+        await db.commit()
         if not candidates:
-            return {"status": "ok", "candidates": 0, "proposed": 0, "distinct": 0, "unsure": 0, "calls": 0}
+            return {
+                "status": "ok",
+                "candidates": 0,
+                "proposed": 0,
+                "distinct": 0,
+                "unsure": 0,
+                "calls": 0,
+                "closed_unmatched": closed,
+            }
 
         totals = {"proposed": 0, "distinct": 0, "unsure": 0, "ignored": 0, "conflicts": 0, "bad_aliases": 0}
         calls = 0
@@ -1493,4 +1505,4 @@ async def _review_duplicate_entities_async() -> dict:
                 totals[k] = totals.get(k, 0) + v
             await db.commit()
 
-    return {"status": "ok", "candidates": len(candidates), "calls": calls, **totals}
+    return {"status": "ok", "candidates": len(candidates), "calls": calls, "closed_unmatched": closed, **totals}

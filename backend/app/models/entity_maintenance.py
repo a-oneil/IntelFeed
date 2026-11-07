@@ -17,7 +17,7 @@ Two tables:
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -48,7 +48,15 @@ class EntityMaintenanceLog(Base):
     )
     applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    __table_args__ = (Index("ix_entity_maintenance_log_entity_type_action", "entity_type", "action", "created_at"),)
+    __table_args__ = (
+        Index("ix_entity_maintenance_log_entity_type_action", "entity_type", "action", "created_at"),
+        # An article's pending verdicts, which the adjudicator's second look settles.
+        Index(
+            "ix_entity_maintenance_log_pending_entry",
+            text("(before->>'entry_id')"),
+            postgresql_where=text("applied = false"),
+        ),
+    )
 
 
 class ActorDescriptionHistory(Base):

@@ -17,6 +17,7 @@ ADJUDICATION_SETTINGS: dict[str, type] = {
     "adjudication_min_priority_score": float,
     "adjudication_apply_min_confidence": str,
     "adjudication_circuit_breaker_pct": float,
+    "adjudication_circuit_breaker_min_items": int,
     "adjudication_content_max_chars": int,
     "adjudication_scope": str,
 }

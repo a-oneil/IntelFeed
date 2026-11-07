@@ -87,6 +87,7 @@ from app.services.proposal_apply import (
     proposal_domain,
     read_progress,
     settle_adjudication_outcome,
+    trim_alias_row,
     write_progress,
 )
 from app.services.proposal_dismissals import (
@@ -1979,74 +1980,8 @@ async def apply_alias_collision(
             message=f"unsupported entity_type: {row.entity_type}",
             status_code=400,
         )
-    model = spec["model"]
-    entity = (await db.execute(select(model).where(model.id == row.entity_id))).scalar_one_or_none()
-    if entity is None:
-        row.applied = True
-        db.add(row)
-        await db.flush()
-        return ApplyAliasCollisionResponse(
-            log_id=row.id,
-            applied=True,
-            skipped=True,
-            entity_id=row.entity_id,
-            removed_alias=bad_alias,
-        )
-
-    current = list(entity.aliases or [])
-    new_aliases = [a for a in current if a != bad_alias]
-    if len(new_aliases) == len(current):
-        # Already gone.
-        row.applied = True
-        db.add(row)
-        await db.flush()
-        return ApplyAliasCollisionResponse(
-            log_id=row.id,
-            applied=True,
-            skipped=True,
-            entity_id=entity.id,
-            removed_alias=bad_alias,
-        )
-    # Unlink what only that alias matched and recount, like an alias edit on the profile;
-    # otherwise the wrong links (and the inflated count) outlive the alias.
-    unlinked = 0
-    cascade = CASCADE_SPECS.get(row.entity_type)
-    if cascade is not None:
-        from app.api.entity_profiles import _unlink_entries_for_removed_aliases
-
-        junction = cascade["junction"]
-        unlinked = await _unlink_entries_for_removed_aliases(
-            db, current, new_aliases, junction, getattr(junction, cascade["junction_fk"]), entity.id, entity=entity
-        )
-    entity.aliases = new_aliases
-    row.applied = True
-    db.add(row)
-    db.add(
-        EntityMaintenanceLog(
-            entity_type=row.entity_type,
-            entity_id=entity.id,
-            action="alias_collision",
-            mode="apply",
-            before={"entity": {"id": str(entity.id), "name": entity.name, "aliases": current}},
-            after={
-                "bad_alias": bad_alias,
-                "kind": (row.after or {}).get("kind"),
-                "aliases_after": new_aliases,
-                "unlinked_entries": unlinked,
-                "promoted_from": str(row.id),
-            },
-            reasoning=f"Promoted from alias_collision proposal {row.id}.",
-            applied=True,
-        )
-    )
-    await db.flush()
-    return ApplyAliasCollisionResponse(
-        log_id=row.id,
-        applied=True,
-        skipped=False,
-        entity_id=entity.id,
-        removed_alias=bad_alias,
-    )
+    out = await trim_alias_row(db, row)
+    return ApplyAliasCollisionResponse(log_id=row.id, **out)
 
 
 # ---------------------------------------------------------------------------

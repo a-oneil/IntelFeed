@@ -351,7 +351,7 @@ Built-in tasks are seeded at startup from `backend/app/ai/prompts/defaults.py`:
 |---|---|---|
 | `entry_analysis` | extraction | One-pass analysis of each new article (see [below](#one-pass-entry-analysis)). Default `max_tokens` 10000 |
 | `entry_adjudication` | extraction | Reviews what `entry_analysis` wrote (links, new entities, relationships, observables) and returns only the verdicts it would change. Runs as the `adjudicate` pipeline stage, no tools, `max_tokens` 4096 |
-| `entity_merge_review` | extraction | The daily duplicate review: says whether two similar actors, malware families or tools are one entity. A "same" verdict becomes a Merge proposal on the Engine Review tab. `max_tokens` 2048 |
+| `entity_merge_review` | extraction | The daily duplicate review: says whether two similar actors, malware families or tools are one entity. A "same" verdict becomes a Merge proposal on the Engine Review tab, and a second "same" on the next run applies it. `max_tokens` 2048 |
 | `ttp_mapping` | extraction | Maps text to MITRE ATT&CK techniques |
 | `article_summary` | analysis | Summary of one entry |
 | `threat_assessment` | analysis | Quick assessment and recommended actions |
