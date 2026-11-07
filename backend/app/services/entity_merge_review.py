@@ -37,7 +37,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import func, inspect, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entity_types import MALWARE, THREAT_ACTOR, TOOL
@@ -82,8 +82,10 @@ ACTION_ALIAS = "alias_collision"
 
 # Two queries, one per signal, so each uses its own index: a single OR'd WHERE
 # loses the trigram index. Both share the exclusions: pairs an analyst marked
-# not-duplicate, pairs with a pending merge proposal either way, pairs
-# judged within the retry window, and pairs MITRE files as two entries.
+# not-duplicate, pairs with another filer's pending merge proposal either way,
+# pairs judged within the retry window, and pairs MITRE files as two entries.
+# This job's own pending merges and alias trims are not excluded: the next run
+# asks the pair again, and a second agreeing answer is what applies them.
 _EXCLUSIONS_SQL = """
 WHERE NOT EXISTS (
     SELECT 1 FROM proposal_dismissals d
@@ -96,9 +98,16 @@ AND NOT EXISTS (
     WHERE m.entity_type = :etype
       AND ((m.entity_id = p.a_id AND m.after->>'target_id' = p.b_id::text)
         OR (m.entity_id = p.b_id AND m.after->>'target_id' = p.a_id::text))
-      AND ((m.action = 'adjudication_merge' AND m.applied = false)
+      AND ((m.action = 'adjudication_merge' AND m.applied = false
+            AND coalesce(m.after->>'origin', '') <> 'merge_review')
         OR (m.action = 'merge_review_distinct'
-            AND m.created_at > now() - make_interval(days => :retry_days)))
+            AND m.created_at > now() - make_interval(days => :retry_days)
+            AND NOT EXISTS (
+                SELECT 1 FROM entity_maintenance_log al
+                WHERE al.action = 'alias_collision' AND al.applied = false
+                  AND al.after->>'origin' = 'merge_review'
+                  AND al.entity_type = :etype AND al.entity_id IN (p.a_id, p.b_id)
+            )))
 )
 AND NOT EXISTS (
     SELECT 1 FROM {table} ma JOIN {table} mb ON mb.id = p.b_id
@@ -165,6 +174,10 @@ class Candidate:
     # Each name the two sides share, with what it is on each side:
     # [{"form", "a": "name" | "alias", "b": ..., "a_source", "b_source"}].
     shared_names: list[dict] = field(default_factory=list)
+    # This job's pending rows about the pair from an earlier run, which this
+    # run's answer confirms or closes: the merge, and alias trims on either side.
+    confirm_merge: EntityMaintenanceLog | None = None
+    confirm_aliases: list[EntityMaintenanceLog] = field(default_factory=list)
 
     @property
     def signals(self) -> dict:
@@ -191,6 +204,22 @@ async def _shared_entries(db: AsyncSession, entity_type: str, a: uuid.UUID, b: u
     return int((await db.execute(q)).scalar_one())
 
 
+async def _pending_own_rows(db: AsyncSession, types: tuple[str, ...]) -> list[EntityMaintenanceLog]:
+    """This job's pending merges and alias trims, for the reviewable types."""
+    return list(
+        (
+            await db.execute(
+                select(EntityMaintenanceLog).where(
+                    EntityMaintenanceLog.action.in_([ACTION_MERGE_FILED, ACTION_ALIAS]),
+                    EntityMaintenanceLog.applied.is_(False),
+                    EntityMaintenanceLog.entity_type.in_(types),
+                    EntityMaintenanceLog.after["origin"].astext == ORIGIN,
+                )
+            )
+        ).scalars()
+    )
+
+
 async def find_merge_candidates(
     db: AsyncSession,
     *,
@@ -198,10 +227,17 @@ async def find_merge_candidates(
     min_similarity: float,
     retry_days: int,
     types: tuple[str, ...] = REVIEWABLE_TYPES,
+    unmatched_out: list | None = None,
 ) -> list[Candidate]:
     """The ``limit`` most likely duplicate pairs across the reviewable types:
     pairs with a trigram-similar name or a shared alias, ranked by how alike
-    they look, with their shared-article count as a tie-breaker and context."""
+    they look, with their shared-article count as a tie-breaker and context.
+
+    Pairs holding this job's pending rows from an earlier run come first, with
+    those rows attached, so each is asked again before anything new.
+    ``unmatched_out`` collects the pending rows whose pair no longer looks
+    alike (or an analyst has since marked distinct): nothing will ask about
+    them again, so the caller closes them."""
     found: dict[tuple[str, uuid.UUID, uuid.UUID], Candidate] = {}
     for etype in types:
         if etype not in _TYPES:
@@ -227,7 +263,32 @@ async def find_merge_candidates(
     for c in found.values():
         c.shared_entries = await _shared_entries(db, c.entity_type, c.a_id, c.b_id)
         c.score = _score(c)
-    ranked = sorted(found.values(), key=lambda c: -c.score)[:limit]
+    by_pair: dict[tuple[str, frozenset], Candidate] = {
+        (c.entity_type, frozenset((c.a_id, c.b_id))): c for c in found.values()
+    }
+    by_side: dict[tuple[str, uuid.UUID], list[Candidate]] = {}
+    for c in found.values():
+        by_side.setdefault((c.entity_type, c.a_id), []).append(c)
+        by_side.setdefault((c.entity_type, c.b_id), []).append(c)
+    for row in await _pending_own_rows(db, tuple(t for t in types if t in _TYPES)):
+        if row.action == ACTION_MERGE_FILED:
+            try:
+                other = uuid.UUID(str((row.after or {}).get("target_id")))
+            except ValueError:
+                other = None
+            c = by_pair.get((row.entity_type, frozenset((row.entity_id, other))))
+            if c is not None and c.confirm_merge is None:
+                c.confirm_merge = row
+            elif unmatched_out is not None:
+                unmatched_out.append(row)
+        else:
+            # One pair carries an alias trim: the most alike pair on that side.
+            sides = by_side.get((row.entity_type, row.entity_id)) or []
+            if sides:
+                max(sides, key=lambda c: c.score).confirm_aliases.append(row)
+            elif unmatched_out is not None:
+                unmatched_out.append(row)
+    ranked = sorted(found.values(), key=lambda c: (not (c.confirm_merge or c.confirm_aliases), -c.score))[:limit]
     for i, c in enumerate(ranked, 1):
         c.pair_id = f"p{i}"
     await _load_profiles(db, ranked)
@@ -519,6 +580,72 @@ async def _withdraw(db: AsyncSession, row: EntityMaintenanceLog, reason: str) ->
     await db.delete(row)
 
 
+def _live(db: AsyncSession, row: EntityMaintenanceLog | None) -> bool:
+    """False once an earlier decision in this run closed the row (a merge
+    settles every proposal about the entity it removed)."""
+    if row is None or row in db.deleted or inspect(row).was_deleted:
+        return False
+    return not row.applied
+
+
+async def _apply_merge_row(db: AsyncSession, row: EntityMaintenanceLog) -> str:
+    """Apply an earlier run's merge proposal through the Review queue's own
+    applier. Returns 'applied', 'resolved' (nothing left to merge) or 'failed'."""
+    from app.services.entry_adjudication import apply_adjudication_row
+    from app.services.proposal_apply import settle_adjudication_outcome
+
+    try:
+        async with db.begin_nested():
+            outcome = await apply_adjudication_row(db, row)
+            status = await settle_adjudication_outcome(db, row, outcome)
+    except Exception as exc:
+        logger.warning("merge review could not apply merge %s: %s", row.id, exc)
+        return "failed"
+    return status if status in ("applied", "resolved") else "failed"
+
+
+async def _settle_aliases(db: AsyncSession, c: Candidate, d: dict, counts: dict[str, int]) -> None:
+    """The alias trims an earlier run filed on this pair: trimmed when this
+    answer names the same alias on the same side again, closed otherwise."""
+    from app.services.proposal_apply import trim_alias_row
+
+    if not c.confirm_aliases:
+        return
+    bad = str(d.get("bad_alias") or "").strip().lower()
+    side = str(d.get("bad_alias_side") or "").lower()
+    side_id = {"a": c.a_id, "b": c.b_id}.get(side)
+    for row in c.confirm_aliases:
+        if not _live(db, row):
+            continue
+        same = bad and row.entity_id == side_id and str((row.after or {}).get("bad_alias") or "").lower() == bad
+        if same:
+            try:
+                async with db.begin_nested():
+                    await trim_alias_row(db, row)
+                counts["aliases_trimmed"] += 1
+                continue
+            except Exception as exc:
+                logger.warning("merge review could not trim alias %s: %s", row.id, exc)
+        await db.delete(row)
+        counts["aliases_closed"] += 1
+    await db.flush()
+
+
+async def close_unmatched(db: AsyncSession, rows: list[EntityMaintenanceLog]) -> int:
+    """Close this job's pending rows that no run will ask about again
+    (``find_merge_candidates``'s ``unmatched_out``): a merge is remembered as
+    unsure, like a withdrawn one; an alias trim is deleted."""
+    for row in rows:
+        if not _live(db, row):
+            continue
+        if row.action == ACTION_MERGE_FILED:
+            await _withdraw(db, row, "the pair no longer comes up as a likely duplicate")
+        else:
+            await db.delete(row)
+    await db.flush()
+    return len(rows)
+
+
 async def file_verdicts(
     db: AsyncSession,
     cands: list[Candidate],
@@ -532,7 +659,20 @@ async def file_verdicts(
 
     by_pair = {c.pair_id: c for c in cands}
     floor = _CONF_RANK.get(min_confidence, 2)
-    counts = {"proposed": 0, "distinct": 0, "unsure": 0, "ignored": 0, "conflicts": 0, "bad_aliases": 0}
+    counts = {
+        "proposed": 0,
+        "distinct": 0,
+        "unsure": 0,
+        "ignored": 0,
+        "conflicts": 0,
+        "bad_aliases": 0,
+        # A pair asked again: its earlier merge applied, or withdrawn; its
+        # earlier alias trims trimmed, or closed.
+        "merged": 0,
+        "withdrawn": 0,
+        "aliases_trimmed": 0,
+        "aliases_closed": 0,
+    }
     seen: set[str] = set()
     for d in decisions:
         if not isinstance(d, dict):
@@ -547,7 +687,25 @@ async def file_verdicts(
         if confidence not in _CONF_RANK:
             confidence = "low"
         reason = str(d.get("reason") or "")[:500]
-        if verdict == "same" and _CONF_RANK[confidence] >= floor:
+        await _settle_aliases(db, c, d, counts)
+        if _live(db, c.confirm_merge):
+            row = c.confirm_merge
+            if verdict == "same" and _CONF_RANK[confidence] >= floor:
+                # Asked twice, "same" twice: the merge runs, in the direction
+                # the first answer filed it.
+                status = await _apply_merge_row(db, row)
+                if status != "failed":
+                    counts["merged"] += 1
+                    continue
+                await _withdraw(db, row, "the merge could not be applied")
+                counts["withdrawn"] += 1
+                continue
+            # The second answer disagrees: the proposal goes, and the answer
+            # is remembered below like any other.
+            await db.delete(row)
+            await db.flush()
+            counts["withdrawn"] += 1
+        elif verdict == "same" and _CONF_RANK[confidence] >= floor:
             keep, lose = _keeper(c, str(d.get("keep") or "").lower() or None)
             keeper, loser = getattr(c, keep), getattr(c, lose)
             loser_id, keeper_id = uuid.UUID(loser["id"]), uuid.UUID(keeper["id"])

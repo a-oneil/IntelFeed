@@ -7,6 +7,9 @@
   that the Review queue can apply with no article behind it.
 - "different" / "unsure" is remembered as merge_review_distinct for the retry
   window; dismissing a filed merge marks the pair not-duplicate for good.
+- The review's own pending rows are asked about again on the next run: a
+  second "same" applies the merge, the same alias named again is trimmed, and
+  anything else closes them.
 """
 
 import uuid
@@ -23,6 +26,7 @@ from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.services.entity_merge_review import (
     ACTION_DISTINCT,
     ORIGIN,
+    close_unmatched,
     file_verdicts,
     find_merge_candidates,
     pairs_block,
@@ -113,8 +117,9 @@ async def test_same_verdict_files_a_merge_the_queue_can_apply(client, admin_head
     assert row.after["merge_into"] == "APT29" and row.after["origin"] == ORIGIN and row.applied is False
     assert row.before["entity"]["name"] == "APT 29" and "entry_id" not in row.before
 
-    # A pending merge takes the pair out of the next run's candidates.
-    assert await _find(db_session) == []
+    # The next run asks about the pair again, with the pending merge attached.
+    again = await _find(db_session)
+    assert [c.confirm_merge for c in again] == [row]
     # A second, competing proposal about the same loser (another target).
     db_session.add(
         EntityMaintenanceLog(
@@ -187,7 +192,8 @@ async def test_different_is_remembered_for_the_retry_window(db_session, test_fee
             {"pair_id": "p9", "verdict": "same", "keep": "a", "confidence": "high", "reason": "unknown pair"},
         ],
     )
-    assert counts == {"proposed": 0, "distinct": 1, "unsure": 0, "ignored": 1, "conflicts": 0, "bad_aliases": 0}
+    assert counts["distinct"] == 1 and counts["ignored"] == 1
+    assert not any(v for k, v in counts.items() if k not in ("distinct", "ignored"))
     row = (
         await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == ACTION_DISTINCT))
     ).scalar_one()
@@ -493,3 +499,121 @@ def test_worker_runs_one_review_at_a_time(private_lock_key):
     finally:
         r.delete(private_lock_key)
         r.close()
+
+
+# ------------------------------------------------------------------ asked again
+
+
+def _answer(c, verdict, **kw):
+    return {"pair_id": c.pair_id, "verdict": verdict, "keep": "a", "confidence": "high", "reason": "r", **kw}
+
+
+async def _filed_merge(db_session, test_feed):
+    a, b, far = await _seed_pair(db_session, test_feed)
+    cands = await _find(db_session)
+    await file_verdicts(db_session, cands, [{**_answer(cands[0], "same"), "keep": ""}])
+    row = (
+        await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == ACTION_MERGE))
+    ).scalar_one()
+    return a, b, far, row
+
+
+async def test_a_second_same_applies_the_merge(db_session, test_feed):
+    a, b, _far, row = await _filed_merge(db_session, test_feed)
+    cands = await _find(db_session)
+    assert cands[0].confirm_merge is row
+    # Its keep pick is ignored: the merge runs the way the first answer filed it.
+    counts = await file_verdicts(db_session, cands, [{**_answer(cands[0], "same"), "keep": "b"}])
+    assert counts["merged"] == 1 and counts["proposed"] == 0
+    assert await db_session.get(ThreatActor, b.id) is None
+    assert await db_session.get(ThreatActor, a.id) is not None
+    assert row.applied is True
+
+
+async def test_a_second_answer_that_disagrees_withdraws_the_merge(db_session, test_feed):
+    a, b, _far, row = await _filed_merge(db_session, test_feed)
+    cands = await _find(db_session)
+    counts = await file_verdicts(db_session, cands, [_answer(cands[0], "different")])
+    assert counts["withdrawn"] == 1 and counts["distinct"] == 1 and counts["merged"] == 0
+    pending = (
+        await db_session.execute(
+            select(EntityMaintenanceLog).where(
+                EntityMaintenanceLog.action == ACTION_MERGE, EntityMaintenanceLog.applied.is_(False)
+            )
+        )
+    ).all()
+    assert pending == []
+    assert await db_session.get(ThreatActor, b.id) is not None
+
+
+async def test_a_pending_merge_whose_pair_is_gone_is_closed(db_session, test_feed):
+    a, _b, far = await _seed_pair(db_session, test_feed)
+    stale = EntityMaintenanceLog(
+        entity_type="threat_actor",
+        entity_id=far.id,
+        action=ACTION_MERGE,
+        mode="shadow",
+        before={"entity": {"id": str(far.id), "name": far.name}},
+        after={"target_id": str(a.id), "target_type": "threat_actor", "merge_into": a.name, "origin": ORIGIN},
+        applied=False,
+    )
+    db_session.add(stale)
+    await db_session.flush()
+    unmatched: list = []
+    await _find(db_session, unmatched_out=unmatched)
+    assert unmatched == [stale]
+    assert await close_unmatched(db_session, unmatched) == 1
+    distinct = (
+        await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == ACTION_DISTINCT))
+    ).scalar_one()
+    assert distinct.after["verdict"] == "unsure" and distinct.entity_id == far.id
+
+
+async def _filed_alias_trim(db_session):
+    ryuk = ThreatActor(name="Ryuk", aliases=["ALPHV", "Ryuk cybercrime group"], article_count=296)
+    blackcat = ThreatActor(name="BlackCat", aliases=["ALPHV", "Noberus"], article_count=500)
+    db_session.add_all([ryuk, blackcat])
+    await db_session.flush()
+    cands = await _find(db_session)
+    side = "a" if cands[0].a_id == ryuk.id else "b"
+    await file_verdicts(db_session, cands, [_answer(cands[0], "different", bad_alias="alphv", bad_alias_side=side)])
+    return ryuk, blackcat, side
+
+
+async def test_the_same_alias_named_again_is_trimmed(db_session, test_feed):
+    ryuk, _blackcat, side = await _filed_alias_trim(db_session)
+    # Judged different minutes ago, but its pending trim brings the pair back.
+    cands = await _find(db_session)
+    assert len(cands) == 1 and len(cands[0].confirm_aliases) == 1
+    counts = await file_verdicts(
+        db_session, cands, [_answer(cands[0], "different", bad_alias="ALPHV", bad_alias_side=side)]
+    )
+    assert counts["aliases_trimmed"] == 1 and counts["bad_aliases"] == 0
+    await db_session.refresh(ryuk)
+    assert ryuk.aliases == ["Ryuk cybercrime group"]
+
+
+async def test_an_alias_blamed_on_the_other_side_closes_the_trim(db_session, test_feed):
+    ryuk, blackcat, side = await _filed_alias_trim(db_session)
+    cands = await _find(db_session)
+    other = "b" if side == "a" else "a"
+    counts = await file_verdicts(
+        db_session, cands, [_answer(cands[0], "different", bad_alias="ALPHV", bad_alias_side=other)]
+    )
+    # The two answers disagree on whose alias it is: the first trim closes and
+    # this answer's trim is filed, to be confirmed or closed next run.
+    assert counts["aliases_closed"] == 1 and counts["aliases_trimmed"] == 0 and counts["bad_aliases"] == 1
+    await db_session.refresh(ryuk)
+    assert "ALPHV" in ryuk.aliases
+    pending = (
+        (
+            await db_session.execute(
+                select(EntityMaintenanceLog).where(
+                    EntityMaintenanceLog.action == "alias_collision", EntityMaintenanceLog.applied.is_(False)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [r.entity_id for r in pending] == [blackcat.id]

@@ -111,6 +111,7 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
         apply_verdicts,
         build_variables,
         mark_reviewed,
+        owe_second_look,
         review_owed,
         supersede_legacy_proposals,
     )
@@ -207,7 +208,7 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
                 return await _finish(FAILED, {"skipped": f"ai_{status}", "items": len(items)})
 
             verdicts, stats = _validate_verdicts(result, items)
-            detail = await apply_verdicts(db, entry, verdicts, parsed, cfg)
+            detail = await apply_verdicts(db, entry, verdicts, parsed, cfg, recheck=recheck_since is not None)
             detail["superseded"] = await supersede_legacy_proposals(db, legacy_rows)
             detail["unknown_ids"] = stats["unknown"]
             detail["coerced_verdicts"] = stats["coerced"]
@@ -233,6 +234,11 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
                 await mark_reviewed(db, entry, [it for it in items if it.kind == "ioc"])
             else:
                 await mark_reviewed(db, entry, items)
+                # Verdicts this review left pending get a second look: a full
+                # review that settles every one of them (owe_second_look).
+                if cfg["mode"] == "apply" and not detail.get("second_look") and await owe_second_look(db, row, entry):
+                    detail["second_look_owed"] = True
+                    return await _finish(RECHECK, detail)
                 # Held matches settled while this review ran, or rejects and
                 # candidates past the manifest's caps: owe the article a
                 # recheck for those.
@@ -306,3 +312,30 @@ async def _backfill(limit: int, since_days: int | None) -> dict:
                 stats["skipped"] += 1
         await db.commit()
         return stats
+
+
+@celery_app.task(
+    name="app.workers.adjudication_tasks.queue_second_look_backlog",
+    soft_time_limit=300,
+    time_limit=360,
+)
+def queue_second_look_backlog() -> dict:
+    """One-off: owe a second look to every article whose earlier review left
+    verdicts pending, so the queue those reviews built settles itself. The
+    resweep dispatches them through the normal budget. Not scheduled — run it
+    once after the deploy that adds second looks:
+
+        celery -A app.workers.celery_app call \\
+            app.workers.adjudication_tasks.queue_second_look_backlog
+    """
+    return run_async(_second_look_backlog())
+
+
+async def _second_look_backlog() -> dict:
+    from app.services.entry_adjudication import queue_second_look_backlog as mark
+
+    async with worker_session() as db:
+        n = await mark(db)
+        await db.commit()
+    logger.info("second-look backlog: %d articles owed a second look", n)
+    return {"marked": n}

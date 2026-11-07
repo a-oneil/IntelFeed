@@ -66,6 +66,7 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "adjudication_apply_min_confidence": str,
     "adjudication_reclassify_consensus": int,
     "adjudication_circuit_breaker_pct": float,
+    "adjudication_circuit_breaker_min_items": int,
     "merge_review_batch_size": int,
     "merge_review_pairs_per_call": int,
     "merge_review_min_similarity": float,
@@ -488,6 +489,15 @@ SETTING_METADATA: dict[str, dict] = {
             "whole run is downgraded to proposals (0.5 = half). A rolling mean over the last 50 apply "
             "runs above the same threshold pauses dispatch for the hour; shadow runs are not sampled, "
             "because they change nothing"
+        ),
+        "group": "adjudication",
+    },
+    "adjudication_circuit_breaker_min_items": {
+        "label": "Circuit Breaker: Minimum Items",
+        "description": (
+            "The circuit breaker only judges a run that reviewed at least this many items. Below it, "
+            "each verdict stands on its own confidence — on a one-item recheck a single remove would "
+            "otherwise read as 100% destructive"
         ),
         "group": "adjudication",
     },
@@ -1446,6 +1456,7 @@ _ENGINE_SECTION_GROUPS: dict[str, str] = {
     "adjudication_apply_min_confidence": "adjudication",
     "adjudication_reclassify_consensus": "adjudication",
     "adjudication_circuit_breaker_pct": "adjudication",
+    "adjudication_circuit_breaker_min_items": "adjudication",
     "merge_review_batch_size": "adjudication",
     "merge_review_pairs_per_call": "adjudication",
     "merge_review_min_similarity": "adjudication",

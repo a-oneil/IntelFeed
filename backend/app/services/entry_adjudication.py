@@ -33,6 +33,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, or_, select
@@ -215,6 +216,7 @@ async def _settings(db: AsyncSession) -> dict:
         "min_score": _num(await get_setting("adjudication_min_priority_score", db), 0.0),
         "min_conf": min_conf if min_conf in CONFIDENCES else "high",
         "breaker_pct": _num(await get_setting("adjudication_circuit_breaker_pct", db), 0.5),
+        "breaker_min_items": _num(await get_setting("adjudication_circuit_breaker_min_items", db), 5, int),
         # Distinct articles whose reviews must agree on the same target type
         # before a reclassify is applied in apply mode (1 = the first one).
         "reclassify_consensus": max(1, _num(await get_setting("adjudication_reclassify_consensus", db), 2, int)),
@@ -375,6 +377,7 @@ async def enqueue_adjudication(
     *,
     backfill: bool = False,
     recheck: bool = False,
+    second_look: bool = False,
 ) -> str:
     """Decide whether the entry gets a review and record it. Returns the
     status written (``pending`` or a ``skipped_*``). The caller commits and,
@@ -384,7 +387,8 @@ async def enqueue_adjudication(
     ``recheck`` keeps the row's ``adjudication_recheck_since``, so the review
     judges only the held matches settled since then; it skips the `created`
     trigger, which those matches already meet. Any other enqueue is a full
-    review and clears it."""
+    review and clears it. ``second_look`` (``owe_second_look``) is a full
+    review that also skips the trigger: the article met it the first time."""
     from app.models.entry import Entry
     from app.models.feed import Feed
     from app.pipeline.plans import resolve_feed_plan
@@ -417,7 +421,8 @@ async def enqueue_adjudication(
     if parsed and parsed.get("_reused_from"):
         return await _write(SKIPPED_ECHO)
 
-    if not recheck and cfg["trigger"] == "created" and not await _created_something(db, entry_id, stored_counts):
+    check_trigger = not (recheck or second_look)
+    if check_trigger and cfg["trigger"] == "created" and not await _created_something(db, entry_id, stored_counts):
         return await _write(SKIPPED_NOTHING_NEW)
 
     if cfg["min_score"] > 0 and float(entry.priority_score or 0.0) < cfg["min_score"]:
@@ -482,6 +487,8 @@ async def reopen_adjudication(db: AsyncSession, entry_id: uuid.UUID, since: date
         row = await _request_row(db, entry_id)
     elif row.adjudication_status in (None, PENDING, SKIPPED_PLAN, SKIPPED_ECHO):
         return
+    if row.adjudication_status == RECHECK and row.adjudication_recheck_since is None:
+        return  # a full second look is owed; it judges these too
     if row.adjudication_status == RECHECK and row.adjudication_recheck_since:
         since = min(since, row.adjudication_recheck_since)
     row.adjudication_status = RECHECK
@@ -638,13 +645,81 @@ async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
             continue
         # A recheck is catch-up work, so it draws on the backfill's share.
         recheck = row.adjudication_recheck_since is not None
-        status = await enqueue_adjudication(db, row.entry_id, None, parsed, backfill=recheck, recheck=recheck)
+        look = row.adjudication_status == RECHECK and not recheck
+        status = await enqueue_adjudication(
+            db, row.entry_id, None, parsed, backfill=recheck or look, recheck=recheck, second_look=look
+        )
         if status == PENDING:
             dispatch_adjudication(row.entry_id, countdown=30)
             swept += 1
         if status == SKIPPED_BUDGET:
             break  # the hour is full; the rest wait for the next sweep
     return {"swept": swept, "candidates": len(rows)}
+
+
+async def queue_second_look_backlog(db: AsyncSession, limit: int = 5000) -> int:
+    """Owe a second look to every reviewed article still holding the stage's
+    pending verdicts (from before second looks existed, or a run the rolling
+    breaker held). The resweep queues them, newest first, through the normal
+    budget. Returns the articles marked."""
+    from app.models.ai_analysis import AIAnalysisRequest
+    from app.models.ai_result import AIResult
+    from app.models.ai_task import AITask
+    from app.models.entity_link_validation_log import EntityLinkValidationLog
+    from app.models.entity_maintenance import EntityMaintenanceLog
+
+    adjudicator_results = select(AIResult.id).where(
+        AIResult.task_id == select(AITask.id).where(AITask.name == TASK_NAME).scalar_subquery()
+    )
+    ids = set(
+        (
+            await db.execute(
+                select(EntityLinkValidationLog.entry_id).where(
+                    EntityLinkValidationLog.action.in_(["shadow_remove", "needs_reclassification"]),
+                    EntityLinkValidationLog.ai_result_id.in_(adjudicator_results),
+                    EntityLinkValidationLog.entry_id.isnot(None),
+                )
+            )
+        ).scalars()
+    )
+    for raw in (
+        await db.execute(
+            select(EntityMaintenanceLog.before["entry_id"].astext).where(
+                EntityMaintenanceLog.applied.is_(False),
+                EntityMaintenanceLog.action.in_(_LOOK_MAINT_ACTIONS),
+                EntityMaintenanceLog.before["entry_id"].astext.isnot(None),
+                or_(
+                    EntityMaintenanceLog.action != ACTION_ALIAS,
+                    EntityMaintenanceLog.after["kind"].astext == "adjudicator",
+                ),
+            )
+        )
+    ).scalars():
+        try:
+            ids.add(uuid.UUID(raw))
+        except (TypeError, ValueError):
+            continue
+    if not ids:
+        return 0
+    rows = (
+        (
+            await db.execute(
+                select(AIAnalysisRequest)
+                .where(
+                    AIAnalysisRequest.entry_id.in_(list(ids)),
+                    AIAnalysisRequest.adjudication_status.in_([COMPLETED, RECHECK, FAILED]),
+                )
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in rows:
+        row.adjudication_status = RECHECK
+        row.adjudication_recheck_since = None
+        db.add(row)
+    return len(rows)
 
 
 async def select_backfill_entries(db: AsyncSession, limit: int = 500, since_days: int | None = None) -> list:
@@ -1941,6 +2016,26 @@ _BYSTANDER_RE = re.compile(
     r"|\bvictim\s+(?:component|environment|organi[sz]ation)\b",
     re.IGNORECASE,
 )
+# "Only as a source of submissions, not as an adversary": the same mistake
+# phrased as a contrast. A boilerplate remove can end the same way ("only in
+# the author bio, not as a threat actor"), so the contrast voids a remove only
+# when the reason names no boilerplate spot.
+_NOT_AS_ADVERSARY_RE = re.compile(
+    r"\bnot\s+as\s+(?:an?\s+)?(?:adversar(?:y|ies)|attackers?|threat\s+actors?|tool\s+being\s+abused)\b",
+    re.IGNORECASE,
+)
+_BOILERPLATE_RE = re.compile(
+    r"\b(?:bio|byline|related|read\s+more|advert\w*|ad|promo\w*|footer|webinar|newsletter|sidebar|navigation|"
+    r"boilerplate|headline|dropdown|user[- ]agent)\b",
+    re.IGNORECASE,
+)
+
+
+def _bystander_reason(reason: str) -> bool:
+    """True when a link remove is argued from the entity not being an adversary."""
+    if _BYSTANDER_RE.search(reason):
+        return True
+    return bool(_NOT_AS_ADVERSARY_RE.search(reason)) and not _BOILERPLATE_RE.search(reason)
 
 
 def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verdict], dict]:
@@ -2020,7 +2115,7 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
             elif verdict in DESTRUCTIVE and _reason_affirms(reason):
                 verdict, explicit = "keep", False
                 stats["affirming_reason"] += 1
-            elif verdict == "remove" and item.kind == "link" and _BYSTANDER_RE.search(reason):
+            elif verdict == "remove" and item.kind == "link" and _bystander_reason(reason):
                 verdict, explicit = "keep", False
                 stats["bystander_reason"] += 1
             bad_alias = None
@@ -2748,17 +2843,225 @@ async def _bad_alias_proposal(db: AsyncSession, item: ReviewItem, form: str, rea
     return before, {"kind": "adjudicator", "bad_alias": alias, "reason": reason}
 
 
+# --------------------------------------------------------------------------- second look
+
+# A review in apply mode can leave verdicts pending: the breaker held the run,
+# or a verdict sat under the confidence floor. Nothing else would ever decide
+# them, so the article gets a second, independent review (the prompt never
+# shows the stage its own earlier verdicts). The second look settles every
+# pending verdict: one it repeats at the floor is applied, one it does not is
+# closed, and it files nothing new that would need a third look.
+_LOOK_MAINT_ACTIONS = (
+    ACTION_UNLINK,
+    ACTION_VETO,
+    ACTION_MERGE,
+    ACTION_HELD_LINK,
+    ACTION_EDGE_DEMOTE,
+    ACTION_IOC_DROP,
+    ACTION_IOC_CAPTURE,
+    ACTION_RECLASSIFY,
+    ACTION_ALIAS,
+)
+LINK_LOG = "link_validator"
+MAINT_LOG = "entity_maintenance"
+LookKey = tuple[str, str, Any]
+
+
+def _look_key(v: Verdict) -> LookKey | None:
+    """The key an earlier pending row of this verdict files under (``_row_look_key``)."""
+    item = v.item
+    if item.kind == "link" and v.verdict == "reclassify" and item.entity_id:
+        return ACTION_RECLASSIFY, item.entity_type or "", item.entity_id
+    if item.kind == "ioc" and v.verdict == "capture" and item.staged:
+        return ACTION_IOC_CAPTURE, item.ioc_kind or "", (item.ioc_value or "").lower()
+    return _verdict_key(v)
+
+
+def _row_look_key(source: str, row) -> LookKey | None:
+    if source == LINK_LOG:
+        return (ACTION_UNLINK if row.action == "shadow_remove" else ACTION_RECLASSIFY), row.entity_type, row.entity_id
+    if row.action == ACTION_IOC_CAPTURE:
+        after = row.after or {}
+        return ACTION_IOC_CAPTURE, after.get("kind") or "", str(after.get("value") or "").lower()
+    if row.entity_id is None:
+        return None
+    return row.action, row.entity_type, row.entity_id
+
+
+async def earlier_proposals(db: AsyncSession, entry_id: uuid.UUID) -> dict[LookKey, list[tuple[str, Any]]]:
+    """The verdicts earlier reviews of this article left pending, by look key.
+    Only the stage's own rows: the duplicate review's merges and aliases are
+    about the catalogue, not this article, and settle in that job."""
+    from app.models.ai_result import AIResult
+    from app.models.ai_task import AITask
+    from app.models.entity_link_validation_log import EntityLinkValidationLog
+    from app.models.entity_maintenance import EntityMaintenanceLog
+
+    adjudicator_results = select(AIResult.id).where(
+        AIResult.task_id == select(AITask.id).where(AITask.name == TASK_NAME).scalar_subquery()
+    )
+    link_rows = (
+        await db.execute(
+            select(EntityLinkValidationLog).where(
+                EntityLinkValidationLog.entry_id == entry_id,
+                EntityLinkValidationLog.action.in_(["shadow_remove", "needs_reclassification"]),
+                EntityLinkValidationLog.ai_result_id.in_(adjudicator_results),
+            )
+        )
+    ).scalars()
+    maint_rows = (
+        await db.execute(
+            select(EntityMaintenanceLog).where(
+                EntityMaintenanceLog.applied.is_(False),
+                EntityMaintenanceLog.before["entry_id"].astext == str(entry_id),
+                EntityMaintenanceLog.action.in_(_LOOK_MAINT_ACTIONS),
+                or_(
+                    EntityMaintenanceLog.action != ACTION_ALIAS,
+                    EntityMaintenanceLog.after["kind"].astext == "adjudicator",
+                ),
+            )
+        )
+    ).scalars()
+    out: dict[LookKey, list[tuple[str, Any]]] = {}
+    for source, rows in ((LINK_LOG, link_rows), (MAINT_LOG, maint_rows)):
+        for row in rows:
+            key = _row_look_key(source, row)
+            if key is not None:
+                out.setdefault(key, []).append((source, row))
+    return out
+
+
+def _pending_row(db: AsyncSession, row) -> bool:
+    """False once something earlier in this run applied or closed the row (an
+    applied veto or merge settles every proposal about its entity)."""
+    from sqlalchemy import inspect as sa_inspect
+
+    if row in db.deleted or sa_inspect(row).was_deleted:
+        return False
+    return not getattr(row, "applied", False)
+
+
+async def _apply_earlier(db: AsyncSession, rows: list[tuple[str, Any]]) -> bool:
+    """Apply the first of a key's pending rows through the Review queue's own
+    appliers and close the rest. A row that will not apply is closed too: a
+    second look leaves nothing pending. True when the change ran."""
+    from app.services.proposal_apply import apply_link_removal_row, settle_adjudication_outcome, trim_alias_row
+
+    rows = [(s, r) for s, r in rows if _pending_row(db, r)]
+    if not rows:
+        return False
+    (source, row), rest = rows[0], rows[1:]
+    applied = False
+    try:
+        async with db.begin_nested():
+            if source == LINK_LOG:
+                applied = not await apply_link_removal_row(db, row)
+            elif row.action == ACTION_ALIAS:
+                applied = not (await trim_alias_row(db, row))["skipped"]
+            else:
+                outcome = await apply_adjudication_row(db, row)
+                status = await settle_adjudication_outcome(db, row, outcome)
+                applied = status == "applied"
+                if status == "skipped":
+                    rest = [(source, row), *rest]
+    except Exception as exc:
+        logger.warning("second look could not apply %s %s: %s", source, row.id, exc)
+        rest = [(source, row), *rest]
+    await _close_rows(db, rest)
+    return applied
+
+
+async def _close_rows(db: AsyncSession, rows: list[tuple[str, Any]]) -> int:
+    """Delete pending rows a second look did not confirm. Not a dismissal: a
+    later review with new evidence may file the verdict again."""
+    n = 0
+    for _source, row in rows:
+        if _pending_row(db, row):
+            await db.delete(row)
+            n += 1
+    await db.flush()
+    return n
+
+
+def _suggested_type(row) -> str | None:
+    """The target type of a pending reclassify row, in either log."""
+    return getattr(row, "suggested_entity_type", None) or (getattr(row, "after", None) or {}).get("suggested_type")
+
+
+async def _confirm_alias(
+    db: AsyncSession, earlier: dict[LookKey, list[tuple[str, Any]]], item: ReviewItem, form: str, do_apply: bool
+) -> int:
+    """A second look's remove that blames the alias an earlier review proposed
+    trimming confirms the trim (applied at the floor). Returns 1 when it did."""
+    key = (ACTION_ALIAS, item.entity_type or "", item.entity_id)
+    rows = earlier.get(key) or []
+    same = [x for x in rows if str((x[1].after or {}).get("bad_alias") or "").lower() == form.lower()]
+    if not same:
+        return 0
+    rest = [x for x in rows if x not in same]
+    if rest:
+        earlier[key] = rest
+    else:
+        earlier.pop(key)
+    if do_apply:
+        await _apply_earlier(db, same)
+    else:
+        await _close_rows(db, same)
+    return 1
+
+
+async def owe_second_look(db: AsyncSession, request_row, entry) -> bool:
+    """After a review in apply mode: when it left verdicts pending, owe the
+    article a full review (``recheck`` with no ``since``), and let that review
+    see again the held matches and candidates its pending verdicts are about,
+    which the first look marked judged. Returns True when one is owed."""
+    from app.models.pending_autolink import PendingAutolinkMatch
+
+    earlier = await earlier_proposals(db, entry.id)
+    if not earlier:
+        return False
+    held = [(k[1], k[2]) for k in earlier if k[0] == ACTION_HELD_LINK]
+    for etype, eid in held:
+        await db.execute(
+            sa_update(PendingAutolinkMatch)
+            .where(
+                PendingAutolinkMatch.entry_id == entry.id,
+                PendingAutolinkMatch.entity_type == etype,
+                PendingAutolinkMatch.entity_id == eid,
+                PendingAutolinkMatch.resolution == "rejected",
+            )
+            .values(reviewed_at=None)
+        )
+    captures = {(k[1], k[2]) for k in earlier if k[0] == ACTION_IOC_CAPTURE}
+    if captures and entry.observable_candidates:
+        entry.observable_candidates = [
+            {**c, "reviewed": False}
+            if isinstance(c, dict) and (c.get("kind") or "", str(c.get("value") or "").lower()) in captures
+            else c
+            for c in entry.observable_candidates
+        ]
+        db.add(entry)
+    request_row.adjudication_status = RECHECK
+    request_row.adjudication_recheck_since = None
+    db.add(request_row)
+    return True
+
+
 async def apply_verdicts(
     db: AsyncSession,
     entry,
     verdicts: list[Verdict],
     parsed: dict | None,
     cfg: dict,
+    *,
+    recheck: bool = False,
 ) -> dict:
     """Act on the verdicts. Shadow writes proposals only; apply (gated on the
     confidence floor and the breakers) acts through the same code the
     existing tools use and writes the same audit rows, which double as the
-    undo record. Returns the run detail stored on the pipeline run."""
+    undo record. In apply mode a full review of an article that still holds
+    pending verdicts is a second look (see ``earlier_proposals``). Returns the
+    run detail stored on the pipeline run."""
     from app.intelligence.link_validation_apply import (
         ENTITY_TYPES,
         LinkRow,
@@ -2786,6 +3089,12 @@ async def apply_verdicts(
     applied_n = 0
     captured_n = 0
     promoted_n = 0
+    # Second look: earlier verdicts it repeated (applied or not), earlier
+    # verdicts it closed, and its own new verdicts it did not file.
+    confirmed_n = 0
+    closed_n = 0
+    dropped_n = 0
+    earlier = await earlier_proposals(db, entry.id) if mode == "apply" and not recheck else {}
 
     # Positive-evidence override: the reviewer may not remove a link to an
     # entity the same analysis extracted by name.
@@ -2810,7 +3119,9 @@ async def apply_verdicts(
     changes = [v for v in verdicts if v.verdict in DESTRUCTIVE | {"merge", "reclassify", "link", "capture"}]
     items_n = len([v for v in verdicts if v.item.kind != "assessment"])
     ratio = (len(destructive) / len(judged)) if judged else 0.0
-    breaker = ratio > cfg["breaker_pct"]
+    # A small run is not a pattern: on a one-item recheck a single remove is
+    # already 100%, and the breaker held every such fix in Review.
+    breaker = len(judged) >= cfg["breaker_min_items"] and ratio > cfg["breaker_pct"]
     # The rolling breaker pauses dispatch for an hour, and it exists to stop
     # damage — which a shadow run does none of. Sampling shadow runs would
     # throttle the very soak that is meant to collect verdicts at full rate
@@ -2820,6 +3131,15 @@ async def apply_verdicts(
     rolling = await _rolling_breaker(ratio, cfg["breaker_pct"]) if mode == "apply" else False
     run_mode = "shadow" if (mode != "apply" or breaker or rolling) else "apply"
     floor = _CONF_RANK[cfg["min_conf"]]
+    # Agreement is the second look's bar, so its repeats are exempt from the
+    # per-article breaker; the breaker still judges its new verdicts alone.
+    # While the rolling breaker is up nothing applies, so nothing is settled.
+    second_look = bool(earlier) and not rolling
+    if second_look:
+        new_destructive = [v for v in destructive if _look_key(v) not in earlier]
+        new_ratio = (len(new_destructive) / len(judged)) if judged else 0.0
+        breaker = len(judged) >= cfg["breaker_min_items"] and new_ratio > cfg["breaker_pct"]
+        run_mode = "apply"
 
     def _log(
         action: str,
@@ -2877,6 +3197,24 @@ async def apply_verdicts(
         # flagged again, whatever the mode and confidence.
         if item.kind == "link" and item.previously_restored:
             do_apply = False
+        if second_look:
+            if v.bad_alias and item.entity_id:
+                confirmed_n += await _confirm_alias(db, earlier, item, v.bad_alias, do_apply)
+            key = _look_key(v)
+            if v.verdict != "reclassify" and key in earlier:
+                rows = earlier.pop(key)
+                confirmed_n += 1
+                if do_apply:
+                    if await _apply_earlier(db, rows):
+                        applied_n += 1
+                else:
+                    closed_n += await _close_rows(db, rows)
+                continue
+            # A verdict the first look did not make: it applies on its own
+            # merits, but is never filed.
+            if v.verdict != "reclassify" and item.kind != "assessment" and (breaker or not do_apply):
+                dropped_n += 1
+                continue
         after_base = {"reason": reason, "confidence": v.confidence}
 
         if item.kind == "link":
@@ -2910,7 +3248,7 @@ async def apply_verdicts(
                         db, ACTION_UNLINK, item.entity_type or "", item.entity_id, entry.id
                     ):
                         _log(ACTION_UNLINK, item, {"junction": snap}, after_base, applied=do_apply)
-                if v.bad_alias:
+                if v.bad_alias and not second_look:
                     alias_row = await _bad_alias_proposal(db, item, v.bad_alias, reason)
                     if alias_row is not None:
                         _log(ACTION_ALIAS, item, alias_row[0], alias_row[1], applied=False)
@@ -2928,6 +3266,11 @@ async def apply_verdicts(
                 # as a proposal, which is also the vote the next article
                 # counts. Applying converts the entity; the link follows it.
                 agreement = 1 + await _reclassify_agreement(db, etype, eid, target, entry.id)  # type: ignore[arg-type]
+                look_rows = earlier.pop((ACTION_RECLASSIFY, etype, eid), []) if second_look else []
+                if any(_suggested_type(row) == target for _s, row in look_rows):
+                    # The first look's vote: two reviews of this article agree.
+                    agreement += 1
+                    confirmed_n += 1
                 converted = False
                 if do_apply and agreement >= cfg["reclassify_consensus"]:
                     try:
@@ -2952,7 +3295,11 @@ async def apply_verdicts(
                             },
                             applied=True,
                         )
-                if not converted:
+                if second_look and not converted:
+                    closed_n += await _close_rows(db, look_rows)
+                    if not look_rows:
+                        dropped_n += 1
+                elif not converted:
                     if etype in ENTITY_TYPES:
                         await log_reclassification(db, entry.id, link_row, reason, target, ai_result_id, v.confidence)
                     else:
@@ -3115,16 +3462,23 @@ async def apply_verdicts(
                 entity_id=entry.id,
             )
 
+    if second_look:
+        for rows in earlier.values():
+            closed_n += await _close_rows(db, rows)
     if captured_n:
         _queue_capture_automations(entry.id)
+    detail_look = (
+        {"second_look": True, "confirmed": confirmed_n, "closed": closed_n, "unfiled": dropped_n} if second_look else {}
+    )
     return {
+        **detail_look,
         "mode": run_mode,
         "requested_mode": mode,
         "items": items_n,
         "verdicts": counts,
         "applied": applied_n,
         "promoted": promoted_n,
-        "shadowed": max(0, len(changes) - applied_n - flip_guarded - dismissed_n),
+        "shadowed": 0 if second_look else max(0, len(changes) - applied_n - flip_guarded - dismissed_n),
         "breaker": breaker,
         "rolling_breaker": rolling,
         "keep_overridden": overridden,
@@ -3213,8 +3567,10 @@ async def apply_adjudication_row(db: AsyncSession, row) -> dict:
 
     if row.applied:
         return {"applied": False, "reason": "already applied"}
-    before = row.before or {}
-    after = row.after or {}
+    # Copies: the JSON columns are compared against what was loaded, so edits
+    # made in place to the loaded dicts would never reach the database.
+    before = dict(row.before or {})
+    after = dict(row.after or {})
     entry = await db.get(Entry, uuid.UUID(before["entry_id"])) if before.get("entry_id") else None
     # A merge or a type change is about the entity, not the article: the
     # duplicate review files merges with no entry at all, and an article being
