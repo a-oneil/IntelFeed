@@ -39,7 +39,11 @@ vi.mock("../engine/AutolinkingSection", () => ({
   AutolinkingSection: ({ hours }: { hours?: number }) => <div data-testid="links" data-hours={String(hours)} />,
 }));
 vi.mock("../engine/EngineSettingsSearch", () => ({ EngineSettingsSearch: () => null }));
-vi.mock("../engine/EngineSwitch", () => ({ ClearCheckEngine: () => null, EngineSwitch: () => null }));
+vi.mock("../engine/EngineSwitch", () => ({
+  CheckEngineBanner: () => null,
+  ClearCheckEngine: () => null,
+  EngineSwitch: () => null,
+}));
 vi.mock("../engine/EntryOutputs", () => ({ EntryOutputs: () => null }));
 vi.mock("@/components/FeedHealthView", () => ({ FeedHealthView: () => null }));
 vi.mock("@/components/SystemSettings", () => ({ default: () => null }));

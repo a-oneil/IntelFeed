@@ -13,6 +13,7 @@ import {
   type ProcessingEntry,
   type ProcessingOutputs,
   type ProcessingStageCell,
+  useEngineHealth,
   useEngineProcessing,
   useRetryPipelineErrors,
   usePipelineOverview,
@@ -31,7 +32,7 @@ import SystemSettings from "@/components/SystemSettings";
 
 import { AutolinkingSection } from "./AutolinkingSection";
 import { EngineSettingsSearch } from "./EngineSettingsSearch";
-import { ClearCheckEngine, EngineSwitch } from "./EngineSwitch";
+import { CheckEngineBanner, ClearCheckEngine, EngineSwitch } from "./EngineSwitch";
 import { EntryOutputs } from "./EntryOutputs";
 import { ExtractionTab } from "./ExtractionTab";
 import { ProposalsQueue } from "./ProposalsQueue";
@@ -702,6 +703,15 @@ export function EngineMatrix({
   const breakerActive = !!breakerUntil && !Number.isNaN(breakerUntil.getTime()) && breakerUntil.getTime() > Date.now();
 
   const peekInfo = peek ? overviewByStage[peek.stage] : undefined;
+  // The top-bar dot is the header light in small: same level, same words.
+  const health = useEngineHealth(true);
+  const dotCls = { err: m.hdotErr, warn: m.hdotWarn, stopped: m.hdotStopped, ok: "" }[health?.level ?? "ok"];
+  const lightLabel = {
+    err: "Check engine: entries stuck, see the note below",
+    warn: "Check engine: runs retrying, see the note below",
+    stopped: "Engine stopped",
+    ok: "Engine healthy",
+  }[health?.level ?? "ok"];
 
   return (
     <div className={styles.wrap}>
@@ -710,10 +720,10 @@ export function EngineMatrix({
           themselves live on the table card, next to what they count. */}
       <div className={m.topbar}>
         <span
-          className={`${m.hdot} ${stats?.errored ? m.hdotErr : ""}`}
+          className={`${m.hdot} ${dotCls}`}
           role="img"
-          aria-label={stats?.errored ? `${stats.errored} entries stuck at a stage` : "pipeline healthy"}
-          title={stats?.errored ? `${stats.errored} entries stuck at a stage` : "pipeline healthy"}
+          aria-label={lightLabel}
+          title={lightLabel}
         />
         {stats?.ingest_series && <Sparkline series={stats.ingest_series} className={m.hspark} />}
         <div className={m.attnTools}>
@@ -747,6 +757,14 @@ export function EngineMatrix({
         <ClearCheckEngine />
         <EngineSwitch />
       </div>
+
+      <CheckEngineBanner
+        labelFor={(st) => labelByStage[st] ?? st.replace(/_/g, " ")}
+        onOpenStage={(st) => {
+          switchView("entries");
+          setOpenStage(st);
+        }}
+      />
 
       {/* matrix */}
       <div className={m.popWrap} ref={popWrapRef}>

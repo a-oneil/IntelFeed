@@ -556,6 +556,8 @@ export interface EngineHealth {
   /** Entries stuck on an errored stage, per stage, since the last clear. */
   failing: { stage: string; count: number }[];
   retrying: number;
+  /** Retried runs per stage, since the last clear. */
+  retryingStages: { stage: string; count: number }[];
   /** When the light was last cleared, and the errors still stuck from before it. */
   clearedAt: string | null;
   clearedErrors: number;
@@ -581,7 +583,11 @@ export function useEngineHealth(enabled: boolean): EngineHealth | undefined {
   const failing = overview.stages
     .filter((s) => newError(s) > 0)
     .map((s) => ({ stage: s.name, count: newError(s) }));
-  const retrying = overview.stages.reduce((n, s) => n + (s.runs_24h.new_retry ?? s.runs_24h.retry), 0);
+  const newRetry = (s: PipelineStageInfo) => s.runs_24h.new_retry ?? s.runs_24h.retry;
+  const retryingStages = overview.stages
+    .filter((s) => newRetry(s) > 0)
+    .map((s) => ({ stage: s.name, count: newRetry(s) }));
+  const retrying = retryingStages.reduce((n, s) => n + s.count, 0);
   const clearedAt = overview.health_cleared_at ?? null;
   const clearedErrors = clearedAt ? overview.stages.reduce((n, s) => n + s.runs_24h.error, 0) : 0;
   const failingTotal = failing.reduce((n, f) => n + f.count, 0);
@@ -592,7 +598,7 @@ export function useEngineHealth(enabled: boolean): EngineHealth | undefined {
       : retrying
         ? "warn"
         : "ok";
-  return { level, failing, retrying, clearedAt, clearedErrors };
+  return { level, failing, retrying, retryingStages, clearedAt, clearedErrors };
 }
 
 /** The Engine console's time picker: one window for every tab but Review. */
