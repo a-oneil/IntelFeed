@@ -349,6 +349,20 @@ async def _load_profiles(db: AsyncSession, cands: list[Candidate]) -> None:
         for side in ("a", "b"):
             objs[side] = await db.get(model, getattr(c, f"{side}_id"))
             setattr(c, side, _profile(objs[side]))
+            # An article count says nothing on its own: a common-word name
+            # (jupiter) piles up links to unrelated articles. The titles let the
+            # model see whether the count is about this thing.
+            if objs[side] is not None:
+                titles = (
+                    await db.execute(
+                        select(Entry.title)
+                        .join(junction, junction.entry_id == Entry.id)
+                        .where(getattr(junction, fk) == objs[side].id)
+                        .order_by(Entry.published_at.desc().nullslast())
+                        .limit(3)
+                    )
+                ).scalars()
+                getattr(c, side)["recent_titles"] = [t for t in titles if t]
         if c.alias_hit and objs["a"] is not None and objs["b"] is not None:
             c.shared_names = await _shared_names(db, c, objs["a"], objs["b"])
         if c.shared_entries:
@@ -407,6 +421,8 @@ def _side(label: str, p: dict) -> str:
         line += f"  first_seen={p['first_seen']}"
     if p.get("description"):
         line += f'\n     description: "{p["description"]}"'
+    if p.get("recent_titles"):
+        line += "\n     recent articles: " + " | ".join(f'"{t[:90]}"' for t in p["recent_titles"])
     return line
 
 

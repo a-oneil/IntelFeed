@@ -77,6 +77,22 @@ async def test_candidates_score_name_alias_and_shared_articles(db_session, test_
     assert "3 shared articles" in block and "created by AI extraction" in block
 
 
+async def test_each_side_shows_its_own_recent_articles(db_session, test_feed):
+    """A count of false matches (a common-word name) has to be visible as such."""
+    a, b, _far = await _seed_pair(db_session, test_feed, shared=0)
+    e = Entry(feed_id=test_feed.id, title="Linux Kernel: CVSS (Max): 9.8", url="https://x/k", guid=str(uuid.uuid4()))
+    db_session.add(e)
+    await db_session.flush()
+    db_session.add(EntryThreatActor(entry_id=e.id, threat_actor_id=b.id))
+    await db_session.flush()
+    cands = await _find(db_session)
+    c = cands[0]
+    side_b = c.b if c.b["id"] == str(b.id) else c.a
+    side_a = c.a if side_b is c.b else c.b
+    assert side_b["recent_titles"] == ["Linux Kernel: CVSS (Max): 9.8"] and side_a["recent_titles"] == []
+    assert 'recent articles: "Linux Kernel: CVSS (Max): 9.8"' in pairs_block(cands)
+
+
 async def test_shared_articles_alone_never_make_a_pair(db_session, test_feed):
     """Two famous things reported together is the normal case, not a duplicate."""
     _a, _b, far = await _seed_pair(db_session, test_feed, shared=0)
