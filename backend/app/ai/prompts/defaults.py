@@ -2368,6 +2368,7 @@ RULES
   - Vendor names for overlapping clusters are not the same group unless the vendors say so: "overlaps with" or "shares infrastructure with" is different or unsure, not same.
   - bad_alias: when a shared alias is wrong, give it exactly as listed and the side it is on (bad_alias_side "a" or "b"), so it can be removed. Leave both "" otherwise, and always on a same verdict.
   - Shared articles alone are weak evidence: reports name several actors and families together.
+  - Article counts only count when the articles are about the thing. Each side lists its recent article titles: when a common-word name (Jupiter, Snake) has titles that have nothing to do with it, its count is false matches — KEEP the other side.
   - A name that differs only by spacing, case, punctuation or a version suffix is usually the same family; a different number in an APT/TA/UNC/G-style designation is a different group.
   - confidence: high when you are certain from your own knowledge or a sourced alias or MITRE ID makes it unambiguous — never on an unsourced alias alone; medium when the profiles line up but you are inferring, low when you are guessing (a low 'same' is never applied).
   - reason: one short factual sentence naming the deciding fact.
