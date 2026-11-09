@@ -16,9 +16,10 @@ import pytest
 # Same locations test_tool_registry_sync.py checks: mounted in the api container
 # (docker-compose.dev.yml), or at the repo root on a host checkout.
 _REPO = Path(__file__).resolve().parents[2]
+_SKILLS = _REPO / "claude" / "skills"
 _CLI_PATHS = {
-    "full": (Path("/app/skill-clis/full_cli.py"), _REPO / "intelfeed-skill" / "scripts" / "intelfeed_cli.py"),
-    "lite": (Path("/app/skill-clis/lite_cli.py"), _REPO / "intelfeed-lite-skill" / "scripts" / "intelfeed_cli.py"),
+    "full": (Path("/app/skill-clis/full_cli.py"), _SKILLS / "intelfeed" / "scripts" / "intelfeed_cli.py"),
+    "lite": (Path("/app/skill-clis/lite_cli.py"), _SKILLS / "intelfeed-lite" / "scripts" / "intelfeed_cli.py"),
 }
 
 

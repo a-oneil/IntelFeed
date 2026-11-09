@@ -2130,10 +2130,10 @@ function SkillSection() {
       <div className={styles.card}>
         <h3 className={styles.cardTitle}>1. Install the Skill</h3>
         <p className={styles.cardDesc}>
-          Clone the skill into your Claude Code skills directory:
+          The skills ship in the IntelFeed repository under <code className={styles.inlineCode}>claude/skills/</code>. Clone it (or use your existing checkout):
         </p>
         <pre className={styles.codeBlock}>
-          <code>git clone https://github.com/a-oneil/intelfeed-skill ~/Downloads/intelfeed-skill</code>
+          <code>git clone https://github.com/a-oneil/IntelFeed ~/Downloads/intelfeed</code>
         </pre>
       </div>
 
@@ -2143,13 +2143,13 @@ function SkillSection() {
           Setup the lite skill if you just want the agent to perform searches and retrieve content from intelfeed.
         </p>
         <pre className={styles.codeBlock}>
-          <code>cp -r ~/Downloads/intelfeed-skill/intelfeed-lite-skill ~/.claude/skills/intelfeed</code>
+          <code>cp -r ~/Downloads/intelfeed/claude/skills/intelfeed-lite ~/.claude/skills/intelfeed-lite</code>
         </pre>
         <p className={styles.cardDesc}>
           Setup the full skill if you need the agent to modify intelfeed configurations.
         </p>
         <pre className={styles.codeBlock}>
-          <code>cp -r ~/Downloads/intelfeed-skill/intelfeed-full-skill ~/.claude/skills/intelfeed</code>
+          <code>cp -r ~/Downloads/intelfeed/claude/skills/intelfeed ~/.claude/skills/intelfeed</code>
         </pre>
       </div>
 

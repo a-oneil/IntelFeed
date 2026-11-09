@@ -131,6 +131,7 @@ scripts/build_apk.sh                    # Bump the Android app version, test, bu
 - **`schemas/`** — Pydantic request/response schemas with generic `PaginatedResponse[T]`
 - **`services/`** — Thin business logic layer (search, dedup, sanitization, rate limiting, enrichment)
 - **`workers/`** — Celery tasks: feed fetching, intel extraction, enrichment, automation, maintenance (beat-scheduled)
+- **`pipeline/`** — The stage registry (`registry.py`: every per-entry processing stage as a `StageDef` with its Celery task path; chord builders read it via `stages_of_kind()`, so no task name is hard-coded elsewhere) and pipeline plans (`plans.py`: per-feed / per-category / global overrides of which stages run). Add a stage here, not in the worker chord. See [docs/engine.md](docs/engine.md).
 - **`intelligence/`** — Correlation engine, autolinker (Aho-Corasick), TTP/CVE extraction, detection rule extraction, reporting
 - **`ai/`** — Pluggable AI provider abstraction
 - **`search/`** — Meilisearch indexing and querying
@@ -188,38 +189,56 @@ db (PostgreSQL:5433, built from `db/Dockerfile` — postgres:16-alpine + pgvecto
 - **Key libraries** — @codemirror (code editing), @xyflow/react (entity graphs), react-grid-layout (dashboards), @tanstack/react-virtual (virtualized lists), sonner (toasts), dompurify (HTML sanitization).
 
 ### Testing
-- **Backend** (`backend/tests/`): Pytest with async fixtures. `conftest.py` provides `db_session` (schema built once per session, each test rolled back), `client` (ASGI test client with dependency override), `test_user`/`admin_user` with `auth_headers`/`admin_headers`. Test DB uses same URL + `_test` suffix.
+- **Backend** (`backend/tests/`): Pytest with async fixtures. `conftest.py` provides `db_session` (schema built once per session, each test rolled back), `client` (ASGI test client with dependency override), `test_user`/`admin_user` with `auth_headers`/`admin_headers`. Test DB uses same URL + `_test` suffix. One session-scoped event loop (a per-test loop invalidates pooled connections). Every test has a 60s timeout; raise it per test with `@pytest.mark.timeout`. A test that opens a second engine (imitating a Celery worker) must be marked `@pytest.mark.committed_db` — it then commits for real and pays for a TRUNCATE afterwards. Route-walking tests depend on the FastAPI version in the lockfile, so run them in the api container if the host venv is older.
 - **Frontend**: Vitest with jsdom + React Testing Library for unit tests (`src/**/__tests__/`). Playwright for E2E (`tests/e2e/`, baseURL `localhost:3001`, workers: 1, retries: 2 in CI).
 
 ## Environment Setup
 
 Copy `.env.example` to `.env`. Key variables: `POSTGRES_*`, `REDIS_URL`, `MEILI_URL`, `MEILI_MASTER_KEY`, `SECRET_KEY`, `ENCRYPTION_KEY`. Most operational settings are configurable in the web UI: AI providers under Settings > AI Configuration; thresholds and API keys under Settings > Engine.
 
+## Claude assets (`claude/`)
+
+Everything Claude-specific that ships with the repo lives under `claude/`, not at the root:
+
+```
+claude/skills/intelfeed/        Full skill + CLI (every registry tool, read and write)
+claude/skills/intelfeed-lite/   Read-only skill + CLI (query/search/pivot only)
+claude/agents/                  Subagent definitions (e.g. intelfeed-recap)
+claude/planning/                Active phase plans and one-off scripts (gitignored)
+```
+
+`.claude/skills/` (dotted, at the root) holds the operator skills for this checkout — deploy, prod-status, review-queue-triage, detection-engineering, threat-intel-analyst.
+
 ## IntelFeed CLI
 
-`intelfeed-skill/scripts/intelfeed_cli.py` is a zero-dependency CLI tool (one command per registry tool) that executes IntelFeed operations via the API. Used by Claude skills to interact with the platform.
+`claude/skills/intelfeed/scripts/intelfeed_cli.py` is a zero-dependency CLI tool (one command per registry tool) that executes IntelFeed operations via the API. Used by Claude skills to interact with the platform.
 
 ```bash
 # Single tool call
-python3 intelfeed-skill/scripts/intelfeed_cli.py search_entries '{"query": "ransomware", "limit": 5}'
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py search_entries '{"query": "ransomware", "limit": 5}'
 
 # Multiple tool calls (batched)
-python3 intelfeed-skill/scripts/intelfeed_cli.py search_entries '{"query": "APT29"}' get_feeds '{"limit": 10}'
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py search_entries '{"query": "APT29"}' get_feeds '{"limit": 10}'
 
 # List available tools
-python3 intelfeed-skill/scripts/intelfeed_cli.py --list-tools
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py --list-tools
 ```
 
 Requires env vars `INTELFEED_API_URL`, `INTELFEED_USERNAME`, `INTELFEED_PASSWORD` and the Docker stack running.
 
-`intelfeed-lite-skill/` is the read-only variant (query/search/pivot tools only, no writes). Both CLIs are code-generated from the `backend/app/tools/` registry by `scripts/dev/sync_skill_clis.py` — regenerate instead of hand-editing them; `backend/tests/test_tool_registry_sync.py` fails on drift.
+`claude/skills/intelfeed-lite/` is the read-only variant (query/search/pivot tools only, no writes). Both CLIs are code-generated from the `backend/app/tools/` registry by `scripts/dev/sync_skill_clis.py` — regenerate instead of hand-editing them; `backend/tests/test_tool_registry_sync.py` fails on drift. The dev compose file bind-mounts both CLIs into the api container at `/app/skill-clis/` so that test can run there too. Full tool-by-tool reference: [docs/cli-reference.md](docs/cli-reference.md).
 
 `intelfeed-mcp/` serves the same registry over MCP (stdio) for local models (LM Studio etc.): nine fixed tools, per-task playbooks in `intelfeed-mcp/skills/*.md` loaded on demand, results shaped to a ~2k-token budget, read-only unless `INTELFEED_MCP_ALLOW_WRITES` is set (or, for the copilot's own CLI runs, `INTELFEED_MCP_PROPOSE_WRITES`, where every write is staged for the user to confirm). It reads the live registry from `/api/tools/tools`; its offline copy `intelfeed-mcp/registry.json` is generated by the same sync script and drift-checked by the same test. See [intelfeed-mcp/README.md](intelfeed-mcp/README.md).
 
 ## Deeper Documentation
 
+[docs/README.md](docs/README.md) is the index of every doc, split into user / operator / contributor sections with a "how to navigate" list. The ones most often needed while changing code:
+
 - [docs/architecture.md](docs/architecture.md) — full architecture reference beyond the summary above
-- [docs/story-threads.md](docs/story-threads.md) — embeddings, thread clustering/merging, the spine, and its tuning knobs
-- [docs/entity-profiles.md](docs/entity-profiles.md), [docs/entries.md](docs/entries.md) — domain deep-dives
+- [docs/contributing.md](docs/contributing.md) — local setup (full Docker or hybrid), migrations, code style, debugging
+- [docs/engine.md](docs/engine.md) / [docs/engine-settings.md](docs/engine-settings.md) — pipeline stages and plans, signal-engine scoring, the Engine console; every runtime setting with its default, editor and the job it drives
+- [docs/intelligence-engine.md](docs/intelligence-engine.md), [docs/observables.md](docs/observables.md), [docs/story-threads.md](docs/story-threads.md) — the autolinker/correlation pipelines, the IOC ledger, and embeddings/thread clustering with their tuning knobs
+- [docs/entity-profiles.md](docs/entity-profiles.md), [docs/entries.md](docs/entries.md), [docs/data-model.md](docs/data-model.md) — domain deep-dives and the schema/migration conventions
 - [docs/android-app.md](docs/android-app.md) — the Android client: download, features, build, signing key, CI releases, sync from the working folder
-- `planning/` (gitignored) — active phase plans (e.g. `vendor-product-entities.md`, `mobile-responsiveness.md`)
+
+Docs conventions: `file:line` code references (CI checks them with `scripts/dev/check_doc_refs.py`; `--fix` repairs the clear cases), absolute dates, one Mermaid diagram per file under `docs/diagrams/`, and present tense — state what is configured, not what changed.

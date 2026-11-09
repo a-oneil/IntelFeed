@@ -31,8 +31,9 @@ TOOLS_DIR = Path(__file__).resolve().parent.parent / "app" / "tools"
 # at /app/skill-clis (docker-compose.dev.yml); on a host checkout they sit at
 # the repo root. Both generated blocks are guarded below.
 _REPO = Path(__file__).resolve().parents[2]
-_FULL_CLI_PATHS = (Path("/app/skill-clis/full_cli.py"), _REPO / "intelfeed-skill" / "scripts" / "intelfeed_cli.py")
-_LITE_CLI_PATHS = (Path("/app/skill-clis/lite_cli.py"), _REPO / "intelfeed-lite-skill" / "scripts" / "intelfeed_cli.py")
+_SKILLS = _REPO / "claude" / "skills"
+_FULL_CLI_PATHS = (Path("/app/skill-clis/full_cli.py"), _SKILLS / "intelfeed" / "scripts" / "intelfeed_cli.py")
+_LITE_CLI_PATHS = (Path("/app/skill-clis/lite_cli.py"), _SKILLS / "intelfeed-lite" / "scripts" / "intelfeed_cli.py")
 _MCP_REGISTRY = _REPO / "intelfeed-mcp" / "registry.json"
 
 

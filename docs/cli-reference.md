@@ -4,8 +4,8 @@ This page is for anyone who wants to drive IntelFeed from a terminal, a script o
 
 The CLI is one Python file that calls a running IntelFeed server. There are two copies:
 
-- **Full CLI** (`intelfeed-skill/scripts/intelfeed_cli.py`): every tool, read and write.
-- **Lite CLI** (`intelfeed-lite-skill/scripts/intelfeed_cli.py`): read tools only.
+- **Full CLI** (`claude/skills/intelfeed/scripts/intelfeed_cli.py`): every tool, read and write.
+- **Lite CLI** (`claude/skills/intelfeed-lite/scripts/intelfeed_cli.py`): read tools only.
 
 Both are generated from the backend tool registry (`backend/app/tools/`), so the server and the CLIs always list the same tools. Run `--list-tools` to see what your copy has.
 
@@ -58,26 +58,26 @@ export INTELFEED_PASSWORD="your-password"
 
 ## Invocation Patterns
 
-All examples run on your machine from the repo root. Swap in `intelfeed-lite-skill/` to use the lite CLI.
+All examples run on your machine from the repo root. Swap in `claude/skills/intelfeed-lite/` to use the lite CLI.
 
 ```bash
 # One tool, with JSON arguments
-python3 intelfeed-skill/scripts/intelfeed_cli.py search_entries '{"query": "ransomware", "limit": 5}'
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py search_entries '{"query": "ransomware", "limit": 5}'
 
 # A tool with no arguments
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_dashboard_stats
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py get_dashboard_stats
 
 # Several tools in one run (one login, calls run in order)
-python3 intelfeed-skill/scripts/intelfeed_cli.py \
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py \
   search_entries '{"query": "APT29"}' \
   get_feeds '{"limit": 10}' \
   get_dashboard_stats
 
 # Every tool with its description and parameters ([optional] in brackets)
-python3 intelfeed-skill/scripts/intelfeed_cli.py --list-tools
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py --list-tools
 
 # One tool's parameters, types, defaults, allowed values and an example
-python3 intelfeed-skill/scripts/intelfeed_cli.py --help-tool search_entries
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py --help-tool search_entries
 ```
 
 Arguments are one JSON object after the tool name. A tool with no JSON after it runs with no arguments. Keys set to `null` are dropped before sending.
@@ -125,7 +125,7 @@ Set `INTELFEED_READ_ONLY=1` to make the full CLI refuse every write tool. The ch
 
 ```bash
 export INTELFEED_READ_ONLY=1
-python3 intelfeed-skill/scripts/intelfeed_cli.py create_campaign '{"name": "Test"}'
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py create_campaign '{"name": "Test"}'
 # stdout: {"error": "read-only mode: create_campaign is a write action and is disabled"}
 # exit code: 2
 ```
@@ -140,7 +140,7 @@ See the [CLI read-only gating diagram](diagrams/cli-readonly-gating.md) for the 
 
 ## The Lite Skill vs. Full Skill
 
-| | Full CLI (`intelfeed-skill`) | Lite CLI (`intelfeed-lite-skill`) |
+| | Full CLI (`claude/skills/intelfeed`) | Lite CLI (`claude/skills/intelfeed-lite`) |
 |---|---|---|
 | Tools | Every registry tool | Every read tool, minus a few heavy ones |
 | Writes, deletes, merges | Yes | No |
@@ -166,11 +166,11 @@ The lite CLI is not a permission boundary on the server: it logs in as your user
 The token is tied to your user and that one item, and stops working after 5 to 10 minutes. These tools work this way: `delete_entity`, `delete_feed`, `delete_campaign`, `delete_automation_rule`, `delete_detection_rule`, `delete_intel_report` and `delete_requirement`.
 
 ```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py delete_entity \
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py delete_entity \
   '{"entity_type": "campaign", "entity_id": "<uuid>"}'
 # result: {"status": "confirmation_required", "confirmation_token": "<token>", ...}
 
-python3 intelfeed-skill/scripts/intelfeed_cli.py delete_entity \
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py delete_entity \
   '{"entity_type": "campaign", "entity_id": "<uuid>", "confirmation_token": "<token>"}'
 # result: {"status": "deleted", ...}
 ```
@@ -627,12 +627,12 @@ These read the pages in `docs/`, as shipped with the deployment. Source: `backen
 
 ## Common Workflows
 
-These run on your machine and use `jq` to pull IDs out of the JSON. Set `CLI=intelfeed-skill/scripts/intelfeed_cli.py` first.
+These run on your machine and use `jq` to pull IDs out of the JSON. Set `CLI=claude/skills/intelfeed/scripts/intelfeed_cli.py` first.
 
 ### Find recent articles about a topic and summarise one
 
 ```bash
-CLI=intelfeed-skill/scripts/intelfeed_cli.py
+CLI=claude/skills/intelfeed/scripts/intelfeed_cli.py
 
 # 1. Newest five ransomware articles
 python3 $CLI search_entries '{"query": "ransomware", "limit": 5, "sort": "newest"}' \
@@ -768,7 +768,7 @@ Tools live on the server, in `backend/app/tools/`. The CLI keeps a copy of each 
 
 3. **If only admins should run it**, add the name to `ADMIN_TOOLS` in `backend/app/tools/__init__.py`. Do this when the matching web API is admin-only, or the tool changes data for everyone (merges, feed pool changes, automation rules, extraction curation).
 
-4. **Regenerate the CLIs** (see below). Then update `intelfeed-skill/SKILL.md` and, for read tools, `intelfeed-lite-skill/SKILL.md`.
+4. **Regenerate the CLIs** (see below). Then update `claude/skills/intelfeed/SKILL.md` and, for read tools, `claude/skills/intelfeed-lite/SKILL.md`.
 
 5. **Run the guard tests**: `pytest tests/test_tool_registry_sync.py` from `backend/`. It checks that every mutating tool is in the full CLI's `WRITE_TOOLS`, that the lite CLI has no write tools, that `intelfeed-mcp/registry.json` matches the registry, that schema enums (entity types, rule formats, TLP, triggers, feed types, relationship verbs) match their sources, and that each handler's signature matches its schema.
 

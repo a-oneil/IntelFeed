@@ -47,10 +47,10 @@ logs/
 .claude/settings.local.json
 
 # Project-specific ignores
-planning/
+claude/planning/
 notes.md
-intelfeed-skill/intelfeed-workspace/
-intelfeed-skill/evals/
+claude/skills/intelfeed/intelfeed-workspace/
+claude/skills/intelfeed/evals/
 .claude/
 
 # Backup Files
