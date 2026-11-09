@@ -446,7 +446,7 @@ services:
           memory: 128M
 
   caddy:
-    image: caddy:2.11.7-alpine
+    image: caddy:2.11.8-alpine
     restart: unless-stopped
     logging: *default-logging
     # Protect the TLS/reverse proxy — if it dies the whole site is unreachable.
