@@ -63,10 +63,12 @@ HEAD_SHA=$(git rev-parse HEAD)
 
 # --- What moved? -------------------------------------------------------------
 #
-# Most commits on this repo touch docs/, scripts/, the Android client
-# or CI — none of which are baked into an image. ./docs, ./scripts and
-# ./intelfeed-skill are bind-mounted read-only into the containers, so new
-# content there is live the moment the pull lands. Rebuilding and recreating the
+# Most commits on this repo touch docs/, scripts/, claude/, the Android client
+# or CI — none of which are baked into an image. ./docs and ./scripts are
+# bind-mounted read-only into the containers, so new content there is live the
+# moment the pull lands; claude/ (the Claude skills and agents) runs on the
+# analyst's own machine against the API, so no container needs it at all.
+# Rebuilding and recreating the
 # stack for those is pure downtime: a cold `docker compose build` on the prod box
 # is minutes of CPU, and `up -d` drops every connection in flight.
 #

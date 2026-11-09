@@ -123,8 +123,8 @@ services:
       - ./scripts:/app/scripts
       # Skill CLIs, mounted so test_tool_registry_sync.py can guard their
       # generated TOOLS/WRITE_TOOLS blocks against the live registry.
-      - ./intelfeed-skill/scripts/intelfeed_cli.py:/app/skill-clis/full_cli.py:ro
-      - ./intelfeed-lite-skill/scripts/intelfeed_cli.py:/app/skill-clis/lite_cli.py:ro
+      - ./claude/skills/intelfeed/scripts/intelfeed_cli.py:/app/skill-clis/full_cli.py:ro
+      - ./claude/skills/intelfeed-lite/scripts/intelfeed_cli.py:/app/skill-clis/lite_cli.py:ro
       - ./logs:/app/logs
       - image_cache:/app/data/image_cache
       - telegram_data:/data

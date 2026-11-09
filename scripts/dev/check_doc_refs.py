@@ -52,6 +52,8 @@ tracked = subprocess.run(
     text=True,
     check=True,
 ).stdout.splitlines()
+# A file deleted in the worktree but not yet staged is still in the index; drop it.
+tracked = [p for p in tracked if (ROOT / p).is_file()]
 _sources: dict[str, list[str]] = {}
 
 

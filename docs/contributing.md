@@ -59,16 +59,17 @@ If a host port is taken, change it with `FRONTEND_PORT`, `DB_PORT`, `REDIS_PORT`
 ## Repo Tour
 
 ```text
-backend/              FastAPI app, models, Alembic migrations, Celery workers, tests
-frontend/             React + TypeScript (Vite, CSS Modules, TanStack Query, Zustand)
-android/              Native Android client (see docs/android-app.md)
-db/                   PostgreSQL 16 image with pgvector
-piper/                Text-to-speech sidecar
-intelfeed-skill/      Claude skill + CLI with every registry tool (196)
-intelfeed-lite-skill/ Read-only skill + CLI (97 tools)
-intelfeed-mcp/        MCP server for local models, over the same tool registry
-docs/                 Documentation (also shown in the app; mounted into the api container)
-scripts/              seed/ maintenance/ telegram/ ops/ dev/ (see scripts/README.md)
+backend/                       FastAPI app, models, Alembic migrations, Celery workers, tests
+frontend/                      React + TypeScript (Vite, CSS Modules, TanStack Query, Zustand)
+android/                       Native Android client (see docs/android-app.md)
+db/                            PostgreSQL 16 image with pgvector
+piper/                         Text-to-speech sidecar
+claude/skills/intelfeed/       Claude skill + CLI with every registry tool (196)
+claude/skills/intelfeed-lite/  Read-only skill + CLI (97 tools)
+claude/agents/                 Claude subagent definitions (e.g. intelfeed-recap)
+intelfeed-mcp/                 MCP server for local models, over the same tool registry
+docs/                          Documentation (also shown in the app; mounted into the api container)
+scripts/                       seed/ maintenance/ telegram/ ops/ dev/ (see scripts/README.md)
 docker-compose.dev.yml, docker-compose.prod.yml
 Caddyfile             Production reverse proxy and TLS
 update.sh             Production update script
@@ -693,8 +694,8 @@ docker compose -f docker-compose.dev.yml exec api python scripts/maintenance/pur
 
 ## Skills, CLI & MCP
 
-- **`intelfeed-skill/`** — Claude skill and CLI with every tool in the registry (196).
-- **`intelfeed-lite-skill/`** — the read-only version (97 tools).
+- **`claude/skills/intelfeed/`** — Claude skill and CLI with every tool in the registry (196).
+- **`claude/skills/intelfeed-lite/`** — the read-only version (97 tools).
 - **`intelfeed-mcp/`** — the same registry served over MCP for local models. See [intelfeed-mcp/README.md](../intelfeed-mcp/README.md).
 
 Each skill has its own zero-dependency `scripts/intelfeed_cli.py`. Both CLIs and the MCP server's `registry.json` are generated from `backend/app/tools/`. Do not edit them by hand; run `python3 scripts/dev/sync_skill_clis.py` after changing a tool.
@@ -706,8 +707,8 @@ export INTELFEED_API_URL=http://localhost:8000
 export INTELFEED_USERNAME=your-username
 export INTELFEED_PASSWORD=your-password
 
-python3 intelfeed-skill/scripts/intelfeed_cli.py --list-tools
-python3 intelfeed-skill/scripts/intelfeed_cli.py search_entries '{"query": "ransomware", "limit": 5}'
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py --list-tools
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py search_entries '{"query": "ransomware", "limit": 5}'
 ```
 
 Full reference: [cli-reference.md](cli-reference.md).
