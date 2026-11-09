@@ -60,7 +60,7 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "pytest-timeout>=2.4.0",
-    "pytest-xdist>=3.5",
+    "pytest-xdist>=3.8.0",
     "httpx>=0.28.1",
     "factory-boy>=3.3.3",
     # Pinned to the version ci.yml installs, so `ruff format` in the dev image
