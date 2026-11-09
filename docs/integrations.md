@@ -481,7 +481,7 @@ export INTELFEED_API_URL=https://intelfeed.example.com
 export INTELFEED_USERNAME=your_user
 export INTELFEED_PASSWORD=your_pass
 
-python3 intelfeed-skill/scripts/intelfeed_cli.py search_entries '{"query": "cve.cvss:>=9.0", "limit": 100}' | \
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py search_entries '{"query": "cve.cvss:>=9.0", "limit": 100}' | \
   python3 -c "
 import sys, json, csv
 data = json.load(sys.stdin)['result']
@@ -654,16 +654,16 @@ with open(STATE_FILE, "w") as f:
 
 ### 13. IntelFeed CLI Integration
 
-`intelfeed-skill/scripts/intelfeed_cli.py` is a dependency-free Python 3 script that calls the tool registry over the API.
+`claude/skills/intelfeed/scripts/intelfeed_cli.py` is a dependency-free Python 3 script that calls the tool registry over the API.
 
 ```bash
 export INTELFEED_API_URL=https://intelfeed.example.com
 export INTELFEED_USERNAME=your_user
 export INTELFEED_PASSWORD=your_pass
 
-python3 intelfeed-skill/scripts/intelfeed_cli.py search_entries '{"query": "ransomware", "limit": 5}'
-python3 intelfeed-skill/scripts/intelfeed_cli.py --list-tools          # every tool
-python3 intelfeed-skill/scripts/intelfeed_cli.py --help-tool get_cve   # one tool's parameters
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py search_entries '{"query": "ransomware", "limit": 5}'
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py --list-tools          # every tool
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py --help-tool get_cve   # one tool's parameters
 ```
 
 - `INTELFEED_API_URL` must be `https://` or `http://` localhost; `INTELFEED_ALLOW_INSECURE_HTTP=1` allows plain HTTP on trusted networks.
@@ -675,7 +675,7 @@ Common tools: `search_entries` (full query language), `search_entities`, `get_en
 Several calls at once:
 
 ```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py \
+python3 claude/skills/intelfeed/scripts/intelfeed_cli.py \
   search_entries '{"query": "Log4j", "limit": 5}' \
   get_feeds '{"limit": 10}'
 ```
@@ -685,7 +685,7 @@ python3 intelfeed-skill/scripts/intelfeed_cli.py \
 ```yaml
 - name: Check for new critical CVEs
   run: |
-    python3 intelfeed-skill/scripts/intelfeed_cli.py search_entries '{"query": "cve.cvss:>=9.0 date:>=2026-10-01", "limit": 20}' \
+    python3 claude/skills/intelfeed/scripts/intelfeed_cli.py search_entries '{"query": "cve.cvss:>=9.0 date:>=2026-10-01", "limit": 20}' \
       | python3 -c "import sys, json; r = json.load(sys.stdin)['result']; print(f\"Found {r['total']} articles\")"
 ```
 

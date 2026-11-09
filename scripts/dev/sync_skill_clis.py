@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regenerate the skill CLIs' TOOLS dicts from the backend agent-tool registry.
 
-The two skill CLIs (intelfeed-skill, intelfeed-lite-skill) carry hand-readable
+The two skill CLIs (claude/skills/intelfeed, claude/skills/intelfeed-lite) carry hand-readable
 copies of the backend tool definitions. Historically these were maintained by
 hand and drifted badly. This script makes the backend registry the single
 source of truth: it fetches the live definitions and rewrites each CLI's
@@ -37,8 +37,8 @@ import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]  # scripts/dev/<this file> -> repo root
-FULL_CLI = REPO / "intelfeed-skill" / "scripts" / "intelfeed_cli.py"
-LITE_CLI = REPO / "intelfeed-lite-skill" / "scripts" / "intelfeed_cli.py"
+FULL_CLI = REPO / "claude" / "skills" / "intelfeed" / "scripts" / "intelfeed_cli.py"
+LITE_CLI = REPO / "claude" / "skills" / "intelfeed-lite" / "scripts" / "intelfeed_cli.py"
 MCP_REGISTRY = REPO / "intelfeed-mcp" / "registry.json"
 
 # Read-only tools deliberately excluded from the lite (retrieval-only) skill:

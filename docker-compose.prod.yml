@@ -189,9 +189,9 @@ services:
       # Global copilot (/api/ai/copilot/stream): the api does NOT run the `claude`
       # CLI. With copilot_worker_dispatch=true (default) it enqueues the CLI turn
       # on the `ai` queue — celery-worker-ai owns the OAuth credentials
-      # volume + intelfeed skill mount and is the single credentials writer — and
+      # volume and is the single credentials writer — and
       # relays the streamed events back over Redis. So the api needs neither the
-      # CLI, the credentials volume, nor the skill mount here. (This resolves the
+      # CLI nor the credentials volume here. (This resolves the
       # earlier "who holds the credentials" question: only the CLI worker does.)
     env_file:
       - .env
@@ -446,7 +446,7 @@ services:
           memory: 128M
 
   caddy:
-    image: caddy:2.11.7-alpine
+    image: caddy:2.11.8-alpine
     restart: unless-stopped
     logging: *default-logging
     # Protect the TLS/reverse proxy — if it dies the whole site is unreachable.
