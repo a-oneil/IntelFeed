@@ -2133,19 +2133,26 @@ pyjwt==2.15.1 \
     # via
     #   intelfeed (pyproject.toml)
     #   mcp
-pymupdf==2.0 \
-    --hash=sha256:707594e8de4946445489ca3274943911a505a5cb665adf8751a4edfc4c0fff58 \
-    --hash=sha256:7733136f626fffe98677daa53c906eb45f2eb486a6450dbcfd652cbbd760f1e2 \
-    --hash=sha256:c9faff6d6ec5882e934a21893917f2c460bbc79f3645318e1f8d726990ab4580 \
-    --hash=sha256:f59f009b1586d56882739189cd3a4f0240efbfae28ebf268a3763ed9a2006270 \
-    --hash=sha256:f92e8a7ae92c7b1cbffcbe8764166ab1234e0a37b07549f5951e7739241d34f0
-    # via intelfeed (pyproject.toml)
-pymupdf-layout==2.0 \
-    --hash=sha256:03ac486c796839eae5c46e910364ad524fb1e83c7dc34553e8e704939d0236a7
-    # via pymupdf
-pymupdf4llm==2.0 \
-    --hash=sha256:43d4b4a2d0bf8b9b4d7f21a48875ef0016018dbad6677ef6b01ef2b0f6e392dd
-    # via pymupdf
+pymupdf==2.1 \
+    --hash=sha256:1bb2284bde6067f05f83961ea678480060870dc966ad520bcf97da0b0eccf40c \
+    --hash=sha256:5a1a1fee36d5598013614e06eef25aaa68819d828f5401170dbcaf6f2714d1dd \
+    --hash=sha256:9ac95f98016e83eafb8f1d786396f9c60e400d559590596e5b2df9eb6384948b \
+    --hash=sha256:a9efa2e9e5f469d3b5749199329739cfef1ff1d1846538ced4885c544eecbcd9 \
+    --hash=sha256:e1122bbc3a1212396f0d70d19f78e084991b59ebdfc9d846c28ca8b509de01ad
+    # via
+    #   intelfeed (pyproject.toml)
+    #   pymupdf-layout
+    #   pymupdf4llm
+pymupdf-layout==2.1 \
+    --hash=sha256:e7e00bc50ec9113d36bdbb0dd5cdafa5f4d61e22e598960fc187ee4f721f5095
+    # via
+    #   pymupdf
+    #   pymupdf4llm
+pymupdf4llm==2.1 \
+    --hash=sha256:2fe8bb344444c6a8ef41fd745d2d10f6da59df6e104ef20f35d51dd26914b5fb
+    # via
+    #   pymupdf
+    #   pymupdf-layout
 pyphen==0.18.1 \
     --hash=sha256:0aa9051e15928cecadd4c632cea0258ba57215b2a197a39baa46abcdb0f47e84 \
     --hash=sha256:dbae6fbbe4f01cb206108b43573d857c67107be9d0e38eb1b08d6fa2210634a7
