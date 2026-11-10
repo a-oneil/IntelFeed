@@ -5,10 +5,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const get = vi.fn();
 const put = vi.fn();
+const post = vi.fn();
 vi.mock("@/api/client", () => ({
   default: {
     get: (...args: unknown[]) => get(...args),
     put: (...args: unknown[]) => put(...args),
+    post: (...args: unknown[]) => post(...args),
   },
 }));
 const confirm = vi.fn();
@@ -85,29 +87,32 @@ describe("CheckEngineBanner", () => {
       }),
     );
   }
-  function renderBanner(onOpenStage = vi.fn()) {
+  function renderBanner() {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={qc}>
-        <CheckEngineBanner labelFor={(s) => s.toUpperCase()} onOpenStage={onOpenStage} />
+        <CheckEngineBanner />
       </QueryClientProvider>,
     );
-    return onOpenStage;
   }
-  beforeEach(() => get.mockReset());
-
-  it("says which stages are stuck and opens one on click", async () => {
-    mockApi(false, [stage("extract", 7), stage("enrich", 5)]);
-    const onOpenStage = renderBanner();
-    expect(await screen.findByRole("status")).toHaveTextContent("12 entries are stuck");
-    await userEvent.click(screen.getByRole("button", { name: /ENRICH 5/ }));
-    expect(onOpenStage).toHaveBeenCalledWith("enrich");
+  beforeEach(() => {
+    get.mockReset();
+    post.mockReset();
   });
 
-  it("explains retries when the light is amber", async () => {
+  it("counts the erroring entries and retries them on click", async () => {
+    mockApi(false, [stage("extract", 7), stage("enrich", 5)]);
+    post.mockResolvedValue({ data: { dispatched: 12, skipped: 0, by_stage: {}, remaining: 0 } });
+    renderBanner();
+    expect(await screen.findByRole("status")).toHaveTextContent("Check engine: 12 entries are erroring - retry");
+    await userEvent.click(screen.getByRole("button", { name: "retry" }));
+    expect(post).toHaveBeenCalledWith("/engine/pipeline/retry-errors", {});
+  });
+
+  it("says runs are retrying when the light is amber", async () => {
     mockApi(false, [stage("extract", 2, 3)]);
     renderBanner();
-    expect(await screen.findByRole("status")).toHaveTextContent("3 runs were retried");
+    expect(await screen.findByRole("status")).toHaveTextContent("Check engine: 3 runs are retrying");
   });
 
   it("is hidden while the light is green", async () => {
