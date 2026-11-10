@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 
-import { ERROR_LIGHT_THRESHOLD, useEngineHealth, type EngineHealth } from "@/hooks/useEngine";
+import { useEngineHealth, type EngineHealth } from "@/hooks/useEngine";
 import { useIsAdmin } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 
@@ -14,41 +14,22 @@ export const ENGINE_ICON_PATH = "M7 6h6M10 6v3M5 9h10l2 2h2v-2h2v8h-2v-2h-2v3h-9
  *  size of the icons around it. */
 export const ENGINE_ICON_VIEWBOX = "2 2 20 20";
 
-function formatClearedAt(iso: string): string {
-  return `at ${new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
-}
+const entries = (n: number) => `${n.toLocaleString()} ${n === 1 ? "entry is" : "entries are"} erroring.`;
 
 function describe(h: EngineHealth): { title: string; body: string } {
+  const failing = h.failing.reduce((n, f) => n + f.count, 0);
   switch (h.level) {
     case "stopped":
-      return { title: "Engine stopped", body: "No feeds are polled and no background work runs until you start it again." };
-    case "err": {
-      const total = h.failing.reduce((n, f) => n + f.count, 0);
-      const where = h.failing.map((f) => `${f.stage} ${f.count.toLocaleString()}`).join(", ");
-      return {
-        title: "Engine errors",
-        body: `${total.toLocaleString()} ${total === 1 ? "entry is" : "entries are"} stuck at a stage (${where}).`,
-      };
-    }
+      return { title: "Engine stopped", body: "Nothing runs until you start it." };
+    case "err":
+      return { title: "Engine errors", body: entries(failing) };
     case "warn":
-      return { title: "Engine retrying", body: `${h.retrying.toLocaleString()} runs retried in the last 24 hours.` };
+      return {
+        title: "Engine retrying",
+        body: `${h.retrying.toLocaleString()} ${h.retrying === 1 ? "run is" : "runs are"} retrying.`,
+      };
     default:
-      if (h.failing.length) {
-        const total = h.failing.reduce((n, f) => n + f.count, 0);
-        return {
-          title: "Engine healthy",
-          body: `${total.toLocaleString()} ${total === 1 ? "entry is" : "entries are"} stuck at a stage, under the ${ERROR_LIGHT_THRESHOLD} it takes to turn the light red.`,
-        };
-      }
-      if (h.clearedAt && h.clearedErrors) {
-        return {
-          title: "Engine healthy",
-          body:
-            `Nothing new since you cleared the light ${formatClearedAt(h.clearedAt)}. ` +
-            `${h.clearedErrors.toLocaleString()} older ${h.clearedErrors === 1 ? "error is" : "errors are"} still in the Engine console.`,
-        };
-      }
-      return { title: "Engine healthy", body: "Every stage ran clean in the last 24 hours." };
+      return { title: "Engine healthy", body: failing ? entries(failing) : "No errors." };
   }
 }
 
@@ -63,7 +44,7 @@ export function EngineStatusButton() {
   const { title, body } = describe(health);
 
   return (
-    <Hint title={title} body={body} aside="Click to open the Engine console." align="end">
+    <Hint title={title} body={body} aside="Click to open the Engine." align="end">
       <button
         className={`${styles.iconBtn} ${styles[`engine_${health.level}`]}`}
         onClick={() => {

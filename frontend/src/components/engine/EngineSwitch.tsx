@@ -1,11 +1,11 @@
 import { toast } from "sonner";
 
 import {
-  ERROR_LIGHT_THRESHOLD,
   type EngineState,
   useClearEngineHealth,
   useEngineHealth,
   useEngineState,
+  useRetryPipelineErrors,
   useSetEngineStopped,
 } from "@/hooks/useEngine";
 import { confirmDialog } from "@/utils/dialog";
@@ -118,42 +118,40 @@ export function EngineStoppedBanner() {
 
 /** Says why the header's check-engine light is on, under the Engine top bar.
  *  Hidden while the light is green (or cleared), and while the engine is
- *  stopped: the stopped banner covers that. Each stage opens its panel. */
-export function CheckEngineBanner({
-  labelFor,
-  onOpenStage,
-}: {
-  labelFor: (stage: string) => string;
-  onOpenStage: (stage: string) => void;
-}) {
+ *  stopped: the stopped banner covers that. */
+export function CheckEngineBanner() {
   const health = useEngineHealth(true);
+  const retryErrors = useRetryPipelineErrors();
   if (!health || (health.level !== "err" && health.level !== "warn")) return null;
   const err = health.level === "err";
-  const rows = err ? health.failing : health.retryingStages;
-  const total = rows.reduce((n, r) => n + r.count, 0);
-  const since = health.clearedAt
-    ? `since you cleared the light ${new Date(health.clearedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`
-    : "in the last 24 hours";
+  const total = (err ? health.failing : health.retryingStages).reduce((n, r) => n + r.count, 0);
+
+  const retry = () =>
+    retryErrors.mutate(
+      {},
+      {
+        onSuccess: (r) =>
+          toast.success(
+            `Retrying ${r.dispatched.toLocaleString()} ${r.dispatched === 1 ? "entry" : "entries"}` +
+              (r.remaining ? ` (${r.remaining.toLocaleString()} more left, retry again)` : ""),
+          ),
+        onError: () => toast.error("Retry failed"),
+      },
+    );
 
   return (
     <div className={`${styles.banner} ${err ? "" : styles.bannerWarn}`} role="status">
-      <strong>{err ? "Check engine: entries stuck." : "Check engine: runs retrying."}</strong>{" "}
-      {err
-        ? `${total.toLocaleString()} entries are stuck on an error ${since}. The light turns red at ${ERROR_LIGHT_THRESHOLD}. Retry them, fix the cause, or clear the light if you are leaving them.`
-        : `${total.toLocaleString()} ${total === 1 ? "run was" : "runs were"} retried ${since}. Retries often settle on their own. The light stays amber until they are 24 hours old, or until you clear it.`}
-      <span className={styles.bannerStages}>
-        {rows.map((r) => (
-          <button
-            key={r.stage}
-            type="button"
-            className={styles.bannerStage}
-            onClick={() => onOpenStage(r.stage)}
-            title={`Open the ${labelFor(r.stage)} stage`}
-          >
-            {labelFor(r.stage)} <b>{r.count.toLocaleString()}</b>
+      <strong>Check engine:</strong>{" "}
+      {err ? (
+        <>
+          {total.toLocaleString()} {total === 1 ? "entry is" : "entries are"} erroring -{" "}
+          <button type="button" className={styles.bannerLink} onClick={retry} disabled={retryErrors.isPending}>
+            {retryErrors.isPending ? "retrying…" : "retry"}
           </button>
-        ))}
-      </span>
+        </>
+      ) : (
+        `${total.toLocaleString()} ${total === 1 ? "run is" : "runs are"} retrying`
+      )}
     </div>
   );
 }

@@ -55,24 +55,17 @@
   border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
   background: color-mix(in srgb, var(--warning) 8%, transparent);
 }
-.bannerStages {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: var(--sp-1);
-  margin-left: var(--sp-2);
-  vertical-align: middle;
-}
-.bannerStage {
+.bannerLink {
   appearance: none;
   font: inherit;
-  font-size: var(--fs-xs);
-  color: var(--text-primary);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 1px 8px;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-decoration: underline;
   cursor: pointer;
 }
-.bannerStage:hover {
-  border-color: var(--text-secondary);
+.bannerLink:disabled {
+  cursor: default;
+  opacity: 0.6;
 }

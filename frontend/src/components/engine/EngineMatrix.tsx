@@ -707,8 +707,8 @@ export function EngineMatrix({
   const health = useEngineHealth(true);
   const dotCls = { err: m.hdotErr, warn: m.hdotWarn, stopped: m.hdotStopped, ok: "" }[health?.level ?? "ok"];
   const lightLabel = {
-    err: "Check engine: entries stuck, see the note below",
-    warn: "Check engine: runs retrying, see the note below",
+    err: "Check engine: entries erroring",
+    warn: "Check engine: runs retrying",
     stopped: "Engine stopped",
     ok: "Engine healthy",
   }[health?.level ?? "ok"];
@@ -758,13 +758,7 @@ export function EngineMatrix({
         <EngineSwitch />
       </div>
 
-      <CheckEngineBanner
-        labelFor={(st) => labelByStage[st] ?? st.replace(/_/g, " ")}
-        onOpenStage={(st) => {
-          switchView("entries");
-          setOpenStage(st);
-        }}
-      />
+      <CheckEngineBanner />
 
       {/* matrix */}
       <div className={m.popWrap} ref={popWrapRef}>
