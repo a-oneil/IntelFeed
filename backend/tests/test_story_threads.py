@@ -6,6 +6,7 @@ its vectors to sit a known distance apart rather than asserting on a magic
 number, so a threshold change fails the test that owns it rather than all of them.
 """
 
+import json
 import math
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -15,7 +16,9 @@ import pytest_asyncio
 from sqlalchemy import text
 
 from app.intelligence.story_threads import (
+    ENTITY_REQUIRED_ABOVE,
     SAME_SOURCE_LIMIT,
+    SEED_FANOUT,
     _candidate_entries,
     ambient_entities,
     assign_entries,
@@ -215,6 +218,40 @@ class TestJoiningAndEchoes:
         rows = await thread_rows(db_session)
         assert rows[0]["entry_count"] == 4
 
+    async def test_a_story_that_pauses_six_days_continues(self, db_session, feeds):
+        """GhostAction's second wave arrived 5.2 days after its first and seeded a sibling."""
+        actor = ThreatActor(name="GhostAction")
+        db_session.add(actor)
+        await db_session.flush()
+        for i in range(3):
+            entry = await make_entry(
+                db_session,
+                feeds[i],
+                title=f"GhostAction worm hits GitHub {i}",
+                similarity_to_base=1.0 if i == 0 else 0.87,
+                axis=i + 1,
+                published=NOW - timedelta(days=6, hours=2),
+                host=f"outlet{i}.example",
+            )
+            db_session.add(EntryThreatActor(entry_id=entry.id, threat_actor_id=actor.id))
+        await db_session.flush()
+        await assign_entries(db_session, limit=50)
+
+        follow_up = await make_entry(
+            db_session,
+            feeds[3],
+            title="GhostAction returns with a token-stealing wave",
+            similarity_to_base=0.87,
+            axis=6,
+            host="outlet3.example",
+        )
+        db_session.add(EntryThreatActor(entry_id=follow_up.id, threat_actor_id=actor.id))
+        await db_session.flush()
+        stats = await assign_entries(db_session, limit=50)
+
+        assert stats["joined"] == 1
+        assert stats["seeded"] == 0
+
     async def test_near_identical_re_report_is_folded_as_an_echo(self, db_session, feeds):
         for i in range(3):
             await make_entry(
@@ -277,7 +314,9 @@ class TestJoiningAndEchoes:
 class TestMerging:
     async def test_two_threads_about_one_story_merge(self, db_session, feeds):
         # Two seeds far enough apart in the fanout to cluster separately, but
-        # whose centroids land within the merge bar once both exist.
+        # whose centroids land within the merge bar once both exist. 0.91 is
+        # the gap the join rules leave: a large thread's entity-less second
+        # wave seeds beside it at about that distance.
         for i in range(3):
             await make_entry(
                 db_session,
@@ -301,7 +340,7 @@ class TestMerging:
             ),
             {
                 "id": uuid.uuid4(),
-                "v": to_literal(unit(similarity=0.99, axis=5)),
+                "v": to_literal(unit(similarity=0.91, axis=5)),
                 "first": NOW,
                 "last": NOW,
             },
@@ -314,6 +353,123 @@ class TestMerging:
         assert len(rows) == 1
         origins = await db_session.execute(text("SELECT COUNT(*) FROM story_thread_entries WHERE role = 'origin'"))
         assert origins.scalar() == 1
+
+    async def _story_with_a_sibling(
+        self,
+        db_session,
+        feeds,
+        *,
+        shared: list[tuple[str, str]],
+        sibling_size: int = 2,
+        story_size: int | None = None,
+    ) -> None:
+        """A three-article thread keyed on two actors, and a sibling thread at 0.87.
+
+        0.87 is where the "France blames Iran" wave sat against the fridge-attack
+        thread: under the plain merge bar, over the shared-entity one. ``shared``
+        is what the sibling's key entities say it has in common, as
+        (entity_type, name) pairs; an actor name resolves to the real actor so
+        the two sides agree on the id.
+        """
+        actors = {}
+        for name in ("NoName057", "Z-Pentest"):
+            actor = ThreatActor(name=name)
+            db_session.add(actor)
+            actors[name] = actor
+        await db_session.flush()
+        for i in range(3):
+            entry = await make_entry(
+                db_session,
+                feeds[i],
+                title=f"Fridge attack {i}",
+                similarity_to_base=1.0 if i == 0 else 0.87,
+                axis=i + 1,
+                host=f"outlet{i}.example",
+            )
+            for actor in actors.values():
+                db_session.add(EntryThreatActor(entry_id=entry.id, threat_actor_id=actor.id))
+        await db_session.flush()
+        await assign_entries(db_session, limit=50)
+        thread_id = (await db_session.execute(text("SELECT id FROM story_threads"))).scalar_one()
+        await refresh_thread(db_session, thread_id)
+        await db_session.execute(
+            text("UPDATE story_threads SET centroid = (:v)::halfvec"),
+            {"v": to_literal(unit(similarity=1.0))},
+        )
+        if story_size is not None:
+            await db_session.execute(
+                text("UPDATE story_threads SET entry_count = :n WHERE id = :t"), {"n": story_size, "t": thread_id}
+            )
+        # A product the story thread also keys on, so a product-only overlap
+        # is a real overlap that the rule must still refuse.
+        product_id = str(uuid.uuid4())
+        await db_session.execute(
+            text("UPDATE story_threads SET key_entities = key_entities || CAST(:p AS jsonb) WHERE id = :t"),
+            {
+                "p": json.dumps([{"entity_type": "product", "entity_id": product_id, "label": "Telegram", "count": 3}]),
+                "t": thread_id,
+            },
+        )
+        key_entities = [
+            {
+                "entity_type": etype,
+                "entity_id": str(actors[name].id) if etype == "threat_actor" else product_id,
+                "label": name,
+                "count": 2,
+            }
+            for etype, name in shared
+        ]
+        await db_session.execute(
+            text(
+                "INSERT INTO story_threads (id, slug, title, status, centroid, entry_count, source_count, "
+                "echo_count, first_seen, last_seen, key_entities) "
+                "VALUES (:id, 'blame', 'France blames Iran for fridge attacks', 'open', (:v)::halfvec, :n, 2, 0, "
+                ":first, :last, CAST(:ents AS jsonb))"
+            ),
+            {
+                "id": uuid.uuid4(),
+                "v": to_literal(unit(similarity=0.87, axis=5)),
+                "n": sibling_size,
+                "first": NOW,
+                "last": NOW,
+                "ents": json.dumps(key_entities),
+            },
+        )
+
+    async def test_a_chapter_sharing_two_actors_merges_at_the_lower_bar(self, db_session, feeds):
+        await self._story_with_a_sibling(
+            db_session, feeds, shared=[("threat_actor", "NoName057"), ("threat_actor", "Z-Pentest")]
+        )
+
+        merged = await merge_overlapping(db_session)
+
+        assert merged == 1
+        assert len(await thread_rows(db_session)) == 1
+
+    async def test_one_shared_actor_is_a_mention_not_a_chapter(self, db_session, feeds):
+        await self._story_with_a_sibling(db_session, feeds, shared=[("threat_actor", "NoName057")])
+
+        assert await merge_overlapping(db_session) == 0
+        assert len(await thread_rows(db_session)) == 2
+
+    async def test_shared_products_do_not_lower_the_bar(self, db_session, feeds):
+        await self._story_with_a_sibling(db_session, feeds, shared=[("product", "Telegram"), ("product", "Telegram")])
+
+        assert await merge_overlapping(db_session) == 0
+        assert len(await thread_rows(db_session)) == 2
+
+    async def test_two_threads_both_past_chapter_size_keep_the_plain_bar(self, db_session, feeds):
+        # Whichever is smaller would be the one folded, and neither is a chapter.
+        await self._story_with_a_sibling(
+            db_session,
+            feeds,
+            shared=[("threat_actor", "NoName057"), ("threat_actor", "Z-Pentest")],
+            sibling_size=ENTITY_REQUIRED_ABOVE,
+            story_size=ENTITY_REQUIRED_ABOVE + 1,
+        )
+
+        assert await merge_overlapping(db_session) == 0
+        assert len(await thread_rows(db_session)) == 2
 
 
 class TestAmbientEntities:
@@ -660,6 +816,75 @@ class TestCandidateSelection:
 
         assert stats["considered"] == 0
         assert stats["seeded"] == 0
+
+    async def test_nvd_rows_mirroring_a_vendor_drop_are_not_two_outlets(self, db_session, feeds):
+        """Four Fortinet "stories" in one pass: PSIRT advisories plus their NVD mirrors."""
+        for i in range(3):
+            await make_entry(
+                db_session,
+                feeds[0],
+                title=f"Authorization bypass through user-controlled key in component {i}",
+                similarity_to_base=1.0 if i == 0 else 0.97,
+                axis=i + 1,
+                host="fortiguard.fortinet.com",
+            )
+        for i in range(3):
+            await make_entry(
+                db_session,
+                feeds[1],
+                title=f"CVE-2026-12615{i}: A authorization bypass through user-controlled key vulnerability",
+                similarity_to_base=0.97,
+                axis=i + 4,
+                host="nvd.nist.gov",
+            )
+        await make_entry(db_session, feeds[2], title="ZDI-26-786: NoMachine nxwebrunner Heap-based Buffer Overflow")
+        await make_entry(db_session, feeds[3], title="SSA-242944 V1.0: Node2Shell Vulnerability in Siemens Products")
+
+        stats = await assign_entries(db_session, limit=50)
+
+        # Only the vendor's own advisories are offered, and one outlet cannot
+        # seed a story by itself.
+        assert stats["considered"] == 3
+        assert stats["seeded"] == 0
+
+    async def test_an_article_the_seed_left_behind_joins_in_the_same_pass(self, db_session, feeds):
+        """A new thread has a centroid from the moment it exists.
+
+        The seed probe keeps at most SEED_FANOUT neighbours. Whatever it leaves
+        behind is examined later in the same pass and must find the thread —
+        otherwise it seeds a sibling, and the sibling cannot be merged either,
+        because both lookups skip threads without a centroid.
+        """
+        actor = ThreatActor(name="Fortinet")
+        db_session.add(actor)
+        await db_session.flush()
+        origin = await make_entry(
+            db_session,
+            feeds[0],
+            title="FortiMail zero-day exploited",
+            published=NOW - timedelta(hours=1),
+            host="outlet0.example",
+        )
+        db_session.add(EntryThreatActor(entry_id=origin.id, threat_actor_id=actor.id))
+        for i in range(SEED_FANOUT + 1):
+            entry = await make_entry(
+                db_session,
+                feeds[i % 4],
+                title=f"FortiMail zero-day coverage {i}",
+                similarity_to_base=0.9,
+                axis=i + 2,
+                host=f"outlet-{i}.example",
+            )
+            db_session.add(EntryThreatActor(entry_id=entry.id, threat_actor_id=actor.id))
+        await db_session.flush()
+
+        stats = await assign_entries(db_session, limit=100)
+
+        assert stats["seeded"] == 1
+        assert stats["unthreaded"] == 0
+        rows = await thread_rows(db_session)
+        assert len(rows) == 1
+        assert rows[0]["entry_count"] == SEED_FANOUT + 2
 
 
 class TestSourceDominance:

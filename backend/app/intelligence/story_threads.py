@@ -86,6 +86,12 @@ CENTROID_MARGIN = 0.08
 # not a half: the smallest legitimate thread is three articles from two outlets.
 DOMINANT_SOURCE_SHARE = 0.67
 
+# What two threads must have in common for the lower merge bar: this many
+# key entities of these types. Products and tools are the vocabulary of a
+# field, not the identity of a story; see ``merge_overlapping``.
+MERGE_SHARED_IDENTITY_TYPES = ("threat_actor", "malware", "cve")
+MERGE_SHARED_ENTITIES = 2
+
 # An entity linked to more than this share of the window's articles is not
 # identity, it is background. "Linux" sits on 16% of a three-week window and
 # "Windows" on 15%; a thread held together by one of those is held together by
@@ -125,7 +131,17 @@ ROUNDUP_SEED_SHARE = 0.4
 # each other on that boilerplate alone, which is how six unrelated errata ended
 # up folded into one "story". They are rows about a package version, not
 # coverage of an event.
-BULLETIN_TITLE_RE = r"(CVSS \(Max\)|^(RHSA|RHBA|RHEA)-[0-9]{4}:)"
+#
+# NVD ("CVE-2026-126166: A improper neutralization..."), ZDI ("ZDI-26-786: ...")
+# and Siemens ("SSA-242944 V1.0: ...") rows are the same shape with a different
+# prefix. NVD is also the mirror of every vendor's own PSIRT page, so a vendor
+# drop of thirty advisories arrived as thirty pairs from "two outlets" and
+# seeded a thread per CWE family — four Fortinet "stories" in one pass, none of
+# them covered by anyone.
+BULLETIN_TITLE_RE = (
+    r"(CVSS \(Max\)|^(RHSA|RHBA|RHEA)-[0-9]{4}:"
+    r"|^(CVE-[0-9]{4}-[0-9]{4,}|ZDI-[0-9]{2}-[0-9]+|SSA-[0-9]+( V[0-9.]+)?):)"
+)
 
 
 def _knob(key: str, default: float) -> float:
@@ -612,7 +628,9 @@ async def _create_thread(db: AsyncSession, origin: dict) -> uuid.UUID:
     return thread_id
 
 
-async def merge_overlapping(db: AsyncSession, rounds: int = 3, touched: set | None = None) -> int:
+async def merge_overlapping(
+    db: AsyncSession, rounds: int = 3, touched: set | None = None, ambient: set | None = None
+) -> int:
     """Fold threads that turn out to be the same story into one. Returns merges.
 
     Incremental clustering splits: two outlets break the same story hours apart,
@@ -625,9 +643,43 @@ async def merge_overlapping(db: AsyncSession, rounds: int = 3, touched: set | No
 
     Merging requires overlapping (or adjacent) time ranges as well as centroid
     similarity: the same subject a month apart is a sequel, not a continuation.
+
+    The bar sits below the join bars' no-entity level on purpose. The join
+    rules refuse an entity-less article once a thread is large, and the wave
+    that article belongs to then seeds beside the thread it continues; the two
+    centroids land around 0.91 (the fridge-sabotage story's CISA-warning wave
+    against its first wave), which a 0.92 bar left split for good.
+
+    A chapter-sized thread that shares two identity entities with a bigger one
+    gets the lower bar, ``thread_merge_similarity_shared_entity``, the way an
+    article sharing an entity gets the lower join bar. The commonest leftover
+    split is a new chapter of a story: its first article misses the join bar
+    by a hair ("France blames Iran" against the fridge-attack reports: 0.839 to
+    a 0.84 bar), seeds its own thread, and the next nine outlets join that
+    nearer thread. The two centroids then sit at 0.87 with the same actors and
+    CVE on both sides: a continuation with a new vocabulary, not a second
+    story.
+
+    The three guards on that lower bar each come from a replay of forty days
+    of production articles. Only actors, malware and CVEs count as shared
+    (``MERGE_SHARED_IDENTITY_TYPES``): products let one AI-abuse thread
+    swallow thirteen unrelated stories through "Microsoft 365" and "Telegram",
+    which sit under the ambient cutoff but are identity of nothing. Two shared
+    entities are required (``MERGE_SHARED_ENTITIES``): one CVE in common is a
+    mention, and it let a PHP thread absorb the Node.js security release that
+    mentioned it. And the thread being folded must still be under
+    ``ENTITY_REQUIRED_ABOVE`` articles: past that it is a story in its own
+    right, and two stories that drifted together over weeks are not a chapter
+    and its book. Ambient entities do not count, for the reason they do not
+    count at join time.
     """
-    threshold = _knob("thread_merge_similarity", 0.92)
-    gap_days = int(_knob("thread_gap_days", 5))
+    threshold = _knob("thread_merge_similarity", 0.90)
+    shared_threshold = _knob("thread_merge_similarity_shared_entity", 0.85)
+    gap_days = int(_knob("thread_gap_days", 7))
+    if ambient is None:
+        window_days = int(_knob("thread_window_days", 21))
+        ambient = await ambient_entities(db, datetime.now(UTC) - timedelta(days=window_days))
+    ambient_keys = sorted(f"{etype}:{eid}" for etype, eid in ambient)
     merged = 0
 
     for _ in range(rounds):
@@ -643,14 +695,33 @@ async def merge_overlapping(db: AsyncSession, rounds: int = 3, touched: set | No
                      AND a.status = 'open' AND b.status = 'open'
                      AND a.centroid IS NOT NULL AND b.centroid IS NOT NULL
                      AND (a.entry_count, a.id::text) > (b.entry_count, b.id::text)
-                     AND 1 - (a.centroid <=> b.centroid) >= :threshold
+                     AND 1 - (a.centroid <=> b.centroid) >= CASE WHEN b.entry_count < :chapter_max AND (
+                            -- Identity entities keyed on both sides, ambient ones aside.
+                            SELECT COUNT(*)
+                            FROM jsonb_array_elements(COALESCE(a.key_entities, '[]'::jsonb)) ka
+                            JOIN jsonb_array_elements(COALESCE(b.key_entities, '[]'::jsonb)) kb
+                              ON ka->>'entity_type' = kb->>'entity_type'
+                             AND ka->>'entity_id' = kb->>'entity_id'
+                            WHERE ka->>'entity_type' = ANY(CAST(:identity_types AS text[]))
+                              AND (ka->>'entity_type') || ':' || (ka->>'entity_id')
+                                  <> ALL(CAST(:ambient AS text[]))
+                         ) >= :min_shared
+                         THEN CAST(:shared_threshold AS float) ELSE CAST(:threshold AS float) END
                      AND b.first_seen <= a.last_seen + make_interval(days => :gap_days)
                      AND a.first_seen <= b.last_seen + make_interval(days => :gap_days)
                     ORDER BY a.centroid <=> b.centroid
                     LIMIT 1
                     """
                     ),
-                    {"threshold": threshold, "gap_days": gap_days},
+                    {
+                        "threshold": threshold,
+                        "shared_threshold": shared_threshold,
+                        "chapter_max": ENTITY_REQUIRED_ABOVE,
+                        "identity_types": list(MERGE_SHARED_IDENTITY_TYPES),
+                        "min_shared": MERGE_SHARED_ENTITIES,
+                        "ambient": ambient_keys,
+                        "gap_days": gap_days,
+                    },
                 )
             )
             .mappings()
@@ -769,7 +840,7 @@ async def assign_entries(db: AsyncSession, limit: int = 500) -> dict:
     dup_sim = _knob("thread_duplicate_similarity", 0.90)
     min_entries = int(_knob("thread_min_entries", 3))
     min_sources = int(_knob("thread_min_sources", 2))
-    gap_days = int(_knob("thread_gap_days", 5))
+    gap_days = int(_knob("thread_gap_days", 7))
     min_body = int(_knob("thread_min_body_chars", 400))
 
     now = datetime.now(UTC)
@@ -887,10 +958,17 @@ async def assign_entries(db: AsyncSession, limit: int = 500) -> dict:
             )
             claimed_in_pass.add(neighbour["id"])
             stats["echoed" if is_echo else "joined"] += 1
+        # Give the new thread its centroid now, not at the end of the pass.
+        # ``_nearest_threads`` and ``merge_overlapping`` both skip threads
+        # without one, so until this ran a thread seeded early in a pass was
+        # invisible to every later candidate in the same pass: articles the
+        # seed's fanout or source cap left behind could not join it and seeded
+        # a sibling instead, and the sibling could not be merged either.
+        await refresh_thread(db, thread_id)
         touched.add(thread_id)
         stats["seeded"] += 1
 
-    stats["merged"] = await merge_overlapping(db, touched=touched)
+    stats["merged"] = await merge_overlapping(db, touched=touched, ambient=ambient)
 
     # Every candidate has now been looked at, threaded or not. Without this the
     # next pass re-offers the same articles and never reaches the rest of the

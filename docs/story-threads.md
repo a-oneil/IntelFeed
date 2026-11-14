@@ -35,7 +35,7 @@ It does nothing while `embeddings_enabled` is off. It runs on the **default** qu
 
 ## How a thread is built
 
-`assign_entries()` (`backend/app/intelligence/story_threads.py:762`) runs every two hours (job `story-threads`). It asks one question per article: *does this continue a story we already have?*
+`assign_entries()` (`backend/app/intelligence/story_threads.py:833`) runs every two hours (job `story-threads`). It asks one question per article: *does this continue a story we already have?*
 
 | Step | Rule |
 |---|---|
@@ -44,7 +44,7 @@ It does nothing while `embeddings_enabled` is off. It runs on the **default** qu
 | **Join** | All must hold: cosine to the thread's **closest single article** clears `thread_join_similarity` (if they share an entity) or `thread_join_similarity_no_entity` (if not); cosine to the centroid clears the same bar minus `CENTROID_MARGIN` (0.08); the pair is not two unrelated catalogues (guard 5); the outlet has fewer than `SAME_SOURCE_LIMIT` (3) articles in the thread. A thread with `ENTITY_REQUIRED_ABOVE` (12) or more articles also requires a shared entity. |
 | **Echo** | A joining article at or above `thread_duplicate_similarity` that brings no entity the thread lacks is a re-report. It is kept, linked to the article it repeats, and folded out of the way. |
 | **Seed** | If no thread fits, look at unthreaded neighbours within `thread_gap_days` either side. A new thread starts when at least `thread_min_entries` articles clear `thread_seed_similarity`, from at least `thread_min_sources` distinct outlets, with no outlet over `DOMINANT_SOURCE_SHARE` (two thirds) or past `SAME_SOURCE_LIMIT`, and they are not a set of catalogues. |
-| **Merge** | Open threads whose centroids reach `thread_merge_similarity` and whose time ranges overlap (or touch) become one. Incremental grouping splits a story when two outlets break it hours apart. |
+| **Merge** | Open threads whose centroids reach `thread_merge_similarity` and whose time ranges overlap, or come within `thread_gap_days` of each other, become one. A chapter-sized thread (under `ENTITY_REQUIRED_ABOVE` articles) that shares `MERGE_SHARED_ENTITIES` (2) key actors, malware families or CVEs with a bigger one needs only `thread_merge_similarity_shared_entity`, the way a shared entity lowers the join bar: a new chapter of a story whose first article just missed the join bar seeds beside the thread, the next outlets join the nearer thread, and the two centroids sit at 0.87 with the same actors on both sides. Products and tools never count as shared (one AI-abuse thread would otherwise absorb unrelated stories through "Microsoft 365"), one shared CVE is a mention rather than a chapter, and two threads both past chapter size are two stories however close they drift. Incremental grouping splits a story when two outlets break it hours apart, and the join rules split it again when a large thread turns away an entity-less wave; the plain merge bar sits a little under the no-entity join bar so that second split heals. A thread seeded during a pass gets its centroid at once, so later candidates in the same pass can join it and the merge can see it. |
 | **Prune** | Threads whose stored membership no longer matches reality are fixed, and a thread left with fewer than two articles is deleted. Feed retention and feed deletion remove rows from `story_thread_entries`; without this step the thread would keep stale counts and a spine about articles that are gone. |
 
 A thread that has had no new article for `thread_dormancy_days` becomes `dormant`: it stops accepting articles but keeps its history.
@@ -54,7 +54,7 @@ Six guards:
 1. **Closest article, not centroid.** A centroid is an average. The average of a twenty-article thread drifts toward "vulnerability news" and then attracts every vulnerability article, so joining on the centroid alone chains unrelated articles into one long thread.
 2. **Background entities are not identity.** "Linux" and "Windows" each sit on about 15% of a three-week window. Any entity on more than `AMBIENT_ENTITY_SHARE` (2%) of the window's articles is ignored in the shared-entity test. This is measured per window, and skipped when the window has fewer than `AMBIENT_MIN_WINDOW` (200) articles, where the numbers are noise.
 3. **One outlet is not corroboration.** Past `SAME_SOURCE_LIMIT` articles from one source domain, that outlet adds nothing more to the thread, in any role. Two unrelated Red Hat errata look like "0.9 cosine and no new entity" to an embedding, so echoes get no exemption.
-4. **Body floor, and a title test.** A large share of a typical window is template bulletin rows. The ones long enough to clear the floor (AusCERT's "package: CVSS (Max): 7.5" bulletins, Red Hat RHSA errata) are caught by `BULLETIN_TITLE_RE`.
+4. **Body floor, and a title test.** A large share of a typical window is template bulletin rows. The ones long enough to clear the floor (AusCERT's "package: CVSS (Max): 7.5" bulletins, Red Hat RHSA errata, NVD "CVE-YYYY-NNNNN: …" rows, ZDI and Siemens SSA advisories) are caught by `BULLETIN_TITLE_RE`. NVD matters doubly: it mirrors every vendor's own advisory page, so a vendor's monthly drop otherwise arrives as "two outlets" agreeing on thirty bugs and seeds a thread per CWE family.
 5. **A catalogue is not a story.** "CISA adds ownCloud, Linux Kernel and JFrog flaws to KEV" names many entities, and each instalment names different ones. One chance overlap clears a shared-entity bar, so such roundups would chain into a fake story. When both sides name at least `ROUNDUP_MIN_ENTITIES` (4) entities and share less than `ROUNDUP_MIN_OVERLAP` (25%) of them, it is a catalogue. An article that names nothing extractable has nothing to disagree about, so the test never trips on it.
 6. **Never-checked articles go first.** Articles inside the gap window are offered again on every pass, in case their story has not broken yet. Once there are more of them than `thread_sweep_limit`, a plain oldest-first order would spend the whole pass re-checking old articles and never reach today's.
 
@@ -112,13 +112,14 @@ All under **Settings → Engine → Score stage → Story threads**, and inline 
 | `embedding_backfill_limit` | `2000` | Entries embedded per run |
 | `thread_window_days` | `21` | How far back an article can still be threaded |
 | `thread_dormancy_days` | `14` | Days of silence before a thread stops accepting articles |
-| `thread_gap_days` | `5` | Most quiet days between an article and the thread it joins |
+| `thread_gap_days` | `7` | Most quiet days between an article and the thread it joins |
 | `thread_min_body_chars` | `400` | Below this an entry is treated as a bulletin row |
 | `thread_join_similarity` | `0.84` | Bar to the closest article, with a shared entity |
 | `thread_join_similarity_no_entity` | `0.90` | Bar without a shared entity |
 | `thread_seed_similarity` | `0.84` | Bar between unthreaded articles to start a thread |
 | `thread_duplicate_similarity` | `0.90` | At or above this, an article is an echo |
-| `thread_merge_similarity` | `0.92` | Two overlapping threads this close become one |
+| `thread_merge_similarity` | `0.90` | Two overlapping threads this close become one |
+| `thread_merge_similarity_shared_entity` | `0.85` | The merge bar for a chapter-sized thread sharing two key actors, malware or CVEs with a bigger one |
 | `thread_sweep_limit` | `1500` | Articles examined per sweep; keep it above the number published inside the gap window |
 | `thread_min_entries` | `3` | Articles needed to start a thread |
 | `thread_min_sources` | `2` | Distinct outlets needed to start a thread |
