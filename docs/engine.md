@@ -21,7 +21,7 @@ The switches live in the `system_settings` database table (editable at Settings 
 | `pipeline_engine_enabled` | `false` | Use pipeline plans instead of each feed's own extraction switches (`backend/app/config.py:117`) |
 | `adjudication_mode` | `apply` | The `adjudicate` stage: `off`, `shadow` (file verdicts as proposals) or `apply` (apply confident verdicts, file the rest) |
 
-Setting metadata is in `backend/app/services/system_settings.py`: `CONFIGURABLE_KEYS` (`backend/app/services/system_settings.py:26`) says which keys may be overridden and their type, `SETTING_METADATA` (`backend/app/services/system_settings.py:220`) holds labels and help text, and `_ENGINE_SECTION_GROUPS` (`backend/app/services/system_settings.py:1423`) places engine keys on console sections.
+Setting metadata is in `backend/app/services/system_settings.py`: `CONFIGURABLE_KEYS` (`backend/app/services/system_settings.py:26`) says which keys may be overridden and their type, `SETTING_METADATA` (`backend/app/services/system_settings.py:220`) holds labels and help text, and `_ENGINE_SECTION_GROUPS` (`backend/app/services/system_settings.py:1431`) places engine keys on console sections.
 
 Related docs: [entries.md](entries.md) (the full entry lifecycle), [intelligence-engine.md](intelligence-engine.md) (the autolinker and correlation code the stages call), [data-model.md](data-model.md) (table schemas), [workers-search-dashboards.md](workers-search-dashboards.md) (Celery and beat schedules).
 
