@@ -394,7 +394,7 @@ Write the briefing now per the structure and rules in your instructions. Remembe
 CONTRACT — every rule here is load-bearing:
 - Use ONLY the supplied articles. No background knowledge of this threat, no history, no attribution beyond what the articles state. If it is not in the window's articles, it does not exist.
 - Two to three sentences, plain prose, no markdown, no lists.
-- Be specific: name victims or sectors, the access vector, tooling, and any concrete artefact (a domain pattern, a file path, a client id) when an article documents one. Concrete artefacts are the most valuable thing you can surface — a detection engineer reads this to decide whether there is something to write a rule against.
+- Be specific: name victims or sectors, the access vector, tooling, and any concrete artefact (a domain pattern, a file path, a client id) when an article documents one. Concrete artefacts are the most valuable thing you can surface — a detection engineer reads this to decide whether there is something to write a rule against. Prefer artefacts that describe behavior or a reusable pattern (a command line, a file path, a domain pattern) over a single hash or IP.
 - Preserve uncertainty markers from the sources: if an article says "claims" or "reportedly", so do you. Never upgrade a claim to a fact.
 - NO counts or quantities of articles/outlets/techniques ("six reports", "several outlets") — the row renders the numbers. Victim counts and record counts FROM the articles (e.g. "284M patient records") are content, not metadata, and belong in the brief.
 - No filler ("this week saw", "activity continues"), no threat-actor boilerplate ("known for", "active since"). Start with what happened.
@@ -565,7 +565,7 @@ Write the spine now, under the contract in your instructions.""",
 For each article you must provide:
 1. **What**: A factual summary of what happened or was disclosed
 2. **So What**: Why this matters — impact, risk, urgency. If telemetry sources were supplied, include whether the analyst has visibility into this threat based on their telemetry.
-3. **Recommended Actions**: Specific, actionable steps. If telemetry sources were supplied, prioritize actions the analyst can take with their available data sources and call out critical visibility gaps.
+3. **Recommended Actions**: Specific, actionable steps. Favor detecting the attacker's behavior over blocking indicators, which go stale when infrastructure rotates. If telemetry sources were supplied, prioritize actions the analyst can take with their available data sources and call out critical visibility gaps.
 4. **Severity**: critical, high, medium, low, informational
 5. **Relevance**: high, medium, low
 6. **detection_posture** (only when telemetry sources were supplied): "covered" if the analyst's telemetry provides good visibility into this threat, "partial" if some visibility exists, "blind" if the threat cannot be detected with current telemetry
@@ -639,6 +639,9 @@ General requirements that apply to every call:
 4. Each rule must be specific to the threat described — not a generic template.
 5. Include appropriate metadata (title, description, severity, MITRE ATT&CK tags).
 6. When telemetry sources are listed in the user message, target those sources where possible and note in the description if a rule requires data the analyst doesn't have.
+7. Detect BEHAVIOR, not atomic indicators. Build each rule on what the attacker does — process lineage, command-line patterns, file/registry/API activity, authentication sequences, protocol misuse — so it still fires after the attacker rotates hashes, IPs and domains. Use the extracted TTPs as the starting point.
+8. Hashes, IPs, domains and URLs may narrow or enrich a behavioral rule, but a rule that only matches a list of them is a last resort: write one only when the article describes no detectable behavior, and say in its description that it is IOC-only and short-lived.
+9. For YARA, prefer code structure and distinctive strings over values that change with every build.
 
 CRITICAL: Each "rule_content" field must contain the actual rule syntax for the requested format (e.g. YAML for sigma, SPL query for splunk_spl, KQL for kql, YARA for yara, etc.) — NOT JSON, NOT a code fence. Each rule must be a single, self-contained, ready-to-use detection rule.
 
@@ -1072,12 +1075,13 @@ Required output sections (returned as a single JSON object):
 2. **attack_chain**: Array of attack phases, each with:
    - step (number), phase (MITRE tactic), technique (technique ID and name)
    - description, detection_opportunity, log_sources (array), detection_feasibility ("high"|"medium"|"low" — base this on whether the analyst's telemetry sources can provide the needed data)
-3. **indicators**: Object with keys "network", "host", "behavioral", each an array of:
-   - For network/host: type, value, context, detection_note, log_field
+3. **indicators**: Object with keys "behavioral", "host", "network", each an array of:
    - For behavioral: description, detection_logic, log_sources
-4. **generated_rules**: Array of detection rules, each with rule_type (one of the rule formats requested by the caller), title, content, severity
+   - For host/network: type, value, context, detection_note, log_field
+   Behavioral entries matter most — they survive infrastructure rotation. Treat host/network values as short-lived supporting context, not the detection.
+4. **generated_rules**: Array of detection rules, each with rule_type (one of the rule formats requested by the caller), title, content, severity. Base rules on the attack_chain behaviors; a rule that only matches hashes, IPs or domains is a last resort for when no behavior is described.
 5. **related_intelligence**: Object with previous_articles, existing_detection_rules, related_cves arrays (populate related_cves from the Known CVEs section in the user message — include cve_id, description, severity, cvss_score, exploit_status for each)
-6. **gaps_and_recommendations**: Array of strings describing detection gaps and recommendations
+6. **gaps_and_recommendations**: Array of strings describing detection gaps and recommendations. Say so when the material gives only atomic indicators and no behavior to detect.
 7. **telemetry_coverage** (include only when telemetry sources were provided): Object with "covered" (array of available, relevant data-source names) and "gaps" (array of data-source names needed but not available)
 
 Respond with a single JSON object containing all sections above. Do not fabricate IOCs, CVEs, or TTPs not supported by the supplied material.""",
@@ -1360,14 +1364,14 @@ Section-specific guidance:
 - Provide specific, actionable recommendations
 - Prioritize by urgency and impact
 - Include both immediate actions and longer-term mitigations
-- Reference specific IOCs, TTPs, or CVEs where applicable
+- Reference specific TTPs, CVEs, or IOCs where applicable; favor behavior detections over blocklists, which go stale when infrastructure rotates
 {% elif section_name == 'detection_guidance' %}
-- Describe how to detect the described threat activity
+- Describe how to detect the described threat activity, leading with the attacker behavior (TTPs) rather than the indicator values
 - Reference specific log sources, data fields, and detection logic
-- Map to IOCs and TTPs from the linked entities
+- Explain what behavior the IOCs point to, so readers can still detect it after the infrastructure changes; use the IOCs themselves for blocking and retro-hunting
 - Include both network and host-based detection opportunities
 {% elif section_name == 'detection_opportunities' %}
-- For each TTP and IOC, describe concrete detection strategies
+- For each TTP, describe concrete behavioral detection strategies; use IOCs as enrichment and retro-hunt input, not as the detection itself
 - Specify the telemetry source required (e.g., Sysmon EventID 1, CloudTrail, proxy logs)
 - Include detection logic concepts — what patterns to look for, what fields to correlate
 - Classify each opportunity by detection maturity level: signature-based, behavioral, or anomaly-based
@@ -1396,7 +1400,7 @@ Section-specific guidance:
 {% elif section_name == 'attack_chain' %}
 - Walk through the attack chain phase by phase
 - Map each phase to MITRE ATT&CK tactics/techniques
-- Include specific IOCs at each phase where known
+- Describe the observable behavior at each phase; add specific IOCs where known as supporting detail
 {% elif section_name == 'key_trends' %}
 - Identify 3-5 significant trends from the source material
 - Include data points and examples for each trend
@@ -2526,6 +2530,7 @@ Respond with valid JSON:
 {% elif section_name == 'recommended_actions' or section_name == 'recommendations' %}
 - Immediate actions first (block, patch, hunt), each completable today
 - One line per action; name the exact indicator, patch, or rule where possible
+- Include at least one behavior hunt that still works after the attacker moves to new infrastructure
 - Separate "do now" from "do this week"
 {% else %}
 - Write appropriate content for a "{{ section_title }}" section of a flash alert
@@ -2594,11 +2599,12 @@ Respond with valid JSON:
 - Objectives, first-seen/last-seen window, attributed actor and confidence, victim scope
 {% elif section_name == 'attack_chain' %}
 - Phase-by-phase walk mapped to ATT&CK tactics/techniques
-- Cite specific IOCs at each phase where the sources provide them (defanged)
+- Describe the observable behavior at each phase; cite specific IOCs where the sources provide them (defanged) as supporting detail
 {% elif section_name == 'affected_systems' %}
 - Affected products/platforms with versions and patch status where known
 {% elif section_name == 'recommendations' or section_name == 'recommended_actions' %}
 - Split into: containment (now), detection (this week), hardening (ongoing)
+- Detection items target the campaign's behavior, not just its current indicators — infrastructure rotates as a campaign runs
 {% else %}
 - Write appropriate content for a "{{ section_title }}" section of a campaign tracker
 - Date every observation; make recency obvious
@@ -2649,7 +2655,9 @@ Respond with valid JSON:
 Your reader builds and tunes detections. Be exact about telemetry: name the log source, the event \
 or field, and the pattern — "Sysmon EventID 1 with parent winword.exe", not "monitor process \
 activity". Classify detection approaches (signature / behavioral / anomaly) and be honest about \
-false-positive cost and tuning burden. Map everything to ATT&CK technique IDs from the linked \
+false-positive cost and tuning burden. Prioritize behavioral detections: attacker behavior is \
+costly to change, while hashes, IPs and domains rotate cheaply — treat atomic IOCs as enrichment \
+and retro-hunt input, not the detection itself. Map everything to ATT&CK technique IDs from the linked \
 entities. Do not fabricate telemetry or detections the source material does not support.
 
 Respond with valid JSON:
@@ -2659,7 +2667,8 @@ Respond with valid JSON:
 {% elif section_name == 'attack_chain' %}
 - Phase-by-phase attack walk with the detection opportunity at each phase
 {% elif section_name == 'detection_opportunities' %}
-- For each TTP/IOC: the telemetry source required, the detection logic concept, maturity class (signature/behavioral/anomaly)
+- For each TTP: the telemetry source required, the behavioral detection logic concept, maturity class (signature/behavioral/anomaly)
+- List behavioral opportunities first; IOC matches come last, as enrichment and retro-hunt input
 - Note expected false-positive profile and tuning considerations
 - Prioritize by feasibility and coverage impact
 {% elif section_name == 'coverage_gaps' %}
@@ -2671,6 +2680,7 @@ Respond with valid JSON:
 - Minimum logging configuration per source; critical vs. nice-to-have; infrastructure/licensing flags
 {% elif section_name == 'recommended_actions' or section_name == 'recommendations' %}
 - Ordered build list: which detections to write first and why, with the rule formats this platform supports (Sigma, SPL, CrowdStrike QL, Elastic QL, KQL, YARA)
+- Behavioral detections go first; IOC blocklists come last, since they expire with the infrastructure
 {% else %}
 - Write appropriate content for a "{{ section_title }}" section of a detection report
 - Keep telemetry specificity; map claims to ATT&CK IDs
