@@ -421,13 +421,14 @@ class Settings(BaseSettings):
     # knob against live data; see app/intelligence/story_threads.py.
     thread_window_days: int = 21  # how far back an entry can still join a thread
     thread_dormancy_days: int = 14  # silence after which a thread stops accepting
-    thread_gap_days: int = 5  # max quiet days between an article and the thread it joins
+    thread_gap_days: int = 7  # max quiet days between an article and the thread it joins
     thread_min_body_chars: int = 400  # below this an entry is a bulletin row, not an article
     thread_join_similarity: float = 0.84  # cosine to the nearest article already in the thread
     thread_join_similarity_no_entity: float = 0.90  # required when no entity is shared
     thread_seed_similarity: float = 0.84  # cosine between entries to start a thread
     thread_duplicate_similarity: float = 0.90  # at/above this an entry is an echo
-    thread_merge_similarity: float = 0.92  # centroid similarity at which two threads are one story
+    thread_merge_similarity: float = 0.90  # centroid similarity at which two threads are one story
+    thread_merge_similarity_shared_entity: float = 0.85  # lower merge bar when the threads share a key entity
     # Entries examined per sweep. Must stay comfortably above the number of
     # articles inside the gap window, or re-checks crowd out the newest arrivals
     # and today's pile never gets threaded — see _candidate_entries.

@@ -129,6 +129,7 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "thread_seed_similarity": float,
     "thread_duplicate_similarity": float,
     "thread_merge_similarity": float,
+    "thread_merge_similarity_shared_entity": float,
     "thread_sweep_limit": int,
     "thread_min_entries": int,
     "thread_min_sources": int,
@@ -1335,6 +1336,13 @@ SETTING_METADATA: dict[str, dict] = {
         "description": "Two overlapping threads this close in centroid are the same story and are folded into one",
         "group": "threads",
     },
+    "thread_merge_similarity_shared_entity": {
+        "label": "Merge Similarity (shared entity)",
+        "description": (
+            "Lower merge bar for two threads whose key entities overlap, the way a shared entity lowers the join bar"
+        ),
+        "group": "threads",
+    },
     "thread_sweep_limit": {
         "label": "Entries Examined Per Sweep",
         "description": (
@@ -1498,6 +1506,7 @@ _ENGINE_SECTION_GROUPS: dict[str, str] = {
     "thread_seed_similarity": "threads",
     "thread_duplicate_similarity": "threads",
     "thread_merge_similarity": "threads",
+    "thread_merge_similarity_shared_entity": "threads",
     "thread_sweep_limit": "threads",
     "thread_min_entries": "threads",
     "thread_min_sources": "threads",

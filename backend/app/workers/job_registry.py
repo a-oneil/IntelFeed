@@ -121,6 +121,7 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
             "thread_seed_similarity",
             "thread_duplicate_similarity",
             "thread_merge_similarity",
+            "thread_merge_similarity_shared_entity",
             "thread_sweep_limit",
             "thread_min_entries",
             "thread_min_sources",

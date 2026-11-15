@@ -34,7 +34,7 @@ A database value that equals the default does nothing useful, and it stops you g
 |---|---|---|
 | `CONFIGURABLE_KEYS` | `backend/app/services/system_settings.py:26` | Which keys the UI can edit, and each value's type |
 | `SETTING_METADATA` | `backend/app/services/system_settings.py:220` | Label, description and group shown in the UI |
-| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1423` | Moves engine keys into the group of the Engine panel that owns them |
+| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1431` | Moves engine keys into the group of the Engine panel that owns them |
 | `SECRET_KEYS` | `backend/app/services/system_settings.py:14` | Encrypted in the database, hidden on read |
 | `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Which Engine screen shows each group; drives the Engine settings search |
 | `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:72` | Single keys that live somewhere other than their group's screen |
@@ -180,13 +180,14 @@ A story thread groups articles about the same unfolding story. Code: `backend/ap
 |---|---|---|
 | `thread_window_days` | int, `21` | How old an article can be and still join a thread. |
 | `thread_dormancy_days` | int, `14` | Days of silence after which a thread stops taking new articles. |
-| `thread_gap_days` | int, `5` | Most quiet days allowed between an article and the thread's latest article. Stops an old story absorbing new, unrelated news. |
+| `thread_gap_days` | int, `7` | Most quiet days allowed between an article and the thread's latest article. Stops an old story absorbing new, unrelated news; a story that pauses over a long weekend still continues. |
 | `thread_min_body_chars` | int, `400` | Shorter articles are treated as bulletins and never threaded. |
 | `thread_join_similarity` | float, `0.84` | Similarity needed to join a thread when the article shares an entity with it. |
 | `thread_join_similarity_no_entity` | float, `0.90` | Higher similarity needed when no entity is shared. |
 | `thread_seed_similarity` | float, `0.84` | Similarity between two loose articles needed to start a thread. |
 | `thread_duplicate_similarity` | float, `0.90` | At or above this, an article is an **echo** (a re-report), not a new development. |
-| `thread_merge_similarity` | float, `0.92` | Similarity at which two overlapping threads are merged. |
+| `thread_merge_similarity` | float, `0.90` | Similarity at which two overlapping threads are merged. |
+| `thread_merge_similarity_shared_entity` | float, `0.85` | Lower merge bar for folding a chapter-sized thread (under 12 articles) into a thread it shares two key actors, malware families or CVEs with. Products never count. |
 | `thread_sweep_limit` | int, `1500` | Articles checked per run. Keep it well above the number of articles published within `thread_gap_days`, or new articles never get threaded. |
 | `thread_min_entries` | int, `3` | Articles needed before a group becomes a thread. |
 | `thread_min_sources` | int, `2` | Distinct source **domains** needed before a group becomes a thread. |
