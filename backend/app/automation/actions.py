@@ -1545,7 +1545,8 @@ async def _action_send_email_batch(
 
 async def _action_mark_priority(db: AsyncSession, entry: Entry, config: dict, user_id: uuid.UUID) -> dict:
     """Mark an entry with a priority level by adding a priority tag."""
-    level = config.get("level", "medium")
+    # Template rules spell the key "priority"; with neither set, the documented default is medium.
+    level = config.get("level") or config.get("priority") or "medium"
     tag_name = f"priority-{level}"
 
     # Reuse add_tags logic

@@ -15,6 +15,7 @@ from sqlalchemy import select
 from app.core.metrics import CELERY_TASK_DURATION_SECONDS, CELERY_TASKS_TOTAL
 from app.models.entry import Entry
 from app.services import translation
+from app.services.sanitizer import sanitize_html
 from app.workers.celery_app import celery_app
 from app.workers.db import run_async, worker_session
 from app.workers.pipeline_logging import pipeline_stage
@@ -66,6 +67,7 @@ async def _translate_one(entry_id: str, target_lang: str, requeue_autolink: bool
         if entry.translated_html and entry.translation_target_language == target_lang and title_already_done:
             return "cached"
 
+        # Summary is feed HTML; the translated result is sanitized before it is stored.
         source_html = entry.content_html or (f"<p>{entry.summary}</p>" if entry.summary else "")
         if not source_html.strip():
             return "empty"
@@ -145,7 +147,7 @@ async def _translate_one(entry_id: str, target_lang: str, requeue_autolink: bool
         from datetime import datetime
 
         effective_source = detected or body_detected
-        entry.translated_html = translated
+        entry.translated_html = sanitize_html(translated) if translated else ""
         if translated_title:
             entry.translated_title = translated_title
         entry.translation_source_language = effective_source or "auto"

@@ -39,9 +39,7 @@ function downloadFile(content: string, filename: string, mime: string) {
 }
 
 function stripHtml(html: string): string {
-  const div = document.createElement("div");
-  div.innerHTML = html;
-  return div.textContent || "";
+  return new DOMParser().parseFromString(html, "text/html").body.textContent || "";
 }
 
 function entryToMarkdown(entry: SharedEntryData): string {
@@ -549,7 +547,7 @@ export function SharedEntryPage() {
                             thumbnailUrl: entry.image_url ?? null,
                           },
                         });
-                        if (ok) return;
+                        if (ok !== false) return;
                         if ("speechSynthesis" in window) speakViaBrowser();
                         else toast.error("Read-aloud audio is unavailable right now.");
                         return;
@@ -674,7 +672,7 @@ export function SharedEntryPage() {
                         {note.title}
                       </div>
                       {note.content_html ? (
-                        <div className={styles.sharedNoteBody} dangerouslySetInnerHTML={{ __html: note.content_html }} />
+                        <SafeHTML html={note.content_html} className={styles.sharedNoteBody} />
                       ) : note.content_markdown ? (
                         <div className={styles.sharedNoteBody}>{note.content_markdown}</div>
                       ) : null}

@@ -795,6 +795,12 @@ async def get_detection_summary_by_id(
     summary = result.scalar_one_or_none()
     if not summary:
         raise AppError(code="not_found", message="Detection summary not found", status_code=404)
+    if (
+        (summary.summary_content or {}).get("kind") == "coverage_set"
+        and user.role != "admin"
+        and summary.created_by != user.id
+    ):
+        raise AppError(code="forbidden", message="Only the set's owner or an admin can access it", status_code=403)
     return DetectionSummarySavedResponse.model_validate(summary)
 
 

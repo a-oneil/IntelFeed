@@ -368,6 +368,7 @@ function SpeechMode() {
   const currentIndexRef = useRef(0);
   const paragraphsRef = useRef<string[]>([]);
   const playbackRateRef = useRef(playbackRate);
+  const skipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Generation token: bumped on every speakParagraph() / cancel so stale
   // onend/onerror callbacks from canceled utterances are ignored. Without this,
   // cancel() can fire onend for the previous utterance after we've already
@@ -393,9 +394,15 @@ function SpeechMode() {
 
   // Clean up on unmount
   useEffect(() => {
+    const genRef = generationRef;
+    const skipRef = skipTimerRef;
     return () => {
+      if (skipRef.current) {
+        clearTimeout(skipRef.current);
+        skipRef.current = null;
+      }
       if (isSupported) {
-        generationRef.current++;
+        genRef.current++;
         window.speechSynthesis.cancel();
       }
     };
@@ -646,13 +653,18 @@ function SpeechMode() {
   };
 
   const skipTo = (index: number) => {
+    if (skipTimerRef.current) {
+      clearTimeout(skipTimerRef.current);
+      skipTimerRef.current = null;
+    }
     generationRef.current++;
     isReadingRef.current = false;
     window.speechSynthesis.cancel();
     currentIndexRef.current = index;
     setSpeechIndex(index);
     setSpeechPaused(false);
-    setTimeout(() => {
+    skipTimerRef.current = setTimeout(() => {
+      skipTimerRef.current = null;
       isReadingRef.current = true;
       speakParagraph(index);
     }, 50);
@@ -677,6 +689,10 @@ function SpeechMode() {
   };
 
   const handleStop = () => {
+    if (skipTimerRef.current) {
+      clearTimeout(skipTimerRef.current);
+      skipTimerRef.current = null;
+    }
     generationRef.current++;
     isReadingRef.current = false;
     window.speechSynthesis.cancel();

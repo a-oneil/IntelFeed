@@ -27,16 +27,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _parse_iso_utc(raw: str) -> datetime:
+    try:
+        dt = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise AppError(
+            code="invalid_param",
+            message=f"Invalid date format '{raw}'. Use ISO 8601.",
+            status_code=400,
+        ) from exc
+    return dt.astimezone(UTC) if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
 def _parse_date_range(date_from: str | None, date_to: str | None, default_days: int = 30) -> tuple[datetime, datetime]:
     now = datetime.now(UTC)
-    if date_to:
-        end = datetime.fromisoformat(date_to).replace(tzinfo=UTC)
-    else:
-        end = now
-    if date_from:
-        start = datetime.fromisoformat(date_from).replace(tzinfo=UTC)
-    else:
-        start = end - timedelta(days=default_days)
+    end = _parse_iso_utc(date_to) if date_to else now
+    start = _parse_iso_utc(date_from) if date_from else (end - timedelta(days=default_days))
     return start, end
 
 
@@ -68,6 +74,8 @@ async def feed_activity(
             .order_by("day")
         )
         return [{"date": str(row.day), "count": row.count} for row in result.all()]
+    except AppError:
+        raise
     except Exception as exc:
         logger.exception("Error in feed_activity widget")
         raise AppError(
@@ -99,6 +107,8 @@ async def cve_severity(
             .group_by(severity_case)
         )
         return [{"severity": row.severity, "count": row.count} for row in result.all()]
+    except AppError:
+        raise
     except Exception as exc:
         logger.exception("Error in cve_severity widget")
         raise AppError(
@@ -130,6 +140,8 @@ async def threat_timeline(
             .order_by("day")
         )
         return [{"actor": row.name, "date": str(row.day), "count": row.count} for row in result.all()]
+    except AppError:
+        raise
     except Exception as exc:
         logger.exception("Error in threat_timeline widget")
         raise AppError(
@@ -174,6 +186,8 @@ async def trending_cves(
             }
             for row in result.all()
         ]
+    except AppError:
+        raise
     except Exception as exc:
         logger.exception("Error in trending_cves widget")
         raise AppError(
@@ -220,6 +234,8 @@ async def new_cves(
             }
             for row in result.all()
         ]
+    except AppError:
+        raise
     except Exception as exc:
         logger.exception("Error in new_cves widget")
         raise AppError(
@@ -260,6 +276,8 @@ async def attack_heatmap(
             }
             for row in result.all()
         ]
+    except AppError:
+        raise
     except Exception as exc:
         logger.exception("Error in attack_heatmap widget")
         raise AppError(
@@ -330,6 +348,8 @@ async def widget_stats(
             "cves": {"count": cves_count, "trend": trend(cves_count, prev_cves)},
             "unread": {"count": unread_count},
         }
+    except AppError:
+        raise
     except Exception as exc:
         logger.exception("Error in widget_stats widget")
         raise AppError(
@@ -365,6 +385,8 @@ async def new_actors(
             }
             for a in result.scalars().all()
         ]
+    except AppError:
+        raise
     except Exception as exc:
         logger.exception("Error in new_actors widget")
         raise AppError(
@@ -395,6 +417,8 @@ async def detection_coverage(
             "covered_ttps": covered_ttps,
             "coverage_pct": coverage_pct,
         }
+    except AppError:
+        raise
     except Exception as exc:
         logger.exception("Error in detection_coverage widget")
         raise AppError(
@@ -453,6 +477,8 @@ async def recent_correlation_events(
             }
             for e, title in rows
         ]
+    except AppError:
+        raise
     except Exception as exc:
         logger.exception("Error in correlation_events widget")
         raise AppError(
@@ -514,6 +540,8 @@ async def new_detections(
             },
             "rules": rules,
         }
+    except AppError:
+        raise
     except Exception as exc:
         logger.exception("Error in new_detections widget")
         raise AppError(
@@ -579,6 +607,8 @@ async def automation_logs_widget(
             },
             "logs": logs,
         }
+    except AppError:
+        raise
     except Exception as exc:
         logger.exception("Error in automation_logs widget")
         raise AppError(

@@ -2,7 +2,8 @@
 
 import hashlib
 import hmac
-from datetime import datetime
+import re
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Header, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -100,8 +101,10 @@ async def get_intelligence_feed(
     if since:
         try:
             # URL-decode may turn '+' into space; restore timezone offset
-            since_clean = since.strip().replace(" 00:00", "+00:00")
+            since_clean = re.sub(r" (\d{2}:\d{2})$", r"+\1", since.strip()).replace("Z", "+00:00")
             since_dt = datetime.fromisoformat(since_clean)
+            if since_dt.tzinfo is None:
+                since_dt = since_dt.replace(tzinfo=UTC)
         except ValueError:
             raise AppError(
                 code="invalid_param",

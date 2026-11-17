@@ -28,6 +28,7 @@ from app.models.saved_search import SavedSearch
 from app.models.shared_entry import SharedEntry
 from app.services import meilisearch_client, translation
 from app.services.read_state import has_no_state_for_user
+from app.services.sanitizer import sanitize_html
 from app.tools import _tool
 
 logger = logging.getLogger(__name__)
@@ -606,6 +607,8 @@ async def _translate_entry(db: AsyncSession, user_id: uuid.UUID, entry_id: str, 
 
     effective_source = detected_lang or body_detected
     now = datetime.now(UTC)
+    # Same as the API route and the worker: never store engine output unsanitized.
+    translated = sanitize_html(translated) if translated else ""
     entry.translated_html = translated
     if translated_title:
         entry.translated_title = translated_title
@@ -981,6 +984,8 @@ async def _get_ingest_batch(db: AsyncSession, user_id: uuid.UUID, batch_id: str)
     if batch is None:
         return {"error": "Batch not found"}
     items = list(batch.items)
+    # Same as GET /api/ingest/batches/{id}: the manual feed is shared (no owner
+    # check), and a poll is what flips a dead worker's `parsing` items so retry lights up.
     if await batches.mark_stale_parsing(db, items):
         await db.commit()
     return _ingest_batch_dict(batch, items)

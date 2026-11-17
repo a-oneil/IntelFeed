@@ -42,7 +42,7 @@ AI_LIMIT = (20, 60)  # 20 req/min
 ANON_LIMITS = ((180, 60), (1500, 3600))
 ANON_ARTICLE_LIMITS = ((20, 60), (150, 3600))
 ANON_HEAVY_LIMITS = ((20, 60), (200, 3600))
-ANON_ARTICLE_PATH = re.compile(r"^/api/entries/[0-9a-fA-F-]{36}$")
+ANON_ARTICLE_PATH = re.compile(r"^/api/entries/(?:[0-9a-fA-F-]{36}|[0-9a-fA-F]{32})$")
 ANON_HEAVY_PREFIXES = (
     "/api/intelligence/graph/",
     "/api/intelligence/pivot/",
@@ -74,7 +74,7 @@ _BUCKET_WINDOWS = {
     "anon_heavy": ANON_HEAVY_LIMITS,
 }
 
-_PROVIDER_TEST = re.compile(r"^/api/ai/providers/[0-9a-fA-F-]{36}/test$")
+_PROVIDER_TEST = re.compile(r"^/api/ai/providers/(?:[0-9a-fA-F-]{36}|[0-9a-fA-F]{32})/test$")
 
 
 Windows = tuple[tuple[int, int], ...]

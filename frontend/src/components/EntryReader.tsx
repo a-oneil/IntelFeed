@@ -449,7 +449,15 @@ export function EntryReader({ entryId }: EntryReaderProps) {
   const isYouTube = entry.feed_type === "youtube";
   const isPodcast = entry.feed_type === "podcast";
   const videoId = (entry.metadata?.video_id as string | undefined)
-    || (isYouTube && entry.url ? new URL(entry.url).searchParams.get("v") ?? undefined : undefined);
+    || (isYouTube && entry.url
+      ? (() => {
+          try {
+            return new URL(entry.url).searchParams.get("v") ?? undefined;
+          } catch {
+            return undefined;
+          }
+        })()
+      : undefined);
   const audioMedia = entry.media?.find((m) => m.media_type === "audio");
 
   const handlePlayEpisode = () => {
@@ -679,7 +687,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                           thumbnailUrl: entry.image_url ?? null,
                         },
                       });
-                      if (ok || isVisitor) return;
+                      if (ok !== false || isVisitor) return;
                       // Piper unavailable/failed — fall back to the browser voice.
                       if ("speechSynthesis" in window) speakViaBrowser();
                       else toast.error("Read-aloud audio is unavailable right now.");
@@ -1012,7 +1020,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
               setActiveReaderPanel("create_entity");
             }}
             onCreateNote={(text) => {
-              setNoteInitialContent(`<blockquote><p>${text}</p></blockquote><p></p>`);
+              setNoteInitialContent(`> ${text.replace(/\r?\n/g, "\n> ")}\n\n`);
               setNoteKey((k) => k + 1);
               setActiveReaderPanel("notes");
             }}

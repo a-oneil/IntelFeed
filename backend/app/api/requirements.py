@@ -423,14 +423,14 @@ async def get_requirement_entities(
     )
     malware_result = await db.execute(
         select(MalwareFamily)
-        .join(EntryMalware, EntryMalware.malware_id == MalwareFamily.id)
+        .join(EntryMalware, EntryMalware.malware_family_id == MalwareFamily.id)
         .where(EntryMalware.entry_id.in_(entry_ids))
         .distinct()
     )
 
     return {
         "ttps": [
-            {"id": str(t.id), "technique_id": t.technique_id, "name": t.name, "tactic": t.tactic}
+            {"id": str(t.id), "technique_id": t.technique_id, "name": t.technique_name, "tactic": t.tactic}
             for t in ttp_result.scalars().all()
         ],
         "cves": [

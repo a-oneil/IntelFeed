@@ -260,10 +260,12 @@ async def save_coverage_set(
     return _saved(summary)
 
 
-async def _get_set(db: AsyncSession, summary_id: uuid.UUID) -> DetectionSummary:
+async def _get_set(db: AsyncSession, summary_id: uuid.UUID, user: User) -> DetectionSummary:
     summary = await db.get(DetectionSummary, summary_id)
     if summary is None or (summary.summary_content or {}).get("kind") != "coverage_set":
         raise AppError(code="not_found", message="Saved set not found", status_code=404)
+    if user.role != "admin" and summary.created_by != user.id:
+        raise AppError(code="forbidden", message="Only the set's owner or an admin can access it", status_code=403)
     return summary
 
 
@@ -284,7 +286,7 @@ async def export_coverage_set(
     """
     if export_format not in EXPORT_FORMATS:
         raise AppError(code="bad_request", message=f"Unknown export format '{export_format}'", status_code=400)
-    summary = await _get_set(db, summary_id)
+    summary = await _get_set(db, summary_id, user)
     content = summary.summary_content or {}
 
     if export_format == "markdown":
@@ -315,7 +317,7 @@ async def export_coverage_set_zip(
 
     from fastapi.responses import Response
 
-    summary = await _get_set(db, summary_id)
+    summary = await _get_set(db, summary_id, user)
     files = await build_set_bundle(db, summary)
 
     buf = io.BytesIO()

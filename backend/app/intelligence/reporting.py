@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.caller import Caller
+from app.core.exceptions import AppError
 from app.models.country import Country, EntryCountry
 from app.models.cve import CVE, EntryCVE
 from app.models.detection_rule import DetectionRule
@@ -126,6 +127,7 @@ async def resolve_report_sources(
     saved_search_id: uuid.UUID | None,
     user_id: uuid.UUID,
     search_limit: int = 50,
+    is_admin: bool = False,
 ) -> tuple[list[uuid.UUID], dict]:
     """Resolve source into (entry_ids, entity_ids_dict).
 
@@ -142,7 +144,7 @@ async def resolve_report_sources(
     elif source_type == "search":
         from app.services.meilisearch_client import search_entries
 
-        results = search_entries(query=search_query or "", limit=search_limit, offset=0)
+        results = search_entries(query=search_query or "", limit=search_limit, offset=0, viewer_id=str(user_id))
         for hit in results.get("hits", []):
             try:
                 resolved_ids.append(uuid.UUID(hit["id"]))
@@ -155,7 +157,13 @@ async def resolve_report_sources(
         saved = await db.get(SavedSearch, saved_search_id)
         if not saved:
             return [], {}
-        results = search_entries(query=saved.query or "", limit=search_limit, offset=0)
+        if not is_admin and saved.created_by != user_id:
+            raise AppError(
+                code="forbidden",
+                message="Only the saved search's owner or an admin can use it",
+                status_code=403,
+            )
+        results = search_entries(query=saved.query or "", limit=search_limit, offset=0, viewer_id=str(user_id))
         for hit in results.get("hits", []):
             try:
                 resolved_ids.append(uuid.UUID(hit["id"]))

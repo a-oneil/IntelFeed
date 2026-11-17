@@ -232,7 +232,7 @@ export function EntityLinkedMarkdown({ text, excludeEntityId, enabled = true }: 
             </a>
           );
         }
-        const isInternal = !!href && href.startsWith("/");
+        const isInternal = !!href && href.startsWith("/") && !href.startsWith("//");
         return (
           <a
             {...rest}

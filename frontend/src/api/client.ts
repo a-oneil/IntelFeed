@@ -19,15 +19,30 @@ const api = axios.create({
 // Shared refresh promise to deduplicate concurrent refresh attempts
 let refreshPromise: Promise<string | null> | null = null;
 
-function isTokenExpiringSoon(token: string): boolean {
+function decodeJwtPayload(token: string): { exp?: number } | null {
   try {
-    const payload = JSON.parse(atob(token.split(".")[1]));
-    const expiresAt = payload.exp * 1000;
-    // Refresh if less than 5 minutes remaining
-    return expiresAt - Date.now() < 5 * 60 * 1000;
+    const part = token.split(".")[1];
+    if (!part) return null;
+    const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    return JSON.parse(atob(padded));
   } catch {
-    return true;
+    return null;
   }
+}
+
+function isTokenExpiringSoon(token: string): boolean {
+  const payload = decodeJwtPayload(token);
+  if (!payload?.exp) return true;
+  const expiresAt = payload.exp * 1000;
+  // Refresh if less than 5 minutes remaining
+  return expiresAt - Date.now() < 5 * 60 * 1000;
+}
+
+function isTokenExpired(token: string): boolean {
+  const payload = decodeJwtPayload(token);
+  if (!payload?.exp) return true;
+  return payload.exp * 1000 <= Date.now();
 }
 
 function doRefresh(): Promise<string | null> {
@@ -131,6 +146,7 @@ function refuseVisitorWrite(config: InternalAxiosRequestConfig): boolean {
   if (!selectIsVisitor(useAuthStore.getState())) return false;
   if (PUBLIC_AUTH_PATHS.some((p) => config.url?.includes(p))) return false;
   if (VISITOR_READ_POSTS.some((p) => config.url?.startsWith(p))) return false;
+  if (/^\/entities\/[^/]+\/context-values$/.test(config.url || "")) return false;
   return true;
 }
 
@@ -155,6 +171,8 @@ api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
     const newToken = await doRefresh();
     if (newToken) {
       config.headers.Authorization = `Bearer ${newToken}`;
+    } else if (accessToken && !isTokenExpired(accessToken)) {
+      config.headers.Authorization = `Bearer ${accessToken}`;
     }
   }
   return config;

@@ -266,13 +266,13 @@ Per-user adjustments in signals mode, applied when reading:
 
 ### Entry-list chips and radar sort
 
-With surfacing on, the entry list (`list_entries`, `backend/app/api/entries.py:447`) loads signals for the page. Each item carries `priority_score`, up to 2 non-echo `top_signals`, and `is_echo`. Score and chips are filled only when the entry clears the threshold; `is_echo` is always set so re-reports can be dimmed. `sort=radar` orders by score with a score-based cursor and, with surfacing on, lists only entries above the threshold, matching the Priority Queue badge (`GET /api/entries/priority-unread-count`). Chips render in `frontend/src/components/SignalChip.tsx`.
+With surfacing on, the entry list (`list_entries`, `backend/app/api/entries.py:454`) loads signals for the page. Each item carries `priority_score`, up to 2 non-echo `top_signals`, and `is_echo`. Score and chips are filled only when the entry clears the threshold; `is_echo` is always set so re-reports can be dimmed. `sort=radar` orders by score with a score-based cursor and, with surfacing on, lists only entries above the threshold, matching the Priority Queue badge (`GET /api/entries/priority-unread-count`). Chips render in `frontend/src/components/SignalChip.tsx`.
 
 ### Story threads in the ranked queue
 
 The Priority Queue (`/priority-queue`) is a second, ranked entry list: `MainLayout` in `priorityMode`, which mounts `EntryList` with `sortOverride="radar"` and `withThreads`, a docked reader, and a "Why it's ranked" card (`frontend/src/components/WhyRankedCard.tsx`). It folds **story threads** into the list as single rows.
 
-Ranking and folding happen on the server (`build_priority_queue`, `backend/app/api/entries.py:1431`). The endpoint lists open threads with something unread, scores each one by its best **unread, non-echo** member, and merges them into the radar-ordered entries so a thread appears just before the first entry it outranks. Every member of a live thread is held back from the list as a standalone entry, including members on later pages. A thread with nothing unread is not shown.
+Ranking and folding happen on the server (`build_priority_queue`, `backend/app/api/entries.py:1440`). The endpoint lists open threads with something unread, scores each one by its best **unread, non-echo** member, and merges them into the radar-ordered entries so a thread appears just before the first entry it outranks. Every member of a live thread is held back from the list as a standalone entry, including members on later pages. A thread with nothing unread is not shown.
 
 The client only flattens the response into rows (`queueItems`, `frontend/src/utils/threads.ts:39`) and adds day dividers. The cursor carries both the entry position and the thread position, so paging never repeats a thread.
 

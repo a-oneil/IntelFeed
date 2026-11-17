@@ -33,6 +33,15 @@ export function ExternalLinkGuard() {
       const link = event.target.closest("a[href], area[href]");
       if (!(link instanceof HTMLAnchorElement || link instanceof HTMLAreaElement)) return;
 
+      const rawHref = Array.from(link.getAttribute("href") || "")
+        .filter((ch) => ch.charCodeAt(0) > 0x20)
+        .join("");
+      if (/^(?:javascript|data|vbscript):/i.test(rawHref)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       const info = evaluateLinkClick(link, event, currentInterceptContext());
       if (!info) return;
 

@@ -1,7 +1,6 @@
 import logging
-import os
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _config_logger = logging.getLogger("app.config")
@@ -497,31 +496,26 @@ class Settings(BaseSettings):
         )
         return f"{base}?sslmode=require" if self.postgres_ssl else base
 
-    @field_validator("cors_origins")
-    @classmethod
-    def _validate_cors_origins(cls, v: list[str]) -> list[str]:
-        env = os.getenv("ENV", "development").lower()
-        if env == "production" and "*" in v:
+    @model_validator(mode="after")
+    def _reject_insecure_defaults(self) -> "Settings":
+        production = self.env.lower() == "production"
+        if production and "*" in self.cors_origins:
             raise ValueError("Wildcard CORS origin ('*') is not allowed in production")
-        return v
-
-    @field_validator("postgres_password", "meili_master_key", "secret_key", "encryption_key")
-    @classmethod
-    def _reject_insecure_defaults(cls, v: str, info) -> str:
-        production = os.getenv("ENV", "development").lower() == "production"
-        if _is_placeholder(v):
-            if production:
+        for field_name in ("postgres_password", "meili_master_key", "secret_key", "encryption_key"):
+            v = getattr(self, field_name)
+            if _is_placeholder(v):
+                if production:
+                    raise ValueError(
+                        f"{field_name} must not be a placeholder ('{v}') in production. "
+                        "Set a strong secret via environment variable or .env file."
+                    )
+                _config_logger.warning("Insecure default for %s — do not use in production", field_name)
+            elif production and field_name == "secret_key" and len(v) < _MIN_SECRET_KEY_LENGTH:
                 raise ValueError(
-                    f"{info.field_name} must not be a placeholder ('{v}') in production. "
-                    "Set a strong secret via environment variable or .env file."
+                    f"secret_key must be at least {_MIN_SECRET_KEY_LENGTH} characters in production. "
+                    "Generate one with: openssl rand -hex 32"
                 )
-            _config_logger.warning("Insecure default for %s — do not use in production", info.field_name)
-        elif production and info.field_name == "secret_key" and len(v) < _MIN_SECRET_KEY_LENGTH:
-            raise ValueError(
-                f"secret_key must be at least {_MIN_SECRET_KEY_LENGTH} characters in production. "
-                "Generate one with: openssl rand -hex 32"
-            )
-        return v
+        return self
 
     @field_validator("encryption_key")
     @classmethod

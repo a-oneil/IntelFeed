@@ -231,8 +231,10 @@ export function InlineEntityHighlighter({
 
     lastAppliedKey.current = entityKey;
 
-    // Sort by value length descending so longer matches take priority
-    const sorted = [...entities].sort((a, b) => b.value.length - a.value.length);
+    // Sort by value length descending (skipping empty values) so longer matches take priority
+    const sorted = entities
+      .filter((e) => e.value && e.value.trim().length > 0)
+      .sort((a, b) => b.value.length - a.value.length);
 
     // Build a combined regex
     const pattern = sorted.map((e) => buildEntityPattern(e)).join("|");
@@ -276,6 +278,10 @@ export function InlineEntityHighlighter({
       let matched = false;
 
       while ((match = regex.exec(text)) !== null) {
+        if (!match[0]) {
+          regex.lastIndex++;
+          continue;
+        }
         matched = true;
         if (match.index > lastIndex) {
           fragment.appendChild(

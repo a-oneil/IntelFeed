@@ -1,3 +1,4 @@
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -6,6 +7,7 @@ from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.content_disposition import attachment
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResponse
 from app.core.security import get_current_user
@@ -34,6 +36,37 @@ from app.schemas.intel_report import (
 )
 
 router = APIRouter()
+
+
+def _safe_filename(raw: str | None, fallback: str) -> str:
+    return re.sub(r'[/\\"\r\n\x00-\x1f]+', "-", (raw or "").strip())[:50].strip(" .-") or fallback
+
+
+async def _usable_template(
+    db: AsyncSession, slug: str, user: User, *, allow_unknown: bool = False
+) -> ReportTemplate | None:
+    """The DB template behind ``slug`` if this user may build from it; None for a code template.
+
+    The template list shows builtin, shared and the user's own templates. Every
+    route that takes a slug has to refuse the rest too, or knowing a private
+    template's slug is enough to build from (and read the sections of) it.
+    ``allow_unknown`` keeps plain report creation accepting a slug no template
+    has, as it always did.
+    """
+    if slug in REPORT_TEMPLATES:
+        return None
+    tmpl = (await db.execute(select(ReportTemplate).where(ReportTemplate.template_slug == slug))).scalar_one_or_none()
+    if tmpl is None:
+        if allow_unknown:
+            return None
+        raise AppError(code="invalid_template", message=f"Unknown template type: {slug}", status_code=400)
+    if not tmpl.is_builtin and not tmpl.is_shared and user.role != "admin" and tmpl.created_by != user.id:
+        raise AppError(
+            code="forbidden",
+            message="Only shared templates or your own templates can be used",
+            status_code=403,
+        )
+    return tmpl
 
 
 async def _preflight(db: AsyncSession, user: User, template_type: str, content: dict) -> None:
@@ -103,6 +136,7 @@ async def create_intel_report(
     data sections (TTPs, references, timeline, observables) fill from the linked entries/entities
     immediately, so a fresh report starts structured instead of empty."""
     report_content = body.content
+    await _usable_template(db, body.template_type, user, allow_unknown=True)
     if not (report_content or {}).get("sections"):
         entity_ids = body.entity_ids or {}
         if body.entry_ids and not entity_ids:
@@ -290,6 +324,10 @@ async def clone_report_template(
     source = await db.get(ReportTemplate, template_id)
     if not source:
         raise AppError(code="not_found", message="Template not found", status_code=404)
+    if not source.is_builtin and not source.is_shared and user.role != "admin" and source.created_by != user.id:
+        raise AppError(
+            code="forbidden", message="Only shared templates or your own templates can be cloned", status_code=403
+        )
 
     body = body or {}
     new_slug = body.get("template_slug", f"{source.template_slug}_custom")
@@ -332,14 +370,10 @@ async def generate_intel_report(
 ):
     """Generate a new report pre-filled from a template and linked entities."""
     # Check builtin templates first, then DB templates
-    if body.template_type not in REPORT_TEMPLATES:
-        db_tmpl = await db.execute(select(ReportTemplate).where(ReportTemplate.template_slug == body.template_type))
-        if not db_tmpl.scalar_one_or_none():
-            raise AppError(
-                code="invalid_template",
-                message=f"Unknown template type: {body.template_type}",
-                status_code=400,
-            )
+    template = REPORT_TEMPLATES.get(body.template_type)
+    if not template:
+        db_tmpl = await _usable_template(db, body.template_type, user)
+        template = {"name": db_tmpl.name or body.template_type.replace("_", " ").title()}
 
     content = await generate_report_content(
         template_type=body.template_type,
@@ -348,7 +382,6 @@ async def generate_intel_report(
         db=db,
     )
 
-    template = REPORT_TEMPLATES[body.template_type]
     title = body.title or f"{template['name']} - {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')}"
 
     report = IntelReport(
@@ -386,6 +419,7 @@ async def generate_full_intel_report(
         saved_search_id=body.saved_search_id,
         user_id=user.id,
         search_limit=body.search_limit,
+        is_admin=user.role == "admin",
     )
 
     if not entry_ids:
@@ -398,14 +432,8 @@ async def generate_full_intel_report(
     # 2. Validate template
     template = REPORT_TEMPLATES.get(body.template_type)
     if not template:
-        db_tmpl = await db.execute(select(ReportTemplate).where(ReportTemplate.template_slug == body.template_type))
-        if not db_tmpl.scalar_one_or_none():
-            raise AppError(
-                code="invalid_template",
-                message=f"Unknown template type: {body.template_type}",
-                status_code=400,
-            )
-        template = REPORT_TEMPLATES.get(body.template_type, {"name": body.template_type.replace("_", " ").title()})
+        await _usable_template(db, body.template_type, user)
+        template = {"name": body.template_type.replace("_", " ").title()}
 
     # 3. Pre-fill data sections (in memory: nothing is written yet)
     content = await generate_report_content(
@@ -583,14 +611,7 @@ async def generate_report_from_campaign(
     template_type = body.get("template_type", "campaign_tracker").strip()
 
     # Validate template
-    if template_type not in REPORT_TEMPLATES:
-        db_tmpl = await db.execute(select(ReportTemplate).where(ReportTemplate.template_slug == template_type))
-        if not db_tmpl.scalar_one_or_none():
-            raise AppError(
-                code="invalid_template",
-                message=f"Unknown template type: {template_type}",
-                status_code=400,
-            )
+    await _usable_template(db, template_type, user)
 
     # Collect entry_ids from campaign
     entry_rows = await db.execute(select(CampaignEntry.entry_id).where(CampaignEntry.campaign_id == campaign_uuid))
@@ -720,15 +741,8 @@ async def clone_report_as_type(
     if not new_template_type:
         raise AppError(code="validation", message="template_type is required", status_code=400)
 
-    # Validate template exists
-    if new_template_type not in REPORT_TEMPLATES:
-        db_tmpl = await db.execute(select(ReportTemplate).where(ReportTemplate.template_slug == new_template_type))
-        if not db_tmpl.scalar_one_or_none():
-            raise AppError(
-                code="invalid_template",
-                message=f"Unknown template type: {new_template_type}",
-                status_code=400,
-            )
+    # Validate template exists and is this user's to use
+    await _usable_template(db, new_template_type, user)
 
     generate = bool(body.get("generate", True))
 
@@ -819,14 +833,14 @@ async def export_intel_report(
     if not report:
         raise AppError(code="not_found", message="Report not found", status_code=404)
 
-    safe_title = report.title[:50].replace("/", "-").replace("\\", "-")
+    safe_title = _safe_filename(report.title, str(report.id))
 
     if format == "markdown":
         content = render_markdown(report)
         return Response(
             content=content,
             media_type="text/markdown; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{safe_title}.md"'},
+            headers={"Content-Disposition": attachment(f"{safe_title}.md")},
         )
 
     elif format == "html":
@@ -834,7 +848,7 @@ async def export_intel_report(
         return Response(
             content=content,
             media_type="text/html; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{safe_title}.html"'},
+            headers={"Content-Disposition": attachment(f"{safe_title}.html")},
         )
 
     elif format == "pdf":
@@ -852,7 +866,7 @@ async def export_intel_report(
             return Response(
                 content=pdf_bytes,
                 media_type="application/pdf",
-                headers={"Content-Disposition": f'attachment; filename="{safe_title}.pdf"'},
+                headers={"Content-Disposition": attachment(f"{safe_title}.pdf")},
             )
         except ImportError:
             # WeasyPrint not installed — return HTML with a note
@@ -861,7 +875,7 @@ async def export_intel_report(
             return Response(
                 content=note + html_content,
                 media_type="text/html; charset=utf-8",
-                headers={"Content-Disposition": f'attachment; filename="{safe_title}.html"'},
+                headers={"Content-Disposition": attachment(f"{safe_title}.html")},
             )
 
     raise AppError(code="invalid_format", message=f"Unsupported export format: {format}", status_code=400)

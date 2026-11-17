@@ -21,6 +21,14 @@ export function SafeHTML({ html, className, style, glossaryTerms }: SafeHTMLProp
   const openLinksNewTab = useReadingPrefs().open_links_new_tab;
 
   const clean = useMemo(() => {
+    const sanitizeOpts = {
+      USE_PROFILES: { html: true },
+      ADD_ATTR: ["target", "loading", "data-glossary-id", "data-glossary-category"],
+      FORBID_TAGS: ["style", "script", "iframe", "object", "embed"],
+      FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover"],
+      ALLOWED_URI_REGEXP: /^(?:(?:f|ht)tps?|mailto|tel|callto|cid|blob):|^\//i,
+    };
+
     DOMPurify.addHook("afterSanitizeAttributes", (node) => {
       if (node.tagName === "A") {
         const href = node.getAttribute("href") || "";
@@ -44,20 +52,16 @@ export function SafeHTML({ html, className, style, glossaryTerms }: SafeHTMLProp
       }
     });
 
-    const sanitized = DOMPurify.sanitize(html, {
-      USE_PROFILES: { html: true },
-      ADD_ATTR: ["target", "loading"],
-      FORBID_TAGS: ["style", "script", "iframe", "object", "embed"],
-      FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover"],
-      ALLOWED_URI_REGEXP: /^(?:(?:f|ht)tps?|mailto|tel|callto|cid|blob):|^\//i,
-    });
-
-    DOMPurify.removeHook("afterSanitizeAttributes");
-    let result = sanitized;
-    if (glossaryTerms && glossaryTerms.length > 0) {
-      result = annotateGlossaryHTML(result, glossaryTerms);
+    try {
+      const sanitized = DOMPurify.sanitize(html, sanitizeOpts);
+      if (glossaryTerms && glossaryTerms.length > 0) {
+        const annotated = annotateGlossaryHTML(sanitized, glossaryTerms);
+        return DOMPurify.sanitize(annotated, sanitizeOpts);
+      }
+      return sanitized;
+    } finally {
+      DOMPurify.removeHook("afterSanitizeAttributes");
     }
-    return result;
   }, [html, glossaryTerms, openLinksNewTab]);
 
   useEffect(() => {

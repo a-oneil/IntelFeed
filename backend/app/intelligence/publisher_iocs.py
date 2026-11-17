@@ -24,10 +24,11 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import unquote
 
-import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.safe_http import safe_async_client
 from app.intelligence.observables import (
     classify_value,
     get_or_create_observable,
@@ -113,6 +114,12 @@ def _role_from_text(text: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _has_traversal_segment(path: str) -> bool:
+    """Reject ``.`` or ``..`` path segments (even percent-encoded) and backslashes."""
+    decoded = unquote(path.split("?", 1)[0].split("#", 1)[0]).replace("\\", "/")
+    return any(seg in (".", "..") for seg in decoded.split("/"))
+
+
 def publisher_ioc_links(content_html: str | None) -> list[tuple[str, str]]:
     """``(url, parser)`` for every allow-listed publisher IOC file the article links to."""
     if not content_html:
@@ -126,6 +133,8 @@ def publisher_ioc_links(content_html: str | None) -> list[tuple[str, str]]:
         except AttributeError:
             continue
         path = path or "/"
+        if _has_traversal_segment(path):
+            continue
         for src_host, prefix_re, parser in PUBLISHER_IOC_SOURCES:
             if host.lower() == src_host and re.match(prefix_re, path):
                 clean = url.split("#", 1)[0]
@@ -139,11 +148,17 @@ def publisher_ioc_links(content_html: str | None) -> list[tuple[str, str]]:
 def raw_urls_for(url: str, parser: str) -> list[str]:
     """Raw-content URLs to fetch for a linked page. A Talos ``.txt`` link also
     yields its sibling ``.json`` (the STIX bundle carries roles)."""
-    raw = url
-    m = re.match(r"https?://github\.com/([^/]+)/([^/]+)/(?:blob|tree)/([^/]+)/(.+)$", url)
+    raw = url.split("#", 1)[0]
+    m = re.match(r"https?://github\.com/([^/]+)/([^/]+)/(?:blob|tree)/([^/]+)/(.+)$", raw)
     if m:
         owner, repo, ref, path = m.groups()
+        if _has_traversal_segment(path):
+            return []
         raw = f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}"
+    else:
+        parsed_m = re.match(r"https?://([^/]+)(/.*)?$", raw)
+        if not parsed_m or _has_traversal_segment(parsed_m.group(2) or "/"):
+            return []
     urls = [raw]
     if parser == "talos":
         if raw.endswith(".txt"):
@@ -318,13 +333,28 @@ async def fetch_publisher_file(url: str) -> str | None:
     except Exception:
         redis = None
     try:
-        async with httpx.AsyncClient(
-            timeout=_FETCH_TIMEOUT, headers={"User-Agent": _USER_AGENT}, follow_redirects=True
+        async with safe_async_client(
+            timeout=_FETCH_TIMEOUT,
+            headers={"User-Agent": _USER_AGENT},
+            follow_redirects=True,
         ) as client:
-            resp = await client.get(url)
-        if resp.status_code != 200 or len(resp.content) > _MAX_BYTES:
-            return None
-        text = resp.text
+            async with client.stream("GET", url) as resp:
+                if resp.status_code != 200:
+                    return None
+                content_length = resp.headers.get("content-length")
+                if content_length is not None and content_length.isdigit() and int(content_length) > _MAX_BYTES:
+                    return None
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > _MAX_BYTES:
+                        return None
+                    chunks.append(chunk)
+                try:
+                    text = b"".join(chunks).decode(resp.encoding or "utf-8", errors="replace")
+                except LookupError:
+                    text = b"".join(chunks).decode("utf-8", errors="replace")
     except Exception:
         logger.info("publisher IOC fetch failed for %s", url, exc_info=True)
         return None

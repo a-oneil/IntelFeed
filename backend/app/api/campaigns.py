@@ -1040,6 +1040,12 @@ async def add_campaign_saved_search(
     ss = saved_search.scalar_one_or_none()
     if not ss:
         raise AppError(code="not_found", message="Saved search not found", status_code=404)
+    if user.role != "admin" and ss.created_by != user.id:
+        raise AppError(
+            code="forbidden",
+            message="Only the saved search's owner or an admin can link it",
+            status_code=403,
+        )
 
     # Check for duplicate
     existing = await db.execute(

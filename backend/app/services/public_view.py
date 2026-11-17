@@ -285,6 +285,7 @@ def _private_models() -> list:
     from app.models.note import Note
     from app.models.observable import EntryObservable, Observable
     from app.models.ransomware import RansomwareVictim, VictimDisclosure
+    from app.models.saved_search import SavedSearch
 
     return [
         Campaign,
@@ -301,6 +302,7 @@ def _private_models() -> list:
         RequirementMatch,
         EntryObservable,
         Observable,
+        SavedSearch,
         # Leak-site victims: the ransomware area is signed-in only.
         RansomwareVictim,
         VictimDisclosure,

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   useNotes,
@@ -58,15 +58,17 @@ export function NoteBrowser() {
   const [entityTypeFilter, setEntityTypeFilter] = useState("");
 
   // Debounce search — send to server after 300ms of inactivity
-  const debounceRef = useState<ReturnType<typeof setTimeout> | null>(null);
-  const handleSearchChange = useCallback(
-    (value: string) => {
-      setSearch(value);
-      if (debounceRef[0]) clearTimeout(debounceRef[0]);
-      debounceRef[0] = setTimeout(() => setDebouncedSearch(value.trim()), 300);
-    },
-    [debounceRef],
-  );
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleSearchChange = useCallback((value: string) => {
+    setSearch(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedSearch(value.trim()), 300);
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   // A note opened from global search lands here with its title as the filter,
   // since the browser has no per-note route to deep-link to.
