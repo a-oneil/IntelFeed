@@ -5,7 +5,7 @@ app/api/intel_reports.py and app/api/requirements.py.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,7 @@ from app.models.detection_rule_version import DetectionRuleVersion
 from app.models.entry import Entry
 from app.models.intel_report import IntelReport, IntelReportVersion
 from app.models.intelligence_requirement import IntelligenceRequirement, RequirementMatch
+from app.models.shared_report import SharedReport
 from app.schemas.intelligence import RULE_TYPE_PATTERN
 from app.schemas.tlp import TLP_VALUES, normalize_tlp
 from app.tools import _tool
@@ -990,3 +991,138 @@ async def _remove_requirement_match(db: AsyncSession, user_id: uuid.UUID, requir
         "entry_id": entry_id,
         "match_count": requirement.match_count,
     }
+
+
+# ---------------------------------------------------------------------------
+# Public share links for reports — the report counterpart of the entry share
+# tools in reader_ops.py. Same rules as the API (app/api/shared_reports.py):
+# one link per (report, analyst); only TLP:CLEAR and TLP:GREEN may be shared.
+# ---------------------------------------------------------------------------
+
+
+def _report_share_dict(share: SharedReport) -> dict:
+    return {
+        "token": share.token,
+        "url": f"/shared/report/{share.token}",
+        "created_at": share.created_at,
+        "expires_at": share.expires_at,
+    }
+
+
+async def _get_report(db: AsyncSession, report_id: str) -> tuple[IntelReport | None, dict | None]:
+    try:
+        rid = uuid.UUID(report_id)
+    except ValueError:
+        return None, {"error": "Invalid report id"}
+    report = await db.get(IntelReport, rid)
+    if not report:
+        return None, {"error": "Report not found"}
+    return report, None
+
+
+@_tool(
+    name="create_report_share_link",
+    description=(
+        "Create a public (unauthenticated) share link for an intel report, or return this user's existing "
+        "active one. The public page shows the rendered report (sections, data tables, tags) with no author "
+        "or source ids. Only TLP:CLEAR and TLP:GREEN reports can be shared; AMBER and RED are refused, and a "
+        "link stops resolving while its report carries one of those markings. ttl_days optionally sets an "
+        "expiry on a newly created link (the API default is no expiry)."
+    ),
+    input_schema={
+        "properties": {
+            "report_id": {"type": "string", "description": "Intel report UUID to share"},
+            "ttl_days": {"type": "number", "description": "Optional days until the link expires (new links only)"},
+        },
+        "required": ["report_id"],
+    },
+    mutating=True,
+)
+async def _create_report_share_link(
+    db: AsyncSession, user_id: uuid.UUID, report_id: str, ttl_days: float | None = None
+) -> dict:
+    from app.api.shared_reports import _tlp_allows_sharing
+
+    report, err = await _get_report(db, report_id)
+    if err:
+        return err
+    if not _tlp_allows_sharing(report):
+        return {"error": f"{report.tlp_marking} reports can't be shared by public link (only TLP:CLEAR and TLP:GREEN)"}
+
+    existing = await db.execute(
+        select(SharedReport).where(
+            SharedReport.report_id == report.id,
+            SharedReport.created_by == user_id,
+            SharedReport.is_active.is_(True),
+        )
+    )
+    share = existing.scalars().first()
+    already_existed = share is not None
+    if not share:
+        share = SharedReport(report_id=report.id, created_by=user_id)
+        if ttl_days is not None:
+            if ttl_days <= 0:
+                return {"error": "ttl_days must be positive"}
+            share.expires_at = datetime.now(UTC) + timedelta(days=ttl_days)
+        db.add(share)
+        await db.flush()
+    return {**_report_share_dict(share), "report_id": str(report.id), "already_existed": already_existed}
+
+
+@_tool(
+    name="get_report_share_link",
+    description=(
+        "Return this user's active public share link for an intel report ({token, url, created_at, "
+        "expires_at}), or null if they have not shared it. Other analysts' links are not returned."
+    ),
+    input_schema={
+        "properties": {"report_id": {"type": "string", "description": "Intel report UUID to look up"}},
+        "required": ["report_id"],
+    },
+    mutating=False,
+)
+async def _get_report_share_link(db: AsyncSession, user_id: uuid.UUID, report_id: str) -> dict:
+    report, err = await _get_report(db, report_id)
+    if err:
+        return err
+    result = await db.execute(
+        select(SharedReport).where(
+            SharedReport.report_id == report.id,
+            SharedReport.created_by == user_id,
+            SharedReport.is_active.is_(True),
+        )
+    )
+    share = result.scalars().first()
+    return {"report_id": str(report.id), "share": _report_share_dict(share) if share else None}
+
+
+@_tool(
+    name="revoke_report_share_link",
+    description=(
+        "Deactivate this user's active public share link for an intel report so its URL stops resolving. "
+        "Other analysts' links for the same report are left alone. create_report_share_link issues a fresh "
+        "link (new token) afterwards."
+    ),
+    input_schema={
+        "properties": {"report_id": {"type": "string", "description": "Intel report UUID whose link to revoke"}},
+        "required": ["report_id"],
+    },
+    mutating=True,
+)
+async def _revoke_report_share_link(db: AsyncSession, user_id: uuid.UUID, report_id: str) -> dict:
+    report, err = await _get_report(db, report_id)
+    if err:
+        return err
+    result = await db.execute(
+        select(SharedReport).where(
+            SharedReport.report_id == report.id,
+            SharedReport.created_by == user_id,
+            SharedReport.is_active.is_(True),
+        )
+    )
+    share = result.scalars().first()
+    if not share:
+        return {"error": "No active share link for this report"}
+    share.is_active = False
+    await db.flush()
+    return {"revoked": True, "report_id": str(report.id), "token": share.token}

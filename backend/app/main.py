@@ -801,6 +801,7 @@ from app.api.requirements import router as requirements_router
 from app.api.saved_searches import router as saved_searches_router
 from app.api.search import router as search_router
 from app.api.shared import router as shared_router
+from app.api.shared_reports import router as shared_reports_router
 from app.api.system_settings import router as system_settings_router
 from app.api.tags import router as tags_router
 from app.api.telegram import router as telegram_router
@@ -895,6 +896,7 @@ app.include_router(analytics_router, prefix="/api/analytics", tags=["analytics"]
 app.include_router(tools_router, prefix="/api/tools", tags=["tools"])
 app.include_router(ai_results_router, prefix="/api", tags=["ai-results"])
 app.include_router(system_settings_router, prefix="/api/system-settings", tags=["system-settings"])
+app.include_router(shared_reports_router, prefix="/api", tags=["sharing"])
 app.include_router(shared_router, prefix="/api", tags=["sharing"])
 app.include_router(job_schedules_router, prefix="/api/job-schedules", tags=["job-schedules"])
 app.include_router(hygiene_router, prefix="/api", tags=["hygiene"])

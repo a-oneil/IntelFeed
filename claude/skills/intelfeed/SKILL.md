@@ -295,7 +295,7 @@ Answer platform questions from the docs, not from memory.
 
 ## Available Tools
 
-196 tools. Names in **bold** are the CLI tool names. `⚠` marks a tool that needs an **admin** account; `🔒` marks one that runs a **confirmation-token flow** — the first call returns a prompt and a token, which you must show the user and only re-send after they explicitly approve.
+199 tools. Names in **bold** are the CLI tool names. `⚠` marks a tool that needs an **admin** account; `🔒` marks one that runs a **confirmation-token flow** — the first call returns a prompt and a token, which you must show the user and only re-send after they explicitly approve.
 
 Everything that creates, changes or deletes data is refused outright when `INTELFEED_READ_ONLY` is set on the environment — that gate is in the CLI itself, not in your instructions.
 
@@ -449,7 +449,7 @@ Rule formats across the platform: `sigma`, `splunk_spl`, `crowdstrike_ql`, `elas
 - **add_requirement_match** — Manually match an entry to a PIR (requirement_id, entry_id, relevance)
 - **remove_requirement_match** — Unmatch an entry and decrement the count (requirement_id, entry_id)
 
-### Intelligence Reports (10 tools)
+### Intelligence Reports (13 tools)
 
 Templates: `actor_profile`, `campaign_tracker`, `detection_report`, `exposure_report`, `flash_alert`, `landscape_report`. TLP 2.0 markings; legacy `TLP:WHITE` is accepted and normalized to `TLP:CLEAR`.
 
@@ -463,6 +463,9 @@ Templates: `actor_profile`, `campaign_tracker`, `detection_report`, `exposure_re
 - **archive_intel_report** — Archive rather than delete (report_id)
 - **delete_intel_report** ⚠🔒 — Delete a **draft** report; published/archived ones must be archived instead (report_id, confirmation_token)
 - **export_report** — Export as markdown or HTML (report_id, format)
+- **create_report_share_link** — Create (or return) this analyst's public share link for a report; only TLP:CLEAR / TLP:GREEN reports can be shared (report_id, ttl_days)
+- **get_report_share_link** — This analyst's active share link for a report, or null (report_id)
+- **revoke_report_share_link** — Deactivate this analyst's share link for a report (report_id)
 
 ### Notes (8 tools)
 

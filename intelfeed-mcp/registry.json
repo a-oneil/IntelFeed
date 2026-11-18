@@ -916,6 +916,27 @@
   "mutating": true
  },
  {
+  "name": "create_report_share_link",
+  "description": "Create a public (unauthenticated) share link for an intel report, or return this user's existing active one. The public page shows the rendered report (sections, data tables, tags) with no author or source ids. Only TLP:CLEAR and TLP:GREEN reports can be shared; AMBER and RED are refused, and a link stops resolving while its report carries one of those markings. ttl_days optionally sets an expiry on a newly created link (the API default is no expiry).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "report_id": {
+     "type": "string",
+     "description": "Intel report UUID to share"
+    },
+    "ttl_days": {
+     "type": "number",
+     "description": "Optional days until the link expires (new links only)"
+    }
+   },
+   "required": [
+    "report_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
   "name": "create_requirement",
   "description": "Create a new Priority Intelligence Requirement (PIR).",
   "input_schema": {
@@ -2817,6 +2838,23 @@
   "mutating": false
  },
  {
+  "name": "get_report_share_link",
+  "description": "Return this user's active public share link for an intel report ({token, url, created_at, expires_at}), or null if they have not shared it. Other analysts' links are not returned.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "report_id": {
+     "type": "string",
+     "description": "Intel report UUID to look up"
+    }
+   },
+   "required": [
+    "report_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
   "name": "get_requirement_coverage",
   "description": "Get intelligence requirements coverage summary — counts by status, priority, category, and staleness.",
   "input_schema": {
@@ -4612,6 +4650,23 @@
     "entity_id",
     "entity_value",
     "scope"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "revoke_report_share_link",
+  "description": "Deactivate this user's active public share link for an intel report so its URL stops resolving. Other analysts' links for the same report are left alone. create_report_share_link issues a fresh link (new token) afterwards.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "report_id": {
+     "type": "string",
+     "description": "Intel report UUID whose link to revoke"
+    }
+   },
+   "required": [
+    "report_id"
    ]
   },
   "mutating": true

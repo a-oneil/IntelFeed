@@ -108,6 +108,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "create_intel_report",
         "create_malware",
         "create_note",
+        "create_report_share_link",
         "create_requirement",
         "create_saved_search",
         "create_share_link",
@@ -159,6 +160,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "remove_from_campaign",
         "remove_requirement_match",
         "report_false_positive",
+        "revoke_report_share_link",
         "revoke_share_link",
         "rollback_detection_rule",
         "run_ai_task",
@@ -863,6 +865,26 @@ TOOLS: dict[str, dict] = {
             },
             "title": {
                 "type": 'str',
+                "default": None,
+            },
+        },
+    },
+    "create_report_share_link": {
+        "description": (
+            "Create a public (unauthenticated) share link for an intel report, or return this user's "
+            "existing active one. The public page shows the rendered report (sections, data tables, "
+            "tags) with no author or source ids. Only TLP:CLEAR and TLP:GREEN reports can be shared; "
+            "AMBER and RED are refused, and a link stops resolving while its report carries one of "
+            "those markings. ttl_days optionally sets an expiry on a newly created link (the API "
+            "default is no expiry)."
+        ),
+        "params": {
+            "report_id": {
+                "type": 'str',
+                "required": True,
+            },
+            "ttl_days": {
+                "type": 'float',
                 "default": None,
             },
         },
@@ -2327,6 +2349,19 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "get_report_share_link": {
+        "description": (
+            "Return this user's active public share link for an intel report ({token, url, "
+            "created_at, expires_at}), or null if they have not shared it. Other analysts' links are "
+            "not returned."
+        ),
+        "params": {
+            "report_id": {
+                "type": 'str',
+                "required": True,
+            },
+        },
+    },
     "get_requirement_coverage": {
         "description": (
             "Get intelligence requirements coverage summary \u2014 counts by status, priority, category, "
@@ -3771,6 +3806,19 @@ TOOLS: dict[str, dict] = {
             "reason": {
                 "type": 'str',
                 "default": None,
+            },
+        },
+    },
+    "revoke_report_share_link": {
+        "description": (
+            "Deactivate this user's active public share link for an intel report so its URL stops "
+            "resolving. Other analysts' links for the same report are left alone. "
+            "create_report_share_link issues a fresh link (new token) afterwards."
+        ),
+        "params": {
+            "report_id": {
+                "type": 'str',
+                "required": True,
             },
         },
     },

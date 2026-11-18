@@ -12,11 +12,11 @@ from app.core.security import get_current_user
 from app.database import get_db
 from app.intelligence.reporting import (
     REPORT_TEMPLATES,
+    attachment_headers,
+    export_report,
     generate_report_content,
     generate_section_content,
     narrative_sections,
-    render_html,
-    render_markdown,
     resolve_report_sources,
 )
 from app.models.intel_report import IntelReport, IntelReportVersion
@@ -819,52 +819,8 @@ async def export_intel_report(
     if not report:
         raise AppError(code="not_found", message="Report not found", status_code=404)
 
-    safe_title = report.title[:50].replace("/", "-").replace("\\", "-")
-
-    if format == "markdown":
-        content = render_markdown(report)
-        return Response(
-            content=content,
-            media_type="text/markdown; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{safe_title}.md"'},
-        )
-
-    elif format == "html":
-        content = render_html(report)
-        return Response(
-            content=content,
-            media_type="text/html; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{safe_title}.html"'},
-        )
-
-    elif format == "pdf":
-        # Try WeasyPrint if available; fall back to HTML with a note
-        try:
-            import weasyprint
-
-            html_content = render_html(report)
-            # WeasyPrint's default fetcher follows any URL in the document,
-            # file:// included, and a <link rel="attachment"> embeds whatever
-            # it fetched in the PDF. render_html sanitizes the body, and this
-            # is the second wall: nothing but inline data: URIs is loaded.
-            fetcher = weasyprint.URLFetcher(allowed_protocols={"data"})
-            pdf_bytes = weasyprint.HTML(string=html_content, url_fetcher=fetcher).write_pdf()
-            return Response(
-                content=pdf_bytes,
-                media_type="application/pdf",
-                headers={"Content-Disposition": f'attachment; filename="{safe_title}.pdf"'},
-            )
-        except ImportError:
-            # WeasyPrint not installed — return HTML with a note
-            html_content = render_html(report)
-            note = "<!-- PDF export requires WeasyPrint. Install with: pip install weasyprint -->\n"
-            return Response(
-                content=note + html_content,
-                media_type="text/html; charset=utf-8",
-                headers={"Content-Disposition": f'attachment; filename="{safe_title}.html"'},
-            )
-
-    raise AppError(code="invalid_format", message=f"Unsupported export format: {format}", status_code=400)
+    content, media_type, filename = export_report(report, format)
+    return Response(content=content, media_type=media_type, headers=attachment_headers(filename))
 
 
 @router.post("/{report_id}/publish", response_model=IntelReportResponse)

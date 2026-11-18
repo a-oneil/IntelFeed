@@ -1,5 +1,6 @@
 """Report rendering engine for IntelFeed intelligence reports."""
 
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -1038,3 +1039,94 @@ a {{ color: #2563eb; }}
 <div class="tlp-banner">{html_module.escape(report.tlp_marking)}</div>
 {body_html}
 </body></html>"""
+
+
+def ordered_sections(report, template_sections: list | None = None) -> list[dict]:
+    """The report's sections as an ordered list the way a reader sees them.
+
+    JSONB does not keep key order, so the saved ``content.sections`` dict is
+    ordered by the template: the DB template's section list when given, else
+    the builtin registry's, with sections the template doesn't know appended
+    in stored order. Each item carries the template's title and type when the
+    saved section has none.
+    """
+    content = report.content or {}
+    sections = content.get("sections") or {}
+    if not isinstance(sections, dict):
+        sections = {}
+
+    meta: dict[str, dict] = {}
+    order: list[str] = []
+    for s in template_sections or []:
+        if isinstance(s, dict) and s.get("name"):
+            meta[s["name"]] = s
+            order.append(s["name"])
+    if not order:
+        template = REPORT_TEMPLATES.get(report.template_type)
+        order = list(template["sections"]) if template else []
+    ordered = [k for k in order if k in sections] + [k for k in sections if k not in order]
+
+    out = []
+    for key in ordered:
+        section = sections[key] if isinstance(sections[key], dict) else {}
+        tmpl = meta.get(key, {})
+        body = section.get("body") or ""
+        # Generated bodies often open with their own "## Title" heading; the
+        # reader draws one, so drop it (same rule as the markdown exporter).
+        body = re.sub(r"^\s*##\s+[^\n]*\n+", "", body)
+        raw_items = section.get("items") if isinstance(section.get("items"), list) else []
+        items = [i for i in raw_items if isinstance(i, dict)]
+        out.append(
+            {
+                "name": key,
+                "title": section.get("title") or tmpl.get("title") or key.replace("_", " ").title(),
+                "type": tmpl.get("type") or ("data" if items and not body else "narrative"),
+                "body": body,
+                "items": items,
+            }
+        )
+    return out
+
+
+def download_filename(title: str, ext: str) -> str:
+    """A header-safe file name for a report download.
+
+    HTTP headers are Latin-1 and the quoted filename ends at the next quote,
+    so anything outside plain ASCII letters, digits, space, dot, dash and
+    underscore is dropped (quotes and path separators included) and a title
+    that leaves nothing behind becomes ``report``.
+    """
+    stem = re.sub(r"[^A-Za-z0-9 ._-]+", "", title or "").strip(" .")[:50].strip(" .")
+    return f"{stem or 'report'}.{ext}"
+
+
+def attachment_headers(filename: str) -> dict[str, str]:
+    return {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+
+def export_report(report, fmt: str) -> tuple[bytes | str, str, str]:
+    """Render a report for download: ``(content, media_type, filename)``.
+
+    ``pdf`` needs WeasyPrint; without it the HTML is returned with a note, so
+    the caller still has a file to hand over.
+    """
+    name = lambda ext: download_filename(report.title, ext)  # noqa: E731
+    if fmt == "markdown":
+        return render_markdown(report), "text/markdown; charset=utf-8", name("md")
+    if fmt == "html":
+        return render_html(report), "text/html; charset=utf-8", name("html")
+    if fmt == "pdf":
+        html_content = render_html(report)
+        try:
+            import weasyprint
+        except ImportError:
+            note = "<!-- PDF export requires WeasyPrint. Install with: pip install weasyprint -->\n"
+            return note + html_content, "text/html; charset=utf-8", name("html")
+        # WeasyPrint's default fetcher follows any URL in the document,
+        # file:// included, and a <link rel="attachment"> embeds whatever
+        # it fetched in the PDF. render_html sanitizes the body, and this
+        # is the second wall: nothing but inline data: URIs is loaded.
+        fetcher = weasyprint.URLFetcher(allowed_protocols={"data"})
+        pdf_bytes = weasyprint.HTML(string=html_content, url_fetcher=fetcher).write_pdf()
+        return pdf_bytes, "application/pdf", name("pdf")
+    raise ValueError(f"Unsupported export format: {fmt}")

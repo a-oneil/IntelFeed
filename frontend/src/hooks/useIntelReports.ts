@@ -11,6 +11,7 @@ import type {
   ReportTemplate,
   SectionGenerateResponse,
   ExposureGenerateRequest,
+  ShareLink,
 } from "@/api/types";
 
 export function useIntelReports(params?: {
@@ -304,5 +305,39 @@ export function useAttachToReport() {
       qc.invalidateQueries({ queryKey: ["intel-reports"] });
       qc.invalidateQueries({ queryKey: ["intel-report", report.id] });
     },
+  });
+}
+
+// --- Public share links (the report counterpart of an article's share link) ---
+
+export function useReportShareLink(id: string | undefined) {
+  return useQuery({
+    queryKey: ["intel-report-share", id],
+    queryFn: async () => {
+      const { data } = await api.get<ShareLink | null>(`/intel-reports/${id}/share`);
+      return data;
+    },
+    enabled: !!id,
+  });
+}
+
+export function useCreateReportShareLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data } = await api.post<ShareLink>(`/intel-reports/${id}/share`);
+      return data;
+    },
+    onSuccess: (link, id) => qc.setQueryData(["intel-report-share", id], link),
+  });
+}
+
+export function useRevokeReportShareLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/intel-reports/${id}/share`);
+    },
+    onSuccess: (_, id) => qc.setQueryData(["intel-report-share", id], null),
   });
 }
