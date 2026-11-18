@@ -149,6 +149,7 @@ SYSTEM_TASKS = [
         "display_name": "TTP Mapping",
         "description": "Map tactics/techniques to MITRE ATT&CK",
         "category": "extraction",
+        "deprecated": True,
         "variables": ["entry.title", "entry.content_text", "entry.feed_title", "telemetry_sources"],
         "default_system_template": """You are a cyber threat intelligence analyst specializing in MITRE ATT&CK. Your job is to read security articles and map every adversary behavior they describe to MITRE ATT&CK techniques.
 
@@ -389,6 +390,10 @@ Write the briefing now per the structure and rules in your instructions. Remembe
         "description": "Two-to-three sentence story line for one threat-board row, built only from the window's articles",
         "category": "analysis",
         "variables": ["threat_name", "entity_type", "window", "entries", "entry_count"],
+        # Nightly board job over a window of articles; not a per-article or
+        # per-entity action.
+        "show_in_entry_actions": False,
+        "show_in_entity_actions": False,
         "default_system_template": """You write the story line for one row of a detection engineer's threat board. The row already renders every count (outlets, articles, technique numbers) — your job is the substance those counts discard.
 
 CONTRACT — every rule here is load-bearing:

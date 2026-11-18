@@ -92,7 +92,7 @@ All lazy-loaded:
 - `/workbench/actor/:id`, `/intelligence/actor/:id` → `/workbench/threat_actor/:id`
 - `/handbook/*` → `/documentation/*`
 
-**Public routes** (no sign-in): `/login`, `/register`, `/shared/:token` (SharedEntryPage), `/shared/copilot/:token` (SharedCopilotPage).
+**Public routes** (no sign-in): `/login`, `/register`, `/shared/:token` (SharedEntryPage), `/shared/report/:token` (SharedReportPage), `/shared/copilot/:token` (SharedCopilotPage).
 
 ### Dynamic Entity Resolution
 
@@ -414,7 +414,7 @@ In `frontend/src/pages/`:
 - **SettingsPage.tsx:** settings sections in three groups. You: Account, Appearance, My AI, Reading, Tags. Connect: Claude Code Skill, Feeds & Export and Telegram (the last two admins only). Administration (admins only): AI Configuration, Engine, Logs, System, Users.
 - **CampaignsPage.tsx:** the campaign list.
 - **ReportBuilderPage.tsx:** write a report.
-- **LoginPage.tsx**, **RegisterPage.tsx**, **SharedEntryPage.tsx**, **SharedCopilotPage.tsx:** public pages.
+- **LoginPage.tsx**, **RegisterPage.tsx**, **SharedEntryPage.tsx**, **SharedReportPage.tsx**, **SharedCopilotPage.tsx:** public pages. SharedReportPage reuses SharedEntryPage's shell styles (top bar, brand, error states) and draws the report with `components/report/ReportDocument.tsx`, the same component as the report builder's Document view.
 
 `OnboardingWizard` (`components/onboarding/`) is a modal, not a page.
 

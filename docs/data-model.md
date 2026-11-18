@@ -833,7 +833,7 @@ Table `notes`: a free-form note, optionally on an entry.
 
 ### 9. System & Configuration
 
-**Tables:** `system_settings`, `themes`, `categories`, `intelligence_requirements`, `requirement_matches`, `glossary_terms`, `ai_providers`, `webhook_presets`, `shared_entries`, `telegram_channel_mentions`, `telegram_link_mentions`, `false_positive_records`, `tts_audio`
+**Tables:** `system_settings`, `themes`, `categories`, `intelligence_requirements`, `requirement_matches`, `glossary_terms`, `ai_providers`, `webhook_presets`, `shared_entries`, `shared_reports`, `telegram_channel_mentions`, `telegram_link_mentions`, `false_positive_records`, `tts_audio`
 
 #### SystemSettings (Singleton)
 Table `system_settings`: one row only (`id = 1`, enforced by the `singleton_row` CHECK constraint).
@@ -895,6 +895,12 @@ Table `webhook_presets`: saved webhook targets for automation actions.
 Table `shared_entries`: a public share link for one entry.
 - `entry_id` (FK, CASCADE), `token` (String 64, unique, random)
 - `is_active` (default true), `expires_at`, `created_by` (SET NULL)
+
+#### SharedReport
+Table `shared_reports`: a public share link for one intel report, same shape as `shared_entries`.
+- `report_id` (FK `intel_reports`, CASCADE), `token` (String 64, unique, random)
+- `is_active` (default true), `expires_at`, `created_by` (SET NULL)
+- Only TLP:CLEAR and TLP:GREEN reports resolve through a link; the marking is checked when the link is made and on every public read (`backend/app/api/shared_reports.py`).
 
 #### TelegramChannelMention
 Table `telegram_channel_mentions`: Telegram channels mentioned across feeds, as possible new sources.

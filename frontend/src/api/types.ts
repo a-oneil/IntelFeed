@@ -2350,6 +2350,40 @@ export interface IntelReport {
   published_at: string | null;
 }
 
+export interface ShareLink {
+  token: string;
+  url: string;
+  created_at: string;
+  expires_at: string | null;
+}
+
+export interface SharedReportSection {
+  name: string;
+  title: string;
+  type: string; // "narrative" | "data"
+  body: string;
+  items: Record<string, unknown>[];
+}
+
+/** What the public shared-report page gets — no author, no source ids. */
+export interface SharedReport {
+  id: string;
+  title: string;
+  template_type: string;
+  template_name: string;
+  tlp_marking: string;
+  status: string;
+  summary: string | null;
+  version: number;
+  tags: string[];
+  body: string;
+  sections: SharedReportSection[];
+  created_at: string;
+  updated_at: string;
+  published_at: string | null;
+  shared_at: string;
+}
+
 export interface IntelReportCreate {
   title: string;
   template_type: string;
