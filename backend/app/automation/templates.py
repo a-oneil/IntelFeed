@@ -172,7 +172,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         },
         "actions": [
             {"type": "extract_cves", "config": {}},
-            {"type": "mark_priority", "config": {"priority": "high"}},
+            {"type": "mark_priority", "config": {"level": "high"}},
             {
                 "type": "send_notification",
                 "config": {
@@ -201,7 +201,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "actions": [
             {"type": "extract_threat_actors", "config": {}},
             {"type": "add_tags", "config": {"tags": ["watched-actor"]}},
-            {"type": "mark_priority", "config": {"priority": "high"}},
+            {"type": "mark_priority", "config": {"level": "high"}},
             {
                 "type": "send_notification",
                 "config": {
@@ -225,11 +225,11 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "conditions": {
             "operator": "AND",
             "conditions": [
-                {"type": "severity_above", "config": {"threshold": 7}},
+                {"type": "severity_above", "config": {"min_cvss": 7}},
             ],
         },
         "actions": [
-            {"type": "mark_priority", "config": {"priority": "high"}},
+            {"type": "mark_priority", "config": {"level": "high"}},
             {"type": "star_entry", "config": {}},
             {
                 "type": "send_notification",
@@ -260,7 +260,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
             {"type": "add_tags", "config": {"tags": ["ransomware", "needs-review"]}},
             {"type": "extract_threat_actors", "config": {}},
             {"type": "extract_malware", "config": {}},
-            {"type": "mark_priority", "config": {"priority": "high"}},
+            {"type": "mark_priority", "config": {"level": "high"}},
         ],
     },
     {
@@ -277,7 +277,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "conditions": {
             "operator": "AND",
             "conditions": [
-                {"type": "feed_type_matches", "config": {"feed_types": ["youtube"]}},
+                {"type": "feed_type_matches", "config": {"types": ["youtube"]}},
             ],
         },
         "actions": [
@@ -374,7 +374,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "conditions": {
             "operator": "AND",
             "conditions": [
-                {"type": "severity_above", "config": {"threshold": 8}},
+                {"type": "severity_above", "config": {"min_cvss": 8}},
             ],
         },
         "actions": [
@@ -461,7 +461,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
             ],
         },
         "actions": [
-            {"type": "mark_priority", "config": {"priority": "high"}},
+            {"type": "mark_priority", "config": {"level": "high"}},
             {"type": "star_entry", "config": {}},
             {
                 "type": "send_notification",
@@ -492,7 +492,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
             ],
         },
         "actions": [
-            {"type": "mark_priority", "config": {"priority": "high"}},
+            {"type": "mark_priority", "config": {"level": "high"}},
             {
                 "type": "create_note",
                 "config": {
@@ -732,7 +732,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
                         },
                     },
                     "then_actions": [
-                        {"type": "mark_priority", "config": {"priority": "high"}},
+                        {"type": "mark_priority", "config": {"level": "high"}},
                         {"type": "extract_cves", "config": {}},
                         {
                             "type": "send_notification",
@@ -800,7 +800,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         },
         "actions": [
             {"type": "star_entry", "config": {}},
-            {"type": "mark_priority", "config": {"priority": "high"}},
+            {"type": "mark_priority", "config": {"level": "high"}},
         ],
     },
     {
@@ -821,7 +821,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
             ],
         },
         "actions": [
-            {"type": "mark_priority", "config": {"priority": "high"}},
+            {"type": "mark_priority", "config": {"level": "high"}},
             {
                 "type": "send_notification",
                 "config": {
@@ -879,7 +879,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
             ],
         },
         "actions": [
-            {"type": "mark_priority", "config": {"priority": "high"}},
+            {"type": "mark_priority", "config": {"level": "high"}},
             {"type": "star_entry", "config": {}},
             {
                 "type": "send_notification",
@@ -998,7 +998,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
             {"type": "add_tags", "config": {"tags": ["supply-chain", "needs-review"]}},
             {"type": "extract_malware", "config": {}},
             {"type": "extract_threat_actors", "config": {}},
-            {"type": "mark_priority", "config": {"priority": "high"}},
+            {"type": "mark_priority", "config": {"level": "high"}},
             {
                 "type": "send_notification",
                 "config": {
@@ -1098,7 +1098,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "conditions": {},
         "actions": [
             {"type": "add_tags", "config": {"tags": ["my-sector"]}},
-            {"type": "mark_priority", "config": {"priority": "high"}},
+            {"type": "mark_priority", "config": {"level": "high"}},
             {
                 "type": "send_notification",
                 "config": {

@@ -866,7 +866,12 @@ async def run_shared_ai_task(
     task = task_result.scalar_one_or_none()
     if not task:
         raise AppError(code="not_found", message=f"Task '{body.task_name}' not found", status_code=404)
-    if task.category not in ("analysis", "generation") or task.name in EXCLUDED_SHARED_TASKS:
+    if (
+        not task.show_in_entry_actions
+        or task.is_deprecated
+        or task.category not in ("analysis", "generation")
+        or task.name in EXCLUDED_SHARED_TASKS
+    ):
         raise AppError(code="forbidden", message="This task cannot be run on shared articles", status_code=403)
 
     await _lock_share(db, share)

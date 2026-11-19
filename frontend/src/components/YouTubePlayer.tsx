@@ -5,7 +5,12 @@ interface YouTubePlayerProps {
   title?: string;
 }
 
+const YOUTUBE_ID_RE = /^[A-Za-z0-9_-]{6,20}$/;
+
 export function YouTubePlayer({ videoId, title }: YouTubePlayerProps) {
+  if (!YOUTUBE_ID_RE.test(videoId)) {
+    return null;
+  }
   return (
     <div className={styles.container}>
       <div className={styles.wrapper}>

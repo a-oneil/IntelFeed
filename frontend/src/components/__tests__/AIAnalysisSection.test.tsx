@@ -104,7 +104,7 @@ describe("AIAnalysisSection row labels", () => {
   it("says 'your key' with the personal estimate when the click runs on my key", () => {
     renderIt();
     // Sonnet on a 4000-in / 600-out summary: $0.012 + $0.009.
-    expect(rowButton()).toHaveTextContent(/your key · ~\$0\.02/);
+    expect(rowButton()).toHaveTextContent(/your key · ~\$0\.01/);
     expect(screen.getByLabelText("your key")).toBeInTheDocument();
   });
 

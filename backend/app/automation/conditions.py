@@ -136,7 +136,9 @@ def _eval_content_contains(entry: Entry, config: dict) -> bool:
 
 async def _eval_severity_above(db: AsyncSession, entry: Entry, config: dict) -> bool:
     """Check if any CVE linked to this entry exceeds the minimum CVSS score."""
-    min_cvss = config.get("min_cvss", 0.0)
+    min_cvss = config.get("min_cvss")
+    if min_cvss is None:
+        min_cvss = config.get("threshold", 0.0)
 
     result = await db.execute(
         select(CVE.cvss_score)
@@ -177,7 +179,7 @@ async def _eval_tag_matches(db: AsyncSession, entry: Entry, config: dict, user_i
 
 async def _eval_feed_type_matches(db: AsyncSession, entry: Entry, config: dict) -> bool:
     """Check if entry's feed type matches specified types."""
-    types = config.get("types", [])
+    types = config.get("types") or config.get("feed_types") or []
     if not types:
         return True
 

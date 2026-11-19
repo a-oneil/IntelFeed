@@ -559,7 +559,7 @@ async def _load_entity_variables(db: AsyncSession, target_type: str, target_id: 
             "entity": {
                 "type": "ttp",
                 "technique_id": entity.technique_id,
-                "name": entity.name,
+                "name": entity.technique_name,
                 "description": entity.description or "",
             }
         }
@@ -600,7 +600,7 @@ async def _load_entity_variables(db: AsyncSession, target_type: str, target_id: 
         return {
             "entity": {
                 "type": "mitigation",
-                "mitigation_id": entity.mitigation_id,
+                "mitigation_id": entity.mitre_id,
                 "name": entity.name,
                 "description": entity.description or "",
             }

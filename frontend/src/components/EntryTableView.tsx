@@ -51,8 +51,14 @@ function stripHtmlFast(html: string): string {
   if (cached !== undefined) return cached;
   const text = html
     .replace(/<[^>]+>/g, " ")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&#(\d+);/g, (_, n) => {
+      const cp = Number(n);
+      return cp >= 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : _;
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => {
+      const cp = parseInt(n, 16);
+      return cp >= 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : _;
+    })
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')

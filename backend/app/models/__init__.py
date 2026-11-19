@@ -90,6 +90,7 @@ from app.models.sector import CampaignSector, MalwareTargetSector, Sector, Threa
 
 # Sharing
 from app.models.shared_entry import SharedEntry
+from app.models.shared_report import SharedReport
 from app.models.story_thread import StoryThread, StoryThreadBeat, StoryThreadEntry, UserThreadState
 
 # System
@@ -223,6 +224,7 @@ __all__ = [
     "SystemSettings",
     # Sharing
     "SharedEntry",
+    "SharedReport",
     "StoryThread",
     "StoryThreadBeat",
     "StoryThreadEntry",

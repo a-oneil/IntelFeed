@@ -1111,3 +1111,33 @@ async def test_no_rules_attached_means_no_detections_section(
     )
     assert resp.status_code == 200
     assert "detections" not in resp.json()["content"]["sections"]
+
+
+async def test_attach_keeps_a_data_section_the_analyst_rewrote(
+    client: AsyncClient,
+    auth_headers: dict,
+    db_session: AsyncSession,
+    test_report: IntelReport,
+    attachable_rules: list[DetectionRule],
+):
+    """The builder saves a hand-edited data section as text with ``items_edited``;
+    attaching more evidence must not put the generated rows back."""
+    content = dict(test_report.content or {})
+    content["sections"] = {
+        **(content.get("sections") or {}),
+        "detections": {"title": "Detections", "body": "- My own rule list", "items": [], "items_edited": True},
+    }
+    test_report.content = content
+    await db_session.flush()
+    await db_session.refresh(test_report)
+
+    resp = await client.post(
+        f"/api/intel-reports/{test_report.id}/attach",
+        headers=auth_headers,
+        json={"entity_ids": {"detection_rules": [str(attachable_rules[0].id)]}},
+    )
+    assert resp.status_code == 200
+    section = resp.json()["content"]["sections"]["detections"]
+    assert section["body"] == "- My own rule list"
+    assert section["items"] == []
+    assert section["items_edited"] is True

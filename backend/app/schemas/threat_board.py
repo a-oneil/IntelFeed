@@ -23,7 +23,7 @@ class ThreatBoardItem(BaseModel):
     prior_rules_strong: int = Field(description="Of those, resolved at high or medium confidence")
     prior_rule_repos: dict[str, int] = Field(description="Prior-rule count per upstream repo")
     last_seen: str | None
-    state: str = Field(description="open | handled | muted")
+    state: str = Field(description="open | tracked | handled | muted")
     is_generic: bool = Field(description="Held out of the ranking as an extraction artefact")
     score: float
     action: str = Field(description="write | extend | diff | audit | merge | review")
@@ -77,13 +77,17 @@ class ThreatBoardItem(BaseModel):
     )
     merged_from: list[dict] = Field(
         default_factory=list,
-        description=("Rows folded into this one because a single thread holds both — {entity_type, entity_key, label}"),
+        description=(
+            "Rows folded into this one — {entity_type, entity_key, label}: actor/malware rows a single "
+            "thread holds together, and on the all facet the CVEs this threat's window articles claim "
+            "(entity_type cve, with is_kev / product / in_stack so the row can name them)"
+        ),
     )
     on_surface: bool = Field(
         True,
         description=(
-            "False for CVE rows affecting nothing in your stack with no fireable rule — "
-            "landscape context that sorts below the divider, not your write-queue"
+            "False for CVE rows affecting nothing in your stack with no fireable rule. "
+            "Informational: it never changes the row's rank or visibility"
         ),
     )
 
@@ -124,3 +128,88 @@ class ThreatStateUpdate(BaseModel):
     note: str | None = None
 
     model_config = ConfigDict(json_schema_extra={"example": {"state": "handled", "note": "adopted 3 sigma rules"}})
+
+
+class HuntTelemetry(BaseModel):
+    source: str = Field(description="Canonical log-type id the query needs (e.g. auth.mfa)")
+    have: bool = Field(description="Whether an enabled telemetry source covers it today")
+
+
+class HuntHypothesis(BaseModel):
+    id: str = Field(description="H1..H3 within the pack")
+    title: str
+    hypothesis: str = Field(description="ATHF form: 'Adversaries use [behavior] to [goal] on [target]'")
+    tactic: str | None = None
+    techniques: list[str] = Field(default_factory=list, description="ATT&CK technique ids")
+    platform: str | None = None
+    data_sources: list[str] = Field(default_factory=list, description="Canonical log-type ids the query needs")
+    telemetry: list[HuntTelemetry] = Field(
+        default_factory=list, description="data_sources checked against the telemetry inventory"
+    )
+    runnable: bool = Field(True, description="Every needed source is collected")
+    query: str = Field(description="The hunting query, in the pack's language")
+    query_notes: str | None = None
+    false_positives: str | None = None
+
+
+class HuntPack(BaseModel):
+    entity_type: str
+    entity_key: str
+    label: str
+    window: str
+    language: str = Field(description="Query language id, e.g. kql, spl, esql (see app.ai.query_language)")
+    language_name: str
+    generated_at: str | None = None
+    model: str | None = None
+    entry_ids: list[str] = Field(default_factory=list, description="Window entries the pack was drafted from")
+    hypotheses: list[HuntHypothesis]
+
+
+class HuntPackResponse(BaseModel):
+    status: str = Field(description="ready | none — none until a pack is drafted for this row, window and language")
+    language: str
+    language_name: str
+    pack: HuntPack | None = None
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "status": "ready",
+                "language": "kql",
+                "language_name": "KQL (Microsoft Sentinel / Defender XDR)",
+                "pack": {
+                    "entity_type": "threat_actor",
+                    "entity_key": "f648c678-251d-447b-8461-5f2b2ec06395",
+                    "label": "Scattered Spider",
+                    "window": "14d",
+                    "language": "kql",
+                    "language_name": "KQL (Microsoft Sentinel / Defender XDR)",
+                    "generated_at": "2026-11-17T23:40:00+00:00",
+                    "model": "claude-sonnet-5-5",
+                    "entry_ids": ["3f1c…"],
+                    "hypotheses": [
+                        {
+                            "id": "H1",
+                            "title": "Help-desk reset followed by MFA enrollment",
+                            "hypothesis": (
+                                "Adversaries use help-desk password resets to register their own MFA method "
+                                "on employee accounts."
+                            ),
+                            "tactic": "credential-access",
+                            "techniques": ["T1621", "T1556.006"],
+                            "platform": "Identity Provider",
+                            "data_sources": ["auth.account", "auth.mfa"],
+                            "telemetry": [
+                                {"source": "auth.account", "have": True},
+                                {"source": "auth.mfa", "have": True},
+                            ],
+                            "runnable": True,
+                            "query": "AuditLogs | where TimeGenerated > ago(7d) | …",
+                            "query_notes": "Join resets to security-info registrations within one hour.",
+                            "false_positives": "New-hire onboarding resets then enrolls the same day from the office.",
+                        }
+                    ],
+                },
+            }
+        }
+    )

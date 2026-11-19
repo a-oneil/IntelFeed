@@ -1,5 +1,6 @@
 """Report rendering engine for IntelFeed intelligence reports."""
 
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -7,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.caller import Caller
+from app.core.exceptions import AppError
 from app.models.country import Country, EntryCountry
 from app.models.cve import CVE, EntryCVE
 from app.models.detection_rule import DetectionRule
@@ -126,6 +128,7 @@ async def resolve_report_sources(
     saved_search_id: uuid.UUID | None,
     user_id: uuid.UUID,
     search_limit: int = 50,
+    is_admin: bool = False,
 ) -> tuple[list[uuid.UUID], dict]:
     """Resolve source into (entry_ids, entity_ids_dict).
 
@@ -142,7 +145,7 @@ async def resolve_report_sources(
     elif source_type == "search":
         from app.services.meilisearch_client import search_entries
 
-        results = search_entries(query=search_query or "", limit=search_limit, offset=0)
+        results = search_entries(query=search_query or "", limit=search_limit, offset=0, viewer_id=str(user_id))
         for hit in results.get("hits", []):
             try:
                 resolved_ids.append(uuid.UUID(hit["id"]))
@@ -155,7 +158,13 @@ async def resolve_report_sources(
         saved = await db.get(SavedSearch, saved_search_id)
         if not saved:
             return [], {}
-        results = search_entries(query=saved.query or "", limit=search_limit, offset=0)
+        if not is_admin and saved.created_by != user_id:
+            raise AppError(
+                code="forbidden",
+                message="Only the saved search's owner or an admin can use it",
+                status_code=403,
+            )
+        results = search_entries(query=saved.query or "", limit=search_limit, offset=0, viewer_id=str(user_id))
         for hit in results.get("hits", []):
             try:
                 resolved_ids.append(uuid.UUID(hit["id"]))
@@ -417,13 +426,15 @@ async def generate_report_content(
         elif section == "timeline":
             content["sections"][section] = {
                 "title": "Timeline",
-                "items": [
-                    {
-                        "date": e.published_at.isoformat() if e.published_at else None,
-                        "title": e.title,
-                    }
-                    for e in entries
-                ],
+                "items": timeline_sorted(
+                    [
+                        {
+                            "date": e.published_at.isoformat() if e.published_at else None,
+                            "title": e.title,
+                        }
+                        for e in entries
+                    ]
+                ),
             }
         elif section == "aliases_attribution":
             content["sections"][section] = {
@@ -922,7 +933,7 @@ def render_markdown(report) -> str:
                 continue
 
             if section.get("items"):
-                for item in section["items"]:
+                for item in timeline_sorted(items) if is_timeline_items(items) else items:
                     if isinstance(item, dict):
                         if "technique_id" in item:
                             # TTP
@@ -936,8 +947,10 @@ def render_markdown(report) -> str:
                             url = item.get("url", "")
                             lines.append(f"- [{_escape_md(item['title'])}]({url})")
                         elif "date" in item and "title" in item:
-                            # Timeline
-                            date = _escape_md(item.get("date", "Unknown"))
+                            # Timeline: the stored date is a full ISO timestamp
+                            # with its offset; the reader wants the day.
+                            raw = item.get("date")
+                            date = _escape_md(raw[:10] if isinstance(raw, str) and raw else "Unknown")
                             lines.append(f"- **{date}**: {_escape_md(item['title'])}")
                         elif "name" in item and "aliases" in item:
                             # Actor
@@ -1038,3 +1051,116 @@ a {{ color: #2563eb; }}
 <div class="tlp-banner">{html_module.escape(report.tlp_marking)}</div>
 {body_html}
 </body></html>"""
+
+
+def is_timeline_items(items: list) -> bool:
+    """Timeline rows are ``{date, title}`` dicts — the shape the markdown
+    exporter and the document view both detect."""
+    return bool(items) and isinstance(items[0], dict) and "date" in items[0] and "title" in items[0]
+
+
+def timeline_sorted(items: list[dict]) -> list[dict]:
+    """Timeline rows oldest first; a row with no date goes last, in stored
+    order. Dates are ISO strings so they sort as text; anything else is
+    treated as undated rather than raising."""
+
+    def key(item: dict) -> tuple[int, str]:
+        d = item.get("date")
+        return (0, d) if isinstance(d, str) and d else (1, "")
+
+    return sorted(items, key=key)
+
+
+def ordered_sections(report, template_sections: list | None = None) -> list[dict]:
+    """The report's sections as an ordered list the way a reader sees them.
+
+    JSONB does not keep key order, so the saved ``content.sections`` dict is
+    ordered by the template: the DB template's section list when given, else
+    the builtin registry's, with sections the template doesn't know appended
+    in stored order. Each item carries the template's title and type when the
+    saved section has none.
+    """
+    content = report.content or {}
+    sections = content.get("sections") or {}
+    if not isinstance(sections, dict):
+        sections = {}
+
+    meta: dict[str, dict] = {}
+    order: list[str] = []
+    for s in template_sections or []:
+        if isinstance(s, dict) and s.get("name"):
+            meta[s["name"]] = s
+            order.append(s["name"])
+    if not order:
+        template = REPORT_TEMPLATES.get(report.template_type)
+        order = list(template["sections"]) if template else []
+    ordered = [k for k in order if k in sections] + [k for k in sections if k not in order]
+
+    out = []
+    for key in ordered:
+        section = sections[key] if isinstance(sections[key], dict) else {}
+        tmpl = meta.get(key, {})
+        body = section.get("body") or ""
+        # Generated bodies often open with their own "## Title" heading; the
+        # reader draws one, so drop it (same rule as the markdown exporter).
+        body = re.sub(r"^\s*##\s+[^\n]*\n+", "", body)
+        raw_items = section.get("items") if isinstance(section.get("items"), list) else []
+        items = [i for i in raw_items if isinstance(i, dict)]
+        # Reports saved before the generator sorted its timeline keep the
+        # entries' query order; the reader always sees them in date order.
+        if is_timeline_items(items):
+            items = timeline_sorted(items)
+        out.append(
+            {
+                "name": key,
+                "title": section.get("title") or tmpl.get("title") or key.replace("_", " ").title(),
+                "type": tmpl.get("type") or ("data" if items and not body else "narrative"),
+                "body": body,
+                "items": items,
+            }
+        )
+    return out
+
+
+def download_filename(title: str, ext: str) -> str:
+    """A header-safe file name for a report download.
+
+    HTTP headers are Latin-1 and the quoted filename ends at the next quote,
+    so anything outside plain ASCII letters, digits, space, dot, dash and
+    underscore is dropped (quotes and path separators included) and a title
+    that leaves nothing behind becomes ``report``.
+    """
+    stem = re.sub(r"[^A-Za-z0-9 ._-]+", "", title or "").strip(" .")[:50].strip(" .")
+    return f"{stem or 'report'}.{ext}"
+
+
+def attachment_headers(filename: str) -> dict[str, str]:
+    return {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+
+def export_report(report, fmt: str) -> tuple[bytes | str, str, str]:
+    """Render a report for download: ``(content, media_type, filename)``.
+
+    ``pdf`` needs WeasyPrint; without it the HTML is returned with a note, so
+    the caller still has a file to hand over.
+    """
+    name = lambda ext: download_filename(report.title, ext)  # noqa: E731
+    if fmt == "markdown":
+        return render_markdown(report), "text/markdown; charset=utf-8", name("md")
+    if fmt == "html":
+        return render_html(report), "text/html; charset=utf-8", name("html")
+    if fmt == "pdf":
+        html_content = render_html(report)
+        try:
+            import weasyprint
+        except ImportError:
+            note = "<!-- PDF export requires WeasyPrint. Install with: pip install weasyprint -->\n"
+            return note + html_content, "text/html; charset=utf-8", name("html")
+        # WeasyPrint's default fetcher follows any URL in the document,
+        # file:// included, and a <link rel="attachment"> embeds whatever
+        # it fetched in the PDF. render_html sanitizes the body, and this
+        # is the second wall: nothing but inline data: URIs is loaded.
+        fetcher = weasyprint.URLFetcher(allowed_protocols={"data"})
+        pdf_bytes = weasyprint.HTML(string=html_content, url_fetcher=fetcher).write_pdf()
+        return pdf_bytes, "application/pdf", name("pdf")
+    raise ValueError(f"Unsupported export format: {fmt}")

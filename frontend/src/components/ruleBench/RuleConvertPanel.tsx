@@ -4,7 +4,9 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import api from "@/api/client";
 import RuleBuilderShell from "@/components/RuleBuilderShell";
+import { useReadingPrefs } from "@/hooks/useReadingPrefs";
 import { formatDateTime } from "@/utils/formatDate";
+import { QUERY_LANGUAGES } from "@/utils/queryLanguage";
 import bench from "./bench.module.css";
 import styles from "./RuleConvertPanel.module.css";
 
@@ -14,6 +16,13 @@ export interface RuleConversion {
   model: string;
   tokens_used?: number;
   cost?: number;
+}
+
+/** What a convert button asks for: the stored format, and the exact language
+    where one format holds several (elastic_ql is ES|QL and EQL). */
+export interface ConvertTarget {
+  type: string;
+  dialect: string | null;
 }
 
 /** A converted rule, now a real row of its own hanging off `derived_from`. */
@@ -33,19 +42,20 @@ interface RuleConvertPanelProps {
   typeLabels: Record<string, string>;
   /** Legacy `metadata.rule_conversions` blob — read-only fallback, see below. */
   conversions: Record<string, RuleConversion>;
-  activeType: string | null;
-  /** The target format currently converting, or null. Only that button reads
+  /** The selected conversion: a sibling's id, or `legacy:<type>` for a blob entry. */
+  activeKey: string | null;
+  /** The target currently converting, or null. Only that button reads
       "Converting…" — the rest stay labelled (though disabled) so the panel
       doesn't look like it's converting to every format at once. */
-  convertingType: string | null;
-  onSelect: (type: string | null) => void;
-  onConvert: (type: string) => void;
+  converting: ConvertTarget | null;
+  onSelect: (key: string | null) => void;
+  onConvert: (target: ConvertTarget, notes: string) => void;
   onRemove: (type: string) => void;
   onUpdateContent: (type: string, content: string) => void;
 }
 
 /** Provenance the convert endpoint records on the sibling it writes. */
-function conversionMeta(sibling: ConversionSibling): RuleConversion | null {
+function conversionMeta(sibling: ConversionSibling): (RuleConversion & { dialect: string | null }) | null {
   const meta = sibling.metadata?.conversion as Record<string, unknown> | undefined;
   if (!meta) return null;
   return {
@@ -54,8 +64,11 @@ function conversionMeta(sibling: ConversionSibling): RuleConversion | null {
     model: (meta.model as string) || "unknown",
     tokens_used: meta.tokens_used as number | undefined,
     cost: meta.cost as number | undefined,
+    dialect: (meta.dialect as string | null | undefined) ?? null,
   };
 }
+
+const LEGACY = "legacy:";
 
 /**
  * Conversions are sibling rules, not a blob on the parent — searchable,
@@ -71,8 +84,8 @@ export function RuleConvertPanel({
   ruleType,
   typeLabels,
   conversions,
-  activeType,
-  convertingType,
+  activeKey,
+  converting,
   onSelect,
   onConvert,
   onRemove,
@@ -80,6 +93,8 @@ export function RuleConvertPanel({
 }: RuleConvertPanelProps) {
   const qc = useQueryClient();
   const siblingsKey = ["rule-conversions", ruleId];
+  const preferred = useReadingPrefs().query_language;
+  const [notes, setNotes] = useState("");
 
   const siblings = useQuery({
     queryKey: siblingsKey,
@@ -90,20 +105,36 @@ export function RuleConvertPanel({
     },
   });
 
-  const byType = new Map((siblings.data ?? []).map((s) => [s.rule_type, s]));
+  // Every query language from Settings › Reading is a target, except the one
+  // this rule already is. Formats the library stores but no SIEM queries in
+  // (Snort, YARA, Nuclei) are listed separately.
+  const languageTargets = QUERY_LANGUAGES.filter((q) => q.ruleType && q.ruleType !== ruleType);
+  const languageTypes = new Set(QUERY_LANGUAGES.map((q) => q.ruleType));
+  const formatTargets = Object.entries(typeLabels).filter(([k]) => k !== ruleType && !languageTypes.has(k));
+
+  const siblingRows = siblings.data ?? [];
+  const siblingTypes = new Set(siblingRows.map((s) => s.rule_type));
   // Blob entries the backfill has not reached; siblings shadow their own format.
-  const legacyTypes = Object.keys(conversions).filter((t) => !byType.has(t));
-  const existing = [...byType.keys(), ...legacyTypes].sort();
+  const legacyTypes = Object.keys(conversions).filter((t) => !siblingTypes.has(t));
+
+  const labelFor = (type: string, dialect: string | null) =>
+    (dialect && QUERY_LANGUAGES.find((q) => q.value === dialect)?.short) || typeLabels[type] || type;
+
+  const existing: { key: string; label: string; legacy: boolean }[] = [
+    ...siblingRows.map((s) => ({ key: s.id, label: labelFor(s.rule_type, conversionMeta(s)?.dialect ?? null), legacy: false })),
+    ...legacyTypes.map((t) => ({ key: `${LEGACY}${t}`, label: typeLabels[t] || t, legacy: true })),
+  ].sort((a, b) => a.label.localeCompare(b.label));
 
   // A conversion writes a new sibling server-side, so the list is stale the
   // moment the mutation the parent owns settles.
   useEffect(() => {
-    if (convertingType === null && ruleId) qc.invalidateQueries({ queryKey: siblingsKey });
+    if (converting === null && ruleId) qc.invalidateQueries({ queryKey: siblingsKey });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [convertingType, ruleId]);
+  }, [converting, ruleId]);
 
-  const activeSibling = activeType ? byType.get(activeType) : undefined;
-  const activeLegacy = activeType && !activeSibling ? conversions[activeType] : undefined;
+  const activeSibling = activeKey && !activeKey.startsWith(LEGACY) ? siblingRows.find((s) => s.id === activeKey) : undefined;
+  const activeLegacyType = activeKey?.startsWith(LEGACY) ? activeKey.slice(LEGACY.length) : null;
+  const activeLegacy = activeLegacyType ? conversions[activeLegacyType] : undefined;
 
   const [draft, setDraft] = useState<string | null>(null);
   useEffect(() => setDraft(null), [activeSibling?.id]);
@@ -126,8 +157,7 @@ export function RuleConvertPanel({
       await api.delete(`/detection-rules/${id}`);
     },
     onSuccess: (_data, id) => {
-      const removed = (siblings.data ?? []).find((s) => s.id === id);
-      if (removed && activeType === removed.rule_type) onSelect(null);
+      if (activeKey === id) onSelect(null);
       qc.invalidateQueries({ queryKey: siblingsKey });
       qc.invalidateQueries({ queryKey: ["detection-rules"] });
       toast.success("Conversion deleted");
@@ -137,24 +167,82 @@ export function RuleConvertPanel({
 
   const meta = activeSibling ? conversionMeta(activeSibling) : activeLegacy;
   const body = draft ?? activeSibling?.rule_content ?? activeLegacy?.content ?? "";
+  const activeTarget: ConvertTarget | null = activeSibling
+    ? { type: activeSibling.rule_type, dialect: conversionMeta(activeSibling)?.dialect ?? null }
+    : activeLegacyType
+      ? { type: activeLegacyType, dialect: null }
+      : null;
+  const isConverting = (t: ConvertTarget) =>
+    converting !== null && converting.type === t.type && (converting.dialect ?? null) === (t.dialect ?? null);
+  const preferredShort = QUERY_LANGUAGES.find((q) => q.value === preferred)?.short;
 
   return (
     <>
-      <div className={bench.railLabel}>Convert this {typeLabels[ruleType] || ruleType} rule</div>
-      <div className={styles.grid}>
-        {Object.entries(typeLabels)
-          .filter(([k]) => k !== ruleType)
-          .map(([k, v]) => (
-            <button
-              key={k}
-              type="button"
-              className={styles.option}
-              onClick={() => onConvert(k)}
-              disabled={convertingType !== null}
-            >
-              {convertingType === k ? "Converting…" : `→ ${v}`}
-            </button>
-          ))}
+      <div className={bench.railLabel}>
+        Convert this {typeLabels[ruleType] || ruleType} rule
+        {preferredShort && <b>preferred: {preferredShort} · Settings › Reading</b>}
+      </div>
+
+      <div className={styles.group}>
+        <span className={styles.groupLabel}>Query languages</span>
+        <div className={styles.grid}>
+          {languageTargets.map((q) => {
+            const target: ConvertTarget = { type: q.ruleType!, dialect: q.value };
+            return (
+              <button
+                key={q.value}
+                type="button"
+                className={styles.option}
+                onClick={() => onConvert(target, notes)}
+                disabled={converting !== null}
+                title={q.label}
+              >
+                <span>{isConverting(target) ? "Converting…" : `→ ${q.short}`}</span>
+                <small className={q.value === preferred ? styles.preferred : undefined}>
+                  {q.value === preferred ? "preferred" : q.label.replace(/^[^(]*\(|\)$/g, "")}
+                </small>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {formatTargets.length > 0 && (
+        <div className={styles.group}>
+          <span className={styles.groupLabel}>Rule formats</span>
+          <div className={styles.grid}>
+            {formatTargets.map(([k, v]) => {
+              const target: ConvertTarget = { type: k, dialect: null };
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  className={styles.option}
+                  onClick={() => onConvert(target, notes)}
+                  disabled={converting !== null}
+                >
+                  <span>{isConverting(target) ? "Converting…" : `→ ${v}`}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className={styles.group}>
+        <label className={styles.groupLabel} htmlFor="conversion-notes">
+          Notes for the conversion
+          <span className={styles.groupHint}>optional · added to the prompt</span>
+        </label>
+        <input
+          id="conversion-notes"
+          className={styles.notes}
+          type="text"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Anything the converted rule should account for"
+          maxLength={2000}
+        />
       </div>
 
       {existing.length > 0 && (
@@ -163,22 +251,22 @@ export function RuleConvertPanel({
             Existing conversions<b>{existing.length}</b>
           </div>
           <div className={styles.tabs}>
-            {existing.map((type) => (
+            {existing.map((c) => (
               <button
-                key={type}
+                key={c.key}
                 type="button"
-                className={`${styles.tab} ${activeType === type ? styles.tabActive : ""}`}
-                onClick={() => onSelect(activeType === type ? null : type)}
+                className={`${styles.tab} ${activeKey === c.key ? styles.tabActive : ""}`}
+                onClick={() => onSelect(activeKey === c.key ? null : c.key)}
               >
-                {typeLabels[type] || type}
-                {!byType.has(type) && <span className={styles.legacyDot} title="Not yet a rule of its own" />}
+                {c.label}
+                {c.legacy && <span className={styles.legacyDot} title="Not yet a rule of its own" />}
               </button>
             ))}
           </div>
         </>
       )}
 
-      {activeType && (activeSibling || activeLegacy) && (
+      {activeTarget && (activeSibling || activeLegacy) && (
         <div className={styles.editor}>
           <div className={styles.editorHead}>
             <span className={styles.editorMeta}>
@@ -192,8 +280,13 @@ export function RuleConvertPanel({
                 Open rule
               </Link>
             )}
-            <button type="button" className={bench.btn} onClick={() => onConvert(activeType)} disabled={convertingType !== null}>
-              {convertingType === activeType ? "Converting…" : "Re-convert"}
+            <button
+              type="button"
+              className={bench.btn}
+              onClick={() => onConvert(activeTarget, notes)}
+              disabled={converting !== null}
+            >
+              {isConverting(activeTarget) ? "Converting…" : "Re-convert"}
             </button>
             {activeSibling ? (
               <>
@@ -215,7 +308,7 @@ export function RuleConvertPanel({
                 </button>
               </>
             ) : (
-              <button type="button" className={bench.btn} onClick={() => onRemove(activeType)}>
+              <button type="button" className={bench.btn} onClick={() => onRemove(activeTarget.type)}>
                 Remove
               </button>
             )}
@@ -227,10 +320,10 @@ export function RuleConvertPanel({
           )}
           <div className={styles.editorBody}>
             <RuleBuilderShell
-              ruleType={activeType}
+              ruleType={activeTarget.type}
               value={body}
               onChange={(content) =>
-                activeSibling ? setDraft(content) : onUpdateContent(activeType, content)
+                activeSibling ? setDraft(content) : onUpdateContent(activeTarget.type, content)
               }
             />
           </div>

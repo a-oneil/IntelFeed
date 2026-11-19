@@ -18,6 +18,7 @@ Three rules this module keeps, by design (GitHub issue #13):
 """
 
 import hashlib
+import html as html_mod
 import logging
 import re
 import uuid
@@ -487,7 +488,7 @@ async def _create_github_file_entry(db: AsyncSession, item: IngestBatchItem, use
         db,
         guid=guid,
         title=(item.title or item.extra.get("title") or item.filename or "Untitled").strip(),
-        html=sanitized or f"<pre><code>{text}</code></pre>",
+        html=sanitized or f"<pre><code>{html_mod.escape(text)}</code></pre>",
         text=text,
         url=item.source_url,
         author="manual-repo-import",

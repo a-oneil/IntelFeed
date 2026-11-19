@@ -405,6 +405,19 @@ def _docx_paragraph_text(p) -> str:
     return "".join(out)
 
 
+_DOCX_MAX_XML_BYTES = 20 * 1024 * 1024
+_DOCX_MAX_META_BYTES = 1 * 1024 * 1024
+
+
+def _read_zip_member_bounded(archive: zipfile.ZipFile, member: str | zipfile.ZipInfo, max_bytes: int) -> bytes | None:
+    """Read a zip member up to ``max_bytes``, returning None if uncompressed bytes exceed the cap."""
+    with archive.open(member) as stream:
+        data = stream.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        return None
+    return data
+
+
 def _parse_docx(data: bytes, filename: str | None) -> ParsedDocument:
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
@@ -412,14 +425,18 @@ def _parse_docx(data: bytes, filename: str | None) -> ParsedDocument:
         raise UnsupportedFormat("not a .docx file") from exc
     with archive:
         try:
-            document_xml = archive.read("word/document.xml")
+            document_xml = _read_zip_member_bounded(archive, "word/document.xml", _DOCX_MAX_XML_BYTES)
         except KeyError as exc:
             raise UnsupportedFormat("not a .docx file (no word/document.xml)") from exc
+        if document_xml is None:
+            raise UnsupportedFormat("word/document.xml exceeds size limit")
         core_title = None
         try:
-            core = DefusedET.fromstring(archive.read("docProps/core.xml"))
-            node = core.find(f"{_DC_NS}title")
-            core_title = (node.text or "").strip() or None if node is not None else None
+            core_bytes = _read_zip_member_bounded(archive, "docProps/core.xml", _DOCX_MAX_META_BYTES)
+            if core_bytes is not None:
+                core = DefusedET.fromstring(core_bytes)
+                node = core.find(f"{_DC_NS}title")
+                core_title = (node.text or "").strip() or None if node is not None else None
         except Exception:
             core_title = None
     root = DefusedET.fromstring(document_xml)
@@ -519,11 +536,19 @@ def iter_zip_members(data: bytes, *, max_members: int, max_member_bytes: int) ->
                 logger.info("Skipping zip member %s (%d bytes over cap)", info.filename, info.file_size)
                 continue
             try:
-                yield info.filename, archive.read(info)
+                member_data = _read_zip_member_bounded(archive, info, max_member_bytes)
             except (zipfile.BadZipFile, RuntimeError, NotImplementedError) as exc:
                 # RuntimeError: encrypted member; NotImplementedError: compression we lack.
                 logger.info("Skipping zip member %s: %s", info.filename, exc)
                 continue
+            if member_data is None:
+                logger.info(
+                    "Skipping zip member %s (decompressed size over %d byte cap)",
+                    info.filename,
+                    max_member_bytes,
+                )
+                continue
+            yield info.filename, member_data
 
 
 def _zip_member_allowed(name: str) -> bool:

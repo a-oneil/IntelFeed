@@ -41,3 +41,47 @@
   gap: var(--sp-2);
   flex-wrap: wrap;
 }
+
+/* An upstream commit, told apart from a local version by its left edge. */
+.upstream {
+  border-left: 2px solid color-mix(in srgb, var(--accent-detect) 50%, transparent);
+}
+
+.upstreamTag {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--accent-detect);
+}
+
+.changeType {
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+}
+
+.sha {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--accent-intel);
+  text-decoration: none;
+}
+
+a.sha:hover {
+  text-decoration: underline;
+}
+
+.commitMeta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+}
+
+.filePath {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

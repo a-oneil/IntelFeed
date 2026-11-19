@@ -1,18 +1,86 @@
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.groupLabel {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.groupHint {
+  margin-left: auto;
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+/* Five across in the full centre column; the strip under the editor is as
+   wide as the editor, which is what makes room for every language. */
 .grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: var(--sp-3);
 }
 
 .option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   font-size: var(--fs-md);
-  padding: var(--sp-3) var(--sp-4);
+  padding: 7px var(--sp-4);
   border-radius: var(--r-md);
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   color: var(--text-primary);
   cursor: pointer;
   text-align: left;
+}
+
+.option > span {
+  white-space: nowrap;
+}
+
+.option small {
+  margin-left: auto;
+  flex: none;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.preferred {
+  color: var(--accent-detect);
+}
+
+.notes {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+  font-family: var(--font-mono);
+}
+
+.notes::placeholder {
+  color: var(--text-muted);
 }
 
 .option:hover:not(:disabled) {

@@ -32,6 +32,12 @@ function toRelative(date: Date): string {
   return toAbsolute(date);
 }
 
+/** "Oct 13, 2026 (2d ago)" — past 30 days the relative form is the date itself, so drop it. */
+function withRelative(absolute: string, date: Date): string {
+  const relative = toRelative(date);
+  return relative === toAbsolute(date) ? absolute : `${absolute} (${relative})`;
+}
+
 /**
  * Format a date according to the user's date_format setting.
  * Returns empty string for null/undefined/invalid input.
@@ -46,7 +52,7 @@ export function formatDate(input: DateInput, fallback = ""): string {
     case "absolute":
       return toAbsolute(date);
     case "both":
-      return `${toAbsolute(date)} (${toRelative(date)})`;
+      return withRelative(toAbsolute(date), date);
     case "relative":
     default:
       return toRelative(date);
@@ -74,7 +80,7 @@ export function formatDateTime(input: DateInput, fallback = ""): string {
     case "absolute":
       return absolute;
     case "both":
-      return `${absolute} (${toRelative(date)})`;
+      return withRelative(absolute, date);
     case "relative":
     default:
       return toRelative(date);

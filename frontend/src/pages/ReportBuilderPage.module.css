@@ -679,6 +679,27 @@
   cursor: not-allowed;
 }
 
+/* Share link */
+.shareUrl {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--accent);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shareUrl:hover {
+  text-decoration: underline;
+}
+
+.shareHint {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
 /* Version History */
 .versionToggle {
   display: flex;
@@ -1084,94 +1105,6 @@
 .docViewBtnOn {
   background: var(--bg-tertiary);
   color: var(--text-primary);
-}
-
-.docSurface {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 28px 36px 36px;
-  max-width: 860px;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-6);
-}
-
-.docSection {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-}
-
-.docHeading {
-  font-family: var(--font-body);
-  font-size: var(--fs-lg);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text-primary);
-  margin: 0;
-  padding-bottom: var(--sp-2);
-  border-bottom: 1px solid var(--border);
-}
-
-.docSurface p {
-  max-width: 72ch;
-}
-
-.docEmpty {
-  color: var(--text-muted);
-  font-size: var(--fs-md);
-  font-style: italic;
-  margin: 0;
-}
-
-.docTableWrap {
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-}
-
-.docTable {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--fs-md);
-}
-
-.docTable th {
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--text-secondary);
-  text-align: left;
-  padding: 8px 12px;
-  background: var(--bg-primary);
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-
-.docTable td {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--bg-tertiary);
-  vertical-align: top;
-}
-
-.docTable tr:last-child td {
-  border-bottom: none;
-}
-
-.docMono {
-  font-family: var(--font-mono);
-  font-size: calc(var(--fs-md) - 1px);
-  word-break: break-all;
-}
-
-.docList {
-  margin: 0;
-  padding-left: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
 }
 
 /* --- Create mode: template expander + full-width editor --- */

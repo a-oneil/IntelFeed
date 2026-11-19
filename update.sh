@@ -15,9 +15,12 @@ log() {
     local level="${2:-info}"
     local ts
     ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-    # Escape backslashes and double quotes for valid JSON
+    # Escape backslashes, double quotes, and control whitespace for valid JSON
     local msg="${1//\\/\\\\}"
     msg="${msg//\"/\\\"}"
+    msg="${msg//$'\t'/\\t}"
+    msg="${msg//$'\r'/\\r}"
+    msg="${msg//$'\n'/\\n}"
     local json="{\"timestamp\":\"$ts\",\"level\":\"$level\",\"event\":\"$msg\",\"logger\":\"update\"}"
     echo "$json" | tee -a "$LOG_FILE"
 }
@@ -52,7 +55,7 @@ fi
 
 if [ "$LOCAL" != "$REMOTE" ]; then
     log "Changes detected ($LOCAL -> $REMOTE), pulling..."
-    git log --oneline "$LOCAL".."$REMOTE" | while IFS= read -r line; do log "$line"; done
+    git log --oneline "$LOCAL".."$REMOTE" | while IFS= read -r line; do if [ -n "$line" ]; then log "$line"; fi; done
     git pull origin main --quiet
 else
     log "Retrying a previous update that did not complete."
@@ -147,13 +150,13 @@ if [ "$needs_build" = true ]; then
     # shellcheck source=scripts/ops/version.sh
     . "$REPO_DIR/scripts/ops/version.sh"
     log "Building images (version $APP_VERSION, sha $GIT_SHA)..."
-    if ! docker compose -f "$COMPOSE_FILE" build 2>&1 | while IFS= read -r line; do [ -n "$line" ] && log "$line"; done; then
+    if ! docker compose -f "$COMPOSE_FILE" build 2>&1 | while IFS= read -r line; do if [ -n "$line" ]; then log "$line"; fi; done; then
         log "Image build FAILED — running stack left untouched, will retry next tick." "error"
         exit 1
     fi
 
     log "Restarting stack..."
-    docker compose -f "$COMPOSE_FILE" up -d 2>&1 | while IFS= read -r line; do [ -n "$line" ] && log "$line"; done
+    docker compose -f "$COMPOSE_FILE" up -d 2>&1 | while IFS= read -r line; do if [ -n "$line" ]; then log "$line"; fi; done
 fi
 
 if [ "$needs_reload" = true ]; then
@@ -164,7 +167,7 @@ if [ "$needs_reload" = true ]; then
     # -T: cron has no TTY, and `exec` allocates one by default.
     if ! docker compose -f "$COMPOSE_FILE" exec -T caddy \
         caddy reload --config /etc/caddy/Caddyfile 2>&1 |
-        while IFS= read -r line; do [ -n "$line" ] && log "$line"; done; then
+        while IFS= read -r line; do if [ -n "$line" ]; then log "$line"; fi; done; then
         log "Caddy reload FAILED — the old config is still serving." "error"
     fi
 fi
@@ -173,6 +176,6 @@ printf '%s' "$HEAD_SHA" > "$DEPLOYED_MARKER"
 rm -f "$PENDING_MARKER"
 
 log "Waiting for health checks..."
-docker compose -f "$COMPOSE_FILE" ps 2>&1 | while IFS= read -r line; do [ -n "$line" ] && log "$line"; done
+docker compose -f "$COMPOSE_FILE" ps 2>&1 | while IFS= read -r line; do if [ -n "$line" ]; then log "$line"; fi; done
 
 log "Update complete."

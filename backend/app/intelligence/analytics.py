@@ -11,6 +11,7 @@ from app.models.detection_rule import DetectionRule
 from app.models.malware_family import MalwareFamily
 from app.models.threat_actor import ThreatActor
 from app.models.ttp import TTP
+from app.services.public_view import visitor_events_only
 
 
 async def entity_trending(
@@ -212,10 +213,14 @@ async def analytics_overview(db: AsyncSession) -> dict:
     # Recent events count (last 7 days)
     cutoff_7d = datetime.now(UTC) - timedelta(days=7)
     recent_events = await db.scalar(
-        select(func.count(CorrelationEventRecord.id)).where(CorrelationEventRecord.created_at >= cutoff_7d)
+        visitor_events_only(
+            select(func.count(CorrelationEventRecord.id)).where(CorrelationEventRecord.created_at >= cutoff_7d)
+        )
     )
     unread_events = await db.scalar(
-        select(func.count(CorrelationEventRecord.id)).where(CorrelationEventRecord.is_read.is_(False))
+        visitor_events_only(
+            select(func.count(CorrelationEventRecord.id)).where(CorrelationEventRecord.is_read.is_(False))
+        )
     )
 
     return {

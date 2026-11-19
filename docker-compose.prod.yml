@@ -237,7 +237,7 @@ services:
         "--bind",
         "0.0.0.0:8000",
         "--timeout",
-        "180",
+        "330",
         "--max-requests",
         "800",
         "--max-requests-jitter",

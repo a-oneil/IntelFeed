@@ -223,6 +223,9 @@ def _plan_tools(requested: list[str] | None) -> _ToolPlan:
 def _normalize_model(model: str) -> str:
     """Map our internal model identifiers to CLI aliases the binary accepts."""
     aliases = {
+        "claude-opus-5-5": "opus",
+        "claude-sonnet-5-5": "sonnet",
+        "claude-haiku-5-5": "haiku",
         "claude-opus-4-6": "opus",
         "claude-sonnet-4-6": "sonnet",
         "claude-haiku-4-5-20251001": "haiku",
@@ -397,6 +400,7 @@ class ClaudeCodeProvider(AIProvider):
                 "--help",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=_scrubbed_env(),
             )
             out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
         except TimeoutError:
@@ -985,6 +989,7 @@ class ClaudeCodeProvider(AIProvider):
                 "--version",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=_scrubbed_env(),
             )
             out, err = await asyncio.wait_for(proc.communicate(), timeout=10)
             if proc.returncode != 0:

@@ -1651,11 +1651,9 @@ async def autolink_batch(
         (EntryTool, EntryTool.source),
         (EntryMitigation, EntryMitigation.source),
     ]
-    # Junction tables without a `source` column — always delete auto-linked records
-    # (CVE/TTP are always auto_link from the autolinker)
+    # Junction tables without a `source` column
     nosource_junctions = [
         EntryCVE,
-        EntryTTP,
     ]
 
     stats = {"scanned": 0, "linked": 0, "deleted": 0}
@@ -1686,6 +1684,15 @@ async def autolink_batch(
             for junc_model in nosource_junctions:
                 del_result = await db.execute(delete(junc_model).where(junc_model.entry_id == row.id))
                 stats["deleted"] += del_result.rowcount
+            # EntryTTP stores both AI behavioral extractions and autolinker links
+            # (prefixed "auto_link:"); preserve non-autolink rows.
+            del_result = await db.execute(
+                delete(EntryTTP).where(
+                    EntryTTP.entry_id == row.id,
+                    EntryTTP.source_text.like("auto_link:%"),
+                )
+            )
+            stats["deleted"] += del_result.rowcount
 
         matches = scan_text(paragraphs)
         if matches:
@@ -1836,6 +1843,8 @@ async def backfill_paragraph_indices(
 
     entry_ids = list(entry_ids_set)
     stats = {"entries": len(entry_ids), "updated": 0}
+    cve_key_cache: dict[uuid.UUID, str] = {}
+    ttp_key_cache: dict[uuid.UUID, str] = {}
 
     for i, eid in enumerate(entry_ids):
         result = await db.execute(
@@ -1850,7 +1859,7 @@ async def backfill_paragraph_indices(
             continue
 
         matches = scan_text(paragraphs)
-        # Build lookup: (entity_type, entity_id_str) → paragraph_indices
+        # Build lookup: (entity_type, entity_id_str_or_lookup_key) → paragraph_indices
         match_map: dict[tuple[str, str], list[int]] = {}
         for m in matches:
             key = (m["entity_type"], str(m.get("entity_id") or m.get("lookup_key", "")))
@@ -1861,9 +1870,34 @@ async def backfill_paragraph_indices(
             q = select(junc_model).where(junc_model.entry_id == eid)
             if not refresh:
                 q = q.where(junc_model.paragraph_indices.is_(None))
-            for junc_row in (await db.execute(q)).scalars().all():
-                entity_id_str = str(getattr(junc_row, fk_col_name))
-                para = match_map.get((entity_type, entity_id_str)) or None
+            junc_rows = (await db.execute(q)).scalars().all()
+            if not junc_rows:
+                continue
+            if entity_type == "cve":
+                missing_cids = {getattr(r, fk_col_name) for r in junc_rows} - cve_key_cache.keys()
+                if missing_cids:
+                    cve_rows = await db.execute(select(CVE.id, CVE.cve_id).where(CVE.id.in_(missing_cids)))
+                    for cid, cve_str in cve_rows.all():
+                        cve_key_cache[cid] = cve_str
+            elif entity_type == "ttp":
+                missing_tids = {getattr(r, fk_col_name) for r in junc_rows} - ttp_key_cache.keys()
+                if missing_tids:
+                    ttp_rows = await db.execute(select(TTP.id, TTP.technique_id).where(TTP.id.in_(missing_tids)))
+                    for tid, tech_id in ttp_rows.all():
+                        ttp_key_cache[tid] = tech_id
+            for junc_row in junc_rows:
+                fk_val = getattr(junc_row, fk_col_name)
+                entity_id_str = str(fk_val)
+                lookup_key = (
+                    cve_key_cache.get(fk_val)
+                    if entity_type == "cve"
+                    else (ttp_key_cache.get(fk_val) if entity_type == "ttp" else None)
+                )
+                para = (
+                    match_map.get((entity_type, entity_id_str))
+                    or (match_map.get((entity_type, lookup_key)) if lookup_key else None)
+                    or None
+                )
                 if (para or refresh) and junc_row.paragraph_indices != para:
                     junc_row.paragraph_indices = para
                     stats["updated"] += 1

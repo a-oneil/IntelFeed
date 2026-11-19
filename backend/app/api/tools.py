@@ -11,8 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.security import AGENT_SCOPE_PROPOSE, ToolCaller, get_tool_caller
 from app.database import get_db
-from app.tools import ADMIN_TOOLS, MUTATING_TOOLS, TOOL_DEFINITIONS, execute_tool
-from app.tools.gate import auto_approve_tools, check_call, needs_confirmation, stage_tool_call, staged_reply
+from app.tools import ADMIN_TOOLS, MUTATING_TOOLS, TOOL_DEFINITIONS
+from app.tools.gate import (
+    auto_approve_tools,
+    check_call,
+    execute_isolated,
+    needs_confirmation,
+    stage_tool_call,
+    staged_reply,
+)
 
 router = APIRouter()
 
@@ -77,7 +84,7 @@ async def execute_tool_endpoint(
             message=f"Tool '{name}' requires admin access",
             status_code=403,
         )
-    result = await execute_tool(name, request.args, db, user.id)
+    result = await execute_isolated(db, name, request.args, user.id)
     return ToolExecuteResponse(result=result)
 
 

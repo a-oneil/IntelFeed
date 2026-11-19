@@ -1,19 +1,26 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { AsyncStateLoading } from "@/components/AsyncState";
 import { Segmented } from "@/components/primitives";
 import { useCoverageWorkspace } from "@/hooks/useCoverageWorkspace";
 import {
+  downloadHuntFile,
   useBoardRules,
+  useDraftHuntPack,
+  useHuntPack,
   usePrecedent,
   useSetThreatState,
   useThreatBoard,
   type BoardFacet,
+  type HuntHypothesis,
   type ThreatBoardItem,
+  type ThreatState,
 } from "@/hooks/useThreatBoard";
 import { useIntelStore } from "@/stores/intelStore";
 import { useOpenThread } from "@/utils/openEntry";
+import { queryLanguageShort } from "@/utils/queryLanguage";
 import styles from "./ThreatBoard.module.css";
 
 /** The Threats board: one briefing row per resolved threat.
@@ -36,8 +43,55 @@ const WINDOWS = [
 
 const STATE_FILTERS = [
   { value: "open", label: "Open" },
+  { value: "tracked", label: "Tracked" },
   { value: "handled", label: "Handled" },
+  { value: "muted", label: "Muted" },
 ] as const;
+type StateFilter = (typeof STATE_FILTERS)[number]["value"];
+
+const EMPTY_TEXT: Record<StateFilter, string> = {
+  open: "No threats with enough coverage in this window.",
+  tracked: "Nothing pinned. Track a row from its ⋯ menu to keep it above the ranking.",
+  handled: "Nothing marked handled yet.",
+  muted: "Nothing dismissed. Dismissed rows stay here until you reopen them.",
+};
+
+/** The ⋯ menu for one row: every state the row can move to from where it is.
+    `tracked` and `open` are both "on the board"; handled and muted differ in
+    what brings a row back: new techniques for handled, only you for muted. */
+function menuItems(item: ThreatBoardItem): { label: string; hint: string; state: ThreatState }[] {
+  switch (item.state) {
+    case "handled":
+      return [
+        { label: "Reopen", hint: "Back on the board.", state: "open" },
+        { label: "Dismiss", hint: "Hide it until you reopen it.", state: "muted" },
+      ];
+    case "muted":
+      return [
+        { label: "Reopen", hint: "Back on the board.", state: "open" },
+        { label: "Track", hint: "Pin it above the ranking.", state: "tracked" },
+      ];
+    case "tracked":
+      return [
+        { label: "Mark handled", hint: "Done for now. Returns when new techniques are reported.", state: "handled" },
+        { label: "Dismiss", hint: "Hide it until you reopen it.", state: "muted" },
+        { label: "Untrack", hint: "Unpin it. The ranking decides again.", state: "open" },
+      ];
+    default:
+      return [
+        { label: "Mark handled", hint: "Done for now. Returns when new techniques are reported.", state: "handled" },
+        { label: "Dismiss", hint: "Hide it until you reopen it.", state: "muted" },
+        { label: "Track", hint: "Pin it above the ranking regardless of coverage.", state: "tracked" },
+      ];
+  }
+}
+
+const STATE_TOAST: Record<ThreatState, (label: string) => string> = {
+  handled: (l) => `${l} marked handled. Returns if new techniques are reported.`,
+  muted: (l) => `${l} dismissed. Find it under Muted.`,
+  tracked: (l) => `${l} pinned above the ranking`,
+  open: (l) => `${l} reopened`,
+};
 
 const ENTITY_COLOR: Record<string, string> = {
   threat_actor: "var(--entity-actor)",
@@ -65,7 +119,7 @@ function actionLabel(item: ThreatBoardItem): string {
     case "extend":
       return `Extend ${item.prior_rules_strong} rule${item.prior_rules_strong === 1 ? "" : "s"} →`;
     case "diff":
-      return `Check ${item.prior_rules} weak match${item.prior_rules === 1 ? "" : "es"} →`;
+      return `Review ${item.prior_rules} rule${item.prior_rules === 1 ? "" : "s"} →`;
     case "audit":
       return `Audit ${item.on_record} known TTP${item.on_record === 1 ? "" : "s"} →`;
     case "adopt":
@@ -73,7 +127,7 @@ function actionLabel(item: ThreatBoardItem): string {
     case "collect":
       return item.is_story ? "Read the story →" : "Rules need telemetry →";
     case "merge":
-      return "Send to merge";
+      return "Merge duplicate";
     default:
       return "Review";
   }
@@ -83,21 +137,21 @@ function actionLabel(item: ThreatBoardItem): string {
 function actionTitle(item: ThreatBoardItem): string {
   switch (item.action) {
     case "write":
-      return "No rule covers this yet — draft one from the reported tradecraft";
+      return "No detection rule covers this threat. Draft one from the reported techniques.";
     case "extend":
-      return "Rules already name this threat — extend them with the newly reported techniques";
+      return "Rules already cover this threat. Extend them with the techniques reported this window.";
     case "diff":
-      return "Only loosely-matching rules exist — compare them against what was reported";
+      return "Rules reference this threat. Compare them with what was reported.";
     case "audit":
-      return "Coverage looks current — audit it against everything on record";
+      return "Coverage looks current. Audit it against every technique on record.";
     case "adopt":
-      return "Matching rules can fire on your telemetry today — adopt them";
+      return "Matching rules can run on telemetry you collect. Adopt them.";
     case "collect":
       return item.is_story
-        ? "No actor, malware or CVE has been named yet — read and identify it"
-        : "Rules exist but need telemetry you don't collect yet";
+        ? "No actor, malware or CVE has been identified yet. Read the story and name it."
+        : "Rules exist, but they need telemetry you do not collect yet.";
     case "merge":
-      return "This row duplicates another threat — merge them";
+      return "This entry duplicates another threat. Merge them.";
     default:
       return "Open the detail drawer";
   }
@@ -109,54 +163,28 @@ function foldsCoverage(item: ThreatBoardItem): boolean {
   return item.stories > 0 && item.stories !== item.attention;
 }
 
-/** Rows this one absorbed. Defensive because a freshly-deployed bundle can be
-    served before the API container finishes restarting, and a row without the
-    field must render, not throw. */
+/** Threat rows this one absorbed (one thread holds both). Defensive because a
+    freshly-deployed bundle can be served before the API container finishes
+    restarting, and a row without the field must render, not throw. */
 function absorbed(item: ThreatBoardItem): ThreatBoardItem["merged_from"] {
-  return item.merged_from ?? [];
+  return (item.merged_from ?? []).filter((m) => m.entity_type !== "cve");
 }
 
-/** One quiet mono line under the story — the collapsed row's trace of what is
-    behind it. Text, not furniture; the drawer carries the detail. */
+/** CVEs this row's articles claim on the All view — the fold made visible, so
+    a vulnerability never vanishes just because an actor is telling its story. */
+function carried(item: ThreatBoardItem): ThreatBoardItem["merged_from"] {
+  return (item.merged_from ?? []).filter((m) => m.entity_type === "cve");
+}
+
+/** One quiet line under the story, only for a story row: whether it is still
+    developing and that no entity has been named yet. Entity rows carry no
+    caption — the numbers live on the identity line and the rule inventory
+    lives in the drawer. */
 function captionText(item: ThreatBoardItem): string {
-  const parts: string[] = [];
-  if (foldsCoverage(item)) parts.push(`${item.stories} stor${item.stories === 1 ? "y" : "ies"}`);
-  parts.push(`${item.articles || item.attention} article${(item.articles || item.attention) === 1 ? "" : "s"}`);
-  if (item.echoes_folded > 0)
-    parts.push(`${item.echoes_folded} duplicate${item.echoes_folded === 1 ? "" : "s"} hidden`);
-  if (item.writable_observables > 0) {
-    parts.push(
-      `${item.writable_observables} rule-ready indicator${item.writable_observables === 1 ? "" : "s"}`
-    );
-  }
-  // A story row has no entity, so it can have no rule inventory. Saying
-  // "nothing matches" about it would report a coverage gap that does not
-  // exist — the gap is that nothing has named the story yet.
   if (item.is_story) {
-    parts.push(
-      item.beats > 1 ? `${item.beats} beats, still developing` : "no actor, malware or CVE resolved yet"
-    );
-    return parts.join(" · ");
+    return item.beats > 1 ? `${item.beats} updates, still developing` : "no actor, malware or CVE identified yet";
   }
-  // Posture only speaks when the library actually resolves rules to this CVE —
-  // classify_cves also matches on title mentions, and "defended · nothing
-  // matches" is a contradiction no caption should print.
-  if (item.posture === "blind" && item.prior_rules > 0)
-    parts.push("rules exist but need telemetry you don't collect");
-  else if (item.posture === "defended" && item.prior_rules > 0)
-    parts.push("a rule can fire on your telemetry today");
-  if (item.prior_rules === 0) parts.push("no rule coverage yet");
-  else if (item.prior_rules_strong === 0 && item.entity_type !== "cve")
-    parts.push(`${item.prior_rules} rule${item.prior_rules === 1 ? "" : "s"} loosely match${item.prior_rules === 1 ? "es" : ""}`);
-  else if (item.entity_type === "cve") {
-    parts.push(`${item.prior_rules} rule${item.prior_rules === 1 ? "" : "s"} in the library`);
-  } else {
-    const weak = item.prior_rules - item.prior_rules_strong;
-    parts.push(
-      `${item.prior_rules_strong} rule${item.prior_rules_strong === 1 ? " names" : "s name"} it${weak > 0 ? ` · +${weak} weak` : ""}`
-    );
-  }
-  return parts.join(" · ");
+  return "";
 }
 
 /** Story line: brief > headline > nothing. Never a computed template sentence —
@@ -165,14 +193,14 @@ function Story({ item }: { item: ThreatBoardItem }) {
   if (item.is_generic) {
     return (
       <p className={styles.story}>
-        Held out of the ranking — a category, not a threat. The extractor accepted a genre word as an
-        entity; resolve it in entity hygiene.
+        Excluded from the ranking: this is a category name, not a threat. The extractor created an entity
+        from a generic word. Resolve it in Engine review.
       </p>
     );
   }
   if (item.brief) {
     return (
-      <p className={styles.story} title={`AI brief from ${item.brief_sources.length || "the window's"} window articles — open the row for the sources`}>
+      <p className={styles.story} title={`AI summary of ${item.brief_sources.length || "the"} articles from this window. Expand the row to see the sources.`}>
         {item.brief}
       </p>
     );
@@ -182,11 +210,10 @@ function Story({ item }: { item: ThreatBoardItem }) {
     return (
       <p className={styles.story}>
         <span className={styles.storyQuote}>“{item.headline.title}”</span>
-        {item.headline.source && <span className={styles.storySrc}> — {item.headline.source}</span>}
+        {item.headline.source && <span className={styles.storySrc}> · {item.headline.source}</span>}
         {item.headline.is_origin && (
           <span className={styles.storySrc}>
-            {" · first"}
-            {outlets > 1 ? ` of ${outlets} outlets` : ""}
+            {outlets > 1 ? ` · first of ${outlets} outlets` : " · first report"}
           </span>
         )}
       </p>
@@ -208,13 +235,13 @@ function PrecedentLine({ item, onOpenStory }: { item: ThreatBoardItem; onOpenSto
         <button
           className={styles.dlink}
           onClick={() => onOpenStory(top.slug)}
-          title={`${top.title} — open that story`}
+          title="Open this story"
         >
           {top.title}
         </button>
         <i>
           {" · "}
-          {Math.round(top.similarity * 100)}% match · {top.entry_count} articles
+          {Math.round(top.similarity * 100)}% similar · {top.entry_count} articles
         </i>
       </div>
     </>
@@ -236,7 +263,7 @@ function StoryDrawer({
     <div className={styles.drawer}>
       <div className={styles.dcol}>
         <div className={styles.dhead}>
-          Coverage · {item.beats || 1} beat{(item.beats || 1) === 1 ? "" : "s"}, {item.attention} outlets
+          Coverage · {item.beats || 1} update{(item.beats || 1) === 1 ? "" : "s"}, {item.attention} outlets
         </div>
         {item.headline && (
           <div className={styles.drow}>
@@ -254,15 +281,15 @@ function StoryDrawer({
           <div className={styles.dmore}>+ {item.echoes_folded} more article{item.echoes_folded === 1 ? "" : "s"} in the story</div>
         )}
         <button className={styles.dlinkQuiet} onClick={() => onOpenStory(item.entity_key)}>
-          Read the spine ↗
+          Open the story timeline ↗
         </button>
       </div>
 
       <div className={styles.dcol}>
-        <div className={styles.dhead}>What's extractable</div>
+        <div className={styles.dhead}>Extracted so far</div>
         <div className={styles.drow}>
           <b>{item.on_record}</b> technique{item.on_record === 1 ? "" : "s"} ·{" "}
-          <b>{item.writable_observables}</b> rule-ready indicator{item.writable_observables === 1 ? "" : "s"}
+          <b>{item.writable_observables}</b> usable indicator{item.writable_observables === 1 ? "" : "s"}
         </div>
         {item.product && (
           <div className={styles.drow}>
@@ -271,30 +298,162 @@ function StoryDrawer({
           </div>
         )}
         <div className={styles.dmore}>
-          Nothing in the library can resolve to a story with no entity — Collect is how it gets one.
+          No entity named yet, so no rule can match.
         </div>
       </div>
 
       <div className={styles.dcol}>
         <div className={styles.dhead}>Why this rank · score {item.score}</div>
         <div className={styles.drow}>
-          beats <b>{item.beats || 1}</b> <i>· waves of coverage, × 2.5 as tradecraft</i>
+          updates <b>{item.beats || 1}</b> <i>· counted like new techniques, × 2.5</i>
         </div>
         <div className={styles.drow}>
           outlets <b>{item.attention}</b>
           <i>
-            {" — "}
+            {" ("}
             {item.sources.slice(0, 4).join(", ")}
             {item.sources.length > 4 ? ` +${item.sources.length - 4}` : ""}
+            {")"}
           </i>
         </div>
         {item.in_stack && (
           <div className={styles.drow}>
-            your stack <b>× 1.5</b> <i>· exposure's own multiplier</i>
+            in your stack <b>× 1.5</b>
           </div>
         )}
         <PrecedentLine item={item} onOpenStory={onOpenStory} />
       </div>
+    </div>
+  );
+}
+
+function apiMessage(err: unknown, fallback: string): string {
+  const msg = (err as { response?: { data?: { message?: string; detail?: string } } })?.response?.data;
+  return msg?.message ?? msg?.detail ?? fallback;
+}
+
+/** The row's hunt pack: one to three hypotheses with queries in the analyst's
+    preferred query language, drafted on request from this window's articles and
+    techniques. A starting point for a hunt that is run in the SIEM and
+    recorded in the ATHF workspace — IntelFeed tracks nothing past the draft. */
+function HuntSection({ item, window }: { item: ThreatBoardItem; window: string }) {
+  const { data, isLoading } = useHuntPack(item.entity_type, item.entity_key, window, true);
+  const draft = useDraftHuntPack();
+  const [copied, setCopied] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const pack = data?.pack ?? null;
+  const dialect = queryLanguageShort(data?.language);
+
+  const run = () =>
+    draft.mutate(
+      { entityType: item.entity_type, entityKey: item.entity_key, window },
+      {
+        onSuccess: () => toast.success(`Hunt pack drafted for ${item.label}`),
+        onError: (err) => toast.error(apiMessage(err, `Could not draft a hunt pack for ${item.label}`)),
+      }
+    );
+
+  const copy = async (h: HuntHypothesis) => {
+    try {
+      await navigator.clipboard.writeText(h.query);
+      setCopied(h.id);
+      setTimeout(() => setCopied(null), 1500);
+    } catch {
+      toast.error("Clipboard unavailable. Select the query and copy it.");
+    }
+  };
+
+  const exportFile = async () => {
+    setExporting(true);
+    try {
+      await downloadHuntFile(item.entity_type, item.entity_key, window);
+    } catch (err) {
+      toast.error(apiMessage(err, "Could not export the hunt file"));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return (
+    <div className={styles.dHunt}>
+      <div className={styles.dhead}>
+        Hunt
+        {pack ? ` · ${pack.hypotheses.length} hypothes${pack.hypotheses.length === 1 ? "is" : "es"}` : ""}
+        {data && (
+          <span className={styles.dheadNote}>
+            {data.language_name}
+          </span>
+        )}
+      </div>
+
+      {isLoading && <div className={styles.dmore}>…</div>}
+
+      {!isLoading && !pack && (
+        <div className={styles.dHuntEmpty}>
+          <span>
+            Up to three hunt hypotheses with {dialect} queries, from this window&apos;s articles and techniques.
+          </span>
+          <button
+            className={`${styles.btn} ${styles.btnPrimary}`}
+            disabled={draft.isPending}
+            onClick={run}
+          >
+            {draft.isPending ? "Drafting…" : "Draft hunt pack"}
+          </button>
+        </div>
+      )}
+
+      {pack?.hypotheses.map((h) => (
+        <div key={h.id} className={styles.dHyp}>
+          <div className={styles.dHypHead}>
+            <b className={styles.dHypTitle}>
+              {h.id} · {h.title}
+            </b>
+            {h.techniques.map((t) => (
+              <span key={t} className={styles.dttp}>
+                {t}
+              </span>
+            ))}
+            {h.tactic && <i className={styles.dHypMeta}>{h.tactic}</i>}
+            {h.platform && <i className={styles.dHypMeta}>{h.platform}</i>}
+          </div>
+          <p className={styles.dHypText}>{h.hypothesis}</p>
+          {h.telemetry.length > 0 && (
+            <div className={styles.dHypTel}>
+              <span>requires</span>
+              {h.telemetry.map((t) => (
+                <span
+                  key={t.source}
+                  className={t.have ? styles.telHave : styles.telMiss}
+                  title={t.have ? "Covered by an enabled telemetry source" : "No enabled telemetry source covers this"}
+                >
+                  {t.source}
+                  {t.have ? "" : " · not collected"}
+                </span>
+              ))}
+            </div>
+          )}
+          <pre className={styles.dQuery}>{h.query}</pre>
+          <div className={styles.dHypFoot}>
+            <button className={styles.btn} onClick={() => copy(h)} aria-label={`Copy ${dialect} for ${h.id}`}>
+              {copied === h.id ? "Copied" : `Copy ${dialect}`}
+            </button>
+            {h.query_notes && <span className={styles.dHypNote}>{h.query_notes}</span>}
+          </div>
+          {h.false_positives && <div className={styles.dHypNote}>Expected false positives: {h.false_positives}</div>}
+        </div>
+      ))}
+
+      {pack && (
+        <div className={styles.dHuntFoot}>
+          <button className={`${styles.btn} ${styles.btnPrimary}`} disabled={exporting} onClick={exportFile}>
+            {exporting ? "Exporting…" : "Export ATHF hunt file"}
+          </button>
+          <button className={styles.btn} disabled={draft.isPending} onClick={run}>
+            {draft.isPending ? "Drafting…" : "Draft again"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -315,33 +474,46 @@ function ThreatDrawer({
   onOpenStory: (slug: string) => void;
 }) {
   const { data, isLoading } = useCoverageWorkspace(item.entity_type, item.entity_key, window, true);
-  // The full inventory behind the caption's "N rules name it" — every library
+  // The full inventory behind the caption's "N rules match" — every library
   // rule that resolves to this row, strongest claim first.
   const { data: rules } = useBoardRules(item.entity_type, item.entity_key, item.prior_rules > 0);
+  // Both lists open to six and expand in place: a "+ N more" that points
+  // somewhere else is a dead end.
+  const [allArticles, setAllArticles] = useState(false);
+  const [allNew, setAllNew] = useState(false);
 
-  if (isLoading) return <div className={styles.drawer}><div className={styles.drawerLoading}>Assembling…</div></div>;
+  if (isLoading) return <div className={styles.drawer}><div className={styles.drawerLoading}>Loading…</div></div>;
   if (!data) return null;
 
-  const newBehaviours = data.behaviours.filter((b) => b.is_new).slice(0, 6);
-  const moreNew = Math.max(0, item.new_techniques - newBehaviours.length);
+  const LIST_CAP = 6;
+  const articles = allArticles ? data.articles : data.articles.slice(0, LIST_CAP);
+  const newAll = data.behaviours.filter((b) => b.is_new);
+  const newBehaviours = allNew ? newAll : newAll.slice(0, LIST_CAP);
 
   return (
     <div className={styles.drawer}>
       <div className={styles.dcol}>
-        <div className={styles.dhead}>
+        <div
+          className={styles.dhead}
+          title={item.echoes_folded > 0 ? `${item.echoes_folded} repeat report${item.echoes_folded === 1 ? "" : "s"} of the same stories folded` : undefined}
+        >
           {foldsCoverage(item)
             ? `Coverage · ${item.stories} stor${item.stories === 1 ? "y" : "ies"}, ${item.attention} outlets`
             : `Articles · ${data.articles.length}`}
         </div>
-        {data.articles.slice(0, 6).map((a) => (
-          <div key={a.entry_id} className={styles.drow}>
+        {articles.map((a) => (
+          <div key={a.entry_id} className={`${styles.drow} ${styles.darticle}`}>
             <button className={styles.dlink} onClick={() => onOpenArticle(a.entry_id)} title="Open in the reader">
               {a.title}
             </button>
-            <i>
-              {a.source}
-              {a.published_at ? ` · ${a.published_at.slice(5, 10)}` : ""}
-              {a.technique_count ? ` · ${a.technique_count} techniques` : ""}
+            <i className={styles.dmeta}>
+              {[
+                a.source,
+                a.published_at ? a.published_at.slice(5, 10) : null,
+                a.technique_count ? `${a.technique_count} technique${a.technique_count === 1 ? "" : "s"}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </i>
             {a.url && (
               <a
@@ -357,26 +529,27 @@ function ThreatDrawer({
             )}
           </div>
         ))}
-        {data.articles.length > 6 && (
-          <div className={styles.dmore}>+ {data.articles.length - 6} more in the workspace</div>
-        )}
-        {item.echoes_folded > 0 && (
-          <div className={styles.dmore}>
-            {item.echoes_folded} of them re-report a story already listed here
-          </div>
+        {data.articles.length > LIST_CAP && (
+          <button className={styles.dmoreBtn} onClick={() => setAllArticles((v) => !v)}>
+            {allArticles ? "Show fewer" : `Show ${data.articles.length - LIST_CAP} more`}
+          </button>
         )}
       </div>
 
       <div className={styles.dcol}>
-        <div className={styles.dhead}>New this window · {item.new_techniques}</div>
-        {newBehaviours.length === 0 && <div className={styles.dmore}>No first-seen techniques in this window.</div>}
+        <div className={styles.dhead}>New techniques this window · {item.new_techniques}</div>
+        {newBehaviours.length === 0 && <div className={styles.dmore}>None this window.</div>}
         {newBehaviours.map((b) => (
           <div key={b.technique_id} className={styles.drow}>
             <b className={styles.dttp}>{b.technique_id}</b> {b.technique_name}
-            <i>{b.tier ? " · telemetry collected" : b.below_line ? " · no source" : ""}</i>
+            <i>{b.tier ? " · telemetry collected" : b.below_line ? " · no telemetry source" : ""}</i>
           </div>
         ))}
-        {moreNew > 0 && <div className={styles.dmore}>+ {moreNew} more</div>}
+        {newAll.length > LIST_CAP && (
+          <button className={styles.dmoreBtn} onClick={() => setAllNew((v) => !v)}>
+            {allNew ? "Show fewer" : `Show ${newAll.length - LIST_CAP} more`}
+          </button>
+        )}
         <PrecedentLine item={item} onOpenStory={onOpenStory} />
       </div>
 
@@ -385,20 +558,15 @@ function ThreatDrawer({
         {foldsCoverage(item) && (
           <div className={styles.drow}>
             stories <b>{item.stories}</b>
-            <i>
-              {item.stories === 1
-                ? ` — one wave, ${item.attention} outlets`
-                : ` — separate stories, not one re-reported`}
-            </i>
           </div>
         )}
         <div className={styles.drow}>
-          {foldsCoverage(item) ? "outlets" : "attention"} <b>{item.attention}</b>
-          <i> — {item.sources.slice(0, 4).join(", ")}{item.sources.length > 4 ? ` +${item.sources.length - 4}` : ""}</i>
+          outlets <b>{item.attention}</b>
+          <i> ({item.sources.slice(0, 4).join(", ")}{item.sources.length > 4 ? ` +${item.sources.length - 4}` : ""})</i>
         </div>
         {item.entity_type === "cve" ? (
           <div className={styles.drow}>
-            exploitation lift{" "}
+            exploitation multiplier{" "}
             <b>
               {item.is_kev
                 ? "KEV × 2.5"
@@ -408,48 +576,38 @@ function ThreatDrawer({
                     ? `${item.exploit_status} × 1.8`
                     : "× 1.0"}
             </b>{" "}
-            <i>· base 1.5 — Vendor Watch's own multipliers</i>
+
           </div>
         ) : (
           <div className={styles.drow}>
-            new tradecraft <b>{item.new_techniques}</b> <i>× 2.5</i>
+            new techniques <b>{item.new_techniques}</b> <i>× 2.5</i>
           </div>
         )}
         {item.writable_observables > 0 && (
           <div className={styles.drow}>
-            rule-ready indicators <b>{item.writable_observables}</b>
+            usable indicators <b>{item.writable_observables}</b>
           </div>
         )}
         <div className={styles.drow}>
-          rules: <b>{item.prior_rules_strong} strong</b>
-          {item.prior_rules - item.prior_rules_strong > 0 && (
-            <> · {item.prior_rules - item.prior_rules_strong} weak</>
-          )}
+          rules <b>{item.prior_rules}</b>
           {Object.keys(item.prior_rule_repos).length > 0 && (
             <i>
-              {" — "}
+              {" ("}
               {Object.entries(item.prior_rule_repos)
                 .sort((a, b) => b[1] - a[1])
                 .slice(0, 3)
                 .map(([r, n]) => `${r} ${n}`)
-                .join(" · ")}
+                .join(", ")}
+              {")"}
             </i>
           )}
         </div>
-        {item.brief && item.brief_sources.length > 0 && (
-          <div className={styles.dmore}>story line built from {item.brief_sources.length} window articles</div>
-        )}
       </div>
 
       {rules && rules.items.length > 0 && (
         <div className={styles.dRules}>
           <div className={styles.dhead}>
-            Rules that resolve here · {rules.total}
-            {rules.weak > 0 && (
-              <span className={styles.dheadNote}>
-                {rules.strong} name it outright · {rules.weak} weak (body text or story tag)
-              </span>
-            )}
+            {rules.total} potential rule{rules.total === 1 ? "" : "s"} could detect this threat
           </div>
           {rules.items.map((r) => (
             <div key={r.rule_id} className={styles.dRule}>
@@ -463,13 +621,16 @@ function ThreatDrawer({
                 {r.is_draft ? " · draft" : ""}
               </span>
               <span className={styles.dRuleMatch}>
-                {r.via} — {r.matched_on ?? "—"}
-                {r.confidence === "low" && <i className={styles.dRuleWeak}> · weak</i>}
+                {r.via}
+                {r.matched_on ? ` · ${r.matched_on}` : ""}
+
               </span>
             </div>
           ))}
         </div>
       )}
+
+      <HuntSection item={item} window={window} />
     </div>
   );
 }
@@ -478,7 +639,10 @@ type VulnFilter = "all" | "stack" | "kev" | "epss" | "norule";
 
 export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
   const [window, setWindow] = useState("14d");
-  const [stateFilter, setStateFilter] = useState<string>("open");
+  const [stateFilter, setStateFilter] = useState<StateFilter>("open");
+  // The open row menu, portalled to the body because .row clips its overflow
+  // for the rounded corners: the row key plus where the trigger sits.
+  const [menuFor, setMenuFor] = useState<{ key: string; top: number; right: number } | null>(null);
   const [vulnFilter, setVulnFilter] = useState<VulnFilter>("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -488,12 +652,39 @@ export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
   // the threats facet. "all" interleaves both by score server-side, with CVEs
   // claimed by a visible cluster folded onto that cluster's row.
   const serverFacet: BoardFacet = facet === "vulns" ? "vulns" : facet === "all" ? "all" : "threats";
-  const { data, isLoading } = useThreatBoard(window, stateFilter === "handled", serverFacet);
+  // Handled and muted rows are only returned when asked for; open and tracked
+  // are the board's normal read.
+  const includeDecided = stateFilter === "handled" || stateFilter === "muted";
+  const { data, isLoading } = useThreatBoard(window, includeDecided, serverFacet);
+
+  // The ⋯ menu closes on any click outside it, on Escape, and when the page
+  // scrolls (its fixed position would drift from the trigger).
+  useEffect(() => {
+    if (!menuFor) return;
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest?.("[data-rowmenu]")) setMenuFor(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuFor(null);
+    };
+    const close = () => setMenuFor(null);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    // `window` is the board's view window in this component; the global is globalThis.
+    globalThis.addEventListener("scroll", close, true);
+    globalThis.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+      globalThis.removeEventListener("scroll", close, true);
+      globalThis.removeEventListener("resize", close);
+    };
+  }, [menuFor]);
 
   const items = useMemo(() => {
     const all = data?.items ?? [];
     const byState = all.filter((i) =>
-      stateFilter === "handled" ? i.state === "handled" : i.state !== "handled"
+      stateFilter === "open" ? i.state === "open" || i.state === "tracked" : i.state === stateFilter
     );
     const byFacet =
       facet === "all" || facet === "vulns" ? byState : byState.filter((i) => i.facets.includes(facet));
@@ -519,7 +710,7 @@ export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
       return;
     }
     if (item.is_generic) {
-      toast.info(`"${item.label}" is flagged as an extraction artefact — resolve it in entity hygiene`);
+      toast.info(`"${item.label}" is flagged as an extraction artefact. Resolve it in Engine review.`);
       return;
     }
     // CVE rows land on the CVE face of the Detection tab — the same view the
@@ -531,16 +722,12 @@ export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
     navigate(`/workbench/${item.entity_type}/${item.entity_key}`);
   };
 
-  const mark = (item: ThreatBoardItem, next: "handled" | "open") => {
+  const mark = (item: ThreatBoardItem, next: ThreatState) => {
+    setMenuFor(null);
     setState.mutate(
       { entityType: item.entity_type, entityKey: item.entity_key, state: next, window },
       {
-        onSuccess: () =>
-          toast.success(
-            next === "handled"
-              ? `${item.label} marked handled — returns if new tradecraft arrives`
-              : `${item.label} reopened`
-          ),
+        onSuccess: () => toast.success(STATE_TOAST[next](item.label)),
         onError: () => toast.error(`Could not update ${item.label}`),
       }
     );
@@ -575,7 +762,7 @@ export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
             onChange={setWindow}
             options={WINDOWS.map((w) => ({ value: w.value, label: w.label }))}
           />
-          <Segmented<string>
+          <Segmented<StateFilter>
             label="State"
             size="sm"
             value={stateFilter}
@@ -588,33 +775,16 @@ export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
       {isLoading ? (
         <AsyncStateLoading label="Ranking threats…" />
       ) : !items.length ? (
-        <div className={styles.empty}>
-          {stateFilter === "handled"
-            ? "Nothing marked handled yet."
-            : "No threats above the attention threshold in this window."}
-        </div>
+        <div className={styles.empty}>{EMPTY_TEXT[stateFilter]}</div>
       ) : (
         <div className={styles.rows}>
-          {items.map((item, index) => {
+          {items.map((item) => {
             const key = `${item.entity_type}:${item.entity_key}`;
             const isOpen = expanded === key;
-            // The landscape divider: below it, CVEs that affect nothing you
-            // run and have no fireable rule — context, not your write-queue.
-            // Same honesty as the workspace's below-the-line rule.
-            const showSurfaceDivider =
-              facet === "vulns" &&
-              !item.on_surface &&
-              (index === 0 || items[index - 1].on_surface);
             return (
               <div key={key}>
-              {showSurfaceDivider && (
-                <div className={styles.surfaceDivider}>
-                  Outside your surface — no stack vendor/product match, no fireable rule. Follow a
-                  vendor or tick a telemetry source to claim these.
-                </div>
-              )}
               <div
-                className={`${styles.row} ${item.is_generic ? styles.generic : ""} ${!item.on_surface ? styles.offSurface : ""} ${isOpen ? styles.rowOpen : ""}`}
+                className={`${styles.row} ${item.is_generic ? styles.generic : ""} ${isOpen ? styles.rowOpen : ""}`}
                 style={{ borderLeftColor: ENTITY_COLOR[item.entity_type] ?? "var(--text-muted)" }}
               >
                 <div
@@ -661,6 +831,17 @@ export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
                         same story
                       </span>
                     )}
+                    {carried(item).map((c) => (
+                      <span
+                        key={c.entity_key}
+                        className={styles.tagCve}
+                        title={`${c.label} is reported in this threat's articles. Decisions on this row apply to it too.`}
+                      >
+                        exploits {c.label}
+                        {c.is_kev ? " · KEV" : ""}
+                        {c.in_stack ? " · in your stack" : ""}
+                      </span>
+                    ))}
                     {item.product && (
                       <span className={styles.tag} style={{ color: "var(--entity-product, #ec4899)" }}>
                         {item.product}
@@ -694,7 +875,7 @@ export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
                           <b>
                             {item.beats || 1} beat{(item.beats || 1) === 1 ? "" : "s"}
                           </b>
-                          <b>no entity yet</b>
+                          <b>no entity identified</b>
                         </>
                       ) : item.entity_type === "cve" ? (
                         <>
@@ -709,7 +890,7 @@ export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
                           <b title="Techniques reported for this threat for the first time in the window">
                             {item.new_techniques} new TTP{item.new_techniques === 1 ? "" : "s"}
                           </b>
-                          <b title="Techniques on record for this threat overall">
+                          <b title="Techniques ever recorded for this threat">
                             {item.on_record} on record
                           </b>
                         </>
@@ -731,16 +912,47 @@ export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
                         {actionLabel(item)}
                       </button>
                       {!item.is_generic && (
-                        <button
-                          className={styles.btn}
-                          disabled={setState.isPending}
-                          aria-label={`${item.state === "handled" ? "Reopen" : item.state === "tracked" ? "Untrack" : "Mark handled"}: ${item.label}`}
-                          onClick={() =>
-                            mark(item, item.state === "handled" || item.state === "tracked" ? "open" : "handled")
-                          }
-                        >
-                          {item.state === "handled" ? "Reopen" : item.state === "tracked" ? "Untrack" : "Mark handled"}
-                        </button>
+                        <span className={styles.menuWrap} data-rowmenu>
+                          <button
+                            className={styles.btn}
+                            aria-label={`More actions: ${item.label}`}
+                            aria-haspopup="menu"
+                            aria-expanded={menuFor?.key === key}
+                            onClick={(e) => {
+                              if (menuFor?.key === key) {
+                                setMenuFor(null);
+                                return;
+                              }
+                              const r = e.currentTarget.getBoundingClientRect();
+                              setMenuFor({ key, top: r.bottom + 4, right: globalThis.innerWidth - r.right });
+                            }}
+                          >
+                            ⋯
+                          </button>
+                          {menuFor?.key === key &&
+                            createPortal(
+                              <div
+                                className={styles.menu}
+                                role="menu"
+                                data-rowmenu
+                                style={{ top: menuFor.top, right: menuFor.right }}
+                              >
+                                {menuItems(item).map((mi) => (
+                                  <button
+                                    key={mi.label}
+                                    role="menuitem"
+                                    className={styles.menuItem}
+                                    disabled={setState.isPending}
+                                    onClick={() => mark(item, mi.state)}
+                                  >
+                                    {mi.label}
+                                    <small className={styles.menuHint}>{mi.hint}</small>
+                                  </button>
+                                ))}
+                              </div>,
+                              document.body
+                            )}
+                        </span>
                       )}
                     </span>
                   </div>

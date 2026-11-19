@@ -529,15 +529,18 @@ def _build_branches(node: ASTNode, plan: ExecutionPlan) -> list[SearchBranch]:
     return branches or [SearchBranch()]
 
 
-def meili_quote(value: str) -> str:
+def meili_quote(value: object) -> str:
     """`value` as a double-quoted Meilisearch filter string literal.
 
     Backslash and the double quote are escaped (Meilisearch's filter grammar
     accepts `\\"` inside a quoted string). Without this, a value from a request
     parameter can close the quote and append its own clause — with `user_tags`
     filterable, that would let one user query another's private assignments.
+    Non-strings (the UUIDs FastAPI parses `feed_id`/`category_id` into) are
+    quoted as their string form.
     """
-    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    text = str(value)
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def tag_filter_clause(name: str, viewer_id: str | None) -> str:
@@ -579,7 +582,7 @@ def _branch_dnf(node: ASTNode, plan: ExecutionPlan, *, negated: bool) -> list[tu
             clause = (
                 tag_filter_clause(node.value, plan.viewer_id)
                 if attribute == "tags"
-                else f'{attribute} = "{node.value}"'
+                else f"{attribute} = {meili_quote(node.value)}"
             )
             return [([], [f"NOT {clause}" if negated else clause])]
 

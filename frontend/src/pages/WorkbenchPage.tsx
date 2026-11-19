@@ -1926,6 +1926,7 @@ const RULE_FORMAT_LABELS: Record<string, string> = {
   sigma: "sigma", splunk_spl: "spl", kql: "kql", elastic_ql: "eql",
   crowdstrike_ql: "cql", snort_suricata: "snort", yara: "yara",
   nuclei: "nuclei", panther: "panther",
+  yaral: "yara-l", aql: "aql", sumo: "sumo", sql: "sql",
 };
 
 type RuleLens = "flat" | "technique" | "repo" | "product";

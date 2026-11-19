@@ -82,6 +82,15 @@ let precedent: { slug: string; title: string; status: string; entry_count: numbe
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 
 const setStateMutate = vi.fn();
+const draftMutate = vi.fn();
+const downloadSpy = vi.fn();
+// The hunt pack the drawer shows: none until a test sets one.
+let huntPack: import("@/hooks/useThreatBoard").HuntPackResponse = {
+  status: "none",
+  language: "kql",
+  language_name: "KQL (Microsoft Sentinel / Defender XDR)",
+  pack: null,
+};
 vi.mock("@/hooks/useThreatBoard", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/useThreatBoard")>();
   return {
@@ -91,20 +100,41 @@ vi.mock("@/hooks/useThreatBoard", async (importOriginal) => {
     usePrecedent: () => ({ data: precedent }),
     // The drawer's full-width rule inventory — loading state is enough here.
     useBoardRules: () => ({ data: undefined, isLoading: true }),
+    useHuntPack: () => ({ data: huntPack, isLoading: false }),
+    useDraftHuntPack: () => ({ mutate: draftMutate, isPending: false }),
+    downloadHuntFile: (...args: unknown[]) => {
+      downloadSpy(...args);
+      return Promise.resolve();
+    },
   };
 });
 
 const workspaceSpy = vi.fn();
+// Undefined keeps the drawer in its loading state; a test that needs the
+// drawer's body sets a (minimal) workspace.
+let workspace: Record<string, unknown> | undefined;
 vi.mock("@/hooks/useCoverageWorkspace", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/useCoverageWorkspace")>();
   return {
     ...actual,
     useCoverageWorkspace: (...args: unknown[]) => {
       workspaceSpy(...args);
-      return { data: undefined, isLoading: true };
+      return { data: workspace, isLoading: workspace === undefined };
     },
   };
 });
+
+const EMPTY_WORKSPACE = {
+  entity_type: "threat_actor",
+  entity_key: "a2",
+  label: "APT29",
+  window: "14d",
+  articles: [],
+  behaviours: [],
+  article_total: 0,
+  article_contributed_total: 0,
+  missing_categories: [],
+};
 
 function renderBoard(facet = "all") {
   return render(
@@ -129,15 +159,9 @@ describe("ThreatBoard briefing rows", () => {
     expect(screen.queryByText(/no new tradecraft/)).not.toBeInTheDocument();
   });
 
-  it("keeps the evidence to one quiet caption line — rule-ready indicators included", () => {
-    renderBoard();
-    expect(screen.getByText("12 articles · 1 rule-ready indicator · 1 rule loosely matches")).toBeInTheDocument();
-    expect(screen.getByText("10 articles · 14 rules name it · +21 weak")).toBeInTheDocument();
-  });
-
   it("derives the action label from the counts", () => {
     renderBoard();
-    expect(screen.getByRole("button", { name: "Check 1 weak match →" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review 1 rule →" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Extend 14 rules →" })).toBeInTheDocument();
   });
 
@@ -146,25 +170,112 @@ describe("ThreatBoard briefing rows", () => {
     fireEvent.click(screen.getByText(/Session-cookie theft and MFA modification/));
     // The drawer lazy-fetches the workspace for exactly this row and window.
     expect(workspaceSpy).toHaveBeenCalledWith("threat_actor", "a2", "14d", true);
-    expect(screen.getByText("Assembling…")).toBeInTheDocument();
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
   });
 
-  it("marks a threat handled with the view's window", () => {
+  it("marks a threat handled from the row menu, with the view's window", () => {
     renderBoard();
-    fireEvent.click(screen.getByRole("button", { name: "Mark handled: ShinyHunters" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions: ShinyHunters" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Mark handled/ }));
     expect(setStateMutate).toHaveBeenCalledWith(
       expect.objectContaining({ entityType: "threat_actor", entityKey: "a1", state: "handled", window: "14d" }),
       expect.anything()
     );
   });
 
+  it("dismisses a threat as muted from the row menu", () => {
+    renderBoard();
+    fireEvent.click(screen.getByRole("button", { name: "More actions: ShinyHunters" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Dismiss/ }));
+    expect(setStateMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "threat_actor", entityKey: "a1", state: "muted" }),
+      expect.anything()
+    );
+  });
+
+  it("offers Open, Tracked, Handled and Muted views", () => {
+    renderBoard();
+    for (const label of ["Open", "Tracked", "Handled", "Muted"]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+  });
+
   it("filters rows by facet", () => {
     renderBoard("malware");
     expect(screen.queryByText("ShinyHunters")).not.toBeInTheDocument();
-    expect(screen.getByText(/No threats above the attention threshold/)).toBeInTheDocument();
+    expect(screen.getByText(/No threats with enough coverage/)).toBeInTheDocument();
   });
 });
 
+
+/** The hunt pack at the drawer's foot: drafted on request, copied to the SIEM,
+    exported to ATHF. Nothing here tracks a hunt. */
+describe("ThreatBoard hunt pack", () => {
+  function openDrawer() {
+    renderBoard();
+    fireEvent.click(screen.getByText(/Session-cookie theft and MFA modification/));
+  }
+
+  it("offers to draft a pack when none exists, and asks the server for this row and window", () => {
+    workspace = EMPTY_WORKSPACE;
+    huntPack = { status: "none", language: "kql", language_name: "KQL (Microsoft Sentinel / Defender XDR)", pack: null };
+    openDrawer();
+    fireEvent.click(screen.getByRole("button", { name: "Draft hunt pack" }));
+    expect(draftMutate).toHaveBeenCalledWith(
+      { entityType: "threat_actor", entityKey: "a2", window: "14d" },
+      expect.anything()
+    );
+    expect(screen.queryByText("Export ATHF hunt file")).not.toBeInTheDocument();
+  });
+
+  it("renders each hypothesis with its query, telemetry check and the ATHF export", () => {
+    workspace = EMPTY_WORKSPACE;
+    huntPack = {
+      status: "ready",
+      language: "kql",
+      language_name: "KQL (Microsoft Sentinel / Defender XDR)",
+      pack: {
+        entity_type: "threat_actor",
+        entity_key: "a2",
+        label: "APT29",
+        window: "14d",
+        language: "kql",
+        language_name: "KQL (Microsoft Sentinel / Defender XDR)",
+        generated_at: "2026-11-17T10:00:00+00:00",
+        model: "stub",
+        entry_ids: ["e2"],
+        hypotheses: [
+          {
+            id: "H1",
+            title: "Help-desk reset then MFA enrollment",
+            hypothesis: "Adversaries use help-desk resets to register their own MFA method on employee accounts.",
+            tactic: "credential-access",
+            techniques: ["T1621"],
+            platform: "Identity Provider",
+            data_sources: ["auth.mfa", "vpn.session"],
+            telemetry: [
+              { source: "auth.mfa", have: true },
+              { source: "vpn.session", have: false },
+            ],
+            runnable: false,
+            query: "AuditLogs | where TimeGenerated > ago(7d) | take 100",
+            query_notes: "Join resets to registrations within one hour.",
+            false_positives: "New-hire onboarding.",
+          },
+        ],
+      },
+    };
+    openDrawer();
+    expect(screen.getByText("H1 · Help-desk reset then MFA enrollment")).toBeInTheDocument();
+    expect(screen.getByText("AuditLogs | where TimeGenerated > ago(7d) | take 100")).toBeInTheDocument();
+    expect(screen.getByText("vpn.session · not collected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy KQL for H1" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Export ATHF hunt file" }));
+    expect(downloadSpy).toHaveBeenCalledWith("threat_actor", "a2", "14d");
+    // The pack is a starting point: no verdicts, findings or tickets anywhere.
+    expect(screen.queryByText(/verdict|finding|ticket/i)).not.toBeInTheDocument();
+  });
+});
 
 /** Story threads on the board: what the counts mean once one story can be told
     apart from eleven re-reports of it, and the row that only a thread can
@@ -226,15 +337,23 @@ describe("ThreatBoard with story threads", () => {
     expect(screen.getByText("1 story")).toBeInTheDocument();
     expect(screen.getByText("7 outlets")).toBeInTheDocument();
     expect(screen.queryByText(/attn 7/)).not.toBeInTheDocument();
-    expect(
-      screen.getByText("1 story · 6 articles · 5 duplicates hidden · 1 rule-ready indicator · 1 rule loosely matches")
-    ).toBeInTheDocument();
   });
 
   it("keeps the outlet count as the story count when nothing is threaded", () => {
     renderRows([makeItem({ stories: 21, attention: 21, articles: 12 })]);
     expect(screen.getByText("21 outlets")).toBeInTheDocument();
     expect(screen.queryByText(/stories/)).not.toBeInTheDocument();
+  });
+
+  it("names a claimed CVE on the row instead of dropping it", () => {
+    renderRows([
+      makeItem({
+        merged_from: [{ entity_type: "cve", entity_key: "CVE-2026-1234", label: "CVE-2026-1234", is_kev: true }],
+      }),
+    ]);
+    expect(screen.getByText(/exploits CVE-2026-1234 · KEV/)).toBeInTheDocument();
+    // A carried CVE is a chip, not a second name on the identity line.
+    expect(screen.queryByText("· CVE-2026-1234")).not.toBeInTheDocument();
   });
 
   it("puts the absorbed row on the same identity line", () => {
@@ -252,7 +371,7 @@ describe("ThreatBoard with story threads", () => {
   it("never reports a rule gap on a row that has no entity", () => {
     renderRows([storyRow]);
     expect(
-      screen.getByText("1 story · 5 articles · 2 duplicates hidden · 2 rule-ready indicators · 3 beats, still developing")
+      screen.getByText("3 updates, still developing")
     ).toBeInTheDocument();
     expect(screen.queryByText(/nothing matches/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Read the story →" })).toBeInTheDocument();
@@ -266,10 +385,10 @@ describe("ThreatBoard with story threads", () => {
     renderRows([storyRow]);
     fireEvent.click(screen.getByText(/Fortinet confirms FortiWeb attacks/));
     expect(workspaceSpy).not.toHaveBeenCalledWith("story", "fortiweb-preauth-rce", "14d", true);
-    expect(screen.getByText("Coverage · 3 beats, 5 outlets")).toBeInTheDocument();
+    expect(screen.getByText("Coverage · 3 updates, 5 outlets")).toBeInTheDocument();
     // The precedent line is the one thing keyword search could never answer.
     expect(screen.getByText("Akira via Cisco ASA")).toBeInTheDocument();
-    expect(screen.getByText(/83% match/)).toBeInTheDocument();
+    expect(screen.getByText(/83% similar/)).toBeInTheDocument();
     precedent = [];
   });
 });

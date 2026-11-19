@@ -141,6 +141,8 @@ function getLanguageExtension(language: string) {
       return StreamLanguage.define(kqlMode);
     case "elastic_ql":
     case "crowdstrike_ql":
+    case "aql":
+    case "sql":
       return sql();
     case "snort_suricata":
       return StreamLanguage.define(snortSuricataMode);

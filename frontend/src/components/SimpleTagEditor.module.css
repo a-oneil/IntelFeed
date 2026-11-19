@@ -21,6 +21,14 @@
   font-size: var(--fs-base);
   background: var(--accent-bg);
   border-color: transparent;
+  /* A tag longer than the row (an "author:…" tag from an import) truncates
+     inside the box instead of running past it. */
+  max-width: 100%;
+  min-width: 0;
+}
+
+.remove {
+  flex: none;
 }
 
 .remove {

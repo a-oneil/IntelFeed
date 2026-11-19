@@ -229,7 +229,10 @@ export const FIELD_GROUPS: QueryFieldGroup[] = [
       {
         token: "rule.type:",
         hint: "Rule format",
-        values: ["sigma", "splunk_spl", "crowdstrike_ql", "elastic_ql", "kql", "yara", "snort_suricata"],
+        values: [
+          "sigma", "splunk_spl", "crowdstrike_ql", "elastic_ql", "kql", "yara", "snort_suricata",
+          "nuclei", "panther", "yaral", "aql", "sumo", "sql",
+        ],
       },
       { token: "rule.severity:", hint: "Severity", values: [...SEVERITIES, "informational"] },
       { token: "rule.data_source:", hint: "Log source the rule needs" },

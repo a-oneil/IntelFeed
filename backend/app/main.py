@@ -111,12 +111,19 @@ async def _seed_ai_tasks() -> None:
                     )
                 )
             else:
-                # Sync variables, default_prompt_template, default_system_template,
-                # and output_schema for existing system tasks so prompt updates
-                # ship on deploy. We do NOT touch user-created AIPromptTemplate
+                # Sync display_name, description, variables, the two default
+                # templates and output_schema for existing system tasks so
+                # prompt and copy updates ship on deploy. We do NOT touch user-created AIPromptTemplate
                 # rows — those remain authoritative when present (see
                 # get_active_prompt in app/ai/engine.py).
                 existing = existing_tasks[task_data["name"]]
+                # Name and description are shipped copy, not user-editable
+                # (AITaskUpdate carries neither), so a rename lands on deploy.
+                if existing.display_name != task_data["display_name"]:
+                    existing.display_name = task_data["display_name"]
+                new_description = task_data.get("description")
+                if existing.description != new_description:
+                    existing.description = new_description
                 new_vars = task_data.get("variables", [])
                 if existing.variables != new_vars:
                     existing.variables = new_vars
@@ -801,6 +808,7 @@ from app.api.requirements import router as requirements_router
 from app.api.saved_searches import router as saved_searches_router
 from app.api.search import router as search_router
 from app.api.shared import router as shared_router
+from app.api.shared_reports import router as shared_reports_router
 from app.api.system_settings import router as system_settings_router
 from app.api.tags import router as tags_router
 from app.api.telegram import router as telegram_router
@@ -895,6 +903,7 @@ app.include_router(analytics_router, prefix="/api/analytics", tags=["analytics"]
 app.include_router(tools_router, prefix="/api/tools", tags=["tools"])
 app.include_router(ai_results_router, prefix="/api", tags=["ai-results"])
 app.include_router(system_settings_router, prefix="/api/system-settings", tags=["system-settings"])
+app.include_router(shared_reports_router, prefix="/api", tags=["sharing"])
 app.include_router(shared_router, prefix="/api", tags=["sharing"])
 app.include_router(job_schedules_router, prefix="/api/job-schedules", tags=["job-schedules"])
 app.include_router(hygiene_router, prefix="/api", tags=["hygiene"])

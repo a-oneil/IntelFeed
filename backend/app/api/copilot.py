@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app import entity_types
+from app.ai.query_language import preferred_query_language, with_query_language
 from app.config import settings
 from app.core.exceptions import AppError
 from app.core.security import get_current_user
@@ -543,11 +544,14 @@ async def copilot_stream(
     prior = list(conv.messages or [])[-_MAX_HISTORY_MESSAGES:]
     history = [{"role": m.get("role"), "content": m.get("content")} for m in prior]
 
-    variables = {
-        "question": body.question,
-        "conversation_history": history,
-        "ambient_context": ambient,
-    }
+    variables = with_query_language(
+        {
+            "question": body.question,
+            "conversation_history": history,
+            "ambient_context": ambient,
+        },
+        preferred_query_language(user.settings),
+    )
     rendered_system = render_prompt(system_template, variables) if system_template else None
     rendered_user = render_prompt(user_template, variables)
 

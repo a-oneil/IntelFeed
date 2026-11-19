@@ -131,7 +131,7 @@ jobs:
           # changes what an image *contains*, not how it *builds*, and the
           # backend job already tests that.
           images='^(backend/(Dockerfile|\.dockerignore|pyproject\.toml|requirements(-dev)?\.lock|entrypoint\.sh)'
-          images="$images"'|frontend/(Dockerfile|\.dockerignore|package\.json|pnpm-lock\.yaml|nginx\.conf)'
+          images="$images"'|frontend/(Dockerfile|\.dockerignore|package\.json|pnpm-lock\.yaml|nginx[^/]*\.conf)'
           images="$images"'|db/Dockerfile|piper/Dockerfile'
           images="$images"'|docker-compose.*\.yml'
           images="$images"'|\.env\.example'

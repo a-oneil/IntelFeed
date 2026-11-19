@@ -1,9 +1,7 @@
 export { RuleStructureRail } from "./RuleStructureRail";
 export { RuleContextRail } from "./RuleContextRail";
-export { RuleStatusLine } from "./RuleStatusLine";
-export { RuleSlideOver } from "./RuleSlideOver";
 export { RuleDetailsForm, type RuleFormValues } from "./RuleDetailsForm";
-export { RuleConvertPanel, type RuleConversion } from "./RuleConvertPanel";
+export { RuleConvertPanel, type RuleConversion, type ConvertTarget } from "./RuleConvertPanel";
 export { RuleHistoryPanel } from "./RuleHistoryPanel";
 export { RuleCompare } from "./RuleCompare";
 export { RuleAIActions } from "./RuleAIActions";

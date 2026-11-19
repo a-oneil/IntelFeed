@@ -223,13 +223,19 @@
      "items": {
       "type": "string",
       "enum": [
+       "aql",
        "crowdstrike_ql",
        "elastic_ql",
        "kql",
+       "nuclei",
+       "panther",
        "sigma",
        "snort_suricata",
        "splunk_spl",
-       "yara"
+       "sql",
+       "sumo",
+       "yara",
+       "yaral"
       ]
      },
      "description": "Rule formats to include in the summary"
@@ -432,7 +438,7 @@
  },
  {
   "name": "convert_detection_rule",
-  "description": "Convert a detection rule to a different rule language using the AI provider assigned to the detection_rules task. Target formats: crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, splunk_spl, yara. Returns the converted content without changing the source rule. With save=true, the conversion is stored on the rule's metadata under rule_conversions (same place the UI keeps saved conversions).",
+  "description": "Convert a detection rule to a different rule language using the AI provider assigned to the detection_rules task. Target formats: aql, crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, splunk_spl, sql, sumo, yara, yaral. Returns the converted content without changing the source rule. With save=true, the conversion is stored on the rule's metadata under rule_conversions (same place the UI keeps saved conversions).",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -443,6 +449,7 @@
     "target_format": {
      "type": "string",
      "enum": [
+      "aql",
       "crowdstrike_ql",
       "elastic_ql",
       "kql",
@@ -451,7 +458,10 @@
       "sigma",
       "snort_suricata",
       "splunk_spl",
-      "yara"
+      "sql",
+      "sumo",
+      "yara",
+      "yaral"
      ]
     },
     "save": {
@@ -590,6 +600,7 @@
     "rule_type": {
      "type": "string",
      "enum": [
+      "aql",
       "crowdstrike_ql",
       "elastic_ql",
       "kql",
@@ -598,7 +609,10 @@
       "sigma",
       "snort_suricata",
       "splunk_spl",
-      "yara"
+      "sql",
+      "sumo",
+      "yara",
+      "yaral"
      ]
     },
     "rule_content": {
@@ -911,6 +925,27 @@
    "required": [
     "entry_id",
     "content"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_report_share_link",
+  "description": "Create a public (unauthenticated) share link for an intel report, or return this user's existing active one. The public page shows the rendered report (sections, data tables, tags) with no author or source ids. Only TLP:CLEAR and TLP:GREEN reports can be shared; AMBER and RED are refused, and a link stops resolving while its report carries one of those markings. ttl_days optionally sets an expiry on a newly created link (the API default is no expiry).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "report_id": {
+     "type": "string",
+     "description": "Intel report UUID to share"
+    },
+    "ttl_days": {
+     "type": "number",
+     "description": "Optional days until the link expires (new links only)"
+    }
+   },
+   "required": [
+    "report_id"
    ]
   },
   "mutating": true
@@ -1712,7 +1747,7 @@
  },
  {
   "name": "generate_detection_rules",
-  "description": "Generate detection rules from an entry's TTPs via the detection_rules AI task and store them as drafts. Supported formats: crowdstrike_ql, elastic_ql, kql, sigma, snort_suricata, splunk_spl, yara.",
+  "description": "Generate detection rules from an entry's TTPs via the detection_rules AI task and store them as drafts. Supported formats: aql, crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, splunk_spl, sql, sumo, yara, yaral.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -1725,13 +1760,19 @@
      "items": {
       "type": "string",
       "enum": [
+       "aql",
        "crowdstrike_ql",
        "elastic_ql",
        "kql",
+       "nuclei",
+       "panther",
        "sigma",
        "snort_suricata",
        "splunk_spl",
-       "yara"
+       "sql",
+       "sumo",
+       "yara",
+       "yaral"
       ]
      },
      "description": "Which rule formats to generate"
@@ -2133,7 +2174,7 @@
  },
  {
   "name": "get_detection_rules",
-  "description": "List detection rules. Optionally filter by rule type (crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, splunk_spl, yara).",
+  "description": "List detection rules. Optionally filter by rule type (aql, crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, splunk_spl, sql, sumo, yara, yaral).",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -2141,6 +2182,7 @@
      "type": "string",
      "description": "Filter by rule type",
      "enum": [
+      "aql",
       "crowdstrike_ql",
       "elastic_ql",
       "kql",
@@ -2149,7 +2191,10 @@
       "sigma",
       "snort_suricata",
       "splunk_spl",
-      "yara"
+      "sql",
+      "sumo",
+      "yara",
+      "yaral"
      ]
     },
     "limit": {
@@ -2812,6 +2857,23 @@
    },
    "required": [
     "victim_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_report_share_link",
+  "description": "Return this user's active public share link for an intel report ({token, url, created_at, expires_at}), or null if they have not shared it. Other analysts' links are not returned.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "report_id": {
+     "type": "string",
+     "description": "Intel report UUID to look up"
+    }
+   },
+   "required": [
+    "report_id"
    ]
   },
   "mutating": false
@@ -4617,6 +4679,23 @@
   "mutating": true
  },
  {
+  "name": "revoke_report_share_link",
+  "description": "Deactivate this user's active public share link for an intel report so its URL stops resolving. Other analysts' links for the same report are left alone. create_report_share_link issues a fresh link (new token) afterwards.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "report_id": {
+     "type": "string",
+     "description": "Intel report UUID whose link to revoke"
+    }
+   },
+   "required": [
+    "report_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
   "name": "revoke_share_link",
   "description": "Deactivate this user's active public share link for an entry so its public URL stops resolving. Share links other analysts created for the same entry are left alone. Reversible in effect (create_share_link issues a fresh link, with a new token).",
   "input_schema": {
@@ -5251,7 +5330,7 @@
  },
  {
   "name": "update_detection_rule",
-  "description": "Update fields of a detection rule. Updatable keys: title, description, rule_content, rule_type (crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, splunk_spl, yara), severity, tags, is_draft, log_sources, mitre_tactics, data_sources, notes, source_ttps, source_entries, source_actors, source_campaigns, metadata, change_description. Changing rule_content snapshots the previous content as a new version; content or type changes re-extract rule metadata into unset fields (same as the API PUT).",
+  "description": "Update fields of a detection rule. Updatable keys: title, description, rule_content, rule_type (aql, crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, splunk_spl, sql, sumo, yara, yaral), severity, tags, is_draft, log_sources, mitre_tactics, data_sources, notes, source_ttps, source_entries, source_actors, source_campaigns, metadata, change_description. Changing rule_content snapshots the previous content as a new version; content or type changes re-extract rule metadata into unset fields (same as the API PUT).",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -5555,13 +5634,14 @@
  },
  {
   "name": "validate_detection_rule",
-  "description": "Validate detection rule syntax. Returns validation errors, warnings, and suggestions. Supported formats: crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, splunk_spl, yara.",
+  "description": "Validate detection rule syntax. Returns validation errors, warnings, and suggestions. Supported formats: aql, crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, splunk_spl, sql, sumo, yara, yaral.",
   "input_schema": {
    "type": "object",
    "properties": {
     "rule_type": {
      "type": "string",
      "enum": [
+      "aql",
       "crowdstrike_ql",
       "elastic_ql",
       "kql",
@@ -5570,7 +5650,10 @@
       "sigma",
       "snort_suricata",
       "splunk_spl",
-      "yara"
+      "sql",
+      "sumo",
+      "yara",
+      "yaral"
      ]
     },
     "rule_content": {

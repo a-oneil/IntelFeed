@@ -1925,7 +1925,8 @@ async def search_all_entities(
     If entity_types is provided, only those types are searched and each gets the full limit.
     """
     results: list[dict] = []
-    q = f"%{query}%"
+    escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    q = f"%{escaped}%"
     ql = query.lower()
     # When filtering by type, give each type the full limit; otherwise cap per-type
     if entity_types:
@@ -1948,36 +1949,40 @@ async def search_all_entities(
         return name_field
 
     # TTPs — search technique_id, technique_name, tactic, and description
-    ttp_result = await db.execute(
-        select(TTP)
-        .where(
-            or_(
-                TTP.technique_id.ilike(q),
-                TTP.technique_name.ilike(q),
-                TTP.tactic.ilike(q),
-                TTP.description.ilike(q),
+    if _should_search("ttp"):
+        ttp_result = await db.execute(
+            select(TTP)
+            .where(
+                or_(
+                    TTP.technique_id.ilike(q, escape="\\"),
+                    TTP.technique_name.ilike(q, escape="\\"),
+                    TTP.tactic.ilike(q, escape="\\"),
+                    TTP.description.ilike(q, escape="\\"),
+                )
             )
+            .limit(per_type_limit)
         )
-        .limit(per_type_limit)
-    )
-    for ttp in ttp_result.scalars().all():
-        item = _serialize_entity("ttp", ttp)
-        if ql in (ttp.technique_id or "").lower() or ql in (ttp.technique_name or "").lower():
-            item["match_field"] = "technique"
-        elif ql in (ttp.tactic or "").lower():
-            item["match_field"] = "tactic"
-        else:
-            item["match_field"] = "description"
-        results.append(item)
+        for ttp in ttp_result.scalars().all():
+            item = _serialize_entity("ttp", ttp)
+            if ql in (ttp.technique_id or "").lower() or ql in (ttp.technique_name or "").lower():
+                item["match_field"] = "technique"
+            elif ql in (ttp.tactic or "").lower():
+                item["match_field"] = "tactic"
+            else:
+                item["match_field"] = "description"
+            results.append(item)
 
     # CVEs — search cve_id and description
-    cve_result = await db.execute(
-        select(CVE).where(or_(CVE.cve_id.ilike(q), CVE.description.ilike(q))).limit(per_type_limit)
-    )
-    for cve in cve_result.scalars().all():
-        item = _serialize_entity("cve", cve)
-        item["match_field"] = "cve_id" if ql in (cve.cve_id or "").lower() else "description"
-        results.append(item)
+    if _should_search("cve"):
+        cve_result = await db.execute(
+            select(CVE)
+            .where(or_(CVE.cve_id.ilike(q, escape="\\"), CVE.description.ilike(q, escape="\\")))
+            .limit(per_type_limit)
+        )
+        for cve in cve_result.scalars().all():
+            item = _serialize_entity("cve", cve)
+            item["match_field"] = "cve_id" if ql in (cve.cve_id or "").lower() else "description"
+            results.append(item)
 
     # Weaknesses — search catalog id, name, alternate terms and description.
     # Alternate terms are searchable here on purpose: a human typing "use after
@@ -1989,10 +1994,10 @@ async def search_all_entities(
             select(CWE)
             .where(
                 or_(
-                    CWE.cwe_id.ilike(q),
-                    CWE.name.ilike(q),
-                    func.array_to_string(CWE.alternate_terms, " ").ilike(q),
-                    CWE.description.ilike(q),
+                    CWE.cwe_id.ilike(q, escape="\\"),
+                    CWE.name.ilike(q, escape="\\"),
+                    func.array_to_string(CWE.alternate_terms, " ").ilike(q, escape="\\"),
+                    CWE.description.ilike(q, escape="\\"),
                 )
             )
             .limit(per_type_limit)
@@ -2010,118 +2015,126 @@ async def search_all_entities(
             results.append(item)
 
     # Threat Actors — search name, aliases, description
-    actor_result = await db.execute(
-        select(ThreatActor)
-        .where(
-            or_(
-                ThreatActor.name.ilike(q),
-                _aliases_match_bounded(ThreatActor, query),
-                ThreatActor.description.ilike(q),
+    if _should_search("threat_actor"):
+        actor_result = await db.execute(
+            select(ThreatActor)
+            .where(
+                or_(
+                    ThreatActor.name.ilike(q, escape="\\"),
+                    _aliases_match_bounded(ThreatActor, query),
+                    ThreatActor.description.ilike(q, escape="\\"),
+                )
             )
+            .limit(per_type_limit)
         )
-        .limit(per_type_limit)
-    )
-    for actor in actor_result.scalars().all():
-        item = _serialize_entity("threat_actor", actor)
-        mf = _match_field(actor, "threat_actor")
-        item["match_field"] = (
-            mf
-            if mf != "name"
-            else (
-                "description"
-                if ql not in (actor.name or "").lower() and not _alias_contains_bounded(actor.aliases, ql)
-                else mf
+        for actor in actor_result.scalars().all():
+            item = _serialize_entity("threat_actor", actor)
+            mf = _match_field(actor, "threat_actor")
+            item["match_field"] = (
+                mf
+                if mf != "name"
+                else (
+                    "description"
+                    if ql not in (actor.name or "").lower() and not _alias_contains_bounded(actor.aliases, ql)
+                    else mf
+                )
             )
-        )
-        results.append(item)
+            results.append(item)
 
     # Malware — search name, aliases, malware_type
-    malware_result = await db.execute(
-        select(MalwareFamily)
-        .where(
-            or_(
-                MalwareFamily.name.ilike(q),
-                _aliases_match_bounded(MalwareFamily, query),
-                MalwareFamily.malware_type.ilike(q),
+    if _should_search("malware"):
+        malware_result = await db.execute(
+            select(MalwareFamily)
+            .where(
+                or_(
+                    MalwareFamily.name.ilike(q, escape="\\"),
+                    _aliases_match_bounded(MalwareFamily, query),
+                    MalwareFamily.malware_type.ilike(q, escape="\\"),
+                )
             )
+            .limit(per_type_limit)
         )
-        .limit(per_type_limit)
-    )
-    for malware in malware_result.scalars().all():
-        item = _serialize_entity("malware", malware)
-        mf = _match_field(malware, "malware")
-        if mf == "name" and ql not in (malware.name or "").lower() and not _alias_contains_bounded(malware.aliases, ql):
-            mf = "malware_type"
-        item["match_field"] = mf
-        results.append(item)
+        for malware in malware_result.scalars().all():
+            item = _serialize_entity("malware", malware)
+            mf = _match_field(malware, "malware")
+            if (
+                mf == "name"
+                and ql not in (malware.name or "").lower()
+                and not _alias_contains_bounded(malware.aliases, ql)
+            ):
+                mf = "malware_type"
+            item["match_field"] = mf
+            results.append(item)
 
     # Detection Rules — search title, description, tags, notes, rule_content,
     # source_ttps, source_cves, mitre_tactics
-    rule_result = await db.execute(
-        select(DetectionRule)
-        .where(
-            or_(
-                DetectionRule.title.ilike(q),
-                DetectionRule.description.ilike(q),
-                DetectionRule.notes.ilike(q),
-                DetectionRule.rule_content.ilike(q),
-                func.array_to_string(DetectionRule.tags, ",").ilike(q),
-                func.array_to_string(DetectionRule.mitre_tactics, ",").ilike(q),
-                cast(DetectionRule.source_ttps, String).ilike(q),
-                cast(DetectionRule.source_cves, String).ilike(q),
+    if _should_search("detection_rule"):
+        rule_result = await db.execute(
+            select(DetectionRule)
+            .where(
+                or_(
+                    DetectionRule.title.ilike(q, escape="\\"),
+                    DetectionRule.description.ilike(q, escape="\\"),
+                    DetectionRule.notes.ilike(q, escape="\\"),
+                    DetectionRule.rule_content.ilike(q, escape="\\"),
+                    func.array_to_string(DetectionRule.tags, ",").ilike(q, escape="\\"),
+                    func.array_to_string(DetectionRule.mitre_tactics, ",").ilike(q, escape="\\"),
+                    cast(DetectionRule.source_ttps, String).ilike(q, escape="\\"),
+                    cast(DetectionRule.source_cves, String).ilike(q, escape="\\"),
+                )
             )
+            .limit(per_type_limit)
         )
-        .limit(per_type_limit)
-    )
-    for rule in rule_result.scalars().all():
-        # Determine which field matched
-        rl = ql
-        if rl in (rule.title or "").lower():
-            mf = "title"
-        elif rl in (rule.description or "").lower():
-            mf = "description"
-        elif any(rl in t.lower() for t in (rule.source_ttps or [])):
-            mf = "source_ttps"
-        elif any(rl in c.lower() for c in (rule.source_cves or [])):
-            mf = "source_cves"
-        elif any(rl in t.lower() for t in (rule.tags or [])):
-            mf = "tags"
-        elif any(rl in t.lower() for t in (rule.mitre_tactics or [])):
-            mf = "mitre_tactics"
-        elif rl in (rule.notes or "").lower():
-            mf = "notes"
-        else:
-            mf = "rule_content"
-        results.append(
-            {
-                "id": str(rule.id),
-                "type": "detection_rule",
-                "title": rule.title,
-                "rule_type": rule.rule_type,
-                "severity": rule.severity,
-                "match_field": mf,
-            }
-        )
+        for rule in rule_result.scalars().all():
+            # Determine which field matched
+            rl = ql
+            if rl in (rule.title or "").lower():
+                mf = "title"
+            elif rl in (rule.description or "").lower():
+                mf = "description"
+            elif any(rl in t.lower() for t in (rule.source_ttps or [])):
+                mf = "source_ttps"
+            elif any(rl in c.lower() for c in (rule.source_cves or [])):
+                mf = "source_cves"
+            elif any(rl in t.lower() for t in (rule.tags or [])):
+                mf = "tags"
+            elif any(rl in t.lower() for t in (rule.mitre_tactics or [])):
+                mf = "mitre_tactics"
+            elif rl in (rule.notes or "").lower():
+                mf = "notes"
+            else:
+                mf = "rule_content"
+            results.append(
+                {
+                    "id": str(rule.id),
+                    "type": "detection_rule",
+                    "title": rule.title,
+                    "rule_type": rule.rule_type,
+                    "severity": rule.severity,
+                    "match_field": mf,
+                }
+            )
 
     # Offensive Tools — search name, aliases, tool_type
-    tool_result = await db.execute(
-        select(Tool)
-        .where(
-            or_(
-                Tool.name.ilike(q),
-                _aliases_match_bounded(Tool, query),
-                Tool.tool_type.ilike(q),
+    if _should_search("tool"):
+        tool_result = await db.execute(
+            select(Tool)
+            .where(
+                or_(
+                    Tool.name.ilike(q, escape="\\"),
+                    _aliases_match_bounded(Tool, query),
+                    Tool.tool_type.ilike(q, escape="\\"),
+                )
             )
+            .limit(per_type_limit)
         )
-        .limit(per_type_limit)
-    )
-    for tool in tool_result.scalars().all():
-        item = _serialize_entity("tool", tool)
-        mf = _match_field(tool, "tool")
-        if mf == "name" and ql not in (tool.name or "").lower() and not _alias_contains_bounded(tool.aliases, ql):
-            mf = "tool_type"
-        item["match_field"] = mf
-        results.append(item)
+        for tool in tool_result.scalars().all():
+            item = _serialize_entity("tool", tool)
+            mf = _match_field(tool, "tool")
+            if mf == "name" and ql not in (tool.name or "").lower() and not _alias_contains_bounded(tool.aliases, ql):
+                mf = "tool_type"
+            item["match_field"] = mf
+            results.append(item)
 
     # Vendors — search name, aliases, vendor_type
     if _should_search("vendor"):
@@ -2129,9 +2142,9 @@ async def search_all_entities(
             select(Vendor)
             .where(
                 or_(
-                    Vendor.name.ilike(q),
+                    Vendor.name.ilike(q, escape="\\"),
                     _aliases_match_bounded(Vendor, query),
-                    Vendor.vendor_type.ilike(q),
+                    Vendor.vendor_type.ilike(q, escape="\\"),
                 )
             )
             .limit(per_type_limit)
@@ -2154,9 +2167,9 @@ async def search_all_entities(
             select(Product)
             .where(
                 or_(
-                    Product.name.ilike(q),
+                    Product.name.ilike(q, escape="\\"),
                     _aliases_match_bounded(Product, query),
-                    Product.product_type.ilike(q),
+                    Product.product_type.ilike(q, escape="\\"),
                 )
             )
             .limit(per_type_limit)
@@ -2174,109 +2187,114 @@ async def search_all_entities(
             results.append(item)
 
     # Countries — search name and aliases
-    country_result = await db.execute(
-        select(Country)
-        .where(
-            or_(
-                Country.name.ilike(q),
-                _aliases_match_bounded(Country, query),
+    if _should_search("country"):
+        country_result = await db.execute(
+            select(Country)
+            .where(
+                or_(
+                    Country.name.ilike(q, escape="\\"),
+                    _aliases_match_bounded(Country, query),
+                )
             )
+            .limit(per_type_limit)
         )
-        .limit(per_type_limit)
-    )
-    for country in country_result.scalars().all():
-        item = _serialize_entity("country", country)
-        item["match_field"] = _match_field(country, "country")
-        results.append(item)
+        for country in country_result.scalars().all():
+            item = _serialize_entity("country", country)
+            item["match_field"] = _match_field(country, "country")
+            results.append(item)
 
     # Sectors — search name and aliases ("banks" finds Financial Services)
-    sector_result = await db.execute(
-        select(Sector)
-        .where(
-            or_(
-                Sector.name.ilike(q),
-                _aliases_match_bounded(Sector, query),
+    if _should_search("sector"):
+        sector_result = await db.execute(
+            select(Sector)
+            .where(
+                or_(
+                    Sector.name.ilike(q, escape="\\"),
+                    _aliases_match_bounded(Sector, query),
+                )
             )
+            .limit(per_type_limit)
         )
-        .limit(per_type_limit)
-    )
-    for sector in sector_result.scalars().all():
-        item = _serialize_entity("sector", sector)
-        item["match_field"] = _match_field(sector, "sector")
-        results.append(item)
+        for sector in sector_result.scalars().all():
+            item = _serialize_entity("sector", sector)
+            item["match_field"] = _match_field(sector, "sector")
+            results.append(item)
 
     # Mitigations — search name and mitre_id
-    mitigation_result = await db.execute(
-        select(Mitigation)
-        .where(
-            or_(
-                Mitigation.name.ilike(q),
-                Mitigation.mitre_id.ilike(q),
-                Mitigation.description.ilike(q),
+    if _should_search("mitigation"):
+        mitigation_result = await db.execute(
+            select(Mitigation)
+            .where(
+                or_(
+                    Mitigation.name.ilike(q, escape="\\"),
+                    Mitigation.mitre_id.ilike(q, escape="\\"),
+                    Mitigation.description.ilike(q, escape="\\"),
+                )
             )
+            .limit(per_type_limit)
         )
-        .limit(per_type_limit)
-    )
-    for mit in mitigation_result.scalars().all():
-        item = _serialize_entity("mitigation", mit)
-        if ql in (mit.mitre_id or "").lower():
-            item["match_field"] = "mitre_id"
-        elif ql in (mit.name or "").lower():
-            item["match_field"] = "name"
-        else:
-            item["match_field"] = "description"
-        results.append(item)
+        for mit in mitigation_result.scalars().all():
+            item = _serialize_entity("mitigation", mit)
+            if ql in (mit.mitre_id or "").lower():
+                item["match_field"] = "mitre_id"
+            elif ql in (mit.name or "").lower():
+                item["match_field"] = "name"
+            else:
+                item["match_field"] = "description"
+            results.append(item)
 
     # Campaigns — search name and description
-    campaign_result = await db.execute(
-        select(Campaign)
-        .where(
-            or_(
-                Campaign.name.ilike(q),
-                Campaign.description.ilike(q),
+    if _should_search("campaign"):
+        campaign_result = await db.execute(
+            select(Campaign)
+            .where(
+                or_(
+                    Campaign.name.ilike(q, escape="\\"),
+                    Campaign.description.ilike(q, escape="\\"),
+                )
             )
+            .limit(per_type_limit)
         )
-        .limit(per_type_limit)
-    )
-    for campaign in campaign_result.scalars().all():
-        results.append(
-            {
-                "id": str(campaign.id),
-                "type": "campaign",
-                "name": campaign.name,
-                "description": campaign.description,
-                "status": campaign.status,
-                "tlp_marking": campaign.tlp_marking,
-                "tags": campaign.tags or [],
-                "match_field": "name",
-            }
-        )
+        for campaign in campaign_result.scalars().all():
+            results.append(
+                {
+                    "id": str(campaign.id),
+                    "type": "campaign",
+                    "name": campaign.name,
+                    "description": campaign.description,
+                    "status": campaign.status,
+                    "tlp_marking": campaign.tlp_marking,
+                    "tags": campaign.tags or [],
+                    "match_field": "name",
+                }
+            )
 
     # Intel Reports — search title and summary
-    report_result = await db.execute(
-        select(IntelReport)
-        .where(
-            or_(
-                IntelReport.title.ilike(q),
-                IntelReport.summary.ilike(q),
+    if _should_search("intel_report"):
+        report_result = await db.execute(
+            select(IntelReport)
+            .where(
+                or_(
+                    IntelReport.title.ilike(q, escape="\\"),
+                    IntelReport.summary.ilike(q, escape="\\"),
+                )
             )
+            .limit(per_type_limit)
         )
-        .limit(per_type_limit)
-    )
-    for report in report_result.scalars().all():
-        results.append(
-            {
-                "id": str(report.id),
-                "type": "intel_report",
-                "title": report.title,
-                "summary": report.summary,
-                "template_type": report.template_type,
-                "status": report.status,
-                "tlp_marking": report.tlp_marking,
-                "tags": report.tags or [],
-                "match_field": "title",
-            }
-        )
+        for report in report_result.scalars().all():
+            results.append(
+                {
+                    "id": str(report.id),
+                    "type": "intel_report",
+                    "title": report.title,
+                    "summary": report.summary,
+                    "template_type": report.template_type,
+                    "status": report.status,
+                    "tlp_marking": report.tlp_marking,
+                    "tags": report.tags or [],
+                    "match_field": "title",
+                }
+            )
 
     # Notes — analyst writing, from the two tables that hold it. The `note:`
     # query-language field runs the same fetch with its own WHERE clauses, so
@@ -3176,8 +3194,11 @@ async def temporal_clusters(
             if other_pair in seen_pairs:
                 continue
             if cluster_entries & other_pair:  # overlap
+                candidate_shared = cluster_shared & other_shared
+                if len(_collapse_name_twins(candidate_shared, entity_labels)) < min_shared_entities:
+                    continue
                 cluster_entries |= other_pair
-                cluster_shared &= other_shared  # intersection of shared entities
+                cluster_shared = candidate_shared
                 seen_pairs.add(other_pair)
 
         # Collapse actor/malware name-twins so one subject counts once — for the

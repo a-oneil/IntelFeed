@@ -9,6 +9,8 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import Response
 
+from app.core.rate_limit import client_ip
+
 LOG_DIR = os.environ.get("LOG_DIR", "logs")
 
 # 10 MB per file, keep 5 rotated backups
@@ -191,7 +193,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             path=request.url.path,
             status=response.status_code,
             duration_ms=duration_ms,
-            client=request.client.host if request.client else None,
+            client=client_ip(request),
         )
 
         return response
@@ -222,7 +224,7 @@ class AuditLoggingMiddleware(BaseHTTPMiddleware):
             path=request.url.path,
             status=response.status_code,
             user=user_info.get("username") or user_info.get("sub"),
-            client=request.client.host if request.client else None,
+            client=client_ip(request),
         )
 
         return response
