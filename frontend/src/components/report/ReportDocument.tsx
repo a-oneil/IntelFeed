@@ -9,6 +9,7 @@
  */
 
 import { EntityLinkedMarkdown } from "@/components/EntityLinkedMarkdown";
+import type { EntityScanMatch } from "@/hooks/useEntityScan";
 import styles from "./ReportDocument.module.css";
 
 export interface ReportDocSection {
@@ -23,6 +24,16 @@ interface Props {
   sections: ReportDocSection[];
   /** Link entity mentions to their profiles (needs a signed-in session). */
   linkEntities?: boolean;
+  /**
+   * Entity matches computed server-side (the public page): the mentions are
+   * highlighted from these, with no scan and no profile navigation.
+   */
+  entityMatches?: EntityScanMatch[];
+  /**
+   * Draw the sections straight on the page, like an article, instead of on
+   * the builder's bordered sheet.
+   */
+  frameless?: boolean;
   /**
    * Text for a section with nothing in it. When omitted, empty sections are
    * left out — the public page shows what was written, not what wasn't.
@@ -160,9 +171,9 @@ export function SectionItemsTable({ items }: { items: Record<string, unknown>[] 
   );
 }
 
-export function ReportDocument({ sections, linkEntities = true, emptyText }: Props) {
+export function ReportDocument({ sections, linkEntities = true, entityMatches, frameless = false, emptyText }: Props) {
   return (
-    <div className={styles.docSurface}>
+    <div className={frameless ? styles.docPlain : styles.docSurface}>
       {sections.map((sec) => {
         const body = sec.body || "";
         const items = Array.isArray(sec.items) ? sec.items : [];
@@ -171,7 +182,14 @@ export function ReportDocument({ sections, linkEntities = true, emptyText }: Pro
         return (
           <section key={sec.name} className={styles.docSection} data-untrusted-content="">
             <h2 className={styles.docHeading}>{sec.title || sec.name}</h2>
-            {body && <EntityLinkedMarkdown text={body} enabled={linkEntities} />}
+            {body && (
+              <EntityLinkedMarkdown
+                text={body}
+                enabled={linkEntities}
+                matches={entityMatches}
+                readOnly={!!entityMatches}
+              />
+            )}
             {items.length > 0 && <SectionItemsTable items={items} />}
             {empty && emptyText && <p className={styles.docEmpty}>{emptyText(sec)}</p>}
           </section>

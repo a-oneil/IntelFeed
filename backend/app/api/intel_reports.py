@@ -1078,7 +1078,8 @@ async def attach_to_intel_report(
 
     # Refresh data sections (items-bearing: TTPs, references, timeline,
     # observables) from the merged evidence; analyst-written narrative bodies
-    # are never touched.
+    # are never touched, and a data section the analyst rewrote as text in
+    # the builder (``items_edited``) keeps that text instead of fresh rows.
     regenerated = await generate_report_content(report.template_type, merged_entries, merged_entities, db)
     content = dict(report.content or {})
     sections = dict(content.get("sections") or {})
@@ -1086,6 +1087,8 @@ async def attach_to_intel_report(
         old = sections.get(key)
         if not isinstance(old, dict):
             sections[key] = fresh
+        elif old.get("items_edited"):
+            continue
         elif fresh.get("items") is not None:
             sections[key] = {**old, "items": fresh["items"], "body": old.get("body") or fresh.get("body", "")}
 

@@ -4356,11 +4356,24 @@ async def autolink_scan(
     like the daily AI summary. CVE/TTP matches found by regex are resolved against
     the DB so only entities that actually have a profile are returned.
     """
+    return {"matches": await scan_text_matches(db, payload.text, visitor=user.is_anonymous)}
+
+
+async def scan_text_matches(db: AsyncSession, text: str | None, *, visitor: bool = False) -> list[dict]:
+    """The auto-linker's matches for arbitrary text, each with the full entity
+    payload a hover popover shows. Serves the scan endpoint and the public
+    shared-report page, which scans server-side so a reader with no session
+    gets the same highlights as the report builder.
+
+    ``visitor`` applies the public read-only rule: the vocabulary holds every
+    entity, and a visitor's scan must not name (or confirm the existence of)
+    one they can't see.
+    """
     from app.intelligence.autolinker import _ensure_vocabulary, scan_text
 
-    text = (payload.text or "").strip()
+    text = (text or "").strip()
     if not text:
-        return {"matches": []}
+        return []
 
     await _ensure_vocabulary(db)
     # Off the event loop: scan_text is pure CPU (Aho-Corasick over ~20k surface
@@ -4370,7 +4383,7 @@ async def autolink_scan(
     # frontend's 15s timeout.
     raw = await asyncio.to_thread(scan_text, text)
     if not raw:
-        return {"matches": []}
+        return []
 
     out: list[dict] = []
     for m in raw:
@@ -4396,9 +4409,7 @@ async def autolink_scan(
                 "surface_forms": m.get("surface_forms") or [m["surface_form"]],
             }
         )
-    if user.is_anonymous and out:
-        # The vocabulary holds every entity: a visitor's scan must not name
-        # (or confirm the existence of) one they can't see.
+    if visitor and out:
         from app.services.public_view import entities_shown
 
         shown = await entities_shown(db, {(m["entity_type"], uuid.UUID(m["entity_id"])) for m in out})
@@ -4452,7 +4463,7 @@ async def autolink_scan(
 
     for m in out:
         m["entity"] = payloads.get((m["entity_type"], m["entity_id"]))
-    return {"matches": out}
+    return out
 
 
 @router.get("/autolink/status")

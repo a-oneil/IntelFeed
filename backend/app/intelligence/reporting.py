@@ -418,13 +418,15 @@ async def generate_report_content(
         elif section == "timeline":
             content["sections"][section] = {
                 "title": "Timeline",
-                "items": [
-                    {
-                        "date": e.published_at.isoformat() if e.published_at else None,
-                        "title": e.title,
-                    }
-                    for e in entries
-                ],
+                "items": timeline_sorted(
+                    [
+                        {
+                            "date": e.published_at.isoformat() if e.published_at else None,
+                            "title": e.title,
+                        }
+                        for e in entries
+                    ]
+                ),
             }
         elif section == "aliases_attribution":
             content["sections"][section] = {
@@ -923,7 +925,7 @@ def render_markdown(report) -> str:
                 continue
 
             if section.get("items"):
-                for item in section["items"]:
+                for item in timeline_sorted(items) if is_timeline_items(items) else items:
                     if isinstance(item, dict):
                         if "technique_id" in item:
                             # TTP
@@ -937,8 +939,10 @@ def render_markdown(report) -> str:
                             url = item.get("url", "")
                             lines.append(f"- [{_escape_md(item['title'])}]({url})")
                         elif "date" in item and "title" in item:
-                            # Timeline
-                            date = _escape_md(item.get("date", "Unknown"))
+                            # Timeline: the stored date is a full ISO timestamp
+                            # with its offset; the reader wants the day.
+                            raw = item.get("date")
+                            date = _escape_md(raw[:10] if isinstance(raw, str) and raw else "Unknown")
                             lines.append(f"- **{date}**: {_escape_md(item['title'])}")
                         elif "name" in item and "aliases" in item:
                             # Actor
@@ -1041,6 +1045,24 @@ a {{ color: #2563eb; }}
 </body></html>"""
 
 
+def is_timeline_items(items: list) -> bool:
+    """Timeline rows are ``{date, title}`` dicts — the shape the markdown
+    exporter and the document view both detect."""
+    return bool(items) and isinstance(items[0], dict) and "date" in items[0] and "title" in items[0]
+
+
+def timeline_sorted(items: list[dict]) -> list[dict]:
+    """Timeline rows oldest first; a row with no date goes last, in stored
+    order. Dates are ISO strings so they sort as text; anything else is
+    treated as undated rather than raising."""
+
+    def key(item: dict) -> tuple[int, str]:
+        d = item.get("date")
+        return (0, d) if isinstance(d, str) and d else (1, "")
+
+    return sorted(items, key=key)
+
+
 def ordered_sections(report, template_sections: list | None = None) -> list[dict]:
     """The report's sections as an ordered list the way a reader sees them.
 
@@ -1076,6 +1098,10 @@ def ordered_sections(report, template_sections: list | None = None) -> list[dict
         body = re.sub(r"^\s*##\s+[^\n]*\n+", "", body)
         raw_items = section.get("items") if isinstance(section.get("items"), list) else []
         items = [i for i in raw_items if isinstance(i, dict)]
+        # Reports saved before the generator sorted its timeline keep the
+        # entries' query order; the reader always sees them in date order.
+        if is_timeline_items(items):
+            items = timeline_sorted(items)
         out.append(
             {
                 "name": key,

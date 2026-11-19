@@ -383,3 +383,77 @@ async def test_share_tool_refuses_amber_and_bad_ttl(db_session: AsyncSession, re
         await execute_tool("create_report_share_link", {"report_id": str(report.id)}, db_session, test_user.id)
     )
     assert "TLP:AMBER" in refused["error"]
+
+
+async def test_public_view_highlights_entities_without_a_session(
+    client: AsyncClient, db_session: AsyncSession, report: IntelReport, auth_headers: dict
+):
+    """The page gets the auto-linker's matches with the report, scanned
+    server-side, so a reader with no login sees the same highlights as the
+    builder. The summary, body and every section body are all scanned."""
+    from app.intelligence.autolinker import refresh_vocabulary
+    from app.models.threat_actor import ThreatActor
+
+    db_session.add(ThreatActor(name="Shareline Bear", aliases=["SB-Share"], description="Named in a shared report."))
+    await db_session.flush()
+    report.summary = "Shareline Bear is exploiting CVE-2021-44228."
+    report.content = {
+        "body": "A note up top.",
+        "sections": {
+            **report.content["sections"],
+            "key_findings": {"body": "## Key Findings\n\nSB-Share reached attacker-controlled LDAP."},
+        },
+    }
+    await db_session.flush()
+    # The update expires the server-set updated_at; reload it so the request
+    # does not lazy-load it mid-response.
+    await db_session.refresh(report)
+    await refresh_vocabulary(db_session)
+    token = await _mint(client, report, auth_headers)
+
+    resp = await client.get(f"/api/shared/report/{token}")
+    assert resp.status_code == 200
+    matches = resp.json()["entities"]
+    actor = next(m for m in matches if m["entity_type"] == "threat_actor")
+    assert actor["canonical_name"] == "Shareline Bear"
+    # Both the canonical name (summary) and the alias (section body) matched.
+    assert {sf.lower() for sf in actor["surface_forms"]} == {"shareline bear", "sb-share"}
+    # The popover's payload rides along, exactly as POST /autolink/scan returns it.
+    assert actor["entity"]["description"] == "Named in a shared report."
+
+
+async def test_public_view_sorts_the_timeline(
+    client: AsyncClient, db_session: AsyncSession, report: IntelReport, auth_headers: dict
+):
+    """A timeline saved in query order reads oldest first; undated rows go last."""
+    report.content = {
+        "sections": {
+            **report.content["sections"],
+            "timeline": {
+                "title": "Timeline",
+                "items": [
+                    {"date": "2026-03-02T10:00:00+00:00", "title": "Third"},
+                    {"date": None, "title": "Undated"},
+                    {"date": "2026-01-29T10:00:00+00:00", "title": "First"},
+                    {"date": "2026-02-02T10:00:00+00:00", "title": "Second"},
+                ],
+            },
+        },
+    }
+    await db_session.flush()
+    await db_session.refresh(report)
+    token = await _mint(client, report, auth_headers)
+
+    resp = await client.get(f"/api/shared/report/{token}")
+    assert resp.status_code == 200
+    timeline = next(s for s in resp.json()["sections"] if s["name"] == "timeline")
+    assert [i["title"] for i in timeline["items"]] == ["First", "Second", "Third", "Undated"]
+
+    # The markdown export walks the same order.
+    md = (await client.get(f"/api/shared/report/{token}/export", params={"format": "markdown"})).text
+    assert md.index("First") < md.index("Second") < md.index("Third") < md.index("Undated")
+    # The export shows the day, not the full timestamp with its offset.
+    assert "**2026\\-01\\-29**: First" in md  # _escape_md escapes the hyphens
+    assert "+00:00" not in md
+    html = (await client.get(f"/api/shared/report/{token}/export", params={"format": "html"})).text
+    assert "+00:00" not in html

@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.intelligence import scan_text_matches
 from app.api.shared import _OG_DESCRIPTION_LIMIT, ShareLinkResponse, _truncate
 from app.core.exceptions import AppError
 from app.core.security import get_current_user
@@ -61,6 +62,10 @@ class SharedReportResponse(BaseModel):
     tags: list[str]
     body: str
     sections: list[SharedReportSection]
+    #: Auto-linker matches over the summary, body and every section body — the
+    #: same shape ``POST /autolink/scan`` returns — so the page highlights
+    #: entities without a session. Each carries the entity payload its popover shows.
+    entities: list[dict]
     created_at: datetime
     updated_at: datetime
     published_at: datetime | None
@@ -198,7 +203,8 @@ async def get_shared_report(
     template_name, template_sections = await _template_for(report, db)
     content = report.content or {}
     body = content.get("body") if isinstance(content.get("body"), str) else ""
-    return SharedReportResponse(
+    sections = ordered_sections(report, template_sections)
+    out = SharedReportResponse(
         id=report.id,
         title=report.title,
         template_type=report.template_type,
@@ -209,12 +215,20 @@ async def get_shared_report(
         version=report.version,
         tags=list(report.tags or []),
         body=body,
-        sections=[SharedReportSection(**s) for s in ordered_sections(report, template_sections)],
+        sections=[SharedReportSection(**s) for s in sections],
+        entities=[],
         created_at=report.created_at,
         updated_at=report.updated_at,
         published_at=report.published_at,
         shared_at=share.created_at,
     )
+    # One scan over everything the page renders as markdown: the builder scans
+    # per block, but the matches are the same and one pass is cheaper. It runs
+    # after the response is built because a cold worker rebuilds the
+    # auto-linker vocabulary here, and that leaves the report row expired.
+    scannable = "\n\n".join(t for t in [out.summary or "", out.body, *(s.body for s in out.sections)] if t)
+    out.entities = await scan_text_matches(db, scannable)
+    return out
 
 
 @router.get("/shared/report/{token}/export")
