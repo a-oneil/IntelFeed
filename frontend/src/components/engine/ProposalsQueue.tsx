@@ -919,9 +919,13 @@ export function ProposalsQueue({
                         <div className={cg.chips}>
                           {kindChips.map((kd) => {
                             const meta = CHANGE_META[kd.action] ?? { label: kd.action, cls: styles.tName };
+                            const label =
+                              kd.action === "alias_collision" && g.trim_aliases?.length
+                                ? `Remove alias${g.trim_aliases.length > 1 ? "es" : ""} ${g.trim_aliases.map((a) => `“${a}”`).join(", ")}`
+                                : meta.label;
                             return (
                               <span key={kd.action} className={`${styles.tag} ${meta.cls}`}>
-                                {meta.label}
+                                {label}
                                 {kd.count > 1 && <span className={cg.cnt}>{kd.count.toLocaleString()}</span>}
                               </span>
                             );

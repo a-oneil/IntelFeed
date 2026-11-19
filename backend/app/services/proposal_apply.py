@@ -182,14 +182,15 @@ async def trim_alias_row(db: AsyncSession, row: EntityMaintenanceLog) -> dict:
     unlink what only that alias matched, recount, and write the applied row.
     Idempotent: an entity or alias already gone marks the proposal applied
     with ``skipped``. Returns {applied, skipped, entity_id, removed_alias}."""
-    from app.api.entity_merge import ENTITY_TYPE_REGISTRY
     from app.api.hygiene import CASCADE_SPECS
 
     bad_alias = (row.after or {}).get("bad_alias")
-    spec = ENTITY_TYPE_REGISTRY.get(row.entity_type)
-    if not bad_alias or not spec:
+    # CASCADE_SPECS, not the merge registry: the adjudicator files alias trims
+    # for every linkable type, countries and sectors included.
+    cascade = CASCADE_SPECS.get(row.entity_type)
+    if not bad_alias or not cascade:
         raise AppError(code="invalid", message="proposal has no alias or an unsupported type", status_code=400)
-    model = spec["model"]
+    model = cascade["model"]
     entity = (await db.execute(select(model).where(model.id == row.entity_id))).scalar_one_or_none()
     current = list(getattr(entity, "aliases", None) or [])
     new_aliases = [a for a in current if a != bad_alias]
@@ -200,15 +201,12 @@ async def trim_alias_row(db: AsyncSession, row: EntityMaintenanceLog) -> dict:
         return {"applied": True, "skipped": True, "entity_id": row.entity_id, "removed_alias": bad_alias}
     # Unlink what only that alias matched and recount, like an alias edit on the profile;
     # otherwise the wrong links (and the inflated count) outlive the alias.
-    unlinked = 0
-    cascade = CASCADE_SPECS.get(row.entity_type)
-    if cascade is not None:
-        from app.api.entity_profiles import _unlink_entries_for_removed_aliases
+    from app.api.entity_profiles import _unlink_entries_for_removed_aliases
 
-        junction = cascade["junction"]
-        unlinked = await _unlink_entries_for_removed_aliases(
-            db, current, new_aliases, junction, getattr(junction, cascade["junction_fk"]), entity.id, entity=entity
-        )
+    junction = cascade["junction"]
+    unlinked = await _unlink_entries_for_removed_aliases(
+        db, current, new_aliases, junction, getattr(junction, cascade["junction_fk"]), entity.id, entity=entity
+    )
     entity.aliases = new_aliases
     row.applied = True
     db.add(row)

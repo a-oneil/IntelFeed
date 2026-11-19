@@ -287,6 +287,8 @@ export interface ReviewGroup {
   kinds: { action: string; count: number }[];
   reclassify_to: { type: string; count: number }[];
   merge_into: { target_type: string; target_id: string; name: string | null; count: number }[];
+  /** The aliases its pending alias trims would remove, most proposed first. */
+  trim_aliases: string[];
   domains: ProposalDomain[];
   origin: ProposalOrigin | "mixed";
   /** The highest verdict confidence among its proposals, where one was given. */
