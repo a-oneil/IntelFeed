@@ -280,6 +280,8 @@ async def _import_yara_multi_rules(
         .where(
             DetectionRule.entry_id == entry.id,
             DetectionRule.rule_type == "yara",
+            # Extended and converted children copy the parent's entry_id.
+            DetectionRule.derived_from.is_(None),
         )
     )
     for rule in result2.scalars().all():
@@ -716,8 +718,16 @@ async def _import_single_rule(
 
     # Dedup: check by entry_id, then by file path in metadata
     file_path = (entry.metadata_ or {}).get("file_path", "")
-    result = await db.execute(select(DetectionRule).where(DetectionRule.entry_id == entry.id))
-    existing = result.scalar_one_or_none()
+    # Extended and converted children copy the parent's entry_id; the mirror is
+    # the root row, and counting a child made scalar_one_or_none() raise
+    # MultipleResultsFound, so any repo file someone had converted stopped syncing.
+    result = await db.execute(
+        select(DetectionRule)
+        .options(raiseload(DetectionRule.entry))
+        .where(DetectionRule.entry_id == entry.id, DetectionRule.derived_from.is_(None))
+        .order_by(DetectionRule.created_at)
+    )
+    existing = result.scalars().first()
 
     if not existing and file_path:
         # By file, whoever imported it: the same file synced under another
