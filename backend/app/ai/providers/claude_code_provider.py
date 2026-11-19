@@ -223,6 +223,9 @@ def _plan_tools(requested: list[str] | None) -> _ToolPlan:
 def _normalize_model(model: str) -> str:
     """Map our internal model identifiers to CLI aliases the binary accepts."""
     aliases = {
+        "claude-opus-5-5": "opus",
+        "claude-sonnet-5-5": "sonnet",
+        "claude-haiku-5-5": "haiku",
         "claude-opus-4-6": "opus",
         "claude-sonnet-4-6": "sonnet",
         "claude-haiku-4-5-20251001": "haiku",

@@ -33,35 +33,35 @@ _TOOL_TYPE_ENUM = list(TOOL_TYPES)
 #   Conversational   → Opus (nuanced Q&A)
 DEFAULT_MODEL_ASSIGNMENTS: dict[str, str] = {
     # One-pass extraction (engine phase 4) — cheap model, runs broadly at ingest
-    "entry_analysis": "claude-haiku-4-5-20251001",
+    "entry_analysis": "claude-haiku-5-5",
     # Extraction → Haiku
-    "ttp_mapping": "claude-haiku-4-5-20251001",
-    "cve_extraction": "claude-haiku-4-5-20251001",
-    "threat_actor_id": "claude-haiku-4-5-20251001",
-    "malware_id": "claude-haiku-4-5-20251001",
-    "tool_extraction": "claude-haiku-4-5-20251001",
-    "mitigation_extraction": "claude-haiku-4-5-20251001",
-    "country_id": "claude-haiku-4-5-20251001",
-    "sector_id": "claude-haiku-4-5-20251001",
-    "article_metadata": "claude-haiku-4-5-20251001",
+    "ttp_mapping": "claude-haiku-5-5",
+    "cve_extraction": "claude-haiku-5-5",
+    "threat_actor_id": "claude-haiku-5-5",
+    "malware_id": "claude-haiku-5-5",
+    "tool_extraction": "claude-haiku-5-5",
+    "mitigation_extraction": "claude-haiku-5-5",
+    "country_id": "claude-haiku-5-5",
+    "sector_id": "claude-haiku-5-5",
+    "article_metadata": "claude-haiku-5-5",
     # Analysis → Sonnet
-    "article_summary": "claude-sonnet-4-6",
-    "intelligence_briefing": "claude-sonnet-4-6",
-    "threat_assessment": "claude-sonnet-4-6",
-    "video_transcript_summary": "claude-sonnet-4-6",
-    "detection_engineering_summary": "claude-sonnet-4-6",
-    "daily_summary": "claude-sonnet-4-6",
-    "threat_brief": "claude-sonnet-4-6",
-    "cve_brief": "claude-sonnet-4-6",
-    "hunt_pack": "claude-sonnet-4-6",
-    "story_thread_spine": "claude-sonnet-4-6",
+    "article_summary": "claude-sonnet-5-5",
+    "intelligence_briefing": "claude-sonnet-5-5",
+    "threat_assessment": "claude-sonnet-5-5",
+    "video_transcript_summary": "claude-sonnet-5-5",
+    "detection_engineering_summary": "claude-sonnet-5-5",
+    "daily_summary": "claude-sonnet-5-5",
+    "threat_brief": "claude-sonnet-5-5",
+    "cve_brief": "claude-sonnet-5-5",
+    "hunt_pack": "claude-sonnet-5-5",
+    "story_thread_spine": "claude-sonnet-5-5",
     # Generation → Opus
-    "detection_rules": "claude-opus-4-6",
-    "report_section": "claude-sonnet-4-6",
+    "detection_rules": "claude-opus-5-5",
+    "report_section": "claude-sonnet-5-5",
     # Digest → Sonnet
-    "reddit_digest": "claude-sonnet-4-6",
+    "reddit_digest": "claude-sonnet-5-5",
     # Conversational → Opus
-    "entry_qa": "claude-opus-4-6",
+    "entry_qa": "claude-opus-5-5",
     # Global copilot (streaming, tool-calling) → Sonnet on the CLI; uses the
     # read-only intelfeed skill to search/look up data. Sonnet balances latency
     # with reasoning for interactive chat.
@@ -72,9 +72,9 @@ DEFAULT_MODEL_ASSIGNMENTS: dict[str, str] = {
     # Post-analysis review of one entry's output (adjudicate stage). Smaller
     # job than extraction: a short article window, a short list, a verdict
     # list back — a small, cheap model is enough, and a local Ollama model works well.
-    "entry_adjudication": "claude-haiku-4-5-20251001",
+    "entry_adjudication": "claude-haiku-5-5",
     # Same shape as the adjudication: short profiles in, a verdict list out.
-    "entity_merge_review": "claude-haiku-4-5-20251001",
+    "entity_merge_review": "claude-haiku-5-5",
 }
 
 # Tasks that must be assigned to a specific provider type (rather than the

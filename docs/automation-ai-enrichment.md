@@ -336,7 +336,7 @@ The providers API lists the instance's providers plus your own keys. Someone els
 {
   "name": "Claude Production",
   "provider_type": "claude",
-  "models": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+  "models": ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
   "config": { "timeout_seconds": 120 }
 }
 ```
@@ -501,6 +501,10 @@ Results live in `ai_results` (`backend/app/models/ai_result.py`):
 
 ```python
 COST_TABLE = {
+    "claude-opus-5-5": (4.0, 20.0),
+    "claude-sonnet-5-5": (2.0, 10.0),
+    "claude-haiku-5-5": (0.10, 0.50),
+    # Previous generation — still priced so results recorded on them cost out.
     "claude-opus-4-6": (15.0, 75.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-haiku-4-5-20251001": (0.80, 4.0),

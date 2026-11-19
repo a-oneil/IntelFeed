@@ -52,6 +52,10 @@ _IN_PROCESS_TOOL_TYPES = frozenset({"ollama", "claude", "openai_compatible"})
 
 # Cost per 1M tokens (input/output) — approximate defaults
 COST_TABLE: dict[str, tuple[float, float]] = {
+    "claude-opus-5-5": (4.0, 20.0),
+    "claude-sonnet-5-5": (2.0, 10.0),
+    "claude-haiku-5-5": (0.10, 0.50),
+    # Previous generation — still priced so results recorded on them cost out.
     "claude-opus-4-6": (15.0, 75.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-haiku-4-5-20251001": (0.80, 4.0),

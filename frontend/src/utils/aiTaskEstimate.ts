@@ -9,12 +9,12 @@ import { formatUsd } from "@/utils/format";
 
 // Cost per 1M tokens (input, output) in USD.
 // Mirrors the backend COST_TABLE in `backend/app/ai/engine.py`. Keep in sync if
-// backend rates change. Matched by model-family substring (opus/sonnet/haiku)
-// so date-suffixed model ids (e.g. "claude-haiku-4-5-20251001") still resolve.
+// backend rates change. Matched by model-family substring (opus/sonnet/haiku),
+// at the current generation's rates, so older or date-suffixed ids still resolve.
 const MODEL_COST: Record<"opus" | "sonnet" | "haiku", { in: number; out: number }> = {
-  opus: { in: 15.0, out: 75.0 },
-  sonnet: { in: 3.0, out: 15.0 },
-  haiku: { in: 0.8, out: 4.0 },
+  opus: { in: 4.0, out: 20.0 },
+  sonnet: { in: 2.0, out: 10.0 },
+  haiku: { in: 0.1, out: 0.5 },
 };
 
 // Rough latency band per model family (seconds) for a single one-shot task.
