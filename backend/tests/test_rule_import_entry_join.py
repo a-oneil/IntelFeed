@@ -78,5 +78,6 @@ async def test_reimporting_a_yara_file_does_not_join_its_entry_per_rule(db_sessi
     assert not [s for s in rule_selects if "JOIN entries" in s]
 
     rows = (await db_session.execute(select(DetectionRule).where(DetectionRule.entry_id == entry.id))).scalars().all()
-    assert all("packer-" in r.rule_content and "-2-" in r.rule_content for r in rows)
+    # Strings read "packer-<i>-<version>": every rule now carries version 2.
+    assert all('-2"' in r.rule_content for r in rows)
     assert all(r.metadata_["commit_sha"] == "b" * 40 for r in rows)
