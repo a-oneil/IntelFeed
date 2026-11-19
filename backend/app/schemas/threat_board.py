@@ -185,7 +185,7 @@ class HuntPackResponse(BaseModel):
                     "language": "kql",
                     "language_name": "KQL (Microsoft Sentinel / Defender XDR)",
                     "generated_at": "2026-11-17T23:40:00+00:00",
-                    "model": "claude-sonnet-4-6",
+                    "model": "claude-sonnet-5-5",
                     "entry_ids": ["3f1c…"],
                     "hypotheses": [
                         {
