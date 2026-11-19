@@ -102,6 +102,8 @@ ENV APP_VERSION=${APP_VERSION} GIT_SHA=${GIT_SHA} BUILD_TIME=${BUILD_TIME}
 
 USER appuser
 ENTRYPOINT ["./entrypoint.sh"]
-# --timeout 180: AI-generation endpoints (e.g. /entries/daily-summary) can run
-# 30-90s for a busy day; gunicorn's default 30s kills them mid-flight.
-CMD ["gunicorn", "app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--timeout", "180"]
+# --timeout 330: AI-generation endpoints run long — a daily summary 30-90s, a
+# threat-board hunt pack on a local model up to its own 300s ceiling — and
+# gunicorn's default 30s kills them mid-flight. nginx's /api proxy timeout
+# (frontend/nginx.conf) matches.
+CMD ["gunicorn", "app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--timeout", "330"]

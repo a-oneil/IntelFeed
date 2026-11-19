@@ -422,14 +422,15 @@ TOOLS: dict[str, dict] = {
     },
     "get_detection_rules": {
         "description": (
-            "List detection rules. Optionally filter by rule type (crowdstrike_ql, elastic_ql, kql, "
-            "nuclei, panther, sigma, snort_suricata, splunk_spl, yara)."
+            "List detection rules. Optionally filter by rule type (aql, crowdstrike_ql, elastic_ql, "
+            "kql, nuclei, panther, sigma, snort_suricata, splunk_spl, sql, sumo, yara, yaral)."
         ),
         "params": {
             "rule_type": {
                 "type": 'str',
                 "default": None,
                 "enum": [
+                    'aql',
                     'crowdstrike_ql',
                     'elastic_ql',
                     'kql',
@@ -438,7 +439,10 @@ TOOLS: dict[str, dict] = {
                     'sigma',
                     'snort_suricata',
                     'splunk_spl',
+                    'sql',
+                    'sumo',
                     'yara',
+                    'yaral',
                 ],
             },
             "limit": {

@@ -6,6 +6,10 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* Same blend the workbench sidebar uses (SidebarLayout.module.css): a
+     touch darker than the card surface, so rows sit level with the nav
+     panels instead of reading brighter than them. */
+  --board-surface: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
   gap: 12px;
 }
 
@@ -54,7 +58,7 @@
   border-left: 3px solid var(--text-muted);
   border-radius: var(--r-md);
   overflow: hidden;
-  background: var(--bg-secondary);
+  background: var(--board-surface);
   display: flex;
   flex-direction: column;
 }
@@ -211,7 +215,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr);
   border-top: 1px dashed var(--border);
-  background: var(--bg-secondary);
+  background: var(--board-surface);
 }
 
 .drawerLoading {
@@ -274,6 +278,25 @@
   text-decoration: underline;
 }
 
+/* An article line: the title gives way, the source and date keep their room. */
+.darticle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.darticle .dlink {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dmeta {
+  flex: none;
+}
+
 .dttp {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -284,6 +307,23 @@
   font-family: var(--font-mono);
   font-size: 9.5px;
   color: var(--text-muted);
+}
+
+/* "Show N more": the list grows in place instead of pointing elsewhere. */
+.dmoreBtn {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.dmoreBtn:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
 }
 
 /* The other names one story's row carries — quieter than the name it leads
@@ -343,17 +383,66 @@
   }
 }
 
-/* The landscape divider: CVEs outside your surface are context, not queue. */
-.surfaceDivider {
-  padding: 4px 2px 10px;
+/* A CVE this row's articles claim (All view): named on the row, never a
+   second line and never dropped. */
+.tagCve {
   font-family: var(--font-mono);
   font-size: 10px;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
+  letter-spacing: 0.03em;
+  color: var(--entity-cve);
+  border: 1px solid color-mix(in srgb, var(--entity-cve) 45%, transparent);
+  border-radius: 999px;
+  padding: 0 7px;
+  white-space: nowrap;
 }
 
-.offSurface {
-  opacity: 0.72;
+/* The row's ⋯ menu: every decision state the row can move to. */
+.menuWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.menu {
+  /* Portalled to the body: .row clips overflow, so top/right come from the
+     trigger's rect as inline style. */
+  position: fixed;
+  z-index: 9999;
+  min-width: 240px;
+  padding: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elevation-3);
+}
+
+.menuItem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.menuItem:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.menuHint {
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
 /* Full-width rule inventory at the drawer's foot — the list behind the
@@ -451,4 +540,125 @@
 
 .dext:hover {
   color: var(--accent);
+}
+
+/* The hunt pack at the drawer's foot: hypotheses and queries the analyst
+   takes to their SIEM. Nothing here is a tracker. */
+.dHunt {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border-subtle);
+  padding: 10px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dHuntEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.dHyp {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+}
+
+.dHypHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dHypTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dHypMeta {
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.dHypText {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.dHypTel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.telHave,
+.telMiss {
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.telHave {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 45%, transparent);
+}
+
+.telMiss {
+  color: var(--danger);
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.dQuery {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--board-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.dHypFoot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dHypNote {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.dHuntFoot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }

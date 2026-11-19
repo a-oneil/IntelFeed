@@ -35,6 +35,12 @@ RULE_TYPE_ABBREV = {
     "kql": "kql",
     "yara": "yara",
     "snort_suricata": "snort",
+    "nuclei": "nuclei",
+    "panther": "panther",
+    "yaral": "yaral",
+    "aql": "aql",
+    "sumo": "sumo",
+    "sql": "sql",
 }
 
 

@@ -483,10 +483,11 @@ TOOLS: dict[str, dict] = {
     "convert_detection_rule": {
         "description": (
             "Convert a detection rule to a different rule language using the AI provider assigned to "
-            "the detection_rules task. Target formats: crowdstrike_ql, elastic_ql, kql, nuclei, "
-            "panther, sigma, snort_suricata, splunk_spl, yara. Returns the converted content without "
-            "changing the source rule. With save=true, the conversion is stored on the rule's "
-            "metadata under rule_conversions (same place the UI keeps saved conversions)."
+            "the detection_rules task. Target formats: aql, crowdstrike_ql, elastic_ql, kql, nuclei, "
+            "panther, sigma, snort_suricata, splunk_spl, sql, sumo, yara, yaral. Returns the "
+            "converted content without changing the source rule. With save=true, the conversion is "
+            "stored on the rule's metadata under rule_conversions (same place the UI keeps saved "
+            "conversions)."
         ),
         "params": {
             "rule_id": {
@@ -497,6 +498,7 @@ TOOLS: dict[str, dict] = {
                 "type": 'str',
                 "required": True,
                 "enum": [
+                    'aql',
                     'crowdstrike_ql',
                     'elastic_ql',
                     'kql',
@@ -505,7 +507,10 @@ TOOLS: dict[str, dict] = {
                     'sigma',
                     'snort_suricata',
                     'splunk_spl',
+                    'sql',
+                    'sumo',
                     'yara',
+                    'yaral',
                 ],
             },
             "save": {
@@ -616,6 +621,7 @@ TOOLS: dict[str, dict] = {
                 "type": 'str',
                 "required": True,
                 "enum": [
+                    'aql',
                     'crowdstrike_ql',
                     'elastic_ql',
                     'kql',
@@ -624,7 +630,10 @@ TOOLS: dict[str, dict] = {
                     'sigma',
                     'snort_suricata',
                     'splunk_spl',
+                    'sql',
+                    'sumo',
                     'yara',
+                    'yaral',
                 ],
             },
             "rule_content": {
@@ -1524,8 +1533,8 @@ TOOLS: dict[str, dict] = {
     "generate_detection_rules": {
         "description": (
             "Generate detection rules from an entry's TTPs via the detection_rules AI task and store "
-            "them as drafts. Supported formats: crowdstrike_ql, elastic_ql, kql, sigma, "
-            "snort_suricata, splunk_spl, yara."
+            "them as drafts. Supported formats: aql, crowdstrike_ql, elastic_ql, kql, nuclei, "
+            "panther, sigma, snort_suricata, splunk_spl, sql, sumo, yara, yaral."
         ),
         "params": {
             "entry_id": {
@@ -1815,14 +1824,15 @@ TOOLS: dict[str, dict] = {
     },
     "get_detection_rules": {
         "description": (
-            "List detection rules. Optionally filter by rule type (crowdstrike_ql, elastic_ql, kql, "
-            "nuclei, panther, sigma, snort_suricata, splunk_spl, yara)."
+            "List detection rules. Optionally filter by rule type (aql, crowdstrike_ql, elastic_ql, "
+            "kql, nuclei, panther, sigma, snort_suricata, splunk_spl, sql, sumo, yara, yaral)."
         ),
         "params": {
             "rule_type": {
                 "type": 'str',
                 "default": None,
                 "enum": [
+                    'aql',
                     'crowdstrike_ql',
                     'elastic_ql',
                     'kql',
@@ -1831,7 +1841,10 @@ TOOLS: dict[str, dict] = {
                     'sigma',
                     'snort_suricata',
                     'splunk_spl',
+                    'sql',
+                    'sumo',
                     'yara',
+                    'yaral',
                 ],
             },
             "limit": {
@@ -4343,12 +4356,12 @@ TOOLS: dict[str, dict] = {
     "update_detection_rule": {
         "description": (
             "Update fields of a detection rule. Updatable keys: title, description, rule_content, "
-            "rule_type (crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, "
-            "splunk_spl, yara), severity, tags, is_draft, log_sources, mitre_tactics, data_sources, "
-            "notes, source_ttps, source_entries, source_actors, source_campaigns, metadata, "
-            "change_description. Changing rule_content snapshots the previous content as a new "
-            "version; content or type changes re-extract rule metadata into unset fields (same as the "
-            "API PUT)."
+            "rule_type (aql, crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, "
+            "splunk_spl, sql, sumo, yara, yaral), severity, tags, is_draft, log_sources, "
+            "mitre_tactics, data_sources, notes, source_ttps, source_entries, source_actors, "
+            "source_campaigns, metadata, change_description. Changing rule_content snapshots the "
+            "previous content as a new version; content or type changes re-extract rule metadata into "
+            "unset fields (same as the API PUT)."
         ),
         "params": {
             "rule_id": {
@@ -4612,14 +4625,15 @@ TOOLS: dict[str, dict] = {
     "validate_detection_rule": {
         "description": (
             "Validate detection rule syntax. Returns validation errors, warnings, and suggestions. "
-            "Supported formats: crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, "
-            "snort_suricata, splunk_spl, yara."
+            "Supported formats: aql, crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, "
+            "snort_suricata, splunk_spl, sql, sumo, yara, yaral."
         ),
         "params": {
             "rule_type": {
                 "type": 'str',
                 "required": True,
                 "enum": [
+                    'aql',
                     'crowdstrike_ql',
                     'elastic_ql',
                     'kql',
@@ -4628,7 +4642,10 @@ TOOLS: dict[str, dict] = {
                     'sigma',
                     'snort_suricata',
                     'splunk_spl',
+                    'sql',
+                    'sumo',
                     'yara',
+                    'yaral',
                 ],
             },
             "rule_content": {

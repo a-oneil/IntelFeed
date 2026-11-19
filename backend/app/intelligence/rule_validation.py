@@ -527,6 +527,16 @@ def _validate_nuclei(rule_content: str) -> ValidationResult:
     return ValidationResult(valid=not has_errors, errors=errors, suggestions=suggestions)
 
 
+# Query languages the library stores (they are conversion targets and
+# generation formats) but cannot parse. Kept in step with RULE_TYPE_PATTERN.
+UNCHECKED_RULE_TYPES: dict[str, str] = {
+    "yaral": "YARA-L",
+    "aql": "AQL",
+    "sumo": "Sumo Logic",
+    "sql": "SQL",
+}
+
+
 def validate_rule(rule_type: str, rule_content: str) -> ValidationResult:
     """Route to appropriate validator."""
     validators = {
@@ -542,6 +552,14 @@ def validate_rule(rule_type: str, rule_content: str) -> ValidationResult:
     }
 
     validator = validators.get(rule_type)
+    if not validator and rule_type in UNCHECKED_RULE_TYPES:
+        # Library formats with no parser here: the rule is stored as written
+        # and the editor reports it as not checked rather than broken.
+        return ValidationResult(
+            valid=True,
+            errors=[],
+            suggestions=[f"No syntax check for {UNCHECKED_RULE_TYPES[rule_type]} yet; the rule is saved as written"],
+        )
     if not validator:
         return ValidationResult(
             valid=False,

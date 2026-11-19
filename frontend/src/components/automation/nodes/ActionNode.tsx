@@ -219,7 +219,7 @@ export const ActionNode = memo(function ActionNode({ data }: NodeProps) {
               className={styles.input}
             />
             <span className={styles.hint}>
-              sigma, splunk_spl, crowdstrike_ql, elastic_ql, kql, yara, snort_suricata
+              sigma, splunk_spl, crowdstrike_ql, elastic_ql, kql, yara, snort_suricata, nuclei, panther, yaral, aql, sumo, sql
             </span>
           </div>
         )}
