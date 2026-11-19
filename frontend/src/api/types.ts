@@ -2357,6 +2357,17 @@ export interface ShareLink {
   expires_at: string | null;
 }
 
+/** One auto-linker match from `POST /autolink/scan` (and a shared report's `entities`). */
+export interface EntityScanMatch {
+  entity_type: string;
+  entity_id: string;
+  canonical_name: string;
+  surface_forms: string[];
+  /** Full entity payload — the same shape the entry-entity endpoints return —
+   *  so hover popovers can show description, facts, aliases and links. */
+  entity?: Record<string, unknown> | null;
+}
+
 export interface SharedReportSection {
   name: string;
   title: string;
@@ -2378,6 +2389,8 @@ export interface SharedReport {
   tags: string[];
   body: string;
   sections: SharedReportSection[];
+  /** Auto-linker matches over the text, computed server-side so the public page highlights without a session. */
+  entities: EntityScanMatch[];
   created_at: string;
   updated_at: string;
   published_at: string | null;

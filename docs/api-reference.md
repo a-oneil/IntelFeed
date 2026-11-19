@@ -1303,7 +1303,7 @@ Enrichment fills in entity details from outside sources (NVD, EPSS, CISA KEV, Ma
 | POST | `/api/intel-reports/{report_id}/share` | User | Make a public link to a report, or return yours if it exists. Only TLP:CLEAR and TLP:GREEN reports can be shared; AMBER and RED are refused |
 | GET | `/api/intel-reports/{report_id}/share` | User | Your link for this report, or null |
 | DELETE | `/api/intel-reports/{report_id}/share` | User | Turn your link off (admins turn off every link for the report) |
-| GET | `/api/shared/report/{token}` | Share token | The shared report: its sections in template order with narrative bodies and data rows. 403 while the report is marked AMBER or RED |
+| GET | `/api/shared/report/{token}` | Share token | The shared report: its sections in template order with narrative bodies and data rows (timeline rows oldest first), plus `entities`, the auto-linker's matches over the text so the page highlights entities without a session. 403 while the report is marked AMBER or RED |
 | GET | `/api/shared/report/{token}/export` | Share token | Download it as Markdown, HTML or PDF (`format=`) |
 | GET | `/api/shared/report/{token}/og` | Share token | An HTML page with link-preview (Open Graph) tags for the shared report |
 

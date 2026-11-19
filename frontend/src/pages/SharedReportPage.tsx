@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
@@ -10,6 +11,7 @@ import { ReportDocument } from "@/components/report/ReportDocument";
 import { Chip } from "@/components/primitives/Chip";
 import { TLP_COLORS } from "@/utils/colorSchemes";
 import { formatDateTime } from "@/utils/formatDate";
+import { useUIStore } from "@/stores/uiStore";
 import type { SharedReport } from "@/api/types";
 import readerStyles from "@/components/EntryReader.module.css";
 import sharedStyles from "./SharedEntryPage.module.css";
@@ -66,6 +68,13 @@ const DownloadIcon = (
 export function SharedReportPage() {
   const { token } = useParams<{ token: string }>();
   const { data: report, isLoading, error } = useSharedReport(token);
+  // The reader's column width, so a shared report and a shared article are
+  // the same width on the same screen.
+  const readerMaxWidth = useUIStore((s) => s.readerMaxWidth);
+  const articlePaneStyle = useMemo<React.CSSProperties>(() => ({
+    ["--reader-col-width" as string]: readerMaxWidth === 0 ? "none" : `${readerMaxWidth + 64}px`,
+    ["--reader-col-inner" as string]: readerMaxWidth === 0 ? "none" : `${readerMaxWidth}px`,
+  }), [readerMaxWidth]);
 
   if (isLoading) return <RouteFallback />;
 
@@ -98,7 +107,7 @@ export function SharedReportPage() {
   return (
     <div className={sharedStyles.page}>
       <div className={readerStyles.readerContainer}>
-        <article className={readerStyles.articlePane}>
+        <article className={readerStyles.articlePane} style={articlePaneStyle}>
           {/* Top bar — identical to the shared article page */}
           <div className={`${readerStyles.topBar} ${sharedStyles.topBar}`}>
             <a className={sharedStyles.brand} href="/" title="Go to IntelFeed" aria-label="Go to IntelFeed">
@@ -153,12 +162,17 @@ export function SharedReportPage() {
 
             {report.body && (
               <div className={styles.preamble} data-untrusted-content="">
-                <EntityLinkedMarkdown text={report.body} enabled={false} />
+                <EntityLinkedMarkdown text={report.body} enabled={false} matches={report.entities} readOnly />
               </div>
             )}
 
             {report.sections.length > 0 ? (
-              <ReportDocument sections={report.sections} linkEntities={false} />
+              <ReportDocument
+                sections={report.sections}
+                linkEntities={false}
+                entityMatches={report.entities}
+                frameless
+              />
             ) : (
               !report.body && <p className={styles.empty}>This report has no content yet.</p>
             )}

@@ -20,6 +20,7 @@ import { useEntityNames } from "@/hooks/useIntelligence";
 import { useSearch } from "@/hooks/useSearch";
 import type { ReportTemplateSection } from "@/api/types";
 import { ReportDocument } from "@/components/report/ReportDocument";
+import { dataSectionText } from "@/components/report/sectionItemsMarkdown";
 import { toast } from "sonner";
 import CodeMirrorEditor from "@/components/CodeMirrorEditor";
 import SimpleTagEditor from "@/components/SimpleTagEditor";
@@ -154,6 +155,9 @@ export function ReportBuilderPage() {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [sections, setSections] = useState<Record<string, string>>({});
+  // Data sections whose rows the analyst has rewritten as text in this
+  // editing session: on save the body replaces the rows (items become []).
+  const [itemsReplaced, setItemsReplaced] = useState<Set<string>>(new Set());
   const [summary, setSummary] = useState("");
   const [tlpMarking, setTlpMarking] = useState("TLP:GREEN");
   const [tags, setTags] = useState<string[]>([]);
@@ -215,6 +219,7 @@ export function ReportBuilderPage() {
         }
       }
       setSections(sectionData);
+      setItemsReplaced(new Set());
       setSummary(report.summary || "");
       setTlpMarking(report.tlp_marking);
       setTags(report.tags || []);
@@ -262,7 +267,9 @@ export function ReportBuilderPage() {
     const existingSections = (existingContent.sections || {}) as Record<string, Record<string, unknown>>;
     const mergedSections: Record<string, unknown> = { ...existingSections };
     for (const [key, val] of Object.entries(sections)) {
-      mergedSections[key] = { ...(existingSections[key] || {}), body: val };
+      mergedSections[key] = itemsReplaced.has(key)
+        ? { ...(existingSections[key] || {}), body: val, items: [], items_edited: true }
+        : { ...(existingSections[key] || {}), body: val };
     }
     const content: Record<string, unknown> = {
       ...existingContent,
@@ -300,7 +307,9 @@ export function ReportBuilderPage() {
     const existingSections2 = (existingContent2.sections || {}) as Record<string, Record<string, unknown>>;
     const mergedSections2: Record<string, unknown> = { ...existingSections2 };
     for (const [key, val] of Object.entries(sections)) {
-      mergedSections2[key] = { ...(existingSections2[key] || {}), body: val };
+      mergedSections2[key] = itemsReplaced.has(key)
+        ? { ...(existingSections2[key] || {}), body: val, items: [], items_edited: true }
+        : { ...(existingSections2[key] || {}), body: val };
     }
     const content: Record<string, unknown> = {
       ...existingContent2,
@@ -438,6 +447,32 @@ export function ReportBuilderPage() {
     const c = report?.content as { sections?: Record<string, SectionData> } | undefined;
     return c?.sections || {};
   }, [report]);
+
+  /** The rows a data section still carries — none once the analyst has
+   *  rewritten them as text this session. */
+  const sectionItems = useCallback(
+    (sectionName: string): Record<string, unknown>[] => {
+      if (itemsReplaced.has(sectionName)) return [];
+      const data = (contentSections[sectionName] || {}) as SectionData;
+      return Array.isArray(data.items) ? data.items : [];
+    },
+    [contentSections, itemsReplaced],
+  );
+
+  /** What a data section's editor shows: its body, then its rows as Markdown. */
+  const dataSectionEditorText = useCallback(
+    (sectionName: string): string => dataSectionText(sections[sectionName] || "", sectionItems(sectionName)),
+    [sections, sectionItems],
+  );
+
+  /** Typing in a data section's editor turns its rows into text: the body is
+   *  now the whole section and the rows go on save. */
+  const handleDataSectionChange = useCallback((sectionName: string, value: string) => {
+    setItemsReplaced((prev) => (prev.has(sectionName) ? prev : new Set(prev).add(sectionName)));
+    setSections((prev) => ({ ...prev, [sectionName]: value }));
+    setHasChanges(true);
+  }, []);
+
 
   // Get template sections for the current report
   const currentTemplateSections: ReportTemplateSection[] =
@@ -918,7 +953,7 @@ export function ReportBuilderPage() {
                       title: sec.title || data.title || sec.name,
                       type: sec.type,
                       body,
-                      items: Array.isArray(data.items) ? data.items : [],
+                      items: sectionItems(sec.name),
                     };
                   })}
                   emptyText={(sec) =>
@@ -929,7 +964,7 @@ export function ReportBuilderPage() {
                 />
               ) : (
                 <CodeMirrorEditor
-                  value={viewingVersionId ? viewingBody : (currentTemplateSections.length > 0 ? currentTemplateSections.map((sec) => sections[sec.name] || "").filter(Boolean).join("\n\n---\n\n") : body)}
+                  value={viewingVersionId ? viewingBody : (currentTemplateSections.length > 0 ? currentTemplateSections.map((sec) => (sec.type === "data" ? dataSectionEditorText(sec.name) : sections[sec.name] || "")).filter(Boolean).join("\n\n---\n\n") : body)}
                   onChange={viewingVersionId ? undefined : (currentTemplateSections.length > 0 ? undefined : handleBodyChange)}
                   language=""
                   readOnly={!!viewingVersionId || currentTemplateSections.length > 0}
@@ -1003,9 +1038,17 @@ export function ReportBuilderPage() {
                     </button>
                   </div>
                 </div>
+                {sec.type === "data" && sectionItems(sec.name).length > 0 && (
+                  <div className={styles.sectionEditorDesc}>
+                    These rows fill from the linked articles and entities. Editing them here
+                    makes this section your text: the rows are replaced by what you write.
+                  </div>
+                )}
                 <CodeMirrorEditor
-                  value={sections[sec.name] || ""}
-                  onChange={(val) => handleSectionChange(sec.name, val)}
+                  value={sec.type === "data" ? dataSectionEditorText(sec.name) : sections[sec.name] || ""}
+                  onChange={(val) =>
+                    sec.type === "data" ? handleDataSectionChange(sec.name, val) : handleSectionChange(sec.name, val)
+                  }
                   language=""
                   height="400px"
                   prose

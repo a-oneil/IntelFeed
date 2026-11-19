@@ -414,7 +414,7 @@ In `frontend/src/pages/`:
 - **SettingsPage.tsx:** settings sections in three groups. You: Account, Appearance, My AI, Reading, Tags. Connect: Claude Code Skill, Feeds & Export and Telegram (the last two admins only). Administration (admins only): AI Configuration, Engine, Logs, System, Users.
 - **CampaignsPage.tsx:** the campaign list.
 - **ReportBuilderPage.tsx:** write a report.
-- **LoginPage.tsx**, **RegisterPage.tsx**, **SharedEntryPage.tsx**, **SharedReportPage.tsx**, **SharedCopilotPage.tsx:** public pages. SharedReportPage reuses SharedEntryPage's shell styles (top bar, brand, error states) and draws the report with `components/report/ReportDocument.tsx`, the same component as the report builder's Document view.
+- **LoginPage.tsx**, **RegisterPage.tsx**, **SharedEntryPage.tsx**, **SharedReportPage.tsx**, **SharedCopilotPage.tsx:** public pages. SharedReportPage reuses SharedEntryPage's shell styles (top bar, brand, error states), follows the reader's column width like a shared article, and draws the report with `components/report/ReportDocument.tsx`, the same component as the report builder's Document view, in its frameless mode. Entity highlights come from the `entities` the shared-report endpoint returns (scanned server-side, since there is no session to call `/autolink/scan`); a click opens the hover card rather than a profile.
 
 `OnboardingWizard` (`components/onboarding/`) is a modal, not a page.
 
