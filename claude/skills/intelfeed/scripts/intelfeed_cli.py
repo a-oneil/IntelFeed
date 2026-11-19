@@ -108,6 +108,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "create_intel_report",
         "create_malware",
         "create_note",
+        "create_report_share_link",
         "create_requirement",
         "create_saved_search",
         "create_share_link",
@@ -159,6 +160,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "remove_from_campaign",
         "remove_requirement_match",
         "report_false_positive",
+        "revoke_report_share_link",
         "revoke_share_link",
         "rollback_detection_rule",
         "run_ai_task",
@@ -481,10 +483,11 @@ TOOLS: dict[str, dict] = {
     "convert_detection_rule": {
         "description": (
             "Convert a detection rule to a different rule language using the AI provider assigned to "
-            "the detection_rules task. Target formats: crowdstrike_ql, elastic_ql, kql, nuclei, "
-            "panther, sigma, snort_suricata, splunk_spl, yara. Returns the converted content without "
-            "changing the source rule. With save=true, the conversion is stored on the rule's "
-            "metadata under rule_conversions (same place the UI keeps saved conversions)."
+            "the detection_rules task. Target formats: aql, crowdstrike_ql, elastic_ql, kql, nuclei, "
+            "panther, sigma, snort_suricata, splunk_spl, sql, sumo, yara, yaral. Returns the "
+            "converted content without changing the source rule. With save=true, the conversion is "
+            "stored on the rule's metadata under rule_conversions (same place the UI keeps saved "
+            "conversions)."
         ),
         "params": {
             "rule_id": {
@@ -495,6 +498,7 @@ TOOLS: dict[str, dict] = {
                 "type": 'str',
                 "required": True,
                 "enum": [
+                    'aql',
                     'crowdstrike_ql',
                     'elastic_ql',
                     'kql',
@@ -503,7 +507,10 @@ TOOLS: dict[str, dict] = {
                     'sigma',
                     'snort_suricata',
                     'splunk_spl',
+                    'sql',
+                    'sumo',
                     'yara',
+                    'yaral',
                 ],
             },
             "save": {
@@ -614,6 +621,7 @@ TOOLS: dict[str, dict] = {
                 "type": 'str',
                 "required": True,
                 "enum": [
+                    'aql',
                     'crowdstrike_ql',
                     'elastic_ql',
                     'kql',
@@ -622,7 +630,10 @@ TOOLS: dict[str, dict] = {
                     'sigma',
                     'snort_suricata',
                     'splunk_spl',
+                    'sql',
+                    'sumo',
                     'yara',
+                    'yaral',
                 ],
             },
             "rule_content": {
@@ -863,6 +874,26 @@ TOOLS: dict[str, dict] = {
             },
             "title": {
                 "type": 'str',
+                "default": None,
+            },
+        },
+    },
+    "create_report_share_link": {
+        "description": (
+            "Create a public (unauthenticated) share link for an intel report, or return this user's "
+            "existing active one. The public page shows the rendered report (sections, data tables, "
+            "tags) with no author or source ids. Only TLP:CLEAR and TLP:GREEN reports can be shared; "
+            "AMBER and RED are refused, and a link stops resolving while its report carries one of "
+            "those markings. ttl_days optionally sets an expiry on a newly created link (the API "
+            "default is no expiry)."
+        ),
+        "params": {
+            "report_id": {
+                "type": 'str',
+                "required": True,
+            },
+            "ttl_days": {
+                "type": 'float',
                 "default": None,
             },
         },
@@ -1502,8 +1533,8 @@ TOOLS: dict[str, dict] = {
     "generate_detection_rules": {
         "description": (
             "Generate detection rules from an entry's TTPs via the detection_rules AI task and store "
-            "them as drafts. Supported formats: crowdstrike_ql, elastic_ql, kql, sigma, "
-            "snort_suricata, splunk_spl, yara."
+            "them as drafts. Supported formats: aql, crowdstrike_ql, elastic_ql, kql, nuclei, "
+            "panther, sigma, snort_suricata, splunk_spl, sql, sumo, yara, yaral."
         ),
         "params": {
             "entry_id": {
@@ -1793,14 +1824,15 @@ TOOLS: dict[str, dict] = {
     },
     "get_detection_rules": {
         "description": (
-            "List detection rules. Optionally filter by rule type (crowdstrike_ql, elastic_ql, kql, "
-            "nuclei, panther, sigma, snort_suricata, splunk_spl, yara)."
+            "List detection rules. Optionally filter by rule type (aql, crowdstrike_ql, elastic_ql, "
+            "kql, nuclei, panther, sigma, snort_suricata, splunk_spl, sql, sumo, yara, yaral)."
         ),
         "params": {
             "rule_type": {
                 "type": 'str',
                 "default": None,
                 "enum": [
+                    'aql',
                     'crowdstrike_ql',
                     'elastic_ql',
                     'kql',
@@ -1809,7 +1841,10 @@ TOOLS: dict[str, dict] = {
                     'sigma',
                     'snort_suricata',
                     'splunk_spl',
+                    'sql',
+                    'sumo',
                     'yara',
+                    'yaral',
                 ],
             },
             "limit": {
@@ -2322,6 +2357,19 @@ TOOLS: dict[str, dict] = {
         ),
         "params": {
             "victim_id": {
+                "type": 'str',
+                "required": True,
+            },
+        },
+    },
+    "get_report_share_link": {
+        "description": (
+            "Return this user's active public share link for an intel report ({token, url, "
+            "created_at, expires_at}), or null if they have not shared it. Other analysts' links are "
+            "not returned."
+        ),
+        "params": {
+            "report_id": {
                 "type": 'str',
                 "required": True,
             },
@@ -3774,6 +3822,19 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "revoke_report_share_link": {
+        "description": (
+            "Deactivate this user's active public share link for an intel report so its URL stops "
+            "resolving. Other analysts' links for the same report are left alone. "
+            "create_report_share_link issues a fresh link (new token) afterwards."
+        ),
+        "params": {
+            "report_id": {
+                "type": 'str',
+                "required": True,
+            },
+        },
+    },
     "revoke_share_link": {
         "description": (
             "Deactivate this user's active public share link for an entry so its public URL stops "
@@ -4295,12 +4356,12 @@ TOOLS: dict[str, dict] = {
     "update_detection_rule": {
         "description": (
             "Update fields of a detection rule. Updatable keys: title, description, rule_content, "
-            "rule_type (crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, "
-            "splunk_spl, yara), severity, tags, is_draft, log_sources, mitre_tactics, data_sources, "
-            "notes, source_ttps, source_entries, source_actors, source_campaigns, metadata, "
-            "change_description. Changing rule_content snapshots the previous content as a new "
-            "version; content or type changes re-extract rule metadata into unset fields (same as the "
-            "API PUT)."
+            "rule_type (aql, crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, "
+            "splunk_spl, sql, sumo, yara, yaral), severity, tags, is_draft, log_sources, "
+            "mitre_tactics, data_sources, notes, source_ttps, source_entries, source_actors, "
+            "source_campaigns, metadata, change_description. Changing rule_content snapshots the "
+            "previous content as a new version; content or type changes re-extract rule metadata into "
+            "unset fields (same as the API PUT)."
         ),
         "params": {
             "rule_id": {
@@ -4564,14 +4625,15 @@ TOOLS: dict[str, dict] = {
     "validate_detection_rule": {
         "description": (
             "Validate detection rule syntax. Returns validation errors, warnings, and suggestions. "
-            "Supported formats: crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, "
-            "snort_suricata, splunk_spl, yara."
+            "Supported formats: aql, crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, "
+            "snort_suricata, splunk_spl, sql, sumo, yara, yaral."
         ),
         "params": {
             "rule_type": {
                 "type": 'str',
                 "required": True,
                 "enum": [
+                    'aql',
                     'crowdstrike_ql',
                     'elastic_ql',
                     'kql',
@@ -4580,7 +4642,10 @@ TOOLS: dict[str, dict] = {
                     'sigma',
                     'snort_suricata',
                     'splunk_spl',
+                    'sql',
+                    'sumo',
                     'yara',
+                    'yaral',
                 ],
             },
             "rule_content": {

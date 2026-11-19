@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
+import { currentReadingPrefs } from "@/hooks/useReadingPrefs";
+import { defaultRuleTypes } from "@/utils/queryLanguage";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useUIStore } from "@/stores/uiStore";
@@ -234,7 +236,7 @@ export default function WorkbenchPanel({
   const handleGenerateRules = () => {
     generateRules.mutate({
       entryId,
-      ruleTypes: ["sigma", "splunk_spl"],
+      ruleTypes: defaultRuleTypes(currentReadingPrefs().query_language),
     });
   };
 

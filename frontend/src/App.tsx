@@ -84,6 +84,11 @@ const SharedCopilotPage = lazy(() =>
     default: m.SharedCopilotPage,
   }))
 );
+const SharedReportPage = lazy(() =>
+  import("@/pages/SharedReportPage").then((m) => ({
+    default: m.SharedReportPage,
+  }))
+);
 const ThreatsPage = lazy(() =>
   import("@/pages/ThreatsPage").then((m) => ({
     default: m.ThreatsPage,
@@ -238,6 +243,7 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/shared/copilot/:token" element={<SharedCopilotPage />} />
+          <Route path="/shared/report/:token" element={<SharedReportPage />} />
           <Route path="/shared/:token" element={<SharedEntryPage />} />
           <Route
             element={

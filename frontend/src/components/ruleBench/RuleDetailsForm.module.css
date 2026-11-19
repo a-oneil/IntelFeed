@@ -3,7 +3,20 @@
 .root {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
+}
+
+/* Two columns in the full-width strip under the editor; one on a phone. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 24px;
+}
+
+@media (max-width: 767px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .group {
@@ -42,6 +55,15 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* A grid cell's automatic minimum is its content, so a long tag would push
+     the column past the editor's edge instead of staying in its box. */
+  min-width: 0;
+}
+
+.field > * {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .subLabel {

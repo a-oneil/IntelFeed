@@ -198,6 +198,7 @@ READ_ONLY_TOOLS = frozenset(
         "get_ransomware_group_victims",
         "get_ransomware_stats",
         "get_ransomware_victim",
+        "get_report_share_link",
         "get_requirement_coverage",
         "get_requirements",
         "get_review_rows",

@@ -20,6 +20,10 @@ const RULE_FORMAT_OPTIONS = [
   { value: "kql", label: "KQL" },
   { value: "snort_suricata", label: "Snort/Suricata" },
   { value: "yara", label: "YARA" },
+  { value: "yaral", label: "YARA-L" },
+  { value: "aql", label: "AQL" },
+  { value: "sumo", label: "Sumo Logic" },
+  { value: "sql", label: "SQL" },
 ] as const;
 
 const FOCUS_OPTIONS = [

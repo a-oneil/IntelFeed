@@ -50,3 +50,65 @@
   color: var(--text-muted);
   font-size: var(--fs-2xs);
 }
+
+/* Provenance: a tight definition list in the 190px rail. */
+.dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+}
+
+.dl dt {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.dl dd {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--accent-intel);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.link:hover {
+  text-decoration-style: solid;
+}
+
+.more {
+  color: var(--text-muted);
+}
+
+.refs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--sp-2);
+  min-width: 0;
+}
+
+.ref {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.ref:hover {
+  color: var(--accent);
+}

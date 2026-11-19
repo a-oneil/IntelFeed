@@ -1050,7 +1050,10 @@ All User.
 | GET | `/api/threat-board/windows` | The windows the board offers |
 | GET | `/api/threat-board/precedent` | Past stories shaped like this one |
 | GET | `/api/threat-board/{entity_type}/{entity_key}/rules` | Rules that match a board row |
-| PUT | `/api/threat-board/{entity_type}/{entity_key}/state` | Mark a row `open`, `handled` or `muted` |
+| PUT | `/api/threat-board/{entity_type}/{entity_key}/state` | Mark a row `open`, `handled`, `muted` (dismissed) or `tracked` (pinned); the decision also covers the CVEs folded onto the row |
+| GET | `/api/threat-board/{entity_type}/{entity_key}/hunt-pack` | The row's cached hunt pack: one to three hypotheses with queries in the user's preferred query language (`?language=` overrides it), telemetry checked at read time (`status: none` until drafted) |
+| POST | `/api/threat-board/{entity_type}/{entity_key}/hunt-pack` | Draft or redraft the hunt pack now (synchronous AI call; 409 when the window has nothing to hunt from, 422 when `hunt_pack` has no provider) |
+| GET | `/api/threat-board/{entity_type}/{entity_key}/hunt-pack.md` | The pack as an ATHF hunt file: YAML frontmatter and the LOCK body, Keep left empty. `?hunt_id=H-0042` numbers it so `athf hunt validate` passes as exported; without it the id stays the `H-XXXX` placeholder for the workspace to assign |
 | GET | `/api/coverage-workspace/{entity_type}/{entity_key}` | Articles and behaviours for one threat |
 | GET | `/api/coverage-workspace/{entity_type}/{entity_key}/behaviours/{technique_id}/rules` | Rules for one behaviour |
 | GET, POST | `/api/coverage-workspace/{entity_type}/{entity_key}/sets` | List or save rule sets for the threat |
@@ -1300,6 +1303,12 @@ Enrichment fills in entity details from outside sources (NVD, EPSS, CISA KEV, Ma
 | POST | `/api/shared/{token}/tts/prepare` | Share token | Prepare read-aloud audio |
 | GET | `/api/shared/{token}/tts/file/{cache_key}.mp3` | Share token | The audio file |
 | GET | `/api/shared/copilot/{token}` | Share token | A shared copilot conversation |
+| POST | `/api/intel-reports/{report_id}/share` | User | Make a public link to a report, or return yours if it exists. Only TLP:CLEAR and TLP:GREEN reports can be shared; AMBER and RED are refused |
+| GET | `/api/intel-reports/{report_id}/share` | User | Your link for this report, or null |
+| DELETE | `/api/intel-reports/{report_id}/share` | User | Turn your link off (admins turn off every link for the report) |
+| GET | `/api/shared/report/{token}` | Share token | The shared report: its sections in template order with narrative bodies and data rows (timeline rows oldest first), plus `entities`, the auto-linker's matches over the text so the page highlights entities without a session. 403 while the report is marked AMBER or RED |
+| GET | `/api/shared/report/{token}/export` | Share token | Download it as Markdown, HTML or PDF (`format=`) |
+| GET | `/api/shared/report/{token}/og` | Share token | An HTML page with link-preview (Open Graph) tags for the shared report |
 
 #### Public RSS
 

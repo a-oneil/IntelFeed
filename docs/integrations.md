@@ -710,7 +710,7 @@ Copilot needs tool calling ([copilot.md](copilot.md)).
 
 With an Anthropic API key (console.anthropic.com): **+ Add** a provider of type **Claude (Anthropic API)** with a name and the key, **Save**, **Test**, then assign tasks and models in **Prompts**.
 
-Models: `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5-20251001` (Haiku cheapest and fastest, Opus strongest). Spend: **Settings → AI Configuration → Cost Dashboard**.
+Models: `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5` (the defaults), plus the previous `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5-20251001` (Haiku cheapest and fastest, Opus strongest). Spend: **Settings → AI Configuration → Cost Dashboard**.
 
 **Claude Code CLI** is created by IntelFeed at startup, signs in with a Claude account (admins redo expired sign-ins in **Settings → AI Configuration**), and runs only on `celery-worker-ai`. See [copilot.md](copilot.md).
 

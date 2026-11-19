@@ -50,6 +50,18 @@
   color: var(--text-primary);
 }
 
+.noSources {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.coverage {
+  margin-left: auto;
+  align-self: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+}
+
 .relatedRow {
   display: flex;
   align-items: baseline;

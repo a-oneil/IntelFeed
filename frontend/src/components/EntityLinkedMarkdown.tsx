@@ -53,6 +53,16 @@ interface Props {
   excludeEntityId?: string;
   /** Skip scanning (e.g. while editing). */
   enabled?: boolean;
+  /**
+   * Matches already computed (the public shared-report page gets them from
+   * the server, which scans without a session). When given, no scan runs.
+   */
+  matches?: EntityScanMatch[];
+  /**
+   * No session behind the page: a click opens the hover card instead of
+   * navigating to a profile, and the card offers no actions.
+   */
+  readOnly?: boolean;
 }
 
 
@@ -133,10 +143,17 @@ function scanMatchToHighlightEntity(m: EntityScanMatch): HighlightEntity {
   }
 }
 
-export function EntityLinkedMarkdown({ text, excludeEntityId, enabled = true }: Props) {
+export function EntityLinkedMarkdown({
+  text,
+  excludeEntityId,
+  enabled = true,
+  matches: givenMatches,
+  readOnly = false,
+}: Props) {
   const navigate = useNavigate();
   const selectEntity = useIntelStore((s) => s.selectEntity);
-  const { data: matches } = useEntityScan(text, enabled);
+  const { data: scanned } = useEntityScan(text, enabled && !givenMatches);
+  const matches = givenMatches ?? scanned;
 
   // Build the remark links and, in the same pass, an href → entity map so
   // hovering a link shows the shared EntityPopover with the full metadata the
@@ -219,6 +236,13 @@ export function EntityLinkedMarkdown({ text, excludeEntityId, enabled = true }: 
               }}
               onClick={(e) => {
                 e.stopPropagation();
+                if (readOnly) {
+                  // Nowhere to go without a session: the card is the destination.
+                  e.preventDefault();
+                  if (hoverTimer.current) clearTimeout(hoverTimer.current);
+                  openPopoverFor(href, e.currentTarget);
+                  return;
+                }
                 if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
                   return;
                 }
@@ -253,7 +277,7 @@ export function EntityLinkedMarkdown({ text, excludeEntityId, enabled = true }: 
         );
       },
     }),
-    [navigate, openPopoverFor],
+    [navigate, openPopoverFor, readOnly],
   );
 
   return (
@@ -270,9 +294,11 @@ export function EntityLinkedMarkdown({ text, excludeEntityId, enabled = true }: 
           onNavigate={() => {
             const { entity } = popover;
             setPopover(null);
+            if (readOnly) return;
             selectEntity(entity.type as EntityType, entity.id, entity.value);
             navigate("/workbench/explore");
           }}
+          readOnly={readOnly}
         />
       )}
     </>

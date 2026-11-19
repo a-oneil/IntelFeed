@@ -43,6 +43,10 @@ ANON_LIMITS = ((180, 60), (1500, 3600))
 ANON_ARTICLE_LIMITS = ((20, 60), (150, 3600))
 ANON_HEAVY_LIMITS = ((20, 60), (200, 3600))
 ANON_ARTICLE_PATH = re.compile(r"^/api/entries/(?:[0-9a-fA-F-]{36}|[0-9a-fA-F]{32})$")
+# A shared report's download renders markdown to HTML and, with WeasyPrint
+# installed, to PDF — real CPU for an anonymous caller, so it sits with the
+# heavy reads rather than the general anonymous budget.
+ANON_REPORT_EXPORT_PATH = re.compile(r"^/api/shared/report/[^/]+/export$")
 ANON_HEAVY_PREFIXES = (
     "/api/intelligence/graph/",
     "/api/intelligence/pivot/",
@@ -115,6 +119,8 @@ def _get_limit(path: str, method: str = "GET", *, anonymous: bool = False) -> tu
             return (*INDICATOR_FEED_LIMIT, "indicator_feeds")
         if method == "GET" and ANON_ARTICLE_PATH.match(path):
             return (*ANON_ARTICLE_LIMITS[0], "anon_article")
+        if method == "GET" and ANON_REPORT_EXPORT_PATH.match(path):
+            return (*ANON_HEAVY_LIMITS[0], "anon_heavy")
         if path.startswith(ANON_HEAVY_PREFIXES):
             return (*ANON_HEAVY_LIMITS[0], "anon_heavy")
         return (*ANON_LIMITS[0], "anon")

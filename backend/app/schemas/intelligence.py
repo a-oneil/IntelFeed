@@ -372,7 +372,9 @@ class MalwareFamilyResponse(BaseModel):
 
 # --- Detection Rule Schemas ---
 
-RULE_TYPE_PATTERN = r"^(sigma|splunk_spl|crowdstrike_ql|elastic_ql|kql|snort_suricata|yara|nuclei|panther)$"
+RULE_TYPE_PATTERN = (
+    r"^(sigma|splunk_spl|crowdstrike_ql|elastic_ql|kql|snort_suricata|yara|nuclei|panther|yaral|aql|sumo|sql)$"
+)
 
 
 class RuleTelemetry(BaseModel):
@@ -593,8 +595,24 @@ class BulkRuleDeleteRequest(BaseModel):
 
 class RuleConvertRequest(BaseModel):
     target_type: str = Field(pattern=RULE_TYPE_PATTERN)
+    # A query-language id from app/ai/query_language.py whose rule_type is
+    # target_type. Names the dialect where one format holds several (ES|QL
+    # and EQL are both elastic_ql) and puts the language's full name in the
+    # prompt. One converted rule per (source, target_type, dialect).
+    dialect: str | None = Field(default=None, max_length=20)
+    # Free text appended to the prompt, for anything the converted rule
+    # should account for.
+    notes: str | None = Field(default=None, max_length=2000)
 
-    model_config = ConfigDict(json_schema_extra={"example": {"target_type": "splunk_spl"}})
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "target_type": "elastic_ql",
+                "dialect": "esql",
+                "notes": "Keep the regex; drop the homoglyph variants.",
+            }
+        }
+    )
 
 
 class RuleChatRequest(BaseModel):

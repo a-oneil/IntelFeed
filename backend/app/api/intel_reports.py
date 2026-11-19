@@ -1,4 +1,3 @@
-import re
 import uuid
 from datetime import UTC, datetime
 
@@ -7,18 +6,17 @@ from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.content_disposition import attachment
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResponse
 from app.core.security import get_current_user
 from app.database import get_db
 from app.intelligence.reporting import (
     REPORT_TEMPLATES,
+    attachment_headers,
+    export_report,
     generate_report_content,
     generate_section_content,
     narrative_sections,
-    render_html,
-    render_markdown,
     resolve_report_sources,
 )
 from app.models.intel_report import IntelReport, IntelReportVersion
@@ -36,10 +34,6 @@ from app.schemas.intel_report import (
 )
 
 router = APIRouter()
-
-
-def _safe_filename(raw: str | None, fallback: str) -> str:
-    return re.sub(r'[/\\"\r\n\x00-\x1f]+', "-", (raw or "").strip())[:50].strip(" .-") or fallback
 
 
 async def _usable_template(
@@ -833,52 +827,8 @@ async def export_intel_report(
     if not report:
         raise AppError(code="not_found", message="Report not found", status_code=404)
 
-    safe_title = _safe_filename(report.title, str(report.id))
-
-    if format == "markdown":
-        content = render_markdown(report)
-        return Response(
-            content=content,
-            media_type="text/markdown; charset=utf-8",
-            headers={"Content-Disposition": attachment(f"{safe_title}.md")},
-        )
-
-    elif format == "html":
-        content = render_html(report)
-        return Response(
-            content=content,
-            media_type="text/html; charset=utf-8",
-            headers={"Content-Disposition": attachment(f"{safe_title}.html")},
-        )
-
-    elif format == "pdf":
-        # Try WeasyPrint if available; fall back to HTML with a note
-        try:
-            import weasyprint
-
-            html_content = render_html(report)
-            # WeasyPrint's default fetcher follows any URL in the document,
-            # file:// included, and a <link rel="attachment"> embeds whatever
-            # it fetched in the PDF. render_html sanitizes the body, and this
-            # is the second wall: nothing but inline data: URIs is loaded.
-            fetcher = weasyprint.URLFetcher(allowed_protocols={"data"})
-            pdf_bytes = weasyprint.HTML(string=html_content, url_fetcher=fetcher).write_pdf()
-            return Response(
-                content=pdf_bytes,
-                media_type="application/pdf",
-                headers={"Content-Disposition": attachment(f"{safe_title}.pdf")},
-            )
-        except ImportError:
-            # WeasyPrint not installed — return HTML with a note
-            html_content = render_html(report)
-            note = "<!-- PDF export requires WeasyPrint. Install with: pip install weasyprint -->\n"
-            return Response(
-                content=note + html_content,
-                media_type="text/html; charset=utf-8",
-                headers={"Content-Disposition": attachment(f"{safe_title}.html")},
-            )
-
-    raise AppError(code="invalid_format", message=f"Unsupported export format: {format}", status_code=400)
+    content, media_type, filename = export_report(report, format)
+    return Response(content=content, media_type=media_type, headers=attachment_headers(filename))
 
 
 @router.post("/{report_id}/publish", response_model=IntelReportResponse)
@@ -1136,7 +1086,8 @@ async def attach_to_intel_report(
 
     # Refresh data sections (items-bearing: TTPs, references, timeline,
     # observables) from the merged evidence; analyst-written narrative bodies
-    # are never touched.
+    # are never touched, and a data section the analyst rewrote as text in
+    # the builder (``items_edited``) keeps that text instead of fresh rows.
     regenerated = await generate_report_content(report.template_type, merged_entries, merged_entities, db)
     content = dict(report.content or {})
     sections = dict(content.get("sections") or {})
@@ -1144,6 +1095,8 @@ async def attach_to_intel_report(
         old = sections.get(key)
         if not isinstance(old, dict):
             sections[key] = fresh
+        elif old.get("items_edited"):
+            continue
         elif fresh.get("items") is not None:
             sections[key] = {**old, "items": fresh["items"], "body": old.get("body") or fresh.get("body", "")}
 

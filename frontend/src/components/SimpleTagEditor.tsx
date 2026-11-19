@@ -36,7 +36,7 @@ export default function SimpleTagEditor({
     <div className={styles.container}>
       <div className={styles.tags}>
         {tags.map((tag) => (
-          <Chip key={tag} className={styles.tag}>
+          <Chip key={tag} className={styles.tag} title={tag} truncate>
             {tag}
             <button
               className={styles.remove}

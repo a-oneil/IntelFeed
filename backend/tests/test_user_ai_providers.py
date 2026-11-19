@@ -882,20 +882,22 @@ async def test_eligible_set_matches_the_migrations_data_step():
     from app.ai.capabilities import USER_PROVIDER_ELIGIBLE_TASKS
     from app.ai.prompts.defaults import SYSTEM_TASKS
 
-    # The migration spells the set out (it must not import app code), so
-    # read its tuple back rather than trusting the two to agree.
-    source = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "a7b8c9d0e1f2_per_user_ai_providers.py"
-    tree = ast.parse(source.read_text())
-    migration = next(
-        set(ast.literal_eval(node.value))
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "ELIGIBLE_TASKS" for t in node.targets)
-    )
+    # Each migration that grants eligibility spells its set out (a migration
+    # must not import app code), so read every ELIGIBLE_TASKS tuple back and
+    # union them rather than trusting the two to agree. A task added later gets
+    # its own data migration, never an edit to a migration that already ran.
+    versions = Path(__file__).resolve().parents[1] / "alembic" / "versions"
+    migration: set[str] = set()
+    for source in sorted(versions.glob("*.py")):
+        tree = ast.parse(source.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "ELIGIBLE_TASKS" for t in node.targets):
+                migration |= set(ast.literal_eval(node.value))
     assert migration == set(USER_PROVIDER_ELIGIBLE_TASKS)
 
     names = {t["name"] for t in SYSTEM_TASKS}
     assert USER_PROVIDER_ELIGIBLE_TASKS <= names
-    assert len(USER_PROVIDER_ELIGIBLE_TASKS) == 14
+    assert len(USER_PROVIDER_ELIGIBLE_TASKS) == 15
     for name in ("entry_analysis", "entry_adjudication", "daily_summary", "threat_brief", "entry_qa"):
         assert name not in USER_PROVIDER_ELIGIBLE_TASKS
 

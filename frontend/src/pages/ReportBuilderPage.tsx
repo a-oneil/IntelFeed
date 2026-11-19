@@ -11,12 +11,17 @@ import {
   useGenerateReportSection,
   useRegenerateAllSections,
   useCloneReportAsType,
+  useReportShareLink,
+  useCreateReportShareLink,
+  useRevokeReportShareLink,
 } from "@/hooks/useIntelReports";
 import { useEntryNames } from "@/hooks/useEntries";
 import { useEntityNames } from "@/hooks/useIntelligence";
 import { useSearch } from "@/hooks/useSearch";
 import type { ReportTemplateSection } from "@/api/types";
-import { EntityLinkedMarkdown } from "@/components/EntityLinkedMarkdown";
+import { ReportDocument } from "@/components/report/ReportDocument";
+import { dataSectionText } from "@/components/report/sectionItemsMarkdown";
+import { toast } from "sonner";
 import CodeMirrorEditor from "@/components/CodeMirrorEditor";
 import SimpleTagEditor from "@/components/SimpleTagEditor";
 import { formatDateTime as formatDate } from "@/utils/formatDate";
@@ -42,125 +47,6 @@ const EXPORT_FORMATS = [
 
 
 type SectionData = { title?: string; body?: string; items?: Record<string, unknown>[] };
-
-/** Data-section rows rendered as a real table, shape-detected the same way
- *  the markdown exporter does (observables, threat surface, TTPs, refs...). */
-function SectionItemsTable({ items }: { items: Record<string, unknown>[] }) {
-  const first = items[0] || {};
-  const cell = (v: unknown) => (Array.isArray(v) ? v.join(", ") : v == null ? "" : String(v));
-
-  if ("kind" in first && "value" in first) {
-    return (
-      <div className={styles.docTableWrap}>
-        <table className={styles.docTable}>
-          <thead><tr><th>Kind</th><th>Value</th><th>Confidence</th><th>Attribution</th><th>Last seen</th></tr></thead>
-          <tbody>
-            {items.map((it, i) => (
-              <tr key={i}>
-                <td>{cell(it.kind)}</td>
-                <td className={styles.docMono}>{cell(it.value)}</td>
-                <td>{typeof it.confidence === "number" ? `${Math.round((it.confidence as number) * 100)}%` : ""}</td>
-                <td>{cell(it.claimed_by)}</td>
-                <td>{cell(it.last_seen)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-  if ("matched_regions" in first) {
-    return (
-      <div className={styles.docTableWrap}>
-        <table className={styles.docTable}>
-          <thead><tr><th>Entity</th><th>Type</th><th>Regions</th><th>Verticals</th><th>Entries</th><th>Victims</th></tr></thead>
-          <tbody>
-            {items.map((it, i) => (
-              <tr key={i}>
-                <td><b>{cell(it.name)}</b></td>
-                <td>{cell(it.subtype || (it.entity_type === "threat_actor" ? "actor" : it.entity_type))}</td>
-                <td>{cell(it.matched_regions) || "—"}</td>
-                <td>{cell(it.matched_sectors) || "—"}</td>
-                <td>{cell(it.entry_count)}</td>
-                <td>{cell(it.victim_count) || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-  if ("technique_id" in first) {
-    return (
-      <div className={styles.docTableWrap}>
-        <table className={styles.docTable}>
-          <thead><tr><th>Technique</th><th>Name</th><th>Tactic</th></tr></thead>
-          <tbody>
-            {items.map((it, i) => (
-              <tr key={i}>
-                <td className={styles.docMono}>{cell(it.technique_id)}</td>
-                <td>{cell(it.name)}</td>
-                <td>{cell(it.tactic)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-  if ("url" in first && "title" in first) {
-    return (
-      <ul className={styles.docList}>
-        {items.map((it, i) => (
-          <li key={i}>
-            <a href={String(it.url || "")} target="_blank" rel="noreferrer">{cell(it.title) || cell(it.url)}</a>
-          </li>
-        ))}
-      </ul>
-    );
-  }
-  if ("date" in first && "title" in first) {
-    return (
-      <ul className={styles.docList}>
-        {items.map((it, i) => (
-          <li key={i}>
-            <span className={styles.docMono}>{cell(it.date)?.slice(0, 10) || "?"}</span> — {cell(it.title)}
-          </li>
-        ))}
-      </ul>
-    );
-  }
-  if ("cve_id" in first) {
-    return (
-      <div className={styles.docTableWrap}>
-        <table className={styles.docTable}>
-          <thead><tr><th>CVE</th><th>Severity</th><th>CVSS</th><th>Description</th></tr></thead>
-          <tbody>
-            {items.map((it, i) => (
-              <tr key={i}>
-                <td className={styles.docMono}>{cell(it.cve_id)}</td>
-                <td>{cell(it.severity)}</td>
-                <td>{cell(it.cvss_score)}</td>
-                <td>{String(it.description || "").slice(0, 160)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-  return (
-    <ul className={styles.docList}>
-      {items.map((it, i) => (
-        <li key={i}>
-          <b>{cell(it.name)}</b>
-          {it.aliases ? ` (${cell(it.aliases)})` : ""}
-          {it.malware_type ? ` — ${cell(it.malware_type)}` : ""}
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 /** Placeholder line the skeleton puts under each heading; stripped back out
  *  when the body is parsed into sections on create. */
@@ -277,11 +163,17 @@ export function ReportBuilderPage() {
   const generateSection = useGenerateReportSection();
   const regenerateAll = useRegenerateAllSections();
   const cloneAsType = useCloneReportAsType();
+  const { data: shareLink } = useReportShareLink(id);
+  const createShareLink = useCreateReportShareLink();
+  const revokeShareLink = useRevokeReportShareLink();
 
   // Local editing state
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [sections, setSections] = useState<Record<string, string>>({});
+  // Data sections whose rows the analyst has rewritten as text in this
+  // editing session: on save the body replaces the rows (items become []).
+  const [itemsReplaced, setItemsReplaced] = useState<Set<string>>(new Set());
   const [summary, setSummary] = useState("");
   const [tlpMarking, setTlpMarking] = useState("TLP:GREEN");
   const [tags, setTags] = useState<string[]>([]);
@@ -343,6 +235,7 @@ export function ReportBuilderPage() {
         }
       }
       setSections(sectionData);
+      setItemsReplaced(new Set());
       setSummary(report.summary || "");
       setTlpMarking(report.tlp_marking);
       setTags(report.tags || []);
@@ -390,7 +283,9 @@ export function ReportBuilderPage() {
     const existingSections = (existingContent.sections || {}) as Record<string, Record<string, unknown>>;
     const mergedSections: Record<string, unknown> = { ...existingSections };
     for (const [key, val] of Object.entries(sections)) {
-      mergedSections[key] = { ...(existingSections[key] || {}), body: val };
+      mergedSections[key] = itemsReplaced.has(key)
+        ? { ...(existingSections[key] || {}), body: val, items: [], items_edited: true }
+        : { ...(existingSections[key] || {}), body: val };
     }
     const content: Record<string, unknown> = {
       ...existingContent,
@@ -428,7 +323,9 @@ export function ReportBuilderPage() {
     const existingSections2 = (existingContent2.sections || {}) as Record<string, Record<string, unknown>>;
     const mergedSections2: Record<string, unknown> = { ...existingSections2 };
     for (const [key, val] of Object.entries(sections)) {
-      mergedSections2[key] = { ...(existingSections2[key] || {}), body: val };
+      mergedSections2[key] = itemsReplaced.has(key)
+        ? { ...(existingSections2[key] || {}), body: val, items: [], items_edited: true }
+        : { ...(existingSections2[key] || {}), body: val };
     }
     const content: Record<string, unknown> = {
       ...existingContent2,
@@ -500,6 +397,36 @@ export function ReportBuilderPage() {
     exportReport.mutate({ id, format, title });
   };
 
+  const shareUrl = shareLink ? `${window.location.origin}${shareLink.url}` : null;
+  // Only CLEAR and GREEN may go out by public link (the backend enforces the
+  // same rule when the link is made and on every read).
+  const tlpBlocksSharing = tlpMarking !== "TLP:CLEAR" && tlpMarking !== "TLP:GREEN";
+  const copyShareUrl = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Share link copied to clipboard");
+    } catch {
+      toast.error("Couldn't copy — select the link and copy it");
+    }
+  };
+  const handleCreateShare = () => {
+    if (!id) return;
+    createShareLink.mutate(id, {
+      onSuccess: (link) => copyShareUrl(`${window.location.origin}${link.url}`),
+      onError: (err) => {
+        const detail = (err as { response?: { data?: { error?: { message?: string } } } }).response?.data?.error?.message;
+        toast.error(detail || "Failed to create share link");
+      },
+    });
+  };
+  const handleRevokeShare = () => {
+    if (!id) return;
+    revokeShareLink.mutate(id, {
+      onSuccess: () => toast.success("Share link turned off"),
+      onError: () => toast.error("Failed to revoke share link"),
+    });
+  };
+
   const handleInsertSnippet = (snippet: string) => {
     setBody((prev) => prev + snippet);
     setHasChanges(true);
@@ -536,6 +463,32 @@ export function ReportBuilderPage() {
     const c = report?.content as { sections?: Record<string, SectionData> } | undefined;
     return c?.sections || {};
   }, [report]);
+
+  /** The rows a data section still carries — none once the analyst has
+   *  rewritten them as text this session. */
+  const sectionItems = useCallback(
+    (sectionName: string): Record<string, unknown>[] => {
+      if (itemsReplaced.has(sectionName)) return [];
+      const data = (contentSections[sectionName] || {}) as SectionData;
+      return Array.isArray(data.items) ? data.items : [];
+    },
+    [contentSections, itemsReplaced],
+  );
+
+  /** What a data section's editor shows: its body, then its rows as Markdown. */
+  const dataSectionEditorText = useCallback(
+    (sectionName: string): string => dataSectionText(sections[sectionName] || "", sectionItems(sectionName)),
+    [sections, sectionItems],
+  );
+
+  /** Typing in a data section's editor turns its rows into text: the body is
+   *  now the whole section and the rows go on save. */
+  const handleDataSectionChange = useCallback((sectionName: string, value: string) => {
+    setItemsReplaced((prev) => (prev.has(sectionName) ? prev : new Set(prev).add(sectionName)));
+    setSections((prev) => ({ ...prev, [sectionName]: value }));
+    setHasChanges(true);
+  }, []);
+
 
   // Get template sections for the current report
   const currentTemplateSections: ReportTemplateSection[] =
@@ -1019,34 +972,30 @@ export function ReportBuilderPage() {
                 </div>
               )}
               {!viewingVersionId && currentTemplateSections.length > 0 && docView === "rendered" ? (
-                <div className={styles.docSurface}>
-                  {currentTemplateSections.map((sec) => {
+                <ReportDocument
+                  sections={currentTemplateSections.map((sec) => {
                     const data = (contentSections[sec.name] || {}) as SectionData;
-                    let bodyText = sections[sec.name] || data.body || "";
                     // Generated bodies often open with their own "## Title"
                     // heading — the doc view already draws one, so drop it
                     // (same rule as the markdown exporter).
-                    bodyText = bodyText.replace(/^\s*##\s+[^\n]*\n+/, "");
-                    const items = Array.isArray(data.items) ? data.items : [];
-                    return (
-                      <section key={sec.name} className={styles.docSection} data-untrusted-content="">
-                        <h2 className={styles.docHeading}>{sec.title || data.title || sec.name}</h2>
-                        {bodyText && <EntityLinkedMarkdown text={bodyText} />}
-                        {items.length > 0 && <SectionItemsTable items={items} />}
-                        {!bodyText && items.length === 0 && (
-                          <p className={styles.docEmpty}>
-                            {sec.type === "data"
-                              ? "No data yet — fills from linked articles and entities."
-                              : "Not written yet — open the section tab to write it or generate with AI."}
-                          </p>
-                        )}
-                      </section>
-                    );
+                    const body = (sections[sec.name] || data.body || "").replace(/^\s*##\s+[^\n]*\n+/, "");
+                    return {
+                      name: sec.name,
+                      title: sec.title || data.title || sec.name,
+                      type: sec.type,
+                      body,
+                      items: sectionItems(sec.name),
+                    };
                   })}
-                </div>
+                  emptyText={(sec) =>
+                    sec.type === "data"
+                      ? "No data yet — fills from linked articles and entities."
+                      : "Not written yet — open the section tab to write it or generate with AI."
+                  }
+                />
               ) : (
                 <CodeMirrorEditor
-                  value={viewingVersionId ? viewingBody : (currentTemplateSections.length > 0 ? currentTemplateSections.map((sec) => sections[sec.name] || "").filter(Boolean).join("\n\n---\n\n") : body)}
+                  value={viewingVersionId ? viewingBody : (currentTemplateSections.length > 0 ? currentTemplateSections.map((sec) => (sec.type === "data" ? dataSectionEditorText(sec.name) : sections[sec.name] || "")).filter(Boolean).join("\n\n---\n\n") : body)}
                   onChange={viewingVersionId ? undefined : (currentTemplateSections.length > 0 ? undefined : handleBodyChange)}
                   language=""
                   readOnly={!!viewingVersionId || currentTemplateSections.length > 0}
@@ -1120,9 +1069,17 @@ export function ReportBuilderPage() {
                     </button>
                   </div>
                 </div>
+                {sec.type === "data" && sectionItems(sec.name).length > 0 && (
+                  <div className={styles.sectionEditorDesc}>
+                    These rows fill from the linked articles and entities. Editing them here
+                    makes this section your text: the rows are replaced by what you write.
+                  </div>
+                )}
                 <CodeMirrorEditor
-                  value={sections[sec.name] || ""}
-                  onChange={(val) => handleSectionChange(sec.name, val)}
+                  value={sec.type === "data" ? dataSectionEditorText(sec.name) : sections[sec.name] || ""}
+                  onChange={(val) =>
+                    sec.type === "data" ? handleDataSectionChange(sec.name, val) : handleSectionChange(sec.name, val)
+                  }
                   language=""
                   height="400px"
                   prose
@@ -1355,6 +1312,55 @@ export function ReportBuilderPage() {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Share — a public, read-only page like a shared article */}
+          <div className={styles.metaSection}>
+            <label className={styles.metaLabel}>Share</label>
+            {shareUrl ? (
+              <>
+                <a className={styles.shareUrl} href={shareUrl} target="_blank" rel="noreferrer" title={shareUrl}>
+                  {shareUrl}
+                </a>
+                <div className={styles.exportGroup}>
+                  <button className={styles.exportBtn} onClick={() => copyShareUrl(shareUrl)} type="button">
+                    Copy link
+                  </button>
+                  <button
+                    className={styles.exportBtn}
+                    onClick={handleRevokeShare}
+                    disabled={revokeShareLink.isPending}
+                    type="button"
+                  >
+                    Turn off
+                  </button>
+                </div>
+                <span className={styles.shareHint}>
+                  {tlpBlocksSharing
+                    ? `Paused: the link stops resolving while this report is marked ${tlpMarking}. Save as TLP:GREEN or TLP:CLEAR to reopen it.`
+                    : "Anyone with the link can read this report without signing in."}
+                </span>
+              </>
+            ) : (
+              <>
+                <div className={styles.exportGroup}>
+                  <button
+                    className={styles.exportBtn}
+                    onClick={handleCreateShare}
+                    disabled={createShareLink.isPending || tlpBlocksSharing}
+                    type="button"
+                    title={tlpBlocksSharing ? `${tlpMarking} reports can't be shared by public link` : undefined}
+                  >
+                    Create share link
+                  </button>
+                </div>
+                <span className={styles.shareHint}>
+                  {tlpBlocksSharing
+                    ? `${tlpMarking} reports can't be shared by public link. Only TLP:CLEAR and TLP:GREEN can.`
+                    : "Makes a public, read-only page — the same as sharing an article."}
+                </span>
+              </>
+            )}
           </div>
 
           {/* Version History */}

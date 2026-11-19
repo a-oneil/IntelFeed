@@ -33,7 +33,7 @@ const TYPE_LABELS: Record<PersonalType, string> = {
 };
 
 const DEFAULT_MODELS: Partial<Record<string, string>> = {
-  claude: "claude-sonnet-4-6",
+  claude: "claude-sonnet-5-5",
 };
 
 /** The first model a key can be routed to without the person typing one. */

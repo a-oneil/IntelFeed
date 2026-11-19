@@ -498,7 +498,7 @@ class ClaudeProvider(AIProvider):
         try:
             client = self._build_client()
             await client.with_options(timeout=15).messages.create(
-                model="claude-haiku-4-5-20251001",
+                model="claude-haiku-5-5",
                 max_tokens=1,
                 messages=[{"role": "user", "content": "hi"}],
             )
@@ -512,6 +512,9 @@ class ClaudeProvider(AIProvider):
         # AI Configuration UI dropdown expects. Keep in sync with
         # COST_TABLE in app/ai/engine.py.
         return [
+            "claude-opus-5-5",
+            "claude-sonnet-5-5",
+            "claude-haiku-5-5",
             "claude-opus-4-6",
             "claude-sonnet-4-6",
             "claude-haiku-4-5-20251001",

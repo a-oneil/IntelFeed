@@ -970,6 +970,10 @@ _RULE_EXT: dict[str, str] = {
     "nuclei": "yaml",
     "snort_suricata": "rules",
     "panther": "py",
+    "yaral": "yaral",
+    "aql": "aql",
+    "sumo": "sumo",
+    "sql": "sql",
 }
 
 _COMMENT: dict[str, str] = {
@@ -982,6 +986,10 @@ _COMMENT: dict[str, str] = {
     "nuclei": "#",
     "snort_suricata": "#",
     "panther": "#",
+    "yaral": "//",
+    "aql": "--",
+    "sumo": "//",
+    "sql": "--",
 }
 
 

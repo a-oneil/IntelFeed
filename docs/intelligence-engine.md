@@ -489,7 +489,7 @@ Endpoints: `GET/POST /api/intel-profiles`, `GET/PUT/DELETE /api/intel-profiles/{
 
 ### Report Generation
 
-A report's sources are a single entry, a list of entries, a search or a saved search (`resolve_report_sources()`). The entities linked to those entries are collected automatically. `generate_report_content()` (`backend/app/intelligence/reporting.py:319`) builds the data sections; the AI writes the narrative ones. Reports render to Markdown (`render_markdown()`) or HTML (`render_html()`).
+A report's sources are a single entry, a list of entries, a search or a saved search (`resolve_report_sources()`). The entities linked to those entries are collected automatically. `generate_report_content()` (`backend/app/intelligence/reporting.py:320`) builds the data sections; the AI writes the narrative ones. In the report builder a data section's rows open in its editor as the Markdown the exporter would write; editing them saves the text as the section body with `items: []` and `items_edited: true`, and attaching more evidence leaves such a section alone instead of refilling its rows. Reports render to Markdown (`render_markdown()`) or HTML (`render_html()`).
 
 ### Export Formats
 

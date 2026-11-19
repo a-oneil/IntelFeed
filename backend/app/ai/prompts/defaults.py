@@ -33,34 +33,35 @@ _TOOL_TYPE_ENUM = list(TOOL_TYPES)
 #   Conversational   → Opus (nuanced Q&A)
 DEFAULT_MODEL_ASSIGNMENTS: dict[str, str] = {
     # One-pass extraction (engine phase 4) — cheap model, runs broadly at ingest
-    "entry_analysis": "claude-haiku-4-5-20251001",
+    "entry_analysis": "claude-haiku-5-5",
     # Extraction → Haiku
-    "ttp_mapping": "claude-haiku-4-5-20251001",
-    "cve_extraction": "claude-haiku-4-5-20251001",
-    "threat_actor_id": "claude-haiku-4-5-20251001",
-    "malware_id": "claude-haiku-4-5-20251001",
-    "tool_extraction": "claude-haiku-4-5-20251001",
-    "mitigation_extraction": "claude-haiku-4-5-20251001",
-    "country_id": "claude-haiku-4-5-20251001",
-    "sector_id": "claude-haiku-4-5-20251001",
-    "article_metadata": "claude-haiku-4-5-20251001",
+    "ttp_mapping": "claude-haiku-5-5",
+    "cve_extraction": "claude-haiku-5-5",
+    "threat_actor_id": "claude-haiku-5-5",
+    "malware_id": "claude-haiku-5-5",
+    "tool_extraction": "claude-haiku-5-5",
+    "mitigation_extraction": "claude-haiku-5-5",
+    "country_id": "claude-haiku-5-5",
+    "sector_id": "claude-haiku-5-5",
+    "article_metadata": "claude-haiku-5-5",
     # Analysis → Sonnet
-    "article_summary": "claude-sonnet-4-6",
-    "intelligence_briefing": "claude-sonnet-4-6",
-    "threat_assessment": "claude-sonnet-4-6",
-    "video_transcript_summary": "claude-sonnet-4-6",
-    "detection_engineering_summary": "claude-sonnet-4-6",
-    "daily_summary": "claude-sonnet-4-6",
-    "threat_brief": "claude-sonnet-4-6",
-    "cve_brief": "claude-sonnet-4-6",
-    "story_thread_spine": "claude-sonnet-4-6",
+    "article_summary": "claude-sonnet-5-5",
+    "intelligence_briefing": "claude-sonnet-5-5",
+    "threat_assessment": "claude-sonnet-5-5",
+    "video_transcript_summary": "claude-sonnet-5-5",
+    "detection_engineering_summary": "claude-sonnet-5-5",
+    "daily_summary": "claude-sonnet-5-5",
+    "threat_brief": "claude-sonnet-5-5",
+    "cve_brief": "claude-sonnet-5-5",
+    "hunt_pack": "claude-sonnet-5-5",
+    "story_thread_spine": "claude-sonnet-5-5",
     # Generation → Opus
-    "detection_rules": "claude-opus-4-6",
-    "report_section": "claude-sonnet-4-6",
+    "detection_rules": "claude-opus-5-5",
+    "report_section": "claude-sonnet-5-5",
     # Digest → Sonnet
-    "reddit_digest": "claude-sonnet-4-6",
+    "reddit_digest": "claude-sonnet-5-5",
     # Conversational → Opus
-    "entry_qa": "claude-opus-4-6",
+    "entry_qa": "claude-opus-5-5",
     # Global copilot (streaming, tool-calling) → Sonnet on the CLI; uses the
     # read-only intelfeed skill to search/look up data. Sonnet balances latency
     # with reasoning for interactive chat.
@@ -71,9 +72,9 @@ DEFAULT_MODEL_ASSIGNMENTS: dict[str, str] = {
     # Post-analysis review of one entry's output (adjudicate stage). Smaller
     # job than extraction: a short article window, a short list, a verdict
     # list back — a small, cheap model is enough, and a local Ollama model works well.
-    "entry_adjudication": "claude-haiku-4-5-20251001",
+    "entry_adjudication": "claude-haiku-5-5",
     # Same shape as the adjudication: short profiles in, a verdict list out.
-    "entity_merge_review": "claude-haiku-4-5-20251001",
+    "entity_merge_review": "claude-haiku-5-5",
 }
 
 # Tasks that must be assigned to a specific provider type (rather than the
@@ -141,6 +142,10 @@ DEFAULT_ASSIGNMENT_CONFIGS: dict[str, dict] = {
         # Detailed multi-section briefing — default 4096 truncates on busy days.
         "max_tokens": 8192,
     },
+    # Three hypotheses each carrying a multi-line query: a KQL hunt with two
+    # joins is 300-400 tokens on its own, and a truncated query is worse than
+    # none because it parses and then lies.
+    "hunt_pack": {"max_tokens": 6000},
 }
 
 SYSTEM_TASKS = [
@@ -149,6 +154,7 @@ SYSTEM_TASKS = [
         "display_name": "TTP Mapping",
         "description": "Map tactics/techniques to MITRE ATT&CK",
         "category": "extraction",
+        "deprecated": True,
         "variables": ["entry.title", "entry.content_text", "entry.feed_title", "telemetry_sources"],
         "default_system_template": """You are a cyber threat intelligence analyst specializing in MITRE ATT&CK. Your job is to read security articles and map every adversary behavior they describe to MITRE ATT&CK techniques.
 
@@ -389,6 +395,10 @@ Write the briefing now per the structure and rules in your instructions. Remembe
         "description": "Two-to-three sentence story line for one threat-board row, built only from the window's articles",
         "category": "analysis",
         "variables": ["threat_name", "entity_type", "window", "entries", "entry_count"],
+        # Nightly board job over a window of articles; not a per-article or
+        # per-entity action.
+        "show_in_entry_actions": False,
+        "show_in_entity_actions": False,
         "default_system_template": """You write the story line for one row of a detection engineer's threat board. The row already renders every count (outlets, articles, technique numbers) — your job is the substance those counts discard.
 
 CONTRACT — every rule here is load-bearing:
@@ -471,6 +481,100 @@ Write the story line now, under the contract in your instructions.""",
             "properties": {
                 "brief": {"type": "string"},
             },
+        },
+    },
+    {
+        "name": "hunt_pack",
+        "display_name": "Threat Hunt Pack",
+        "description": (
+            "One to three threat-hunting hypotheses for a threat-board row, each with a query in the "
+            "analyst's preferred query language, drafted only from the window's articles and extracted techniques"
+        ),
+        "category": "generation",
+        "variables": [
+            "threat_name",
+            "entity_type",
+            "window",
+            "query_language",
+            "query_language_name",
+            "entries",
+            "entry_count",
+            "behaviours",
+            "facts",
+            "log_types",
+        ],
+        # Drafted on request from the board's drawer; not a per-article or
+        # per-entity action.
+        "show_in_entry_actions": False,
+        "show_in_entity_actions": False,
+        "default_system_template": """You draft threat-hunting hypotheses for a threat hunter. The hunter has one threat in front of them and a window of recent reporting about it; your output is the starting point of a hunt they will run themselves in their SIEM and document in their own hunting workspace. You are not writing a detection rule and not writing a report.
+
+CONTRACT — every rule here is load-bearing:
+- Use ONLY the supplied articles, extracted techniques, quoted observable sentences and facts. No background knowledge of this threat, no remembered campaigns, no attribution the input does not state. If it is not in the input, it does not exist.
+- Write one to three hypotheses. Fewer, well-grounded hypotheses beat three thin ones. If the input documents only one searchable behavior, write one.
+- Behavior first. Each hypothesis must describe something the adversary DOES that leaves telemetry — a process chain, an authentication pattern, a configuration change, a traffic shape — not a list of indicators. Hashes, IPs and domains from the input may appear only inside query_notes as enrichment, never as the thing the query looks for.
+- Phrase the hypothesis sentence exactly in the form: "Adversaries use [behavior] to [goal] on [target]." One sentence.
+- Prefer hypotheses whose telemetry the hunter already collects (telemetry_collected: true on the technique). Include at most one hypothesis that needs telemetry they do not collect, and only when the input makes it the most important behavior.
+- techniques: one to three MITRE ATT&CK technique IDs, taken from the extracted techniques supplied whenever one fits. tactic: one slug from this list — initial-access, execution, persistence, privilege-escalation, defense-evasion, credential-access, discovery, lateral-movement, collection, command-and-control, exfiltration, impact. platform: one of Windows, macOS, Linux, Network Devices, Containers, ESXi, IaaS, SaaS, Identity Provider, Office Suite.
+- data_sources: ONLY ids from the supplied log_types list (for example auth.mfa, process.creation, vpn.session). They are matched against the hunter's telemetry inventory; an id outside the list can never match and must not be used. Two to four ids.
+- query: written in {{ query_language_name }} and nothing else. It is a HUNTING query, not an alert: bound it to the last 7 days, aggregate or summarize so the result is a triage table (counts, distinct counts, first/last seen, grouped by the thing the hunter would pivot on), and cap raw-row output at 100. Use that platform's standard schema (Sentinel tables and KQL operators; Splunk CIM fields and index=/sourcetype= scoping; ECS field names for ES|QL; Sigma logsource/detection YAML). Where a name depends on the hunter's environment (an index, an allowlist, a lookup), use the conventional one and say so in query_notes rather than inventing a placeholder syntax that will not parse.
+- query_notes: two or three sentences — what the query finds, what to adapt (index names, allowlists, time range), and any indicator from the input worth adding as enrichment.
+- false_positives: one sentence naming the legitimate activity that will also match and how to tell it apart.
+- title: at most ten words, the behavior in plain English.
+- No filler, no preamble, no restating the threat's name or counts.
+
+Respond with JSON: {"hypotheses": [{"title": "...", "hypothesis": "Adversaries use ... to ... on ...", "tactic": "...", "techniques": ["T1234"], "platform": "...", "data_sources": ["..."], "query": "...", "query_notes": "...", "false_positives": "..."}]}""",
+        "default_prompt_template": """Threat: {{ threat_name }} ({{ entity_type }}), window: {{ window }}, {{ entry_count }} articles. Query language: {{ query_language_name }}.
+
+{% if facts %}## Vulnerability facts (ground your claims; do not restate as bare numbers)
+{% if facts.affected %}**Affected**: {{ facts.affected | join(", ") }}
+{% endif %}{% if facts.description %}**Description**: {{ facts.description }}
+{% endif %}{% if facts.is_kev %}**On CISA KEV**{% if facts.kev_date_added %} since {{ facts.kev_date_added }}{% endif %}
+{% endif %}{% if facts.exploit_status %}**Exploit status**: {{ facts.exploit_status }}{% endif %}{% if facts.exploit_availability %} | **Exploit availability**: {{ facts.exploit_availability }}{% endif %}
+
+{% endif %}## Techniques extracted from the window
+{% if behaviours %}{% for b in behaviours %}- {{ b.technique_id }} {{ b.technique_name }}{% if b.tactic %} ({{ b.tactic }}){% endif %} — {{ b.entry_count }} article{{ "s" if b.entry_count != 1 else "" }}{% if b.is_new %}, NEW this window{% endif %}; telemetry_collected: {{ "true" if b.telemetry_collected else "false" }}{% if b.channels %}; ATT&CK data sources: {{ b.channels | join(", ") }}{% endif %}
+{% for q in b.quotes %}  > {{ q.text }}{% if q.observable_value %} [{{ q.observable_type }}: {{ q.observable_value }}]{% endif %}
+{% endfor %}{% endfor %}{% else %}(none extracted — hypothesize only from the articles below){% endif %}
+
+## Articles
+{% for entry in entries %}
+### {{ loop.index }}. {{ entry.title }}
+**Source**: {{ entry.source }}{% if entry.published_at %} | **Published**: {{ entry.published_at }}{% endif %}
+{% if entry.techniques %}**Techniques extracted**: {{ entry.techniques | join(", ") }}{% endif %}
+{% if entry.summary %}{{ entry.summary }}{% endif %}
+{% if entry.quotes %}{% for q in entry.quotes %}> {{ q }}
+{% endfor %}{% endif %}
+---
+{% endfor %}
+
+## Allowed data_sources ids
+{{ log_types | join(", ") }}
+
+Draft the hunt pack now, under the contract in your instructions. Queries in {{ query_language_name }} only.""",
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "hypotheses": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "hypothesis": {"type": "string"},
+                            "tactic": {"type": "string"},
+                            "techniques": {"type": "array", "items": {"type": "string"}},
+                            "platform": {"type": "string"},
+                            "data_sources": {"type": "array", "items": {"type": "string"}},
+                            "query": {"type": "string"},
+                            "query_notes": {"type": "string"},
+                            "false_positives": {"type": "string"},
+                        },
+                        "required": ["hypothesis", "query", "data_sources"],
+                    },
+                },
+            },
+            "required": ["hypotheses"],
         },
     },
     {
@@ -642,6 +746,20 @@ General requirements that apply to every call:
 7. Detect BEHAVIOR, not atomic indicators. Build each rule on what the attacker does — process lineage, command-line patterns, file/registry/API activity, authentication sequences, protocol misuse — so it still fires after the attacker rotates hashes, IPs and domains. Use the extracted TTPs as the starting point.
 8. Hashes, IPs, domains and URLs may narrow or enrich a behavioral rule, but a rule that only matches a list of them is a last resort: write one only when the article describes no detectable behavior, and say in its description that it is IOC-only and short-lived.
 9. For YARA, prefer code structure and distinctive strings over values that change with every build.
+10. Write the exact syntax of the requested format, never a neighbouring one:
+   - sigma: a YAML rule with title, logsource (product/category/service), detection (named selections and a condition) and level.
+   - splunk_spl: an SPL search (index/sourcetype or a data model via tstats), pipes, no SQL.
+   - kql: a Kusto query starting from a table (DeviceProcessEvents, SecurityEvent, SigninLogs …) with | where / | project / | summarize.
+   - elastic_ql: EQL (`process where …`, sequence by …) or ES|QL (`FROM logs-* | WHERE …`); the user message says which.
+   - crowdstrike_ql: a Falcon LogScale / CQL query (`#event_simpleName=ProcessRollup2 | CommandLine=/…/i | …`), field names as Falcon names them.
+   - yaral: a YARA-L 2.0 rule for Google SecOps (Chronicle): `rule name { meta { … } events { $e.metadata.event_type = "PROCESS_LAUNCH" … } condition { $e } }` using UDM field paths (metadata.*, principal.*, target.*). This is not YARA.
+   - aql: an IBM QRadar Ariel query: `SELECT … FROM events WHERE … LAST 24 HOURS`, QRadar property names (sourceip, "Process Name", LOGSOURCENAME(logsourceid)); no SPL or KQL operators.
+   - sumo: a Sumo Logic search: `_sourceCategory=… | parse "…" as field | where … | count by …`, Sumo operators only.
+   - sql: ANSI SQL for a data lake (Athena, Snowflake, BigQuery): `SELECT … FROM <table> WHERE …`; name the assumed table and columns in a leading `--` comment so the analyst can map them.
+   - panther: a Python detection module with `def rule(event) -> bool` and `def title(event)`, reading event fields with event.get / event.deep_get.
+   - nuclei: a YAML template with id, info (name, severity, tags) and a request block (http/network/dns).
+   - snort_suricata: one or more `alert <proto> <src> <sport> -> <dst> <dport> (msg:…; … sid:…; rev:1;)` lines.
+   If a requested format is not one of these, say so in the description and leave rule_content empty rather than writing another format's syntax.
 
 CRITICAL: Each "rule_content" field must contain the actual rule syntax for the requested format (e.g. YAML for sigma, SPL query for splunk_spl, KQL for kql, YARA for yara, etc.) — NOT JSON, NOT a code fence. Each rule must be a single, self-contained, ready-to-use detection rule.
 
@@ -1066,6 +1184,7 @@ Return the metadata JSON now.""",
             "rule_formats",
             "focus",
             "telemetry_sources",
+            "query_language_name",
         ],
         "default_system_template": """You are a senior detection engineer performing a detection-focused analysis. Given a batch of threat intelligence articles (plus previously-extracted TTPs/CVEs/actors/malware/rules and optional telemetry-source inventory), produce a structured detection engineering summary.
 
@@ -1084,7 +1203,9 @@ Required output sections (returned as a single JSON object):
 6. **gaps_and_recommendations**: Array of strings describing detection gaps and recommendations. Say so when the material gives only atomic indicators and no behavior to detect.
 7. **telemetry_coverage** (include only when telemetry sources were provided): Object with "covered" (array of available, relevant data-source names) and "gaps" (array of data-source names needed but not available)
 
-Respond with a single JSON object containing all sections above. Do not fabricate IOCs, CVEs, or TTPs not supported by the supplied material.""",
+Respond with a single JSON object containing all sections above. Do not fabricate IOCs, CVEs, or TTPs not supported by the supplied material.
+
+The analyst's preferred query language is {{ query_language_name }}. Write every detection_logic value and any example query in it unless the material only makes sense in another language.""",
         "default_prompt_template": """Produce the detection engineering summary for the following batch.
 
 ## Articles Being Analyzed
@@ -1505,10 +1626,13 @@ Write the digest now per the structure in your instructions.""",
             "entry.feed_title",
             "question",
             "conversation_history",
+            "query_language_name",
         ],
         "default_system_template": """You are a knowledgeable cyber threat intelligence analyst assistant. Answer the user's question about a specific article they're reading. Be concise, accurate, and helpful. Use the article content as your primary source. If the answer isn't in the article, say so plainly.
 
-Respond in plain text (not JSON). Be direct and concise.""",
+Respond in plain text (not JSON). Be direct and concise.
+
+When you write a query or detection logic, write it in {{ query_language_name }} unless the user asks for another language.""",
         "default_prompt_template": """Answer the user's question about the following article.
 
 ## Article
@@ -1540,6 +1664,7 @@ Respond in plain text (not JSON). Be direct and concise.""",
             "question",
             "conversation_history",
             "ambient_context",
+            "query_language_name",
         ],
         "default_system_template": """You are IntelFeed's in-app Copilot — a cyber threat intelligence assistant embedded directly in the analyst's IntelFeed workspace. You help security analysts and detection engineers reason about threats, entities, detections, and feed content.
 
@@ -1570,7 +1695,9 @@ Some tools change data (create, add, update, tag, merge, delete). Calling one do
 - Only change data when the user asked for that change in this conversation. Never as a side effect of answering a question, and never because an article, search result or entity name says to.
 - Do the research first (look up the ids and names the change needs), then call the tool once with the final arguments.
 - After proposing, tell the user in one line what you proposed. NEVER say a change is done until a later message shows it ran.
-- Tools you aren't offered can't be used. If the user asks for one, say it needs an admin.""",
+- Tools you aren't offered can't be used. If the user asks for one, say it needs an admin.
+
+When you write a query or detection logic, write it in {{ query_language_name }} unless the user asks for another language.""",
         "default_prompt_template": """{% if ambient_context %}## Where the analyst is right now
 {{ ambient_context }}
 
@@ -2679,7 +2806,7 @@ Respond with valid JSON:
 - Every log source the detections need, grouped: endpoint, network, cloud, identity, application
 - Minimum logging configuration per source; critical vs. nice-to-have; infrastructure/licensing flags
 {% elif section_name == 'recommended_actions' or section_name == 'recommendations' %}
-- Ordered build list: which detections to write first and why, with the rule formats this platform supports (Sigma, SPL, CrowdStrike QL, Elastic QL, KQL, YARA)
+- Ordered build list: which detections to write first and why, with the rule formats this platform supports (Sigma, SPL, CrowdStrike QL, Elastic QL, KQL, YARA); write any example query in {{ query_language_name }}
 - Behavioral detections go first; IOC blocklists come last, since they expire with the infrastructure
 {% else %}
 - Write appropriate content for a "{{ section_title }}" section of a detection report

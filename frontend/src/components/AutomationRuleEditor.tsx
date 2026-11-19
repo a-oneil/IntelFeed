@@ -280,7 +280,7 @@ function actionConfigFields(
           key: "rule_types",
           label: "Rule types (comma-separated)",
           placeholder: "sigma, splunk_spl, kql",
-          hint: "Options: sigma, splunk_spl, crowdstrike_ql, elastic_ql, kql, yara, snort_suricata",
+          hint: "Options: sigma, splunk_spl, crowdstrike_ql, elastic_ql, kql, yara, snort_suricata, nuclei, panther, yaral, aql, sumo, sql",
         },
       ];
     case "add_tags":
