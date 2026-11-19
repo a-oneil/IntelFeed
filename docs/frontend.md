@@ -404,7 +404,7 @@ In `frontend/src/pages/`:
 - **WorkbenchPage.tsx:** the entity browser. Also exports `WorkbenchLayout` and hosts the glossary and detection workbench as sections.
 - **EntityProfilePage.tsx:** one profile page for every entity type and campaigns.
 - **DashboardPage.tsx:** the Workbench dashboard (widget boards via `useDashboards`).
-- **ThreatsPage.tsx:** `/workbench/threats`, ranked by story. Its Vulnerabilities tab uses `FollowView` from `ExposurePage.tsx`.
+- **ThreatsPage.tsx:** `/workbench/threats`, ranked by story. The tabs are filters of one ranking: All interleaves actors, malware, vulnerabilities and story rows by score, and a CVE whose window articles an actor or malware row already tells rides on that row as an `exploits CVE-…` chip rather than getting its own line. Each row's ⋯ menu moves it between the four decision states (open, tracked, handled, muted); the state filter shows each. The drawer ends in the hunt pack: `Draft hunt pack` asks the `hunt_pack` AI task for one to three hypotheses with queries in the user's preferred query language (Settings › Reading › Preferred query language, stored as `query_language` in `users.settings`; the vocabulary is `backend/app/ai/query_language.py`), each hypothesis's data sources checked against the telemetry inventory, and `Export ATHF hunt file` downloads the pack as an ATHF `H-XXXX.md`. IntelFeed stores only the drafted pack; running the hunt and recording findings happen in the SIEM and the ATHF workspace. Its Vulnerabilities tab uses `FollowView` from `ExposurePage.tsx`.
 - **ExposureBuilderPage.tsx:** `/workbench/report/exposure`.
 - **SearchPage.tsx:** `/search`.
 - **DocumentationPage.tsx:** in-app docs (`useDocumentation.ts`, with `MermaidDiagram` for diagrams).

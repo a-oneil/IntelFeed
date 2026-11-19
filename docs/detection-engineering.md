@@ -146,7 +146,7 @@ SPL, KQL, EQL and ES|QL queries have no name of their own. They are titled `<art
 
 ### Validation Architecture
 
-`validate_rule()` (`backend/app/intelligence/rule_validation.py:530`) takes a rule type and body, picks the validator for that type, and returns a `ValidationResult`:
+`validate_rule()` (`backend/app/intelligence/rule_validation.py:540`) takes a rule type and body, picks the validator for that type, and returns a `ValidationResult`:
 
 ```python
 @dataclass

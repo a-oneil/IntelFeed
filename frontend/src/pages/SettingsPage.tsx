@@ -5,6 +5,7 @@ import { useUIStore, type ReaderFontSize, type ReaderLineHeight, type ReaderMaxW
 import { useAppSidebarAutoCollapse } from "@/hooks/useAppSidebarAutoCollapse";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useUpdateProfile, useChangePassword } from "@/hooks/useAuth";
+import { QUERY_LANGUAGES } from "@/utils/queryLanguage";
 import { readingPrefs, type ReadingPrefs } from "@/hooks/useReadingPrefs";
 import { useSaveOnboardingProgress } from "@/hooks/useOnboarding";
 import { useExternalLinkSettings } from "@/hooks/useExternalLinkSettings";
@@ -547,6 +548,27 @@ function ReadingSection() {
           >
             <option value="all">All entries</option>
             <option value="unread">Unread only</option>
+          </select>
+        </div>
+
+        <div className={styles.settingRow}>
+          <div className={styles.settingInfo}>
+            <span className={styles.settingLabel}>Preferred query language</span>
+            <span className={styles.settingHint}>
+              Used wherever IntelFeed writes queries or detection logic for you: hunt packs, default rule
+              formats, the copilot and detection summaries.
+            </span>
+          </div>
+          <select
+            className={styles.select}
+            value={prefs.query_language}
+            onChange={(e) => updateSetting("query_language", e.target.value)}
+          >
+            {QUERY_LANGUAGES.map((d) => (
+              <option key={d.value} value={d.value}>
+                {d.label}
+              </option>
+            ))}
           </select>
         </div>
 

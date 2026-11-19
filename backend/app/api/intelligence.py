@@ -2764,6 +2764,10 @@ RULE_TYPE_LABELS = {
     "yara": "YARA",
     "nuclei": "Nuclei",
     "panther": "Panther",
+    "yaral": "YARA-L",
+    "aql": "AQL",
+    "sumo": "Sumo Logic",
+    "sql": "SQL",
 }
 
 
@@ -4080,7 +4084,9 @@ async def run_task_on_entry(
             for t in ttp_result.scalars().all()
         ]
 
-        rule_types = ["sigma", "splunk_spl"]
+        from app.ai.query_language import default_rule_types
+
+        rule_types = default_rule_types(user.settings)
         rules = await generate_detection_rules(db, user.id, entry_id, entry_data, ttps, rule_types)
         await db.commit()
 

@@ -1885,7 +1885,8 @@ async def _action_generate_detection_rules(
 
     Config:
       - rule_types: list[str] — e.g. ["sigma", "splunk_spl", "kql"]
-        Supported: sigma, splunk_spl, crowdstrike_ql, elastic_ql, kql, yara, snort_suricata
+        Supported: sigma, splunk_spl, crowdstrike_ql, elastic_ql, kql, yara, snort_suricata, nuclei, panther,
+        yaral, aql, sumo, sql
         Default: ["sigma"]
 
     Uses TTPs from context if a prior extract action ran, otherwise

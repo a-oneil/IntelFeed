@@ -74,6 +74,7 @@ USER_PROVIDER_ELIGIBLE_TASKS: frozenset[str] = frozenset(
     {
         "copilot",
         "detection_rules",
+        "hunt_pack",
         "article_summary",
         "threat_assessment",
         "intelligence_briefing",

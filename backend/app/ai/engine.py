@@ -1007,6 +1007,12 @@ async def run_task(
     # Get prompt templates — system may be None (legacy flat-prompt mode).
     system_template, user_template, prompt_version = await get_active_prompt_versioned(db, task.id)
 
+    # Every prompt can name the analyst's query language; the caller's own
+    # values win when it already set them (hunt packs pass an explicit one).
+    from app.ai.query_language import preferred_for_user, with_query_language
+
+    variables = with_query_language(variables, await preferred_for_user(db, user_id))
+
     # Render both halves with the same variable scope.
     rendered_system = render_prompt(system_template, variables) if system_template else None
     rendered_user = render_prompt(user_template, variables)

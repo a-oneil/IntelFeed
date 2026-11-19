@@ -357,6 +357,9 @@ Built-in tasks are seeded at startup from `backend/app/ai/prompts/defaults.py`:
 | `threat_assessment` | analysis | Quick assessment and recommended actions |
 | `daily_summary`, `intelligence_briefing`, `detection_engineering_summary` | analysis | Briefings over many entries |
 | `threat_brief`, `cve_brief` | analysis | The two-sentence story lines on the Threats board |
+| `hunt_pack` | generation | The Threats board's hunt pack: one to three hunt hypotheses with queries in the user's preferred query language, drafted on request from the row's window only (`backend/app/services/hunt_pack.py`) |
+
+Every task's templates also receive `query_language` and `query_language_name` — the calling user's preferred query language (Settings › Reading, stored as `query_language` in `users.settings`; the vocabulary and the default rule formats it implies live in `backend/app/ai/query_language.py`). `run_task` adds them to whatever variables the caller passed, so a prompt that writes queries or detection logic says `{{ query_language_name }}` and nothing else changes; `detection_engineering_summary`, `entry_qa`, `copilot`, `report_section` and `hunt_pack` do. The copilot route adds the same two keys itself.
 | `story_thread_spine` | analysis | The narrative spine of a story thread ([story-threads.md](story-threads.md)) |
 | `video_transcript_summary`, `reddit_digest` | analysis | Source-specific summaries |
 | `entry_qa` | analysis | The per-entry "Ask Agent" chat |

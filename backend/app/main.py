@@ -111,12 +111,19 @@ async def _seed_ai_tasks() -> None:
                     )
                 )
             else:
-                # Sync variables, default_prompt_template, default_system_template,
-                # and output_schema for existing system tasks so prompt updates
-                # ship on deploy. We do NOT touch user-created AIPromptTemplate
+                # Sync display_name, description, variables, the two default
+                # templates and output_schema for existing system tasks so
+                # prompt and copy updates ship on deploy. We do NOT touch user-created AIPromptTemplate
                 # rows — those remain authoritative when present (see
                 # get_active_prompt in app/ai/engine.py).
                 existing = existing_tasks[task_data["name"]]
+                # Name and description are shipped copy, not user-editable
+                # (AITaskUpdate carries neither), so a rename lands on deploy.
+                if existing.display_name != task_data["display_name"]:
+                    existing.display_name = task_data["display_name"]
+                new_description = task_data.get("description")
+                if existing.description != new_description:
+                    existing.description = new_description
                 new_vars = task_data.get("variables", [])
                 if existing.variables != new_vars:
                     existing.variables = new_vars

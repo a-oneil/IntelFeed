@@ -372,7 +372,9 @@ class MalwareFamilyResponse(BaseModel):
 
 # --- Detection Rule Schemas ---
 
-RULE_TYPE_PATTERN = r"^(sigma|splunk_spl|crowdstrike_ql|elastic_ql|kql|snort_suricata|yara|nuclei|panther)$"
+RULE_TYPE_PATTERN = (
+    r"^(sigma|splunk_spl|crowdstrike_ql|elastic_ql|kql|snort_suricata|yara|nuclei|panther|yaral|aql|sumo|sql)$"
+)
 
 
 class RuleTelemetry(BaseModel):

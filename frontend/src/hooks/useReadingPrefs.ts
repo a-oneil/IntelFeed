@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useAuthStore } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
+import { DEFAULT_QUERY_LANGUAGE, isQueryLanguage, type QueryLanguage } from "@/utils/queryLanguage";
 
 /**
  * The Settings → Reading preferences, with the shipped defaults.
@@ -28,6 +29,9 @@ export interface ReadingPrefs {
   compact_view: boolean;
   /** Show the summary line under each entry title. */
   show_entry_preview: boolean;
+  /** The query language IntelFeed writes queries and detection logic in for
+      this analyst: hunt packs, default rule formats, copilot and summaries. */
+  query_language: QueryLanguage;
 }
 
 export const READING_DEFAULTS: ReadingPrefs = {
@@ -39,6 +43,7 @@ export const READING_DEFAULTS: ReadingPrefs = {
   mark_read_on_scroll: true,
   compact_view: false,
   show_entry_preview: true,
+  query_language: DEFAULT_QUERY_LANGUAGE,
 };
 
 const PAGE_SIZES = new Set([25, 50, 100]);
@@ -57,6 +62,7 @@ export function readingPrefs(settings: Record<string, unknown> | null | undefine
     mark_read_on_scroll: pick("mark_read_on_scroll", (v) => typeof v === "boolean"),
     compact_view: pick("compact_view", (v) => typeof v === "boolean"),
     show_entry_preview: pick("show_entry_preview", (v) => typeof v === "boolean"),
+    query_language: pick("query_language", isQueryLanguage),
   };
 }
 

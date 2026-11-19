@@ -12,6 +12,8 @@
  * library to find more.
  */
 import { Link } from "react-router-dom";
+import { currentReadingPrefs } from "@/hooks/useReadingPrefs";
+import { defaultRuleTypes } from "@/utils/queryLanguage";
 import { toast } from "sonner";
 import type { EntityType } from "@/stores/intelStore";
 import type { EntitySearchResult, PivotResponse } from "@/api/types";
@@ -33,7 +35,6 @@ function isGeneratable(type: EntityType): type is GeneratableType {
 }
 
 /** Default formats — mirrors the entry intel panel's "Gen Rules" action. */
-const DEFAULT_RULE_TYPES = ["sigma", "splunk_spl"];
 
 function libraryPath(query: string): string {
   return `/workbench/explore?section=rules&rules_q=${encodeURIComponent(query)}`;
@@ -101,7 +102,7 @@ function RuleListFallback({
     if (generateRules.isPending) return;
     setGenerating(true);
     generateRules.mutate(
-      { entityType: targetType, entityId, ruleTypes: DEFAULT_RULE_TYPES },
+      { entityType: targetType, entityId, ruleTypes: defaultRuleTypes(currentReadingPrefs().query_language) },
       {
         onSuccess: (created) => {
           if (created.length > 0) {
