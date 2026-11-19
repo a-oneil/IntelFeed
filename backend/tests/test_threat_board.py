@@ -283,8 +283,8 @@ class TestTracked:
 @pytest.mark.asyncio
 class TestVulnFacet:
     """CVE rows as board citizens: exploitation-ranked, posture-derived
-    actions, and the surface split — a KEV affecting nothing you run and
-    nothing you can observe is landscape context, not your write-queue."""
+    actions, and the surface flag — a KEV affecting nothing you run and
+    nothing you can observe is marked, never demoted."""
 
     async def _seed_cve(self, db_session, test_feed, cve_id, *, is_kev=True, entries=3, title_prefix="Exploit"):
         from app.models.cve import CVE, EntryCVE
@@ -306,7 +306,7 @@ class TestVulnFacet:
             db_session.add(EntryCVE(entry_id=entry.id, cve_id=cve.id))
         return cve
 
-    async def test_stack_match_sorts_above_the_surface_divider(self, db_session, test_feed, test_user):
+    async def test_stack_match_lifts_the_score_but_never_reorders_past_it(self, db_session, test_feed, test_user):
         from app.models.cve_affected import CVEAffected
         from app.models.user_entity_watch import UserEntityWatch
         from app.models.vendor import Vendor
@@ -330,10 +330,13 @@ class TestVulnFacet:
         assert by_key["CVE-2026-11111"].in_stack is True
         assert by_key["CVE-2026-11111"].on_surface is True
         assert by_key["CVE-2026-22222"].on_surface is False
-        # The stack CVE outranks the louder landscape KEV: on_surface sorts
-        # first, and only stack matches earn the exposure base multiplier.
+        # on_surface is a chip, not a sort key: the stack match earns the
+        # exposure multiplier (2 stories x 1.5) but the louder KEV (5 stories)
+        # still ranks first. Nothing sinks below a divider any more — that is
+        # how CVEs used to vanish from the All view.
+        assert by_key["CVE-2026-11111"].score < by_key["CVE-2026-22222"].score
         keys = [r.entity_key for r in rows]
-        assert keys.index("CVE-2026-11111") < keys.index("CVE-2026-22222")
+        assert keys.index("CVE-2026-22222") < keys.index("CVE-2026-11111")
         assert by_key["CVE-2026-11111"].action == "write"
         assert by_key["CVE-2026-11111"].is_kev is True
 
@@ -351,6 +354,112 @@ class TestVulnFacet:
 
         merged = await client.get("/api/threat-board?facet=all&min_attention=1", headers=auth_headers)
         assert any(r["entity_type"] == "cve" for r in merged.json()["items"])
+
+
+@pytest.mark.asyncio
+class TestClaimedCveFold:
+    """A CVE the window already tells through an actor or malware row is one
+    story: it rides on that row instead of getting its own line — and instead
+    of vanishing, which is what dropping it did."""
+
+    async def _seed(self, db_session, test_feed, *, actor="Fold Crew", cve_id="CVE-2026-44444", shared=2, extra=1):
+        from app.models.cve import CVE, EntryCVE
+        from app.models.threat_actor import ThreatActor
+
+        who = ThreatActor(name=actor)
+        cve = CVE(cve_id=cve_id, severity="CRITICAL", cvss_score=9.1, is_kev=True)
+        db_session.add_all([who, cve])
+        await db_session.flush()
+        now = datetime.now(UTC)
+        for i in range(shared + extra):
+            entry = Entry(
+                feed_id=test_feed.id,
+                guid=f"{actor}-{cve_id}-{i}",
+                title=f"{actor} exploits {cve_id} wave {i}",
+                url=f"https://outlet{i}.example.com/{actor}/{i}",
+                published_at=now - timedelta(days=1),
+            )
+            db_session.add(entry)
+            await db_session.flush()
+            db_session.add(EntryThreatActor(entry_id=entry.id, threat_actor_id=who.id))
+            if i < shared:
+                db_session.add(EntryCVE(entry_id=entry.id, cve_id=cve.id))
+        await db_session.commit()
+        return who, cve
+
+    async def test_claimed_cve_rides_on_the_threat_row(self, db_session, test_feed, test_user):
+        from app.services.threat_board import build_cve_board, fold_claimed_cves
+
+        who, cve = await self._seed(db_session, test_feed)
+        threats = await build_threat_board(db_session, min_attention=1)
+        cves = await build_cve_board(db_session, min_attention=1, user_id=test_user.id)
+        assert any(c.entity_key == cve.cve_id for c in cves)
+
+        threats, cves = await fold_claimed_cves(db_session, threats, cves)
+        assert all(c.entity_key != cve.cve_id for c in cves), "the claimed CVE must leave the CVE list"
+        row = next(t for t in threats if t.entity_key == str(who.id))
+        carried = [m for m in row.merged_from if m["entity_type"] == entity_types.CVE]
+        assert [m["entity_key"] for m in carried] == [cve.cve_id]
+        assert carried[0]["is_kev"] is True
+
+    async def test_one_shared_article_is_not_a_claim(self, db_session, test_feed, test_user):
+        from app.services.threat_board import build_cve_board, fold_claimed_cves
+
+        who, cve = await self._seed(
+            db_session, test_feed, actor="Thin Crew", cve_id="CVE-2026-55555", shared=1, extra=2
+        )
+        threats = await build_threat_board(db_session, min_attention=1)
+        cves = await build_cve_board(db_session, min_attention=1, user_id=test_user.id)
+        threats, cves = await fold_claimed_cves(db_session, threats, cves)
+        assert any(c.entity_key == cve.cve_id for c in cves)
+        row = next(t for t in threats if t.entity_key == str(who.id))
+        assert row.merged_from == []
+
+    async def test_tracked_cve_never_folds(self, db_session, test_feed, test_user):
+        from app.services.threat_board import build_cve_board, fold_claimed_cves
+
+        who, cve = await self._seed(db_session, test_feed, actor="Pin Crew", cve_id="CVE-2026-66666")
+        await db_session.execute(
+            text(
+                "INSERT INTO threat_board_state (entity_type, entity_key, state, new_count_at_decision) "
+                "VALUES ('cve', :k, 'tracked', 0)"
+            ),
+            {"k": cve.cve_id},
+        )
+        await db_session.commit()
+        threats = await build_threat_board(db_session, min_attention=1)
+        cves = await build_cve_board(db_session, min_attention=1, user_id=test_user.id)
+        threats, cves = await fold_claimed_cves(db_session, threats, cves)
+        assert any(c.entity_key == cve.cve_id and c.state == "tracked" for c in cves)
+        row = next(t for t in threats if t.entity_key == str(who.id))
+        assert row.merged_from == []
+
+    async def test_all_facet_shows_the_cve_on_the_row_not_as_a_line(self, db_session, client, auth_headers, test_feed):
+        who, cve = await self._seed(db_session, test_feed, actor="Api Crew", cve_id="CVE-2026-77777")
+        resp = await client.get("/api/threat-board?facet=all&min_attention=1", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        items = resp.json()["items"]
+        assert all(not (i["entity_type"] == "cve" and i["entity_key"] == cve.cve_id) for i in items)
+        row = next(i for i in items if i["entity_key"] == str(who.id))
+        assert any(m["entity_type"] == "cve" and m["entity_key"] == cve.cve_id for m in row["merged_from"])
+
+    async def test_handling_the_threat_handles_the_cve_it_carries(self, db_session, client, auth_headers, test_feed):
+        who, cve = await self._seed(db_session, test_feed, actor="Decide Crew", cve_id="CVE-2026-88888")
+        resp = await client.put(
+            f"/api/threat-board/threat_actor/{who.id}/state",
+            headers=auth_headers,
+            json={"state": "handled"},
+        )
+        assert resp.status_code == 200, resp.text
+        states = dict(
+            (
+                await db_session.execute(
+                    text("SELECT entity_key, state FROM threat_board_state WHERE entity_key IN (:a, :c)"),
+                    {"a": str(who.id), "c": cve.cve_id},
+                )
+            ).all()
+        )
+        assert states == {str(who.id): "handled", cve.cve_id: "handled"}
 
 
 @pytest.mark.asyncio

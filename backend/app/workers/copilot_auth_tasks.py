@@ -43,6 +43,7 @@ from datetime import UTC, datetime
 import redis
 from celery.exceptions import SoftTimeLimitExceeded
 
+from app.ai.providers.claude_code_provider import _scrubbed_env
 from app.config import settings
 from app.workers.celery_app import celery_app
 
@@ -124,6 +125,7 @@ def _cli_auth_status() -> dict:
             capture_output=True,
             text=True,
             timeout=20,
+            env=_scrubbed_env(),
         )
         return json.loads((out.stdout or "").strip() or "{}")
     except Exception:
@@ -249,8 +251,7 @@ def run_claude_auth(self, session_id: str) -> dict:
         # Force a fresh interactive OAuth login: strip any prebaked token/key so
         # `auth login` actually runs the browser flow (and writes a new
         # .credentials.json) instead of reporting "already logged in".
-        env = os.environ.copy()
-        env["TERM"] = "xterm-256color"
+        env = _scrubbed_env({"TERM": "xterm-256color"})
         for var in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"):
             env.pop(var, None)
 

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import AppError
 from app.core.public_access import viewer_is_anonymous
 from app.core.security import get_viewer
 from app.database import get_db
@@ -24,6 +25,18 @@ router = APIRouter()
 
 _MATRIX_CACHE_PREFIX = "intelfeed:attack:matrix"
 _MATRIX_CACHE_TTL_SECONDS = 180
+
+
+def _parse_iso_utc(raw: str) -> datetime:
+    try:
+        dt = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+    except ValueError:
+        raise AppError(
+            code="invalid_param",
+            message=f"Invalid date format '{raw}'. Use ISO 8601.",
+            status_code=400,
+        )
+    return dt.astimezone(UTC) if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def _technique_tactics(ttp: TTP) -> list[str]:
@@ -194,14 +207,8 @@ async def generate_layer(
     if entry_id:
         query = query.where(EntryTTP.entry_id == entry_id)
     else:
-        if date_to:
-            end = datetime.fromisoformat(date_to).replace(tzinfo=UTC)
-        else:
-            end = now
-        if date_from:
-            start = datetime.fromisoformat(date_from).replace(tzinfo=UTC)
-        else:
-            start = end - timedelta(days=30)
+        end = _parse_iso_utc(date_to) if date_to else now
+        start = _parse_iso_utc(date_from) if date_from else (end - timedelta(days=30))
         query = query.where(EntryTTP.extracted_at >= start, EntryTTP.extracted_at <= end)
 
     query = query.group_by(TTP.id, TTP.technique_id, TTP.technique_name, TTP.tactic)
@@ -264,14 +271,8 @@ async def list_techniques(
 ):
     """List techniques extracted in the window, ranked by article count, with each technique's latest sighting date."""
     now = datetime.now(UTC)
-    if date_to:
-        end = datetime.fromisoformat(date_to).replace(tzinfo=UTC)
-    else:
-        end = now
-    if date_from:
-        start = datetime.fromisoformat(date_from).replace(tzinfo=UTC)
-    else:
-        start = end - timedelta(days=30)
+    end = _parse_iso_utc(date_to) if date_to else now
+    start = _parse_iso_utc(date_from) if date_from else (end - timedelta(days=30))
 
     result = await db.execute(
         select(

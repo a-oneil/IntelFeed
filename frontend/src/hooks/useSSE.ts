@@ -11,10 +11,14 @@ const INVALIDATION_DEBOUNCE_MS = 2000;
 
 export function useSSE() {
   const queryClient = useQueryClient();
+  // Keyed on the token itself, not just "signed in": a token rotation re-runs
+  // connect(), which is what revives a stream whose retries ran out during an
+  // outage. Rotation is rare (the access token lives for hours), so it's cheap.
   const token = useAuthStore((s) => s.accessToken);
   const eventSourceRef = useRef<EventSource | null>(null);
   const retriesRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const genRef = useRef(0);
 
   // Debounce SSE-triggered invalidations to prevent request storms
   // when many feeds are fetched in quick succession
@@ -38,16 +42,14 @@ export function useSSE() {
     [queryClient]
   );
 
-  // Set by the effect's cleanup. `connect` awaits a ticket before it can build
-  // the EventSource, so an unmount during that await would otherwise land a
-  // brand-new connection *after* cleanup had already run — with the ref still
-  // null, there was nothing for cleanup to close, and the orphan stayed open
-  // forever. Six of those exhaust the browser's per-origin HTTP/1.1 connection
-  // pool and every subsequent request in the app hangs until its timeout.
-  const cancelledRef = useRef(false);
-
   const connect = useCallback(async () => {
-    if (!token || cancelledRef.current) return;
+    const gen = ++genRef.current;
+    if (!token) return;
+    clearTimeout(timerRef.current);
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
 
     // Fetch a short-lived, single-use ticket instead of exposing the JWT in the URL
     let ticket: string;
@@ -56,7 +58,7 @@ export function useSSE() {
       ticket = res.data.ticket;
     } catch {
       // If ticket fetch fails, retry with backoff
-      if (!cancelledRef.current && retriesRef.current < MAX_RETRIES) {
+      if (gen === genRef.current && retriesRef.current < MAX_RETRIES) {
         const delay = Math.min(
           BASE_DELAY_MS * Math.pow(2, retriesRef.current),
           MAX_DELAY_MS,
@@ -67,8 +69,8 @@ export function useSSE() {
       return;
     }
 
-    // Unmounted while the ticket was in flight: never open the connection.
-    if (cancelledRef.current) return;
+    // Unmounted or superseded while the ticket was in flight: never open the connection.
+    if (gen !== genRef.current) return;
 
     const url = `/api/events?ticket=${encodeURIComponent(ticket)}`;
     const es = new EventSource(url);
@@ -199,8 +201,10 @@ export function useSSE() {
       es.removeEventListener("report_generation_complete", onReportGenerationComplete);
       es.removeEventListener("report_generation_error", onReportGenerationError);
       es.close();
-      eventSourceRef.current = null;
-      if (!cancelledRef.current && retriesRef.current < MAX_RETRIES) {
+      if (eventSourceRef.current === es) {
+        eventSourceRef.current = null;
+      }
+      if (gen === genRef.current && retriesRef.current < MAX_RETRIES) {
         const delay = Math.min(
           BASE_DELAY_MS * Math.pow(2, retriesRef.current),
           MAX_DELAY_MS,
@@ -212,10 +216,10 @@ export function useSSE() {
   }, [token, queryClient, debouncedInvalidate]);
 
   useEffect(() => {
-    cancelledRef.current = false;
     connect();
+    const pendingGen = genRef;
     return () => {
-      cancelledRef.current = true;
+      pendingGen.current++;
       clearTimeout(timerRef.current);
       clearTimeout(invalidationTimerRef.current);
       const es = eventSourceRef.current;

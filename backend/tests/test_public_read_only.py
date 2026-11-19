@@ -197,6 +197,9 @@ OWN_AUTH_ROUTES = frozenset(
         "GET /api/taxii2/api/collections/{collection_id}/",
         "GET /api/taxii2/api/collections/{collection_id}/objects/",
         "GET /api/shared/copilot/{token}",
+        "GET /api/shared/report/{token}",
+        "GET /api/shared/report/{token}/export",
+        "GET /api/shared/report/{token}/og",
         "GET /api/shared/{token}",
         "GET /api/shared/{token}/og",
         "GET /api/shared/{token}/tts/file/{cache_key}.mp3",
@@ -606,6 +609,8 @@ def test_anonymous_buckets():
     assert _get_limits(f"{entry}/ttps", anonymous=True) == ("anon", ANON_LIMITS)
     assert _get_limits("/api/entries", anonymous=True) == ("anon", ANON_LIMITS)
     assert _get_limits("/api/intelligence/graph/x", anonymous=True) == ("anon_heavy", ANON_HEAVY_LIMITS)
+    assert _get_limits("/api/shared/report/tok/export", anonymous=True) == ("anon_heavy", ANON_HEAVY_LIMITS)
+    assert _get_limits("/api/shared/report/tok", anonymous=True) == ("anon", ANON_LIMITS)
     assert _get_limits("/api/taxii2/api/collections/", anonymous=True) == (
         "indicator_feeds",
         (INDICATOR_FEED_LIMIT,),

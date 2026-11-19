@@ -138,6 +138,7 @@ def safe_async_client(*, allow_private: bool | None = None, http2: bool = False,
     Environment proxies are not used: a proxy would make the connection, and
     the address check would be checking the proxy.
     """
+    kwargs.setdefault("trust_env", False)
     transport = SafeTransport(allow_private=allow_private, http2=http2)
     return httpx.AsyncClient(transport=transport, **kwargs)
 

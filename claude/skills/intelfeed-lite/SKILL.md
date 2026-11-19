@@ -285,7 +285,7 @@ Answer platform questions from the docs, not from memory.
 
 ## Available Tools
 
-97 tools, all read-only. The lite CLI does not carry a single tool that creates, changes or deletes anything — no writes, no AI extraction, no report or document generation (`export_observables` only reads a ledger slice back as EDL/CSV/JSON; it saves nothing). If the user asks for one of those, say the lite skill cannot do it rather than improvising a workaround. `⚠` marks a tool that needs an **admin** account; for anyone else the API answers 403.
+98 tools, all read-only. The lite CLI does not carry a single tool that creates, changes or deletes anything — no writes, no AI extraction, no report or document generation (`export_observables` only reads a ledger slice back as EDL/CSV/JSON; it saves nothing). If the user asks for one of those, say the lite skill cannot do it rather than improvising a workaround. `⚠` marks a tool that needs an **admin** account; for anyone else the API answers 403.
 
 ### Search & Discovery (4 tools)
 
@@ -393,10 +393,11 @@ Rule formats in the library: `sigma`, `splunk_spl`, `crowdstrike_ql`, `elastic_q
 - **get_requirement_coverage** — Coverage summary by status, priority, category and staleness
 - **check_requirement_match** — Run an entry through the real matching engine against active PIRs (entry_id)
 
-### Intelligence Reports (2 tools)
+### Intelligence Reports (3 tools)
 
 - **list_intel_reports** — Reports newest-updated first, section names only (status, template_type, limit, offset)
 - **get_intel_report** — One report with every section's content (report_id)
+- **get_report_share_link** — This analyst's active public share link for a report, or null (report_id)
 
 ### Notes (2 tools)
 

@@ -22,7 +22,7 @@ from app.schemas.search import (
     UnifiedSearchQuery,
     UnifiedSearchResponse,
 )
-from app.search.query_planner import IS_FILTER_VALUES, VALID_SORTS, tag_filter_clause
+from app.search.query_planner import IS_FILTER_VALUES, VALID_SORTS, meili_quote, tag_filter_clause
 from app.services import meilisearch_client
 from app.services.entry_tags import load_entry_tags
 
@@ -456,13 +456,13 @@ async def get_search_facets(
     # Build filter string matching the same logic as search_entries
     filter_parts: list[str] = []
     if feed_id:
-        fid_parts = " OR ".join(f'feed_id = "{fid}"' for fid in feed_id)
+        fid_parts = " OR ".join(f"feed_id = {meili_quote(fid)}" for fid in feed_id)
         filter_parts.append(f"({fid_parts})")
     if category_id:
-        cid_parts = " OR ".join(f'category_id = "{cid}"' for cid in category_id)
+        cid_parts = " OR ".join(f"category_id = {meili_quote(cid)}" for cid in category_id)
         filter_parts.append(f"({cid_parts})")
     if feed_type:
-        ft_parts = " OR ".join(f'feed_type = "{ft}"' for ft in feed_type)
+        ft_parts = " OR ".join(f"feed_type = {meili_quote(ft)}" for ft in feed_type)
         filter_parts.append(f"({ft_parts})")
     if tags:
         for tag in tags:
@@ -480,7 +480,7 @@ async def get_search_facets(
     if has_notes is not None:
         filter_parts.append(f"has_notes = {str(has_notes).lower()}")
     if media_type:
-        filter_parts.append(f'media_type = "{media_type}"')
+        filter_parts.append(f"media_type = {meili_quote(media_type)}")
 
     filters_str = " AND ".join(filter_parts) if filter_parts else None
     facets = meilisearch_client.get_facets(query=q, filters=filters_str, viewer_id=str(user.id))

@@ -33,12 +33,6 @@
   color: var(--text-primary);
 }
 
-.vulnsBody {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-5);
-}
-
 .state {
   padding: 32px 16px;
   color: var(--text-muted);

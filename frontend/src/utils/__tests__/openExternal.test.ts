@@ -128,4 +128,15 @@ describe("openExternalUrl", () => {
     useAuthStore.setState({ user: { ...user(), id: "u2" } });
     expect(currentInterceptContext().trustedHosts).not.toContain("evil.example");
   });
+
+  it("refuses dangerous schemes and holds protocol-relative external URLs", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    openExternalUrl("javascript:alert(1)");
+    expect(open).not.toHaveBeenCalled();
+    expect(useExternalLinkStore.getState().pending).toBeNull();
+
+    openExternalUrl("//evil.example/x");
+    expect(open).not.toHaveBeenCalled();
+    expect(useExternalLinkStore.getState().pending?.host).toBe("evil.example");
+  });
 });

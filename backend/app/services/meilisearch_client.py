@@ -6,7 +6,7 @@ from datetime import UTC
 import meilisearch
 
 from app.config import settings
-from app.search.query_planner import tag_filter_clause
+from app.search.query_planner import meili_quote, tag_filter_clause
 
 logger = logging.getLogger(__name__)
 
@@ -356,18 +356,18 @@ def search_entries(
         filters = []
         if feed_id:
             if isinstance(feed_id, list):
-                fid_parts = " OR ".join(f'feed_id = "{fid}"' for fid in feed_id)
+                fid_parts = " OR ".join(f"feed_id = {meili_quote(fid)}" for fid in feed_id)
                 filters.append(f"({fid_parts})")
             else:
-                filters.append(f'feed_id = "{feed_id}"')
+                filters.append(f"feed_id = {meili_quote(feed_id)}")
         if category_id:
             if isinstance(category_id, list):
-                cid_parts = " OR ".join(f'category_id = "{cid}"' for cid in category_id)
+                cid_parts = " OR ".join(f"category_id = {meili_quote(cid)}" for cid in category_id)
                 filters.append(f"({cid_parts})")
             else:
-                filters.append(f'category_id = "{category_id}"')
+                filters.append(f"category_id = {meili_quote(category_id)}")
         if feed_type:
-            type_filters = " OR ".join(f'feed_type = "{ft}"' for ft in feed_type)
+            type_filters = " OR ".join(f"feed_type = {meili_quote(ft)}" for ft in feed_type)
             filters.append(f"({type_filters})")
         if tags:
             for tag in tags:
@@ -385,7 +385,7 @@ def search_entries(
         if has_notes is not None:
             filters.append(f"has_notes = {str(has_notes).lower()}")
         if media_type:
-            filters.append(f'media_type = "{media_type}"')
+            filters.append(f"media_type = {meili_quote(media_type)}")
 
         params: dict = {
             "limit": limit,

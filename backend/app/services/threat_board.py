@@ -182,17 +182,19 @@ class ThreatRow:
     thread_slug: str | None = None
     thread_title: str | None = None
     beats: int = 0
-    # Rows this one absorbed because one thread holds both — {entity_type,
-    # entity_key, label}. The name-merge path leaves this empty; it folds two
-    # spellings of one name, which needs no attribution.
+    # Rows this one absorbed — {entity_type, entity_key, label}: actor/malware
+    # rows one thread holds together, and (all facet) the CVEs this row's
+    # articles claim, carrying is_kev / product / in_stack. The name-merge path
+    # leaves this empty; it folds two spellings of one name, which needs no
+    # attribution.
     merged_from: list[dict] = field(default_factory=list)
     # CVE rows are keyed by cve_id everywhere (rule_coverage, state, workspace)
     # but the entity profile routes on the row uuid — carry it for navigation.
     profile_id: str | None = None
-    # Your surface, or the landscape? A CVE affecting nothing you run and
-    # nothing you can observe is context, not your write-queue — it sorts
-    # below a divider, the same honesty as the workspace's below-the-line
-    # rule. Threat rows are always on-surface.
+    # Your surface, or the landscape? False for a CVE affecting nothing you run
+    # with no fireable rule. Informational only: the board ranks by score and
+    # the in-stack chip already says what matters, so this never sorts or
+    # hides a row. Threat rows are always on-surface.
     on_surface: bool = True
 
     @property
@@ -1434,7 +1436,7 @@ async def build_cve_board(
     # not two rows competing for the same slot.
     out = _merge_by_thread(out, dominant_thread)
     out = [r for r in out if include_handled or r.state in ("open", "tracked")]
-    out.sort(key=lambda r: (r.state != "tracked", not r.on_surface, -r.score))
+    out.sort(key=lambda r: (r.state != "tracked", -r.score))
     tracked_count = sum(1 for r in out if r.state == "tracked")
     out = out[: max(limit, tracked_count)]
 
@@ -1725,39 +1727,92 @@ async def fold_claimed_cves(
     threats: list[ThreatRow],
     cves: list[ThreatRow],
     window: str = "14d",
-) -> list[ThreatRow]:
-    """Drop CVE rows already claimed by a visible threat row's window."""
+) -> tuple[list[ThreatRow], list[ThreatRow]]:
+    """Fold CVE rows a visible threat row's window already claims onto that row.
+
+    A CVE sharing ``CVE_FOLD_SHARED_ENTRIES`` or more window articles with an
+    actor or malware row is the same story told twice, so it gets no line of
+    its own. It is not dropped either: it rides on the claiming row as a
+    ``merged_from`` entry (``entity_type`` cve, plus ``is_kev`` / ``product`` /
+    ``in_stack`` so the row can say "exploits CVE-… · KEV"), and because
+    ``set_threat_state`` writes every merged_from key, handling the threat
+    handles the CVE. Where several visible rows share the articles, the one
+    sharing the most claims it. A tracked CVE is a human pin and never folds.
+
+    Returns ``(threats, cves)`` with the claimed CVEs moved from the second
+    list onto rows of the first.
+    """
     if not threats or not cves:
-        return cves
+        return threats, cves
     hours = WINDOW_HOURS.get(window, WINDOW_HOURS["14d"])
     since = datetime.now(UTC) - timedelta(hours=hours)
-    actor_keys = [t.entity_key for t in threats if t.entity_type == entity_types.THREAT_ACTOR]
-    malware_keys = [t.entity_key for t in threats if t.entity_type == entity_types.MALWARE]
-    claimed = {
-        r.cve_id
-        for r in (
-            await db.execute(
-                text("""
-                    SELECT c.cve_id
-                    FROM cves c
-                    JOIN entry_cves ec ON ec.cve_id = c.id
-                    JOIN entries e ON e.id = ec.entry_id
-                    LEFT JOIN entry_threat_actors ea ON ea.entry_id = e.id AND ea.threat_actor_id::text = ANY(:akeys)
-                    LEFT JOIN entry_malware em ON em.entry_id = e.id AND em.malware_family_id::text = ANY(:mkeys)
-                    WHERE c.cve_id = ANY(:ckeys) AND e.published_at > :since
-                      AND (ea.entry_id IS NOT NULL OR em.entry_id IS NOT NULL)
-                    GROUP BY c.cve_id
-                    HAVING count(DISTINCT e.id) >= :shared
-                    """),
-                {
-                    "akeys": actor_keys or [""],
-                    "mkeys": malware_keys or [""],
-                    "ckeys": [c.entity_key for c in cves],
-                    "since": since,
-                    "shared": CVE_FOLD_SHARED_ENTRIES,
-                },
-            )
-        ).all()
-    }
-    # A tracked CVE is a human pin and never folds away.
-    return [c for c in cves if c.entity_key not in claimed or c.state == "tracked"]
+    by_threat = {(t.entity_type, t.entity_key): i for i, t in enumerate(threats)}
+    actor_keys = [k for et, k in by_threat if et == entity_types.THREAT_ACTOR]
+    malware_keys = [k for et, k in by_threat if et == entity_types.MALWARE]
+    if not actor_keys and not malware_keys:
+        return threats, cves
+    pairs = (
+        await db.execute(
+            text("""
+                SELECT c.cve_id, 'threat_actor' AS threat_type, ea.threat_actor_id::text AS threat_key,
+                       count(DISTINCT e.id) AS shared
+                FROM cves c
+                JOIN entry_cves ec ON ec.cve_id = c.id
+                JOIN entries e ON e.id = ec.entry_id
+                JOIN entry_threat_actors ea ON ea.entry_id = e.id AND ea.threat_actor_id::text = ANY(:akeys)
+                WHERE c.cve_id = ANY(:ckeys) AND e.published_at > :since
+                GROUP BY c.cve_id, ea.threat_actor_id
+                HAVING count(DISTINCT e.id) >= :shared
+                UNION ALL
+                SELECT c.cve_id, 'malware', em.malware_family_id::text, count(DISTINCT e.id)
+                FROM cves c
+                JOIN entry_cves ec ON ec.cve_id = c.id
+                JOIN entries e ON e.id = ec.entry_id
+                JOIN entry_malware em ON em.entry_id = e.id AND em.malware_family_id::text = ANY(:mkeys)
+                WHERE c.cve_id = ANY(:ckeys) AND e.published_at > :since
+                GROUP BY c.cve_id, em.malware_family_id
+                HAVING count(DISTINCT e.id) >= :shared
+                """),
+            {
+                "akeys": actor_keys or [""],
+                "mkeys": malware_keys or [""],
+                "ckeys": [c.entity_key for c in cves if c.state != "tracked"],
+                "since": since,
+                "shared": CVE_FOLD_SHARED_ENTRIES,
+            },
+        )
+    ).all()
+
+    # One claimant per CVE: most shared articles, then the stronger row.
+    claimant: dict[str, tuple[int, float, int]] = {}
+    for cve_id, threat_type, threat_key, shared in pairs:
+        idx = by_threat.get((threat_type, threat_key))
+        if idx is None:
+            continue
+        cand = (int(shared), threats[idx].score, idx)
+        if cve_id not in claimant or cand[:2] > claimant[cve_id][:2]:
+            claimant[cve_id] = cand
+
+    if not claimant:
+        return threats, cves
+    carried: dict[int, list[dict]] = {}
+    kept: list[ThreatRow] = []
+    for c in cves:
+        hit = claimant.get(c.entity_key)
+        if hit is None or c.state == "tracked":
+            kept.append(c)
+            continue
+        carried.setdefault(hit[2], []).append(
+            {
+                "entity_type": entity_types.CVE,
+                "entity_key": c.entity_key,
+                "label": c.label,
+                "is_kev": c.is_kev,
+                "product": c.product,
+                "in_stack": c.in_stack,
+            }
+        )
+    folded = [
+        replace(t, merged_from=[*t.merged_from, *carried[i]]) if i in carried else t for i, t in enumerate(threats)
+    ]
+    return folded, kept

@@ -6,15 +6,20 @@ until the frontend moves over.
 """
 
 from fastapi import APIRouter, Body, Depends, Path, Query
+from fastapi.responses import PlainTextResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import entity_types
+from app.ai.query_language import QUERY_LANGUAGES, preferred_query_language
+from app.ai.query_language import language as query_language
 from app.core.exceptions import AppError
 from app.core.security import get_current_user
 from app.database import get_db
 from app.intelligence.story_threads import SIMILAR_FLOOR
 from app.models.user import User
-from app.schemas.threat_board import ThreatBoardItem, ThreatBoardResponse, ThreatStateUpdate
+from app.schemas.threat_board import HuntPackResponse, ThreatBoardItem, ThreatBoardResponse, ThreatStateUpdate
+from app.services import hunt_pack as hunt_packs
 from app.services.threat_board import (
     STORY,
     WINDOW_HOURS,
@@ -85,7 +90,7 @@ async def get_threat_board(
         description=(
             "threats = actor/malware rows; vulns = exploitation-ranked CVE rows; "
             "all = both interleaved by score, with CVEs claimed by a visible threat "
-            "folded onto that threat's cluster instead of getting their own line"
+            "folded onto that threat's row (as merged_from entries) instead of getting their own line"
         ),
     ),
     limit: int = Query(25, ge=1, le=100, description="Maximum threats returned"),
@@ -138,9 +143,9 @@ async def get_threat_board(
             user_id=user.id,
         )
     if facet == "all" and cves:
-        cves = await fold_claimed_cves(db, threats, cves, window=window)
+        threats, cves = await fold_claimed_cves(db, threats, cves, window=window)
         merged = threats + cves
-        merged.sort(key=lambda r: (r.is_generic, r.state != "tracked", not r.on_surface, -r.score))
+        merged.sort(key=lambda r: (r.is_generic, r.state != "tracked", -r.score))
         tracked = sum(1 for r in merged if r.state == "tracked")
         rows = merged[: max(limit, tracked)]
     else:
@@ -180,6 +185,14 @@ async def set_threat_state(
     else:
         board = await build_threat_board(db, window=window, limit=200, min_attention=1, include_handled=True)
     row = next((r for r in board if r.entity_type == entity_type and r.entity_key == entity_key), None)
+    if row is not None and entity_type in (entity_types.THREAT_ACTOR, entity_types.MALWARE):
+        # The All view folds claimed CVEs onto this row, so the decision has to
+        # reach them too — or the CVE pops out as its own open row the moment
+        # the threat it rode on is handled.
+        cves = await build_cve_board(
+            db, window=window, limit=200, min_attention=1, include_handled=True, user_id=user.id
+        )
+        (row,), _ = await fold_claimed_cves(db, [row], cves, window=window)
     if row is None and body.state == "tracked":
         # The pull path: tracking is exactly for threats the ranking hasn't
         # surfaced. Validate the entity exists and pin it with empty counts —
@@ -353,3 +366,146 @@ async def get_precedent(
 async def get_windows(user: User = Depends(get_current_user)):
     """Windows the board offers, for the segmented control."""
     return {"windows": list(WINDOW_HOURS)}
+
+
+# ── Hunt packs ───────────────────────────────────────────────────────────────
+# A starting point for a hunt, not a record of one: hypotheses and queries the
+# analyst copies into their SIEM or exports as an ATHF hunt file. Nothing about
+# the hunt itself is stored here (see services/hunt_pack.py).
+
+HUNT_ROW_TYPES = (entity_types.THREAT_ACTOR, entity_types.MALWARE, entity_types.CVE)
+_LANGUAGE_DESC = (
+    "Query language id (kql, spl, esql, eql, cql, yaral, aql, sumo, sql, panther, sigma); "
+    "defaults to the user's query_language setting"
+)
+
+
+def _hunt_language(requested: str | None, user: User) -> str:
+    if requested is None:
+        return preferred_query_language(user.settings)
+    if requested not in QUERY_LANGUAGES:
+        raise AppError(
+            code="bad_request",
+            message=f"language must be one of {', '.join(QUERY_LANGUAGES)}",
+            status_code=400,
+        )
+    return requested
+
+
+def _hunt_row_type(entity_type: str) -> None:
+    if entity_type not in HUNT_ROW_TYPES:
+        raise AppError(
+            code="bad_request",
+            message="Hunt packs exist for threat_actor, malware and cve rows",
+            status_code=400,
+        )
+
+
+@router.get("/{entity_type}/{entity_key}/hunt-pack", response_model=HuntPackResponse)
+async def get_hunt_pack(
+    entity_type: str = Path(..., description="threat_actor, malware or cve"),
+    entity_key: str = Path(..., description="Entity uuid or CVE id — the board row's key"),
+    window: str = Query("14d", pattern="^(7d|14d|30d)$", description="The board view's window"),
+    language: str | None = Query(None, description=_LANGUAGE_DESC),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The cached hunt pack for a row, if one has been drafted.
+
+    The language is the user's preferred query language unless `language`
+    overrides it. `status` is `none` until someone drafts one (POST). Each hypothesis's
+    `telemetry` is checked against the enabled telemetry inventory at read
+    time, so ticking a source in Settings flips `runnable` without a redraft.
+    """
+    _hunt_row_type(entity_type)
+    chosen = _hunt_language(language, user)
+    pack = await hunt_packs.get_cached_pack(db, entity_type, entity_key, window, chosen)
+    if pack is None:
+        return HuntPackResponse(status="none", language=chosen, language_name=query_language(chosen).name)
+    return HuntPackResponse(
+        status="ready",
+        language=chosen,
+        language_name=query_language(chosen).name,
+        pack=await hunt_packs.annotate_telemetry(db, pack),
+    )
+
+
+@router.post("/{entity_type}/{entity_key}/hunt-pack", response_model=HuntPackResponse)
+async def draft_hunt_pack(
+    entity_type: str = Path(..., description="threat_actor, malware or cve"),
+    entity_key: str = Path(..., description="Entity uuid or CVE id — the board row's key"),
+    window: str = Query("14d", pattern="^(7d|14d|30d)$", description="The board view's window"),
+    language: str | None = Query(None, description=_LANGUAGE_DESC),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Draft (or redraft) the hunt pack for a row now.
+
+    Synchronous, up to five minutes: the analyst asked for it and is waiting,
+    and a local model writing three queries can take that long. The `hunt_pack` AI
+    task runs on the window's articles, extracted techniques and observable
+    quotes — nothing else — and the result replaces any cached pack for this
+    row, window and language. 422 when the task has no provider assigned; 409
+    when the window holds nothing to hypothesize from.
+    """
+    _hunt_row_type(entity_type)
+    chosen = _hunt_language(language, user)
+    try:
+        pack = await hunt_packs.generate_hunt_pack(db, user.id, entity_type, entity_key, window, chosen)
+    except LookupError:
+        raise AppError(code="not_found", message="Entity not found", status_code=404) from None
+    except hunt_packs.NothingToHunt:
+        raise AppError(
+            code="nothing_to_hunt",
+            message="No articles or extracted techniques in this window to draft a hunt from",
+            status_code=409,
+        ) from None
+    if pack is None:
+        raise AppError(
+            code="not_configured",
+            message="The hunt_pack AI task has no provider assigned, or the model returned no usable hypotheses",
+            status_code=422,
+        )
+    await db.commit()
+    return HuntPackResponse(
+        status="ready",
+        language=chosen,
+        language_name=query_language(chosen).name,
+        pack=await hunt_packs.annotate_telemetry(db, pack),
+    )
+
+
+@router.get("/{entity_type}/{entity_key}/hunt-pack.md", response_class=PlainTextResponse)
+async def export_hunt_file(
+    entity_type: str = Path(..., description="threat_actor, malware or cve"),
+    entity_key: str = Path(..., description="Entity uuid or CVE id — the board row's key"),
+    window: str = Query("14d", pattern="^(7d|14d|30d)$", description="The board view's window"),
+    language: str | None = Query(None, description=_LANGUAGE_DESC),
+    hunt_id: str = Query(
+        hunt_packs.PLACEHOLDER_HUNT_ID,
+        pattern=rf"^(H-XXXX|{hunt_packs.HUNT_ID_PATTERN[1:-1]})$",
+        description="The workspace's next hunt number (H-0042); the H-XXXX placeholder when unknown",
+    ),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The cached pack as an ATHF hunt file (Markdown download).
+
+    YAML frontmatter plus the LOCK body: Learn, Observe and Check filled from
+    the row and its articles, Keep empty for the hunt itself. `athf hunt
+    validate` passes once the file carries a real id: pass `hunt_id` when you
+    know the workspace's next number, otherwise it stays `H-XXXX` and you
+    renumber it on arrival. 404 until a pack has been drafted.
+    """
+    _hunt_row_type(entity_type)
+    chosen = _hunt_language(language, user)
+    pack = await hunt_packs.get_cached_pack(db, entity_type, entity_key, window, chosen)
+    if pack is None:
+        raise AppError(code="not_found", message="No hunt pack drafted for this row yet", status_code=404)
+    pack = await hunt_packs.annotate_telemetry(db, pack)
+    body = await hunt_packs.build_hunt_file(db, pack, hunter=user.username, hunt_id=hunt_id)
+    return PlainTextResponse(
+        body,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{hunt_packs.hunt_filename(pack, hunt_id)}"'},
+    )

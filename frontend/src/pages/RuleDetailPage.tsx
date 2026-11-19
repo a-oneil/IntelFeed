@@ -20,8 +20,9 @@ import type { ChatMessage } from "@/hooks/useDetectionRules";
 import { generateRuleContent } from "@/hooks/useCreateRuleFromEntity";
 import RuleBuilderShell from "@/components/RuleBuilderShell";
 import type { RuleValidationResult, FeasibilityResult } from "@/api/types";
+import { useQuery } from "@tanstack/react-query";
+import api from "@/api/client";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
-import { useRailWidth } from "@/hooks/useRailWidth";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { useIntelStore } from "@/stores/intelStore";
@@ -30,15 +31,13 @@ import { type SegmentedOption } from "@/components/primitives";
 import {
   RuleAIActions,
   RuleChatPanel,
-  RuleCompare,
   RuleContextRail,
   RuleConvertPanel,
   RuleDetailsForm,
   RuleHistoryPanel,
-  RuleSlideOver,
-  RuleStatusLine,
   RuleStructureRail,
   scrollEditorToLine,
+  type ConvertTarget,
   type RuleConversion,
   type RuleFormValues,
 } from "@/components/ruleBench";
@@ -56,7 +55,13 @@ const RULE_TYPE_LABELS: Record<string, string> = {
   yara: "YARA",
   nuclei: "Nuclei",
   panther: "Panther",
+  yaral: "YARA-L",
+  aql: "AQL",
+  sumo: "Sumo Logic",
+  sql: "SQL",
 };
+
+const SEVERITY_OPTIONS = ["informational", "low", "medium", "high", "critical"];
 
 interface BenchSeed {
   entityType: string;
@@ -88,6 +93,10 @@ const COMMENT_PREFIX: Record<string, string> = {
   nuclei: "#",
   snort_suricata: "#",
   panther: "#",
+  yaral: "//",
+  aql: "--",
+  sumo: "//",
+  sql: "--",
 };
 
 function seedHeader(seed: BenchSeed, ruleType: string): string {
@@ -133,20 +142,13 @@ function draftWithAiPrompt(seed: BenchSeed, ruleType: string): string {
 const RULE_EXT: Record<string, string> = {
   sigma: "yml", yara: "yar", kql: "kql", elastic_ql: "eql", splunk_spl: "spl",
   crowdstrike_ql: "cql", snort_suricata: "rules", nuclei: "yaml", panther: "py",
+  yaral: "yaral", aql: "aql", sumo: "sumo", sql: "sql",
 };
 
-/** Everything that is not the rule body lives in the slide-over. */
-type Pane = "details" | "ai" | "convert" | "history" | "structure" | "context" | "compare";
-
-const PANE_TITLES: Record<Pane, string> = {
-  details: "Details",
-  ai: "AI Assist",
-  convert: "Convert",
-  history: "History",
-  structure: "Structure",
-  context: "Context",
-  compare: "Compare",
-};
+/** Everything that is not the rule body is a tab in the strip under the
+    editor. Structure and Context are rails on a wide screen and only become
+    tabs once their rail has folded away. */
+type Pane = "details" | "ai" | "convert" | "history" | "structure" | "context";
 
 export default function RuleDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -176,10 +178,6 @@ export default function RuleDetailPage() {
     isExtendMode && rule?.derived_from ? rule.derived_from : undefined
   );
   const [upstreamOpen, setUpstreamOpen] = useState(true);
-  // The rule shelf docks on the right like the entry reader — its own
-  // persisted width, its own collapse. Opening a fresh pane un-collapses it.
-  const shelfRail = useRailWidth("rule-shelf", { default: 560, min: 380, max: 920 });
-  const [shelfCollapsed, setShelfCollapsed] = useState(false);
   // The window's observables as a checklist: ticked items become the version
   // note, so the change record says which evidence the extension covers.
   const [coveredObs, setCoveredObs] = useState<number[]>([]);
@@ -189,8 +187,8 @@ export default function RuleDetailPage() {
       const quotes = seed?.quotes ?? [];
       setChangeDescription(
         next.length
-          ? `Covers: ${next
-              .sort()
+          ? `Covers: ${[...next]
+              .sort((a, b) => a - b)
               .map((n) => quotes[n]?.text.slice(0, 60) ?? text)
               .join(" · ")}`
           : ""
@@ -212,6 +210,16 @@ export default function RuleDetailPage() {
   const { data: relatedRules } = useRelatedRules(isCreateMode ? undefined : id);
   const { data: freshIntel } = useRuleFreshIntel(isCreateMode ? undefined : id);
   const convertRule = useConvertRule();
+  // Same key the Convert tab reads, so the tab label counts siblings without
+  // a second request.
+  const { data: conversionSiblings } = useQuery({
+    queryKey: ["rule-conversions", id],
+    enabled: !!id && !isCreateMode,
+    queryFn: async () => {
+      const { data } = await api.get<{ id: string; rule_type: string }[]>(`/detection-rules/${id}/conversions`);
+      return data;
+    },
+  });
 
   // Three columns need ~1200px. Below that each rail folds into the slide-over
   // rather than squeezing the editor, which is the thing being worked in.
@@ -228,12 +236,9 @@ export default function RuleDetailPage() {
   const [title, setTitle] = useState("");
   const [ruleType, setRuleType] = useState("sigma");
   const [ruleContent, setRuleContent] = useState("");
-  const [pane, setPane] = useState<Pane | null>(null);
-  useEffect(() => {
-    if (pane) setShelfCollapsed(false);
-  }, [pane]);
-  // On a phone the shelf's tab strip is wider than the panel and scrolls, so a
-  // tab selected from off-screen (History, Convert) would activate with no
+  const [pane, setPane] = useState<Pane>("details");
+  // On a phone the tab strip is wider than the column and scrolls, so a tab
+  // selected from off-screen (History, Convert) would activate with no
   // visible trace. Pull the active one into view whenever the pane changes.
   const activeTabRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
@@ -241,7 +246,6 @@ export default function RuleDetailPage() {
   }, [pane]);
   const [compareRuleId, setCompareRuleId] = useState<string | null>(null);
   const [activeLine, setActiveLine] = useState<number | null>(null);
-  const [issuesOpen, setIssuesOpen] = useState(false);
   const [copiedRule, setCopiedRule] = useState(false);
   const [description, setDescription] = useState("");
   const [severity, setSeverity] = useState("");
@@ -256,12 +260,14 @@ export default function RuleDetailPage() {
   const [viewingVersion, setViewingVersion] = useState<string | null>(null);
   const [diffVersionNum, setDiffVersionNum] = useState<number | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
-  const [extractedMeta, setExtractedMeta] = useState<Record<string, unknown> | null>(null);
+  // What the body extractor can read out of the rule text, for Auto-fill. It
+  // is never written back as the rule's metadata (see handleSave).
   const [mappedFields, setMappedFields] = useState<Record<string, unknown> | null>(null);
 
   // Rule conversions: { [ruleType]: { content, converted_at, model } }
   const [conversions, setConversions] = useState<Record<string, RuleConversion>>({});
-  const [activeConversionTab, setActiveConversionTab] = useState<string | null>(null);
+  // A sibling rule id, or `legacy:<type>` for a blob entry — see RuleConvertPanel.
+  const [activeConversionKey, setActiveConversionKey] = useState<string | null>(null);
 
   const versionDiff = useVersionDiff();
   const editorRef = useRef<HTMLDivElement>(null);
@@ -269,9 +275,22 @@ export default function RuleDetailPage() {
   const metaTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const initializedCreate = useRef(false);
 
+  // Abort in-flight AI chat stream and clear pending timers on unmount
+  useEffect(() => {
+    return () => {
+      chatAbortRef.current?.abort();
+      clearTimeout(validateTimerRef.current);
+      clearTimeout(metaTimerRef.current);
+    };
+  }, []);
+
   // Pre-fill from query params in create mode
   useEffect(() => {
-    if (!isCreateMode || initializedCreate.current) return;
+    if (!isCreateMode) {
+      initializedCreate.current = false;
+      return;
+    }
+    if (initializedCreate.current) return;
     initializedCreate.current = true;
 
     // Seeded from the coverage workspace: technique + quotes as a cited
@@ -298,7 +317,7 @@ export default function RuleDetailPage() {
       setTags(template.tags);
     }
     setHasChanges(true);
-  }, [isCreateMode, searchParams]);
+  }, [isCreateMode, searchParams, seed]);
 
   // Sync from server data
   useEffect(() => {
@@ -313,7 +332,6 @@ export default function RuleDetailPage() {
       setDataSources(rule.data_sources);
       setSourceTtps((rule.source_ttps as string[]) || []);
       setNotes(rule.notes || "");
-      setExtractedMeta(rule.metadata || null);
       // Restore chat history from metadata
       const meta = rule.metadata as Record<string, unknown> | null;
       const savedChat = meta?.ai_chat_history;
@@ -350,7 +368,6 @@ export default function RuleDetailPage() {
         {
           onSuccess: (result) => {
             if (result.metadata && Object.keys(result.metadata).length > 0) {
-              setExtractedMeta(result.metadata);
               setMappedFields(result.mapped_fields);
               // In create mode, auto-fill empty fields
               if (isCreateMode) {
@@ -508,19 +525,21 @@ export default function RuleDetailPage() {
     if (JSON.stringify(dataSources) !== JSON.stringify(rule.data_sources)) updates.data_sources = dataSources;
     if (JSON.stringify(sourceTtps) !== JSON.stringify(rule.source_ttps || [])) updates.source_ttps = sourceTtps;
     if (notes !== (rule.notes || "")) updates.notes = notes;
-    // Merge chat history into metadata. Conversions are NOT persisted here:
-    // each conversion is a sibling detection_rules row (derived_from) written
-    // by the convert endpoint — re-writing the legacy metadata.rule_conversions
-    // blob on every save is exactly what the sibling backfill exists to remove.
-    // Any blob already in extractedMeta is passed through untouched so a
-    // not-yet-backfilled legacy conversion is never silently deleted.
-    const metaToSave: Record<string, unknown> = { ...(extractedMeta || {}) };
-    if (chatMessages.length > 0) {
-      metaToSave.ai_chat_history = chatMessages;
-    } else {
-      delete metaToSave.ai_chat_history;
+    // Metadata goes back as the server gave it, plus the chat history. Never
+    // the extractor's output: that lacks the provenance keys (repo, owner,
+    // file_path, commit_history) and saving it turned mirrored rules into
+    // "authored here" rules with no history. Conversions are NOT persisted
+    // here either — each is a sibling detection_rules row (derived_from).
+    const savedChat = (rule.metadata as Record<string, unknown> | null)?.ai_chat_history;
+    if (JSON.stringify(savedChat ?? null) !== JSON.stringify(chatMessages.length > 0 ? chatMessages : null)) {
+      const metaToSave: Record<string, unknown> = { ...((rule.metadata as Record<string, unknown> | null) || {}) };
+      if (chatMessages.length > 0) {
+        metaToSave.ai_chat_history = chatMessages;
+      } else {
+        delete metaToSave.ai_chat_history;
+      }
+      updates.metadata = metaToSave;
     }
-    updates.metadata = metaToSave;
 
     updateRule.mutate(updates as Parameters<typeof updateRule.mutate>[0], {
       onSuccess: () => {
@@ -557,24 +576,15 @@ export default function RuleDetailPage() {
     rollbackVersion.mutate({ ruleId: id, versionId }, { onSuccess: () => setViewingVersion(null) });
   };
 
-  const handleConvert = (targetType: string) => {
+  const handleConvert = (target: ConvertTarget, notes: string) => {
     if (!id || isCreateMode) return;
     convertRule.mutate(
-      { ruleId: id, target_type: targetType },
+      { ruleId: id, target_type: target.type, dialect: target.dialect, notes },
       {
         onSuccess: (result) => {
-          setConversions((prev) => ({
-            ...prev,
-            [result.target_type]: {
-              content: result.converted_content,
-              converted_at: new Date().toISOString(),
-              model: result.model,
-              tokens_used: result.tokens_used,
-              cost: result.cost,
-            },
-          }));
-          setActiveConversionTab(result.target_type);
-          setHasChanges(true);
+          // The conversion is a sibling row now; the panel refetches the list
+          // when the mutation settles and this selects the one just written.
+          setActiveConversionKey(result.rule_id);
         },
         onError: (err) => {
           const e = err as { code?: string; response?: { data?: { error?: { message?: string } } }; message?: string };
@@ -594,10 +604,7 @@ export default function RuleDetailPage() {
       delete next[type];
       return next;
     });
-    if (activeConversionTab === type) {
-      const remaining = Object.keys(conversions).filter((k) => k !== type);
-      setActiveConversionTab(remaining.length > 0 ? remaining[0] : null);
-    }
+    if (activeConversionKey === `legacy:${type}`) setActiveConversionKey(null);
     setHasChanges(true);
   };
 
@@ -611,7 +618,9 @@ export default function RuleDetailPage() {
   const autoSaveMeta = useCallback(
     (messages: ChatMessage[], _convs: Record<string, RuleConversion>) => {
       if (isCreateMode || !id) return;
-      const meta: Record<string, unknown> = { ...(extractedMeta || {}) };
+      // Same rule as handleSave: the stored metadata plus the chat, never the
+      // extractor's view of the body.
+      const meta: Record<string, unknown> = { ...((rule?.metadata as Record<string, unknown> | null) || {}) };
       if (messages.length > 0) {
         meta.ai_chat_history = messages;
       } else {
@@ -619,7 +628,7 @@ export default function RuleDetailPage() {
       }
       updateRule.mutate({ id, metadata: meta } as Parameters<typeof updateRule.mutate>[0]);
     },
-    [isCreateMode, id, extractedMeta, updateRule]
+    [isCreateMode, id, rule?.metadata, updateRule]
   );
 
   const sendChat = (text: string) => {
@@ -697,31 +706,34 @@ export default function RuleDetailPage() {
 
   const openCompare = (otherId: string) => {
     setCompareRuleId(otherId);
-    setPane("compare");
+    setPane("history");
   };
 
   if (!isCreateMode && isLoading) return <div className={styles.page}><AsyncStateLoading label="Loading rule…" /></div>;
   if (!isCreateMode && !rule) return <div className={styles.page}><div className={styles.loading}>Rule not found</div></div>;
 
-  const nearDupeCount = relatedRules?.near_duplicate.length ?? 0;
-  const telemetryCounts = rule?.telemetry?.required.length
-    ? { required: rule.telemetry.required.length, collected: rule.telemetry.collected.length }
-    : feasibility
-      ? { required: feasibility.feasible.length + feasibility.missing.length, collected: feasibility.feasible.length }
-      : null;
+  // Only a root mirror is locked: an extended child carries the parent's repo
+  // keys but is the analyst's own rule.
+  const renameLocked = !!rule?.source_repo && !rule?.derived_from;
+  const conversionCount = (conversionSiblings?.length ?? 0) + Object.keys(conversions).filter(
+    (t) => !conversionSiblings?.some((s) => s.rule_type === t)
+  ).length;
+  const historyCount = (versions?.length ?? 0) + (commitTimeline?.commits.length ?? 0);
 
   const paneTabs: SegmentedOption<Pane>[] = [
     ...(structureCollapsed ? [{ value: "structure" as Pane, label: "Structure" }] : []),
-    ...(railsCollapsed ? [{ value: "context" as Pane, label: "Context" }] : []),
+    ...(railsCollapsed && !isCreateMode ? [{ value: "context" as Pane, label: "Context" }] : []),
     { value: "details", label: "Details" },
     { value: "ai", label: "AI Assist" },
     ...(isCreateMode
       ? []
       : ([
-          { value: "convert" as Pane, label: `Convert${Object.keys(conversions).length ? ` (${Object.keys(conversions).length})` : ""}` },
-          { value: "history" as Pane, label: `History${versions?.length ? ` (${versions.length})` : ""}` },
+          { value: "convert" as Pane, label: `Convert${conversionCount ? ` (${conversionCount})` : ""}` },
+          { value: "history" as Pane, label: `History${historyCount ? ` (${historyCount})` : ""}` },
         ])),
   ];
+  // A rail that unfolds again takes its tab with it; fall back to Details.
+  const activePane: Pane = paneTabs.some((t) => t.value === pane) ? pane : "details";
 
   return (
     <div className={styles.page}>
@@ -731,16 +743,9 @@ export default function RuleDetailPage() {
         <Breadcrumb items={[
           { label: "Workbench", to: "/workbench/explore" },
           { label: "Rules", onClick: () => { setActiveSection("rules"); navigate("/workbench/explore"); } },
-          { label: isCreateMode ? "New Rule" : (title || "Untitled Rule") },
+          ...(isCreateMode ? [{ label: "New Rule" }] : []),
         ]} />
         <div className={styles.topActions}>
-          {structureCollapsed && (
-            <button className={styles.metaToggle} onClick={() => setPane("structure")}>Structure</button>
-          )}
-          {railsCollapsed && !isCreateMode && (
-            <button className={styles.metaToggle} onClick={() => setPane("context")}>Context</button>
-          )}
-          <button className={styles.metaToggle} onClick={() => setPane("details")}>Details</button>
           {!isCreateMode && (
             <>
               <button
@@ -762,6 +767,7 @@ export default function RuleDetailPage() {
               ruleContent={ruleContent}
               ruleType={ruleType}
               rule={rule}
+              commitTimeline={commitTimeline}
               activeLine={activeLine}
               onSelectLine={handleOutlineSelect}
             />
@@ -772,9 +778,38 @@ export default function RuleDetailPage() {
           {!isCreateMode && (
             <div className={styles.edHeadline}>
               <span className={`${styles.edFmt} ${styles[`edFmt_${ruleType}`] || ""}`}>{RULE_TYPE_LABELS[ruleType] || ruleType}</span>
-              {severity && <span className={styles.edSev} data-sev={severity}>{severity}</span>}
-              {(rule?.source_cves as string[] | undefined)?.[0] && (
-                <span className={styles.edCve}>{(rule?.source_cves as string[])[0]}</span>
+              <select
+                className={styles.sevSelect}
+                data-sev={severity || undefined}
+                value={severity}
+                aria-label="Severity"
+                onChange={(e) => { setSeverity(e.target.value); setHasChanges(true); }}
+              >
+                <option value="">severity</option>
+                {SEVERITY_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              {renameLocked ? (
+                <span
+                  className={styles.titleLocked}
+                  title={`Imported from ${rule?.source_repo}. The title is how the upstream sync tracks this rule, so it cannot be renamed here. Save a copy to get a rule you can rename.`}
+                >
+                  <span className={styles.titleText}>{title}</span>
+                  <span className={styles.lockHint}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+                      <rect x="4" y="11" width="16" height="10" rx="2" />
+                      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+                    </svg>
+                    upstream · rename locked
+                  </span>
+                </span>
+              ) : (
+                <input
+                  className={styles.titleInput}
+                  value={title}
+                  aria-label="Rule title"
+                  placeholder="Untitled detection rule"
+                  onChange={(e) => { setTitle(e.target.value); setHasChanges(true); }}
+                />
               )}
               <div className={styles.edHeadlineActions}>
                 <button className={styles.metaToggle} onClick={handleCopyRule}>{copiedRule ? "Copied!" : "Copy"}</button>
@@ -850,39 +885,6 @@ export default function RuleDetailPage() {
             />
           </div>
 
-          {!viewingVersion && (
-            <>
-              <RuleAIActions onAsk={sendChat} disabled={chatStreaming} />
-              <p className={styles.aiNote}>
-                Each answer comes back as a block you accept into the buffer — not prose you copy out of a chat pane.
-              </p>
-            </>
-          )}
-
-          <RuleStatusLine
-            validation={viewingVersion ? null : validation}
-            ruleTypeLabel={RULE_TYPE_LABELS[ruleType] || ruleType}
-            telemetry={telemetryCounts}
-            nearDupeCount={nearDupeCount}
-            freshIntelCount={freshIntel?.total ?? 0}
-            issuesOpen={issuesOpen}
-            onToggleIssues={() => setIssuesOpen((v) => !v)}
-          />
-
-          {issuesOpen && validation && !viewingVersion && (
-            <div className={styles.errorList}>
-              {validation.errors.map((err, i) => (
-                <div key={i} className={err.severity === "error" ? styles.errorItem : styles.warningItem}>
-                  {err.line && <span className={styles.lineNum}>L{err.line}</span>}
-                  {err.message}
-                </div>
-              ))}
-              {validation.suggestions.map((s, i) => (
-                <div key={`s-${i}`} className={styles.suggestionItem}>{s}</div>
-              ))}
-            </div>
-          )}
-
           {viewingVersion && (
             <div className={styles.versionViewBar}>
               Viewing version {versions?.find((v) => v.id === viewingVersion)?.version_number} (read-only)
@@ -940,6 +942,111 @@ export default function RuleDetailPage() {
             </div>
           )}
 
+          <div className={styles.tabStrip} role="tablist" aria-label="Rule panels">
+            {paneTabs.map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                role="tab"
+                aria-selected={activePane === t.value}
+                ref={activePane === t.value ? activeTabRef : undefined}
+                className={`${styles.shelfTab} ${activePane === t.value ? styles.shelfTabActive : ""}`}
+                onClick={() => setPane(t.value)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div className={styles.tabBody}>
+            {activePane === "structure" && (
+              <RuleStructureRail
+                ruleContent={ruleContent}
+                ruleType={ruleType}
+                rule={rule}
+                commitTimeline={commitTimeline}
+                activeLine={activeLine}
+                onSelectLine={handleOutlineSelect}
+              />
+            )}
+            {activePane === "context" && (
+              <RuleContextRail
+                rule={rule}
+                freshIntel={freshIntel}
+                related={relatedRules}
+                feasibility={feasibility}
+                dataSources={dataSources}
+                onDataSourcesChange={(ds) => handleFieldChange("dataSources", ds)}
+                onDiff={openCompare}
+              />
+            )}
+            {activePane === "details" && (
+              <RuleDetailsForm
+                values={formValues}
+                onChange={handleFieldChange}
+                mappedFields={mappedFields}
+                onAutoFill={applyExtractedFields}
+              />
+            )}
+            {activePane === "ai" && (
+              <>
+                <RuleAIActions onAsk={sendChat} disabled={chatStreaming} />
+                <RuleChatPanel
+                  embedded
+                  messages={chatMessages}
+                  input={chatInput}
+                  streaming={chatStreaming}
+                  onInput={setChatInput}
+                  onSend={() => sendChat(chatInput)}
+                  onStop={handleChatStop}
+                  onClear={() => { setChatMessages([]); autoSaveMeta([], conversions); }}
+                  onClose={() => setPane("details")}
+                  onApplyCode={(code) => { setRuleContent(code); setHasChanges(true); }}
+                />
+              </>
+            )}
+            {activePane === "convert" && !isCreateMode && (
+              <RuleConvertPanel
+                ruleId={id}
+                ruleType={ruleType}
+                typeLabels={RULE_TYPE_LABELS}
+                conversions={conversions}
+                activeKey={activeConversionKey}
+                converting={
+                  convertRule.isPending
+                    ? {
+                        type: (convertRule.variables as { target_type?: string } | undefined)?.target_type ?? "",
+                        dialect: (convertRule.variables as { dialect?: string | null } | undefined)?.dialect ?? null,
+                      }
+                    : null
+                }
+                onSelect={setActiveConversionKey}
+                onConvert={handleConvert}
+                onRemove={handleRemoveConversion}
+                onUpdateContent={handleUpdateConversionContent}
+              />
+            )}
+            {activePane === "history" && !isCreateMode && (
+              <RuleHistoryPanel
+                rule={rule}
+                versions={versions}
+                commitTimeline={commitTimeline}
+                viewingVersion={viewingVersion}
+                diffVersion={diffVersionNum}
+                diff={versionDiff.data}
+                diffPending={versionDiff.isPending}
+                onView={setViewingVersion}
+                onDiff={(versionNumber) => {
+                  setDiffVersionNum(versionNumber);
+                  versionDiff.mutate({ ruleId: id!, v1: versionNumber });
+                }}
+                onRollback={handleRollback}
+                compareRuleId={compareRuleId}
+                currentContent={ruleContent}
+                onCloseCompare={() => setCompareRuleId(null)}
+              />
+            )}
+          </div>
         </div>
 
         {!railsCollapsed && !isCreateMode && (
@@ -949,125 +1056,14 @@ export default function RuleDetailPage() {
               freshIntel={freshIntel}
               related={relatedRules}
               feasibility={feasibility}
+              dataSources={dataSources}
+              onDataSourcesChange={(ds) => handleFieldChange("dataSources", ds)}
               onDiff={openCompare}
             />
           </aside>
         )}
       </div>
       </div>
-
-      {pane && (
-        <RuleSlideOver
-          title={PANE_TITLES[pane]}
-          onClose={() => setPane(null)}
-          collapsed={shelfCollapsed}
-          onToggleCollapse={() => setShelfCollapsed((v) => !v)}
-          railStyle={shelfRail.style}
-          onResize={shelfRail.handleProps.onResize}
-          onResizeStart={shelfRail.handleProps.onResizeStart}
-          onResizeEnd={shelfRail.handleProps.onResizeEnd}
-          onResizeReset={shelfRail.handleProps.onReset}
-          tabs={
-            pane === "compare" ? (
-              <button className={styles.metaToggle} onClick={() => setPane("details")}>← Back</button>
-            ) : (
-              <div className={styles.shelfTabs} role="tablist" aria-label="Rule shelf">
-                {paneTabs.map((t) => (
-                  <button
-                    key={t.value}
-                    type="button"
-                    role="tab"
-                    aria-selected={pane === t.value}
-                    ref={pane === t.value ? activeTabRef : undefined}
-                    className={`${styles.shelfTab} ${pane === t.value ? styles.shelfTabActive : ""}`}
-                    onClick={() => setPane(t.value)}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            )
-          }
-        >
-          {pane === "structure" && (
-            <RuleStructureRail
-              ruleContent={ruleContent}
-              ruleType={ruleType}
-              rule={rule}
-              activeLine={activeLine}
-              onSelectLine={(line) => { handleOutlineSelect(line); setPane(null); }}
-            />
-          )}
-          {pane === "context" && (
-            <RuleContextRail
-              rule={rule}
-              freshIntel={freshIntel}
-              related={relatedRules}
-              feasibility={feasibility}
-              onDiff={openCompare}
-            />
-          )}
-          {pane === "details" && (
-            <RuleDetailsForm
-              rule={rule}
-              values={formValues}
-              onChange={handleFieldChange}
-              extractedMeta={extractedMeta}
-              extracting={extractMetadata.isPending}
-              mappedFields={mappedFields}
-              onAutoFill={applyExtractedFields}
-              feasibility={feasibility}
-              commitTimeline={commitTimeline}
-            />
-          )}
-          {pane === "ai" && (
-            <RuleChatPanel
-              embedded
-              messages={chatMessages}
-              input={chatInput}
-              streaming={chatStreaming}
-              onInput={setChatInput}
-              onSend={() => sendChat(chatInput)}
-              onStop={handleChatStop}
-              onClear={() => { setChatMessages([]); autoSaveMeta([], conversions); }}
-              onClose={() => setPane(null)}
-              onApplyCode={(code) => { setRuleContent(code); setHasChanges(true); }}
-            />
-          )}
-          {pane === "convert" && !isCreateMode && (
-            <RuleConvertPanel
-              ruleId={id}
-              ruleType={ruleType}
-              typeLabels={RULE_TYPE_LABELS}
-              conversions={conversions}
-              activeType={activeConversionTab}
-              convertingType={convertRule.isPending ? ((convertRule.variables as { target_type?: string } | undefined)?.target_type ?? null) : null}
-              onSelect={setActiveConversionTab}
-              onConvert={handleConvert}
-              onRemove={handleRemoveConversion}
-              onUpdateContent={handleUpdateConversionContent}
-            />
-          )}
-          {pane === "history" && !isCreateMode && (
-            <RuleHistoryPanel
-              versions={versions}
-              viewingVersion={viewingVersion}
-              diffVersion={diffVersionNum}
-              diff={versionDiff.data}
-              diffPending={versionDiff.isPending}
-              onView={(versionId) => { setViewingVersion(versionId); setPane(null); }}
-              onDiff={(versionNumber) => {
-                setDiffVersionNum(versionNumber);
-                versionDiff.mutate({ ruleId: id!, v1: versionNumber });
-              }}
-              onRollback={handleRollback}
-            />
-          )}
-          {pane === "compare" && compareRuleId && (
-            <RuleCompare otherRuleId={compareRuleId} currentContent={ruleContent} />
-          )}
-        </RuleSlideOver>
-      )}
       </div>
     </div>
   );

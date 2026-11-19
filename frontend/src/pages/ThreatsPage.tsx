@@ -5,17 +5,15 @@ import ThreatBoard from "@/components/ThreatBoard";
 import { PageHeader, Segmented } from "@/components/primitives";
 import { useExposureBoard } from "@/hooks/useWatchlist";
 import { FollowView } from "./ExposurePage";
-import { VulnTiles, VulnLongTail } from "@/components/VulnLandscape";
 import styles from "./ThreatsPage.module.css";
 
 /** The Threats page: triage gets its own address.
 
     Tabs: the ranked briefing board faceted by entity type, plus the
     Vulnerabilities tab — CVE rows as board citizens (exploitation-ranked
-    briefing rows, posture-derived actions, the board's own state machine),
-    with Vendor Watch's tiles re-idiomed above and its exhaustive stack table
-    as the long tail below. Stack management lives in the Manage-stack
-    slide-over — a setting of the view, not a destination. */
+    briefing rows, posture-derived actions, the board's own state machine).
+    Stack management lives in the Manage-stack slide-over — a setting of the
+    view, not a destination; the exposure board is fetched for it alone. */
 
 type Tab = "all" | "actors" | "malware" | "vulns";
 
@@ -43,7 +41,7 @@ export function ThreatsPage() {
 
   // The exposure board backs the Vulnerabilities tab and the slide-over; only
   // fetch it once that tab is in play.
-  const { data: exposure, isLoading: exposureLoading } = useExposureBoard({ enabled: tab === "vulns" });
+  const { data: exposure } = useExposureBoard({ enabled: tab === "vulns" });
 
   const setTab = useCallback(
     (next: Tab) => {
@@ -90,18 +88,13 @@ export function ThreatsPage() {
             />
           </div>
         }
-        subtitle="Recently reported ranked by attention and new tradecraft."
+        subtitle="Recently reported threats, ranked by coverage and new techniques."
       />
 
       {tab !== "vulns" ? (
         <ThreatBoard facet={TAB_FACET[tab]} />
       ) : (
-        <div className={styles.vulnsBody}>
-          {exposure && <VulnTiles data={exposure} onFollow={() => setManageStack(true)} />}
-          <ThreatBoard facet="vulns" />
-          {exposureLoading && <div className={styles.state}>Loading your stack…</div>}
-          {exposure && <VulnLongTail data={exposure} />}
-        </div>
+        <ThreatBoard facet="vulns" />
       )}
 
       {manageStack && (

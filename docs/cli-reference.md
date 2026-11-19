@@ -504,6 +504,9 @@ Source: `backend/app/tools/workspace.py`.
 | `update_intel_report` | Change an intel report. | **`report_id`**, **`updates`** | write |
 | `delete_intel_report` | Delete a draft report. Needs confirmation. | **`report_id`**, `confirmation_token` | write, admin |
 | `archive_intel_report` | Archive a report. | **`report_id`** | write |
+| `create_report_share_link` | Make a public share link for a report (TLP:CLEAR and TLP:GREEN only). | **`report_id`**, `ttl_days` | write |
+| `get_report_share_link` | Your active share link for a report. | **`report_id`** | read |
+| `revoke_report_share_link` | Turn off your share link for a report. | **`report_id`** | write |
 | `delete_requirement` | Delete a requirement and its matches. Needs confirmation. | **`requirement_id`**, `confirmation_token` | write |
 | `fulfill_requirement` | Mark a requirement fulfilled. | **`requirement_id`**, `report_id` | write |
 | `add_requirement_match` | Match an article to a requirement by hand. | **`requirement_id`**, **`entry_id`**, `relevance` | write |

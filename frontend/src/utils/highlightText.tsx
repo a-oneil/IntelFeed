@@ -26,10 +26,13 @@ export function annotateGlossaryHTML(html: string, terms: GlossaryTermHighlight[
   for (const t of sorted) {
     const names = [t.name, ...(t.search_terms || [])];
     for (const n of names) {
-      allNames.push(n);
-      termMap.set(n.toLowerCase(), t);
+      const trimmed = (n || "").trim();
+      if (!trimmed) continue;
+      allNames.push(trimmed);
+      termMap.set(trimmed.toLowerCase(), t);
     }
   }
+  if (allNames.length === 0) return html;
 
   // Sort by length descending so longer names match first
   allNames.sort((a, b) => b.length - a.length);
@@ -47,8 +50,8 @@ export function annotateGlossaryHTML(html: string, terms: GlossaryTermHighlight[
   }
 
   for (const textNode of textNodes) {
-    // Skip text inside an existing glossary span
-    if (textNode.parentElement?.classList.contains("glossary-term")) {
+    // Skip text inside unsafe/non-prose elements or existing links/glossary spans
+    if (textNode.parentElement?.closest("textarea,option,script,style,title,noscript,code,pre,a,.glossary-term")) {
       continue;
     }
 
@@ -62,6 +65,10 @@ export function annotateGlossaryHTML(html: string, terms: GlossaryTermHighlight[
     let matched = false;
 
     while ((match = regex.exec(text)) !== null) {
+      if (!match[0]) {
+        regex.lastIndex++;
+        continue;
+      }
       matched = true;
       if (match.index > lastIndex) {
         fragment.appendChild(doc.createTextNode(text.slice(lastIndex, match.index)));

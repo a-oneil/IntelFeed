@@ -6,13 +6,14 @@
  * triaging "what should I build next".
  */
 import { useState } from "react";
+import { currentReadingPrefs } from "@/hooks/useReadingPrefs";
+import { defaultRuleTypes } from "@/utils/queryLanguage";
 import { toast } from "sonner";
 import type { EntityType } from "@/stores/intelStore";
 import { useEntityDetectionGaps } from "@/hooks/useEntityProfile";
 import { useGenerateEntityRules } from "@/hooks/useIntelligence";
 import styles from "../entityProfile.module.css";
 
-const DEFAULT_RULE_TYPES = ["sigma", "splunk_spl"];
 
 export function DetectionGapsTab({
   entityType,
@@ -31,7 +32,7 @@ export function DetectionGapsTab({
     if (generateRules.isPending) return;
     setGeneratingFor(technique.ttp_id);
     generateRules.mutate(
-      { entityType: "ttp", entityId: technique.ttp_id, ruleTypes: DEFAULT_RULE_TYPES },
+      { entityType: "ttp", entityId: technique.ttp_id, ruleTypes: defaultRuleTypes(currentReadingPrefs().query_language) },
       {
         onSuccess: (created) => {
           if (created.length > 0) {

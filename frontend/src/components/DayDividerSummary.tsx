@@ -227,7 +227,7 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
         filters: filters as unknown as Record<string, unknown>,
         track: { entryId: speechEntryId, title, feedTitle: "IntelFeed — Daily Summary" },
       });
-      if (ok) return;
+      if (ok !== false) return;
       if (speechSupported) speakViaBrowser();
       return;
     }
@@ -532,7 +532,7 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
                   </a>
                 );
               }
-              const isInternal = !!href && href.startsWith("/");
+              const isInternal = !!href && href.startsWith("/") && !href.startsWith("//");
               return (
                 <a
                   {...rest}

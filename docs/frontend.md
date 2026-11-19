@@ -92,7 +92,7 @@ All lazy-loaded:
 - `/workbench/actor/:id`, `/intelligence/actor/:id` → `/workbench/threat_actor/:id`
 - `/handbook/*` → `/documentation/*`
 
-**Public routes** (no sign-in): `/login`, `/register`, `/shared/:token` (SharedEntryPage), `/shared/copilot/:token` (SharedCopilotPage).
+**Public routes** (no sign-in): `/login`, `/register`, `/shared/:token` (SharedEntryPage), `/shared/report/:token` (SharedReportPage), `/shared/copilot/:token` (SharedCopilotPage).
 
 ### Dynamic Entity Resolution
 
@@ -404,7 +404,7 @@ In `frontend/src/pages/`:
 - **WorkbenchPage.tsx:** the entity browser. Also exports `WorkbenchLayout` and hosts the glossary and detection workbench as sections.
 - **EntityProfilePage.tsx:** one profile page for every entity type and campaigns.
 - **DashboardPage.tsx:** the Workbench dashboard (widget boards via `useDashboards`).
-- **ThreatsPage.tsx:** `/workbench/threats`, ranked by story. Its Vulnerabilities tab uses `FollowView` from `ExposurePage.tsx`.
+- **ThreatsPage.tsx:** `/workbench/threats`, ranked by story. The tabs are filters of one ranking: All interleaves actors, malware, vulnerabilities and story rows by score, and a CVE whose window articles an actor or malware row already tells rides on that row as an `exploits CVE-…` chip rather than getting its own line. Each row's ⋯ menu moves it between the four decision states (open, tracked, handled, muted); the state filter shows each. The drawer ends in the hunt pack: `Draft hunt pack` asks the `hunt_pack` AI task for one to three hypotheses with queries in the user's preferred query language (Settings › Reading › Preferred query language, stored as `query_language` in `users.settings`; the vocabulary is `backend/app/ai/query_language.py`), each hypothesis's data sources checked against the telemetry inventory, and `Export ATHF hunt file` downloads the pack as an ATHF `H-XXXX.md`. IntelFeed stores only the drafted pack; running the hunt and recording findings happen in the SIEM and the ATHF workspace. Its Vulnerabilities tab uses `FollowView` from `ExposurePage.tsx`.
 - **ExposureBuilderPage.tsx:** `/workbench/report/exposure`.
 - **SearchPage.tsx:** `/search`.
 - **DocumentationPage.tsx:** in-app docs (`useDocumentation.ts`, with `MermaidDiagram` for diagrams).
@@ -414,7 +414,7 @@ In `frontend/src/pages/`:
 - **SettingsPage.tsx:** settings sections in three groups. You: Account, Appearance, My AI, Reading, Tags. Connect: Claude Code Skill, Feeds & Export and Telegram (the last two admins only). Administration (admins only): AI Configuration, Engine, Logs, System, Users.
 - **CampaignsPage.tsx:** the campaign list.
 - **ReportBuilderPage.tsx:** write a report.
-- **LoginPage.tsx**, **RegisterPage.tsx**, **SharedEntryPage.tsx**, **SharedCopilotPage.tsx:** public pages.
+- **LoginPage.tsx**, **RegisterPage.tsx**, **SharedEntryPage.tsx**, **SharedReportPage.tsx**, **SharedCopilotPage.tsx:** public pages. SharedReportPage reuses SharedEntryPage's shell styles (top bar, brand, error states), follows the reader's column width like a shared article, and draws the report with `components/report/ReportDocument.tsx`, the same component as the report builder's Document view, in its frameless mode. Entity highlights come from the `entities` the shared-report endpoint returns (scanned server-side, since there is no session to call `/autolink/scan`); a click opens the hover card rather than a profile.
 
 `OnboardingWizard` (`components/onboarding/`) is a modal, not a page.
 

@@ -422,14 +422,15 @@ TOOLS: dict[str, dict] = {
     },
     "get_detection_rules": {
         "description": (
-            "List detection rules. Optionally filter by rule type (crowdstrike_ql, elastic_ql, kql, "
-            "nuclei, panther, sigma, snort_suricata, splunk_spl, yara)."
+            "List detection rules. Optionally filter by rule type (aql, crowdstrike_ql, elastic_ql, "
+            "kql, nuclei, panther, sigma, snort_suricata, splunk_spl, sql, sumo, yara, yaral)."
         ),
         "params": {
             "rule_type": {
                 "type": 'str',
                 "default": None,
                 "enum": [
+                    'aql',
                     'crowdstrike_ql',
                     'elastic_ql',
                     'kql',
@@ -438,7 +439,10 @@ TOOLS: dict[str, dict] = {
                     'sigma',
                     'snort_suricata',
                     'splunk_spl',
+                    'sql',
+                    'sumo',
                     'yara',
+                    'yaral',
                 ],
             },
             "limit": {
@@ -951,6 +955,19 @@ TOOLS: dict[str, dict] = {
         ),
         "params": {
             "victim_id": {
+                "type": 'str',
+                "required": True,
+            },
+        },
+    },
+    "get_report_share_link": {
+        "description": (
+            "Return this user's active public share link for an intel report ({token, url, "
+            "created_at, expires_at}), or null if they have not shared it. Other analysts' links are "
+            "not returned."
+        ),
+        "params": {
+            "report_id": {
                 "type": 'str',
                 "required": True,
             },

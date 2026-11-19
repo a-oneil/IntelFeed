@@ -936,6 +936,63 @@ async def _existing_entries_by_item_key(db: AsyncSession, feed_id, parsed_items:
     return found
 
 
+def _github_entry_moved(entry: Entry, parsed) -> bool:
+    """True when the re-listed file sits at a different commit than the stored row."""
+    new_sha = (parsed.metadata or {}).get("commit_sha")
+    old_sha = (entry.metadata_ or {}).get("commit_sha")
+    return bool(new_sha) and new_sha != old_sha
+
+
+async def _refresh_github_entry(db: AsyncSession, feed: Feed, entry: Entry, parsed) -> None:
+    """Bring a github_repo entry up to the commit the feed now lists, then run
+    the rule importer again so the mirrored rule follows the file: the new
+    body, the commit appended to its history, the body it replaced kept as a
+    version. Without this a repo rule froze at the commit it was imported at."""
+    content_html = parsed.content_html or ""
+    content_text = html_to_text(content_html) if content_html else ""
+    entry.url = parsed.url or entry.url
+    entry.title = parsed.title or entry.title
+    entry.author = parsed.author or entry.author
+    entry.summary = parsed.summary
+    entry.content_html = sanitize_html(content_html) if content_html else entry.content_html
+    entry.content_text = content_text or entry.content_text
+    entry.word_count = len(content_text.split()) if content_text else entry.word_count
+    entry.content_hash = compute_content_hash(parsed.title, content_text)
+    if parsed.published_at:
+        entry.published_at = min(parsed.published_at, datetime.now(UTC))
+    entry.metadata_ = {**(entry.metadata_ or {}), **(parsed.metadata or {})}
+    await db.flush()
+
+    from app.services.meilisearch_client import index_entry
+
+    try:
+        index_entry(
+            entry_id=entry.id,
+            feed_id=feed.id,
+            title=entry.title,
+            content_text=entry.content_text,
+            summary=entry.summary,
+            author=entry.author,
+            published_at=entry.published_at.isoformat() if entry.published_at else None,
+            feed_type=feed.feed_type,
+            feed_title=feed.title,
+            url=entry.url,
+            language=entry.language,
+            word_count=entry.word_count,
+        )
+    except Exception as exc:
+        logger.warning("Meilisearch indexing failed for refreshed entry %s: %s", entry.id, exc)
+
+    if not feed.extract_detection_rules or not (entry.metadata_ or {}).get("content_type"):
+        return
+    from app.services.github_rule_import import process_github_entry
+    from app.services.system_user import get_system_user_id
+
+    system_user = await get_system_user_id(db)
+    if system_user:
+        await process_github_entry(db, entry, system_user)
+
+
 async def _refresh_same_url_entry(db: AsyncSession, feed: Feed, entry_id, parsed) -> bool:
     """Update a stored entry from a re-listed copy of it, if the feed's text changed.
 
@@ -1252,9 +1309,16 @@ async def _fetch_extended_feed(db: AsyncSession, feed: Feed) -> None:
     new_entry_ids = []
     parsed_entries = _drop_excluded_titles(feed, parsed_entries)
 
+    # A github_repo entry's guid is the file path, so a later commit to the
+    # same file re-lists the same guid: that is an update to track, not a
+    # duplicate to skip.
+    moved_github: list[tuple[Entry, object]] = []
     for parsed in parsed_entries:
         existing = await db.execute(select(Entry).where(Entry.feed_id == feed.id, Entry.guid == parsed.guid))
-        if existing.scalar_one_or_none():
+        row = existing.scalar_one_or_none()
+        if row is not None:
+            if feed.feed_type == "github_repo" and _github_entry_moved(row, parsed):
+                moved_github.append((row, parsed))
             continue
 
         content_text = None
@@ -1361,6 +1425,14 @@ async def _fetch_extended_feed(db: AsyncSession, feed: Feed) -> None:
                 r.sadd("meili:failed_entry_ids", str(entry.id))
             except Exception:
                 pass
+
+    for row, parsed in moved_github:
+        try:
+            await _refresh_github_entry(db, feed, row, parsed)
+        except Exception:
+            logger.exception("Extended feed %s: could not refresh moved file %s", feed.id, parsed.guid)
+    if moved_github:
+        logger.info("Extended feed %s: %d files moved to a new commit", feed.id, len(moved_github))
 
     # Update feed metadata
     feed.last_fetched_at = datetime.now(UTC)
@@ -2261,15 +2333,27 @@ async def _full_sync_github_feed(feed_id: str, user_id: str | None = None) -> di
             },
         )
 
-        # Collect existing GUIDs for this feed so the adapter can skip them
-        guid_result = await db.execute(select(Entry.guid).where(Entry.feed_id == feed.id))
-        existing_guids = {row[0] for row in guid_result.all()}
+        # Known files and the blob id of the text we hold for each, so the
+        # adapter lists only new files and known files whose blob moved on.
+        from app.adapters.github_repo import blob_sha_of
+
+        guid_result = await db.execute(
+            select(Entry.guid, Entry.metadata_["raw_content"].astext).where(Entry.feed_id == feed.id)
+        )
+        guid_rows = guid_result.all()
+        existing_guids = {row[0] for row in guid_rows}
+        known_blobs = {row[0]: blob_sha_of(row[1]) for row in guid_rows if row[1]}
         stats["already_existed"] = len(existing_guids)
 
         adapter = GitHubRepoAdapter()
-        feed_meta, parsed_entries = await adapter.fetch_full_tree(config, existing_guids=existing_guids)
-        stats["total_in_tree"] = len(existing_guids) + len(parsed_entries)
-        stats["to_import"] = len(parsed_entries)
+        feed_meta, parsed_entries = await adapter.fetch_full_tree(
+            config, existing_guids=existing_guids, known_blobs=known_blobs
+        )
+        changed_count = sum(1 for p in parsed_entries if p.guid in existing_guids)
+        stats["total_in_tree"] = len(existing_guids) + len(parsed_entries) - changed_count
+        stats["to_import"] = len(parsed_entries) - changed_count
+        stats["to_refresh"] = changed_count
+        stats["refreshed"] = 0
 
         _update_sync_progress(
             feed_id,
@@ -2300,9 +2384,21 @@ async def _full_sync_github_feed(feed_id: str, user_id: str | None = None) -> di
         new_entry_ids = []
         parsed_entries = _drop_excluded_titles(feed, parsed_entries)
         for parsed in parsed_entries:
-            # Double-check GUID uniqueness (adapter already filtered, but be safe)
-            dup = await db.execute(select(Entry.id).where(Entry.feed_id == feed.id, Entry.guid == parsed.guid))
-            if dup.scalar_one_or_none():
+            # A known guid is a file the tree says changed: bring the entry and
+            # its rule up to date instead of skipping it.
+            dup = await db.execute(select(Entry).where(Entry.feed_id == feed.id, Entry.guid == parsed.guid))
+            known = dup.scalar_one_or_none()
+            if known is not None:
+                new_text = (parsed.metadata or {}).get("raw_content")
+                if new_text != (known.metadata_ or {}).get("raw_content"):
+                    try:
+                        await _refresh_github_entry(db, feed, known, parsed)
+                        stats["refreshed"] += 1
+                    except Exception:
+                        logger.exception("Full sync %s: could not refresh %s", feed.id, parsed.guid)
+                elif new_text is not None:
+                    # Same text, nothing stored to compare next time: keep a copy.
+                    known.metadata_ = {**(known.metadata_ or {}), "raw_content": new_text}
                 continue
 
             content_text = None

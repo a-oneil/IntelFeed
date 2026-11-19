@@ -52,6 +52,10 @@ _IN_PROCESS_TOOL_TYPES = frozenset({"ollama", "claude", "openai_compatible"})
 
 # Cost per 1M tokens (input/output) — approximate defaults
 COST_TABLE: dict[str, tuple[float, float]] = {
+    "claude-opus-5-5": (4.0, 20.0),
+    "claude-sonnet-5-5": (2.0, 10.0),
+    "claude-haiku-5-5": (0.10, 0.50),
+    # Previous generation — still priced so results recorded on them cost out.
     "claude-opus-4-6": (15.0, 75.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-haiku-4-5-20251001": (0.80, 4.0),
@@ -793,7 +797,7 @@ def _get_provider_instance(
     if provider_model.user_id is not None:
         # A personal key points wherever its owner said; the outbound check
         # vetted that host, and the client must not be redirected past it.
-        merged_config.setdefault("follow_redirects", False)
+        merged_config["follow_redirects"] = False
 
     provider_type = (provider_model.provider_type or "claude").lower()
     if provider_type == "claude":
@@ -1006,6 +1010,12 @@ async def run_task(
 
     # Get prompt templates — system may be None (legacy flat-prompt mode).
     system_template, user_template, prompt_version = await get_active_prompt_versioned(db, task.id)
+
+    # Every prompt can name the analyst's query language; the caller's own
+    # values win when it already set them (hunt packs pass an explicit one).
+    from app.ai.query_language import preferred_for_user, with_query_language
+
+    variables = with_query_language(variables, await preferred_for_user(db, user_id))
 
     # Render both halves with the same variable scope.
     rendered_system = render_prompt(system_template, variables) if system_template else None

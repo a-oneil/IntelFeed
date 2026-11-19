@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { currentReadingPrefs } from "@/hooks/useReadingPrefs";
+import { defaultRuleTypes } from "@/utils/queryLanguage";
 import { useUIStore } from "@/stores/uiStore";
 import type { TTP, CVE, ThreatActor, MalwareFamily, AITask, AIResult } from "@/api/types";
 import {
@@ -68,7 +70,7 @@ export default function EntryAIPanel({
   const hasDetectionGap = ((ttps?.length ?? 0) > 0 || (cves?.length ?? 0) > 0) && ruleCount === 0;
 
   const handleGenerateRules = () => {
-    generateRules.mutate({ entryId, ruleTypes: ["sigma", "splunk_spl"] });
+    generateRules.mutate({ entryId, ruleTypes: defaultRuleTypes(currentReadingPrefs().query_language) });
   };
 
   return (

@@ -409,6 +409,7 @@ async def index_entities(db: AsyncSession, ids_by_type: dict[str, list]) -> int:
 # Accepts every slug spelling in use across the API/merge/reclassify layers.
 _DELETE_INDEX_BY_TYPE = {
     "cve": "entities_cve",
+    "cwe": "entities_cwe",
     "ttp": "entities_ttp",
     "threat_actor": "entities_threat_actor",
     "malware": "entities_malware",

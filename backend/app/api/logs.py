@@ -1,7 +1,6 @@
 """Admin-only endpoints for reading application log files."""
 
 import os
-from collections import deque
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Path, Query
@@ -80,6 +79,8 @@ async def clear_log(
 
 def _tail_file(path: str, n: int) -> str:
     """Read the last *n* lines from a file efficiently."""
+    if n <= 0:
+        return ""
     try:
         with open(path, "rb") as f:
             # For small files, just read everything
@@ -92,19 +93,22 @@ def _tail_file(path: str, n: int) -> str:
                 all_lines = f.read().decode("utf-8", errors="replace").splitlines()
                 lines = all_lines[-n:]
             else:
-                # For larger files, seek backwards in chunks
-                buf = b""
-                chunk = min(size, 65_536)
+                # For larger files, read backwards in chunks until >n newlines are collected
                 pos = size
-                result: deque[str] = deque(maxlen=n)
-                while pos > 0 and len(result) < n:
-                    pos = max(pos - chunk, 0)
+                newlines = 0
+                chunks: list[bytes] = []
+                max_scan = 16 * 1024 * 1024
+                scanned = 0
+                while pos > 0 and newlines <= n and scanned < max_scan:
+                    read_size = min(65_536, pos)
+                    pos -= read_size
+                    scanned += read_size
                     f.seek(pos)
-                    buf = f.read(min(chunk, size - pos)) + buf
-                    lines_found = buf.decode("utf-8", errors="replace").splitlines()
-                    result = deque(lines_found[-n:], maxlen=n)
-                    buf = b""
-                lines = list(result)
+                    data = f.read(read_size)
+                    newlines += data.count(b"\n")
+                    chunks.append(data)
+                buf = b"".join(reversed(chunks))
+                lines = buf.decode("utf-8", errors="replace").splitlines()[-n:]
 
             # Drop trailing incomplete JSON line — multiple processes write to
             # the same log files, so a read can catch a line mid-write.

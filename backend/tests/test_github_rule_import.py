@@ -149,8 +149,17 @@ class MockScalarResult:
     def scalar_one_or_none(self):
         return self._value
 
+    def scalar(self):
+        """Aggregate queries (max version number): an int when the test set one, else 0."""
+        return self._value if isinstance(self._value, int) else 0
+
     def scalars(self):
         return self
+
+    def first(self):
+        if isinstance(self._value, list):
+            return self._value[0] if self._value else None
+        return self._value if not isinstance(self._value, int) else None
 
     def all(self):
         if self._value is None:
@@ -343,6 +352,8 @@ class TestImportDetectionRule:
         existing_rule = MagicMock()
         existing_rule.id = uuid.uuid4()
         existing_rule.metadata_ = {}
+        existing_rule.rule_content = "title: the body before upstream changed it"
+        existing_rule.rule_type = "sigma"
         db.execute.return_value = MockScalarResult(existing_rule)
 
         rule = await import_detection_rule(db, entry, user_id)
@@ -352,8 +363,26 @@ class TestImportDetectionRule:
         assert existing_rule.title == "Suspicious PowerShell Execution"
         assert existing_rule.rule_type == "sigma"
         assert existing_rule.severity == "high"
-        # db.add should NOT be called for updates
-        db.add.assert_not_called()
+        # The only row added is the version snapshot of the body the sync
+        # replaced, so History can diff one upstream state against the next.
+        from app.models.detection_rule_version import DetectionRuleVersion
+
+        added = [call.args[0] for call in db.add.call_args_list]
+        assert len(added) == 1
+        assert isinstance(added[0], DetectionRuleVersion)
+        assert added[0].rule_content == "title: the body before upstream changed it"
+        assert added[0].change_description.startswith("Upstream ")
+        assert added[0].changed_by == user_id
+
+        # A sync that finds the same body writes no version.
+        unchanged_db = _make_db()
+        same = MagicMock()
+        same.id = existing_rule.id
+        same.metadata_ = {}
+        same.rule_content = existing_rule.rule_content
+        unchanged_db.execute.return_value = MockScalarResult(same)
+        await import_detection_rule(unchanged_db, entry, user_id)
+        unchanged_db.add.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_experimental_sigma_is_draft(self):

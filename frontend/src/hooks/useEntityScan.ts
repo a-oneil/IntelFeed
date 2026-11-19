@@ -1,15 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import api from "@/api/client";
+import type { EntityScanMatch } from "@/api/types";
 
-export interface EntityScanMatch {
-  entity_type: string;
-  entity_id: string;
-  canonical_name: string;
-  surface_forms: string[];
-  /** Full entity payload — the same shape the entry-entity endpoints return —
-   *  so hover popovers can show description, facts, aliases and links. */
-  entity?: Record<string, unknown> | null;
-}
+export type { EntityScanMatch };
 
 /**
  * Scan arbitrary text (e.g. an entity profile description) for known
