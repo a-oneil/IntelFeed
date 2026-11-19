@@ -1,9 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useIntelStore } from "@/stores/intelStore";
 import type { DetectionRule, FeasibilityResult } from "@/api/types";
 import type { RelatedRules, RuleFreshIntel } from "@/hooks/useDetectionRules";
 import { useEntryTTPs } from "@/hooks/useIntelligence";
+import DataSourcePicker from "@/components/DataSourcePicker";
 import { formatDateTime } from "@/utils/formatDate";
 import bench from "./bench.module.css";
 import styles from "./RuleContextRail.module.css";
@@ -18,6 +19,10 @@ const RULE_TYPE_SHORT: Record<string, string> = {
   yara: "yara",
   nuclei: "nuclei",
   panther: "panther",
+  yaral: "yara-l",
+  aql: "aql",
+  sumo: "sumo",
+  sql: "sql",
 };
 
 interface RuleContextRailProps {
@@ -25,17 +30,30 @@ interface RuleContextRailProps {
   freshIntel?: RuleFreshIntel;
   related?: RelatedRules;
   feasibility: FeasibilityResult | null;
+  /** The rule's declared data sources, editable in place. */
+  dataSources: string[];
+  onDataSourcesChange?: (value: string[]) => void;
   onDiff: (ruleId: string) => void;
 }
 
 /**
  * Right column: why the rule exists, what has landed since, whether the fields
- * are actually collected, and what already covers the same ground. Every card
- * is an endpoint that used to render inside a collapsed tab.
+ * are actually collected, and what already covers the same ground. The
+ * telemetry card is also where data sources are edited — the one place the
+ * page shows them.
  */
-export function RuleContextRail({ rule, freshIntel, related, feasibility, onDiff }: RuleContextRailProps) {
+export function RuleContextRail({
+  rule,
+  freshIntel,
+  related,
+  feasibility,
+  dataSources,
+  onDataSourcesChange,
+  onDiff,
+}: RuleContextRailProps) {
   const navigate = useNavigate();
   const { data: entryTtps } = useEntryTTPs(rule?.entry_id || undefined);
+  const [editingSources, setEditingSources] = useState(false);
 
   // The quote is the entry_ttps match text for a technique this rule claims —
   // the sentence that caused the rule, not the article's first paragraph.
@@ -60,6 +78,9 @@ export function RuleContextRail({ rule, freshIntel, related, feasibility, onDiff
           ...feasibility.missing.map((t) => ({ name: t, have: false })),
         ]
       : [];
+  const collected = telemetryRows.filter((r) => r.have).length;
+  const coverage = telemetryRows.length ? collected / telemetryRows.length : null;
+  const showTelemetry = telemetryRows.length > 0 || !!onDataSourcesChange;
 
   const nearDupes = related?.near_duplicate ?? [];
   const otherRelated = related
@@ -122,25 +143,52 @@ export function RuleContextRail({ rule, freshIntel, related, feasibility, onDiff
         </>
       )}
 
-      {telemetryRows.length > 0 && (
+      {showTelemetry && (
         <>
           <div className={bench.railLabel}>
             Fields vs inventory
-            <b>
-              {telemetryRows.filter((r) => r.have).length}/{telemetryRows.length} collected
-            </b>
+            {telemetryRows.length > 0 && (
+              <b>
+                {collected}/{telemetryRows.length} collected
+              </b>
+            )}
           </div>
           <div className={bench.card}>
-            <div className={bench.cardBody}>
-              {telemetryRows.map((r) => (
-                <div key={r.name} className={bench.kv}>
-                  <span>{r.name}</span>
-                  <span className={`${bench.kvStatus} ${r.have ? bench.ok : bench.warn}`}>
-                    {r.have ? "collected" : "missing"}
+            {telemetryRows.length > 0 ? (
+              <div className={bench.cardBody}>
+                {telemetryRows.map((r) => (
+                  <div key={r.name} className={bench.kv}>
+                    <span>{r.name}</span>
+                    <span className={`${bench.kvStatus} ${r.have ? bench.ok : bench.warn}`}>
+                      {r.have ? "collected" : "missing"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className={bench.cardBody}>
+                <span className={styles.noSources}>No data sources declared</span>
+              </div>
+            )}
+            {editingSources && onDataSourcesChange && (
+              <div className={bench.cardBody}>
+                <DataSourcePicker value={dataSources} onChange={onDataSourcesChange} />
+              </div>
+            )}
+            {onDataSourcesChange && (
+              <div className={bench.cardFoot}>
+                <button type="button" className={bench.btn} onClick={() => setEditingSources((v) => !v)}>
+                  {editingSources ? "Done" : dataSources.length ? "Edit sources" : "+ Add source"}
+                </button>
+                {coverage !== null && (
+                  <span
+                    className={`${styles.coverage} ${coverage >= 0.8 ? bench.ok : coverage >= 0.5 ? bench.warn : bench.bad}`}
+                  >
+                    {Math.round(coverage * 100)}% collected
                   </span>
-                </div>
-              ))}
-            </div>
+                )}
+              </div>
+            )}
           </div>
         </>
       )}

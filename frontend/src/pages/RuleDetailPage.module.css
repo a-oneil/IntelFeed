@@ -179,9 +179,11 @@
   overflow-y: auto;
 }
 
+/* The editor keeps the height it had when it filled the column alone: the
+   tab strip below is extra scroll, never something that squeezes the body. */
 .editorWrap {
-  flex: 1;
-  min-height: 240px;
+  flex: none;
+  height: clamp(320px, calc(100vh - 320px), 760px);
   display: flex;
   flex-direction: column;
 }
@@ -233,6 +235,81 @@
 .edFmt_crowdstrike_ql { color: var(--fmt-kql, #79c0ff); border-color: rgba(88,166,255,.3); }
 .edFmt_snort_suricata { color: var(--fmt-nuclei, #ffa657); border-color: rgba(247,129,102,.3); }
 .edFmt_panther { color: var(--fmt-sigma, #56d364); border-color: rgba(63,185,80,.3); }
+.edFmt_yaral { color: var(--fmt-yara); border-color: rgba(168,85,247,.3); }
+.edFmt_aql { color: var(--fmt-kql, #79c0ff); border-color: rgba(88,166,255,.3); }
+.edFmt_sumo { color: var(--fmt-kql, #79c0ff); border-color: rgba(88,166,255,.3); }
+.edFmt_sql { color: var(--fmt-kql, #79c0ff); border-color: rgba(88,166,255,.3); }
+
+/* Severity is edited where it is read: a select styled as the old label. */
+.sevSelect {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.sevSelect[data-sev="critical"] { color: var(--danger); }
+.sevSelect[data-sev="high"] { color: var(--severity-high); }
+.sevSelect[data-sev="medium"] { color: var(--warning); }
+.sevSelect option { color: var(--text-primary); background: var(--bg-secondary); }
+
+/* The title: an input on a rule authored here, read-only with a lock on one
+   mirrored from a repo (the sync finds the rule by its title). */
+.titleInput {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+  font-family: inherit;
+}
+
+.titleInput:hover {
+  border-color: var(--border);
+}
+
+.titleInput:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg-secondary);
+}
+
+.titleLocked {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 3px 8px;
+}
+
+.titleText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.lockHint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+}
 .edSev { font-family: var(--font-mono); font-size: var(--fs-md); text-transform: none; }
 .edSev[data-sev="critical"] { color: var(--danger); }
 .edSev[data-sev="high"] { color: var(--severity-high); }
@@ -441,6 +518,30 @@
     flex: none;
   }
 
+  /* The title takes its own line under the format and severity, and a locked
+     title keeps its hint on the line below it rather than running into it. */
+  .titleInput,
+  .titleLocked {
+    flex-basis: 100%;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .titleLocked {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+
+  .titleText {
+    flex-basis: 100%;
+    white-space: normal;
+  }
+
+  /* Tabs scroll sideways like the other mobile strips instead of stacking. */
+  .tabStrip {
+    flex-wrap: nowrap;
+  }
+
   .statusBtn,
   .metaToggle,
   .deleteBtn,
@@ -573,11 +674,34 @@
 }
 
 
-/* Reader-style flat tabs in the shelf toolbar (copies .labelBtn / .labelBtnActive). */
-.shelfTabs {
+/* The strip under the Save bar: Details · Convert · AI Assist · History, plus
+   Structure and Context once their rails have folded. Reader-style flat tabs
+   (copies .labelBtn / .labelBtnActive). */
+.tabStrip {
+  /* A scroll container's automatic minimum size is 0, so without this the
+     column flexbox squashes the strip to its padding once the tab body
+     overflows. */
+  flex: none;
   display: flex;
   align-items: center;
   gap: 2px;
+  margin-top: var(--sp-2);
+  padding: 0 2px 6px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabStrip::-webkit-scrollbar {
+  display: none;
+}
+
+.tabBody {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-3) 2px var(--sp-6);
 }
 
 .shelfTab {

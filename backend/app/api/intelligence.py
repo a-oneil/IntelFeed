@@ -2567,7 +2567,21 @@ async def update_detection_rule(
         db.add(version)
         rule.rule_content = body.rule_content
 
-    if body.title is not None:
+    if body.title is not None and body.title != rule.title:
+        # The upstream sync finds a mirrored rule by its title (see
+        # github_rule_import), so renaming one would turn the next sync into a
+        # duplicate import and orphan this row's commit history.
+        # An extended or converted child carries the parent's repo keys so
+        # upstream commits can badge it; it is not what the sync looks up.
+        if rule.source_repo and rule.derived_from is None:
+            raise AppError(
+                code="rename_locked",
+                message=(
+                    f"This rule is mirrored from {rule.source_repo}; its title is how the upstream sync "
+                    "tracks it. Save a copy to get a rule you can rename."
+                ),
+                status_code=400,
+            )
         rule.title = body.title
     if body.description is not None:
         rule.description = body.description
@@ -2600,10 +2614,12 @@ async def update_detection_rule(
 
     # Re-extract metadata when rule_content or rule_type changes
     if content_changed or type_changed or body.metadata is not None:
-        from app.intelligence.rule_metadata import extract_and_apply
+        from app.intelligence.rule_metadata import extract_and_apply, merge_client_metadata
 
         if body.metadata is not None:
-            rule.metadata_ = body.metadata
+            # The client never sees itself as the owner of provenance: a blob
+            # without repo/owner/file_path/commit_history keeps the existing ones.
+            rule.metadata_ = merge_client_metadata(rule.metadata_, body.metadata)
         explicit_fields = {k for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
         extract_and_apply(rule, explicit_fields)
 
@@ -2787,6 +2803,32 @@ async def convert_detection_rule(
     if rule.rule_type == body.target_type:
         raise AppError(code="same_type", message="Source and target rule types are the same", status_code=400)
 
+    from app.ai.query_language import QUERY_LANGUAGES
+
+    source_label = RULE_TYPE_LABELS.get(rule.rule_type, rule.rule_type)
+    target_label = RULE_TYPE_LABELS.get(body.target_type, body.target_type)
+    # The dialect names the exact language (ES|QL rather than "Elastic QL") so
+    # the prompt and the sibling's title say which one came back. Checked
+    # before the provider lookup: bad input is a 400 whether or not AI is set up.
+    dialect = None
+    if body.dialect:
+        lang = QUERY_LANGUAGES.get(body.dialect)
+        if lang is None or lang.rule_type != body.target_type:
+            raise AppError(
+                code="bad_dialect",
+                message=f"dialect {body.dialect!r} is not a {target_label} query language",
+                status_code=400,
+            )
+        dialect = lang.id
+        target_label = lang.short
+        target_prompt_name = lang.name
+    else:
+        target_prompt_name = target_label
+
+    notes_block = ""
+    if body.notes and body.notes.strip():
+        notes_block = f"\n\nANALYST NOTES FOR THIS CONVERSION:\n{body.notes.strip()}\n"
+
     from app.ai.caller import Caller
     from app.ai.engine import _get_provider_instance, record_direct_result, resolve_assignment
 
@@ -2801,10 +2843,7 @@ async def convert_detection_rule(
     task, provider_model = resolved.task, resolved.provider
     provider = _get_provider_instance(provider_model, extra_config=resolved.config)
 
-    source_label = RULE_TYPE_LABELS.get(rule.rule_type, rule.rule_type)
-    target_label = RULE_TYPE_LABELS.get(body.target_type, body.target_type)
-
-    prompt = f"""Convert the following {source_label} detection rule to {target_label} format.
+    prompt = f"""Convert the following {source_label} detection rule to {target_prompt_name} format.
 
 SOURCE RULE ({source_label}):
 ```
@@ -2816,10 +2855,10 @@ RULE CONTEXT:
 - Description: {rule.description or "N/A"}
 - Severity: {rule.severity or "N/A"}
 - MITRE Tactics: {", ".join(rule.mitre_tactics) if rule.mitre_tactics else "N/A"}
-- Data Sources: {", ".join(rule.data_sources) if rule.data_sources else "N/A"}
+- Data Sources: {", ".join(rule.data_sources) if rule.data_sources else "N/A"}{notes_block}
 
 CONVERSION INSTRUCTIONS:
-1. Produce a complete, syntactically valid {target_label} rule — not pseudocode
+1. Produce a complete, syntactically valid {target_prompt_name} rule — not pseudocode
 2. Map field names correctly between formats
    (e.g., SIGMA 'Image' → Splunk 'process_name' → Elastic 'process.executable')
 3. Translate log source references to the target platform's conventions
@@ -2879,9 +2918,11 @@ Return ONLY the converted rule content — no explanation, no markdown fences, j
         target_label=target_label,
         content=converted_content,
         user=user,
+        dialect=dialect,
         provenance={
             "converted_from": str(rule.id),
             "source_type": rule.rule_type,
+            "dialect": dialect,
             "converted_at": datetime.now(UTC).isoformat(),
             "model": response.model,
             "tokens_used": response.tokens_input + response.tokens_output,
@@ -2893,6 +2934,7 @@ Return ONLY the converted rule content — no explanation, no markdown fences, j
         "converted_content": converted_content,
         "source_type": rule.rule_type,
         "target_type": body.target_type,
+        "dialect": dialect,
         "model": response.model,
         "tokens_input": response.tokens_input,
         "tokens_output": response.tokens_output,
@@ -2914,6 +2956,7 @@ async def _upsert_conversion_sibling(
     content: str,
     user: User,
     provenance: dict,
+    dialect: str | None = None,
 ) -> DetectionRule:
     """Store a conversion as a real rule row hanging off its parent.
 
@@ -2922,9 +2965,12 @@ async def _upsert_conversion_sibling(
     on its own, and deleted with the parent. A KQL translation of a Sigma rule is
     a rule — the thing you hand to whoever runs Sentinel — so it gets a row.
 
-    One sibling per (parent, target format). Re-converting rewrites that row and
-    snapshots the previous body as a version, rather than accumulating a pile of
-    near-identical rules every time someone re-runs the model.
+    One sibling per (parent, target format, dialect). Re-converting rewrites that
+    row and snapshots the previous body as a version, rather than accumulating a
+    pile of near-identical rules every time someone re-runs the model. The
+    dialect matters only where one format holds several languages (elastic_ql
+    is ES|QL and EQL); rows written before dialects existed carry none and
+    match a dialect-less request.
 
     The parent's entity mappings (techniques, CVEs, actors, entries) are copied
     across: the translation detects the same thing, and without them the sibling
@@ -2932,7 +2978,7 @@ async def _upsert_conversion_sibling(
     `data_sources` and `log_sources` are deliberately *not* copied — those are
     format-specific and get re-extracted from the converted body below.
     """
-    sibling = (
+    same_format = (
         (
             await db.execute(
                 select(DetectionRule).where(
@@ -2942,7 +2988,11 @@ async def _upsert_conversion_sibling(
             )
         )
         .scalars()
-        .first()
+        .all()
+    )
+    sibling = next(
+        (s for s in same_format if ((s.metadata_ or {}).get("conversion") or {}).get("dialect") == dialect),
+        None,
     )
 
     if sibling is None:
@@ -3071,7 +3121,11 @@ async def list_rule_conversions(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Sibling rules converted from this one, one per target format."""
+    """Sibling rules converted from this one, one per target format and dialect.
+
+    Extended children also hang off ``derived_from``; they are the same format
+    with a hand edit, not a conversion, and are left out.
+    """
     rows = (
         (
             await db.execute(
@@ -3084,7 +3138,7 @@ async def list_rule_conversions(
         .scalars()
         .all()
     )
-    return list(rows)
+    return [r for r in rows if (r.metadata_ or {}).get("conversion")]
 
 
 @router.post("/detection-rules/chat")

@@ -22,6 +22,10 @@ RULE_TYPE_TO_CONTENT_TYPE: dict[str, str | None] = {
     "yara": "yara_rule",
     "snort_suricata": None,  # No extractor
     "crowdstrike_ql": None,  # No extractor
+    "yaral": None,  # No extractor
+    "aql": None,  # No extractor
+    "sumo": None,  # No extractor
+    "sql": None,  # No extractor
 }
 
 # Normalize severity values from various formats to our standard scale
@@ -183,6 +187,42 @@ def apply_metadata_to_fields(
         rule.references = mapped["references"]
 
 
+# Keys in DetectionRule.metadata that the body extractor never produces and
+# must survive a re-extraction: where a mirrored rule came from (the upstream
+# sync finds the row by owner/repo/file_path and the History tab reads
+# commit_history), what the editor stores beside the body, and lineage.
+IMPORT_METADATA_KEYS: frozenset[str] = frozenset(
+    {
+        "repo",
+        "owner",
+        "file_path",
+        "commit_sha",
+        "commit_author",
+        "commit_message",
+        "commit_date",
+        "change_type",
+        "commit_history",
+    }
+)
+PRESERVED_METADATA_KEYS: frozenset[str] = IMPORT_METADATA_KEYS | {
+    "ai_chat_history",
+    "rule_conversions",
+    "conversion",
+    "extended_from",
+}
+
+
+def merge_client_metadata(existing: dict | None, incoming: dict | None) -> dict:
+    """``incoming`` metadata from a client, with the import keys it left out
+    kept from ``existing``. The editor sends back what it has, which is never
+    the provenance, and a save must not turn a mirrored rule into an authored one."""
+    merged = dict(incoming or {})
+    for key in IMPORT_METADATA_KEYS:
+        if key not in merged and existing and key in existing:
+            merged[key] = existing[key]
+    return merged
+
+
 def extract_and_apply(rule, explicit_fields: set[str] | None = None) -> dict:
     """Convenience: extract metadata from rule content, store it, and apply to fields.
 
@@ -190,9 +230,8 @@ def extract_and_apply(rule, explicit_fields: set[str] | None = None) -> dict:
     """
     metadata = extract_rule_metadata(rule.rule_type, rule.rule_content)
     if metadata:
-        # Preserve non-extraction keys (ai_chat_history, rule_conversions, etc.)
         existing = rule.metadata_ or {}
-        preserved = {k: v for k, v in existing.items() if k in ("ai_chat_history", "rule_conversions")}
+        preserved = {k: v for k, v in existing.items() if k in PRESERVED_METADATA_KEYS}
         merged = {**metadata, **preserved}
         rule.metadata_ = merged
         apply_metadata_to_fields(metadata, rule, explicit_fields)

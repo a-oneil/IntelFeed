@@ -507,11 +507,16 @@ export interface ConvertResult {
   converted_content: string;
   source_type: string;
   target_type: string;
+  /** Query-language id when the target format holds several (ES|QL vs EQL). */
+  dialect: string | null;
   model: string;
   tokens_input: number;
   tokens_output: number;
   tokens_used: number;
   cost: number;
+  /** The sibling rule the conversion was written to. */
+  rule_id: string;
+  title: string;
 }
 
 export function useConvertRule() {
@@ -519,13 +524,17 @@ export function useConvertRule() {
     mutationFn: async ({
       ruleId,
       target_type,
+      dialect,
+      notes,
     }: {
       ruleId: string;
       target_type: string;
+      dialect?: string | null;
+      notes?: string;
     }) => {
       const { data } = await api.post<ConvertResult>(
         `/detection-rules/${ruleId}/convert`,
-        { target_type },
+        { target_type, dialect: dialect ?? null, notes: notes?.trim() || null },
         // AI conversion routinely takes 30-90s; the client default of 15s
         // aborted every call before the model could answer.
         { timeout: 180000 }
