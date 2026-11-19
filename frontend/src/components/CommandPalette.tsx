@@ -225,7 +225,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
     // Show commands grouped by category
     for (const cat of ACTION_CATEGORY_ORDER) {
-      for (const action of actions.filter((a) => a.category === cat)) {
+      for (const action of actions
+        .filter((a) => a.category === cat)
+        .sort((a, b) => a.label.localeCompare(b.label))) {
         results.push({
           type: "action",
           category: cat,
@@ -378,9 +380,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                   )}
                   {item.icon && (
                     <item.icon
-                      className={`${styles.actionIcon} ${
-                        item.category === "create" ? styles.createIcon : item.category === "run" ? styles.runIcon : ""
-                      }`}
+                      className={styles.actionIcon}
                       stroke={1.75}
                       aria-hidden
                     />

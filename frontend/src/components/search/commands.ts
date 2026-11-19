@@ -86,13 +86,13 @@ export type SpecialAction =
   | "open-ingest"
   | "show-shortcuts";
 
-export type ActionCategory = "run" | "create" | "navigate" | "browse" | "manage";
+export type ActionCategory = "run" | "create" | "navigate" | "workbench" | "manage";
 
 export const ACTION_CATEGORY_LABELS: Record<ActionCategory, string> = {
   run: "RUN",
   create: "CREATE",
   navigate: "GO TO",
-  browse: "BROWSE",
+  workbench: "WORKBENCH",
   manage: "MANAGE",
 };
 
@@ -101,7 +101,7 @@ export const ACTION_CATEGORY_ORDER: ActionCategory[] = [
   "run",
   "create",
   "navigate",
-  "browse",
+  "workbench",
   "manage",
 ];
 
@@ -130,34 +130,34 @@ export const QUICK_ACTIONS: QuickAction[] = [
   { label: "Priority queue", icon: IconListNumbers, path: "/priority-queue", category: "navigate", keywords: ["priority", "queue", "radar", "ranked", "signal", "triage"] },
   { label: "Dashboard", icon: IconLayoutDashboard, path: "/workbench/dashboard", category: "navigate", keywords: ["dashboard", "board", "widgets", "overview", "triage", "charts"] },
   { label: "Intelligence workbench", icon: IconMicroscope, path: "/workbench/explore", category: "navigate", keywords: ["intel", "intelligence", "analysis", "entities", "workbench"] },
-  { label: "Campaigns", entityType: "campaign", path: "/campaigns", category: "navigate", keywords: ["campaign", "tracking", "operation"] },
   { label: "Automation rules", icon: IconBolt, path: "/automation", category: "navigate", keywords: ["automation", "rules", "schedule", "trigger", "action"] },
   { label: "Documentation", icon: IconBooks, path: "/documentation", category: "navigate", keywords: ["docs", "documentation", "handbook", "guide", "manual", "readme"] },
   { label: "Settings", icon: IconSettings, path: "/settings", category: "navigate", keywords: ["config", "configure", "preferences", "options"] },
   { label: "Engine console", icon: IconEngine, path: "/settings?section=engine", category: "navigate", adminOnly: true, keywords: ["engine", "pipeline", "ingest", "stages", "console", "processing"] },
 
-  // --- Browse (workbench rail sections) ------------------------------------
-  { label: "ATT&CK matrix", icon: IconLayoutGrid, path: explore("attack_matrix"), category: "browse", workbenchSection: "attack_matrix", keywords: ["attack", "mitre", "matrix", "coverage", "navigator", "heatmap"] },
-  { label: "Rules library", icon: IconShieldCheck, path: explore("rules"), category: "browse", workbenchSection: "rules", keywords: ["rules", "sigma", "splunk", "elastic", "crowdstrike", "kql", "yara", "detection"] },
-  { label: "Telemetry sources", icon: IconDatabase, path: explore("telemetry"), category: "browse", workbenchSection: "telemetry", keywords: ["telemetry", "log", "sources", "data sources", "coverage", "gaps"] },
-  { label: "Threats", icon: IconRadar, path: "/workbench/threats", category: "browse", keywords: ["threats", "threat board", "intel to rules", "coverage"] },
-  { label: "Vendor watch", icon: IconEye, path: "/workbench/threats?tab=vulns", category: "browse", keywords: ["exposure", "vendor watch", "watch", "stack", "surface", "vulnerabilities"] },
-  { label: "Threat actors", entityType: "threat_actor", path: explore("threat_actors"), category: "browse", workbenchSection: "threat_actors", keywords: ["actor", "apt", "group", "adversary", "threat actor"] },
-  { label: "Malware", entityType: "malware", path: explore("malware"), category: "browse", workbenchSection: "malware", keywords: ["malware", "ransomware", "trojan", "loader", "family"] },
-  { label: "CVEs", entityType: "cve", path: explore("cves"), category: "browse", workbenchSection: "cves", keywords: ["vulnerability", "cve", "exploit", "patch", "kev", "epss"] },
-  { label: "TTPs", entityType: "ttp", path: explore("ttps"), category: "browse", workbenchSection: "ttps", keywords: ["technique", "tactic", "ttp", "mitre", "attack"] },
-  { label: "Tools", entityType: "tool", path: explore("tools"), category: "browse", workbenchSection: "tools", keywords: ["tool", "offensive", "utility", "cobalt", "mimikatz"] },
-  { label: "Vendors", entityType: "vendor", path: explore("vendors"), category: "browse", workbenchSection: "vendors", keywords: ["vendor", "company", "manufacturer"] },
-  { label: "Products", entityType: "product", path: explore("products"), category: "browse", workbenchSection: "products", keywords: ["product", "software", "application", "appliance"] },
-  { label: "Countries", entityType: "country", path: explore("countries"), category: "browse", workbenchSection: "countries", keywords: ["country", "nation", "geo", "attribution"] },
-  { label: "Sectors", entityType: "sector", path: explore("sectors"), category: "browse", workbenchSection: "sectors", keywords: ["sector", "industry", "vertical", "victimology", "targeting"] },
-  { label: "Mitigations", entityType: "mitigation", path: explore("mitigations"), category: "browse", workbenchSection: "mitigations", keywords: ["mitigation", "control", "defense", "countermeasure"] },
-  { label: "Watchlist", icon: IconStar, path: explore("watchlist"), category: "browse", workbenchSection: "watchlist", keywords: ["watchlist", "watched", "tracking", "alerts"] },
-  { label: "Ransomware tracker", icon: IconLockExclamation, path: explore("ransomware"), category: "browse", workbenchSection: "ransomware", keywords: ["ransomware", "victims", "leak site", "extortion"] },
-  { label: "Intelligence requirements", icon: IconClipboardList, path: explore("requirements"), category: "browse", workbenchSection: "requirements", keywords: ["requirement", "pir", "intelligence requirement", "priority"] },
-  { label: "Reports", icon: IconReport, path: explore("reports"), category: "browse", workbenchSection: "reports", keywords: ["report", "intel report", "findings", "writeup"] },
-  { label: "Telegram mentions", icon: IconBrandTelegram, path: explore("telegram_mentions"), category: "browse", workbenchSection: "telegram_mentions", keywords: ["telegram", "mentions", "channel", "chatter"] },
-  { label: "Glossary", icon: IconVocabulary, path: explore("glossary"), category: "browse", workbenchSection: "glossary", keywords: ["terms", "definitions", "glossary", "acronym"] },
+  // --- Workbench (workbench rail sections) ---------------------------------
+  { label: "ATT&CK matrix", icon: IconLayoutGrid, path: explore("attack_matrix"), category: "workbench", workbenchSection: "attack_matrix", keywords: ["attack", "mitre", "matrix", "coverage", "navigator", "heatmap"] },
+  { label: "Rules library", icon: IconShieldCheck, path: explore("rules"), category: "workbench", workbenchSection: "rules", keywords: ["rules", "sigma", "splunk", "elastic", "crowdstrike", "kql", "yara", "detection"] },
+  { label: "Telemetry sources", icon: IconDatabase, path: explore("telemetry"), category: "workbench", workbenchSection: "telemetry", keywords: ["telemetry", "log", "sources", "data sources", "coverage", "gaps"] },
+  { label: "Threats", icon: IconRadar, path: "/workbench/threats", category: "workbench", keywords: ["threats", "threat board", "intel to rules", "coverage"] },
+  { label: "Vendor watch", icon: IconEye, path: "/workbench/threats?tab=vulns", category: "workbench", keywords: ["exposure", "vendor watch", "watch", "stack", "surface", "vulnerabilities"] },
+  { label: "Threat actors", entityType: "threat_actor", path: explore("threat_actors"), category: "workbench", workbenchSection: "threat_actors", keywords: ["actor", "apt", "group", "adversary", "threat actor"] },
+  { label: "Malware", entityType: "malware", path: explore("malware"), category: "workbench", workbenchSection: "malware", keywords: ["malware", "ransomware", "trojan", "loader", "family"] },
+  { label: "CVEs", entityType: "cve", path: explore("cves"), category: "workbench", workbenchSection: "cves", keywords: ["vulnerability", "cve", "exploit", "patch", "kev", "epss"] },
+  { label: "TTPs", entityType: "ttp", path: explore("ttps"), category: "workbench", workbenchSection: "ttps", keywords: ["technique", "tactic", "ttp", "mitre", "attack"] },
+  { label: "Tools", entityType: "tool", path: explore("tools"), category: "workbench", workbenchSection: "tools", keywords: ["tool", "offensive", "utility", "cobalt", "mimikatz"] },
+  { label: "Vendors", entityType: "vendor", path: explore("vendors"), category: "workbench", workbenchSection: "vendors", keywords: ["vendor", "company", "manufacturer"] },
+  { label: "Products", entityType: "product", path: explore("products"), category: "workbench", workbenchSection: "products", keywords: ["product", "software", "application", "appliance"] },
+  { label: "Countries", entityType: "country", path: explore("countries"), category: "workbench", workbenchSection: "countries", keywords: ["country", "nation", "geo", "attribution"] },
+  { label: "Sectors", entityType: "sector", path: explore("sectors"), category: "workbench", workbenchSection: "sectors", keywords: ["sector", "industry", "vertical", "victimology", "targeting"] },
+  { label: "Campaigns", entityType: "campaign", path: "/campaigns", category: "workbench", keywords: ["campaign", "tracking", "operation"] },
+  { label: "Mitigations", entityType: "mitigation", path: explore("mitigations"), category: "workbench", workbenchSection: "mitigations", keywords: ["mitigation", "control", "defense", "countermeasure"] },
+  { label: "Watchlist", icon: IconStar, path: explore("watchlist"), category: "workbench", workbenchSection: "watchlist", keywords: ["watchlist", "watched", "tracking", "alerts"] },
+  { label: "Ransomware tracker", icon: IconLockExclamation, path: explore("ransomware"), category: "workbench", workbenchSection: "ransomware", keywords: ["ransomware", "victims", "leak site", "extortion"] },
+  { label: "Intelligence requirements", icon: IconClipboardList, path: explore("requirements"), category: "workbench", workbenchSection: "requirements", keywords: ["requirement", "pir", "intelligence requirement", "priority"] },
+  { label: "Reports", icon: IconReport, path: explore("reports"), category: "workbench", workbenchSection: "reports", keywords: ["report", "intel report", "findings", "writeup"] },
+  { label: "Telegram mentions", icon: IconBrandTelegram, path: explore("telegram_mentions"), category: "workbench", workbenchSection: "telegram_mentions", keywords: ["telegram", "mentions", "channel", "chatter"] },
+  { label: "Glossary", icon: IconVocabulary, path: explore("glossary"), category: "workbench", workbenchSection: "glossary", keywords: ["terms", "definitions", "glossary", "acronym"] },
 
   // --- Manage (settings rail + engine views) -------------------------------
   // Engine deep links go through the console's legacy ?tab= / ?section= map —

@@ -182,7 +182,7 @@ describe("CommandPalette empty-query composition", () => {
       "RUN",
       "CREATE",
       "GO TO",
-      "BROWSE",
+      "WORKBENCH",
       "MANAGE",
     ]);
     expect(positions.every((p) => p >= 0)).toBe(true);
@@ -214,10 +214,10 @@ describe("CommandPalette filter mode", () => {
     const { container } = renderPalette();
     typeQuery("campaign");
 
-    // Both label-substring hits (score 100), so CREATE wins over GO TO.
-    const [create, goTo] = orderOf(container, ["Create campaign", "Campaigns"]);
+    // Both label-substring hits (score 100), so CREATE wins over WORKBENCH.
+    const [create, browse] = orderOf(container, ["Create campaign", "Campaigns"]);
     expect(create).toBeGreaterThanOrEqual(0);
-    expect(goTo).toBeGreaterThan(create);
+    expect(browse).toBeGreaterThan(create);
   });
 
   it("ranks a label hit above a keyword-only hit", () => {

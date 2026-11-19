@@ -121,15 +121,6 @@
   color: var(--text-muted);
 }
 
-.createIcon {
-  /* action semantics, not an entity: create=success, run=info */
-  color: var(--success);
-}
-
-.runIcon {
-  color: var(--accent-intel);
-}
-
 .resultLabel {
   flex: 1;
   overflow: hidden;
