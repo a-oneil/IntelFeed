@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Bolt
@@ -617,14 +618,22 @@ private fun ScopeBanner(
                     Text(health.joinToString(" · "), color = TextSecondary, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     feed.curationLabel?.let { Text(it, color = CyberPurple, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                     if (feed.errorCount > 0) {
-                        Text(
-                            "⚠ The last ${if (feed.errorCount == 1) "fetch" else "${feed.errorCount} fetches"} failed" +
-                                (feed.lastError?.takeIf { it.isNotBlank() }?.let { ": ${it.take(160)}" } ?: ""),
-                            color = CyberAmber,
-                            fontSize = 11.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Row(verticalAlignment = Alignment.Top) {
+                            Icon(
+                                Icons.Filled.Warning,
+                                contentDescription = null,
+                                tint = CyberAmber,
+                                modifier = Modifier.padding(top = 1.dp, end = 4.dp).size(12.dp)
+                            )
+                            Text(
+                                "The last ${if (feed.errorCount == 1) "fetch" else "${feed.errorCount} fetches"} failed" +
+                                    (feed.lastError?.takeIf { it.isNotBlank() }?.let { ": ${it.take(160)}" } ?: ""),
+                                color = CyberAmber,
+                                fontSize = 11.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }

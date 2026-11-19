@@ -1,3 +1,4 @@
+import { IconAffiliate, IconFileDescription, IconFingerprint, IconShieldCode } from "@tabler/icons-react";
 import { useState, useCallback, useEffect } from "react";
 import type {
   DetectionSummaryRequest,
@@ -478,7 +479,7 @@ export function DetectionWorkbenchPage() {
 
       {!result && !detectionSummary.isPending && !detectionSummary.isError && (
         <div className={styles.emptyResults}>
-          <div className={styles.emptyIcon}>&#x1F6E1;</div>
+          <div className={styles.emptyIcon}><IconShieldCode size="1em" stroke={1.75} aria-hidden /></div>
           <p>
             Search and select entries above, configure rule formats, then click
             "Generate Analysis" to begin.
@@ -497,7 +498,7 @@ function ExecutiveSummarySection({ summary }: { summary: string }) {
       titleVariant="heading"
       title={
         <>
-          <span className={styles.sectionIcon}>&#x1F4CB;</span>
+          <span className={styles.sectionIcon}><IconFileDescription size="1em" stroke={1.75} aria-hidden /></span>
           Executive Summary
         </>
       }
@@ -583,7 +584,7 @@ function IndicatorsSection({
   return (
     <div className={styles.sectionCard}>
       <div className={styles.sectionHeader}>
-        <span className={styles.sectionIcon}>&#x1F50D;</span>
+        <span className={styles.sectionIcon}><IconFingerprint size="1em" stroke={1.75} aria-hidden /></span>
         <span className={styles.sectionTitle}>Indicators</span>
       </div>
       <div className={styles.tabNav}>
@@ -656,7 +657,7 @@ function GeneratedRulesSection({
       titleVariant="heading"
       title={
         <>
-          <span className={styles.sectionIcon}>&#x1F4DD;</span>
+          <span className={styles.sectionIcon}><IconShieldCode size="1em" stroke={1.75} aria-hidden /></span>
           Generated Rules ({rules.length})
         </>
       }
@@ -722,7 +723,7 @@ function RelatedIntelligenceSection({
       titleVariant="heading"
       title={
         <>
-          <span className={styles.sectionIcon}>&#x1F517;</span>
+          <span className={styles.sectionIcon}><IconAffiliate size="1em" stroke={1.75} aria-hidden /></span>
           Related Intelligence
         </>
       }

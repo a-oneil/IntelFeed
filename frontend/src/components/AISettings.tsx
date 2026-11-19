@@ -1,3 +1,4 @@
+import { IconAlertTriangle } from "@tabler/icons-react";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { AIProvider } from "@/api/types";
@@ -126,7 +127,7 @@ function ProviderHealthBanner({ onGoToProviders }: { onGoToProviders?: () => voi
   return (
     <div className={styles.healthBanner} role="alert">
       <div className={styles.healthBannerBody}>
-        <span className={styles.healthBannerIcon}>⚠</span>
+        <span className={styles.healthBannerIcon}><IconAlertTriangle size="1em" stroke={1.75} aria-hidden /></span>
         <div className={styles.healthBannerText}>
           {!hasUsable && (
             <strong>No AI provider is currently available.</strong>

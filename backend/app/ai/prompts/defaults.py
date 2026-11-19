@@ -297,7 +297,7 @@ Use this structure:
 
 **Executive Summary** — 2-3 sentences on the most significant developments.
 
-**Key Developments** — Bulleted list of 3-7 most important items. Each bullet: bold headline, then 1 sentence of detail. Prefix critical/high severity items with a relevant emoji.
+**Key Developments** — Bulleted list of 3-7 most important items. Each bullet: bold headline, then 1 sentence of detail. Start critical/high severity items with **Critical:** or **High:**. No emoji.
 
 **Trends** — 2-4 short bullets on overarching patterns.
 
@@ -349,7 +349,7 @@ WRITE IN MARKDOWN. No preamble, no greeting, no JSON wrapping in the body. Struc
 Group related articles into 3-6 thematic sections. Use `### Theme Heading` for each. Under each heading, write 2-4 sentences of analytical prose — not bullets — explaining what happened, why it matters, and how it connects to other items in the same theme. Embed inline links to the specific articles you reference using markdown link syntax: `[Article Title](URL)`. Every concrete claim should be tied back to a linked article. Where multiple articles in the day cover the same incident, link them together in the same sentence.
 
 ## Notable Individual Items
-A bulleted list of 3-8 standout articles that don't fit cleanly into a theme but deserve a mention. Each bullet: `- **[Article Title](URL)** — one sentence of why it matters.` Prefix high-severity items with a relevant emoji where it adds signal (🚨 critical, 🛡️ defensive, 🔓 vuln, 🎯 targeted attack, 🏛️ policy, 📊 research).
+A bulleted list of 3-8 standout articles that don't fit cleanly into a theme but deserve a mention. Each bullet: `- **[Article Title](URL)** — one sentence of why it matters.` Start high-severity items with **Critical:** or **High:**. No emoji.
 
 ## Worth a Closer Look
 Optional final section. 1-3 articles the analyst should prioritize reading in full. For each, give the linked title and 1-2 sentences on what's specifically interesting and what to extract from it.

@@ -1,3 +1,4 @@
+import { IconAlertTriangle } from "@tabler/icons-react";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -651,7 +652,7 @@ export function CopilotDockPanel() {
           {needsReauth && (
             <div className={styles.reauthBanner}>
               <span className={styles.reauthText}>
-                ⚠ Copilot sign-in expired — responses will fail until you re-authenticate.
+                <IconAlertTriangle size="1em" stroke={1.75} aria-hidden /> Copilot sign-in expired — responses will fail until you re-authenticate.
               </span>
               <button className={styles.reauthBtn} onClick={() => setReauthOpen(true)}>
                 Re-authenticate

@@ -10,7 +10,7 @@ import type { CorrelationEvent } from "@/api/types";
 import { CorrelationSkeleton } from "@/components/Skeleton";
 import { type CorrelationFilter, type CorrelationSeverity } from "@/types/triageView";
 import {
-  CORR_EVENT_ICONS,
+  CorrEventIcon,
   CORR_EVENT_LABELS,
   CORR_SEVERITY_MAP,
   CORR_EVENT_TYPE_GROUPS,
@@ -293,7 +293,7 @@ export default function CorrelationBrowserWidget({ config }: Props) {
                           type="button"
                         >
                           <span className={`${styles.checkbox} ${checked ? styles.checkboxOn : ""}`} />
-                          <span className={styles.eventTypeIcon}>{CORR_EVENT_ICONS[type] || "\u{26A0}"}</span>
+                          <CorrEventIcon type={type} className={styles.eventTypeIcon} />
                           <span className={styles.eventTypeLabel}>{CORR_EVENT_LABELS[type] || type}</span>
                         </button>
                       );

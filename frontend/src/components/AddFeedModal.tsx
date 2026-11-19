@@ -1,3 +1,4 @@
+import { IconAlertTriangle } from "@tabler/icons-react";
 import { useState } from "react";
 import {
   useCategories,
@@ -1062,8 +1063,6 @@ export function AddFeedModal({ onClose }: Props) {
                           : `Private channel ${c.channel_id}`;
                         const tags: string[] = [];
                         if (c.verified) tags.push("verified");
-                        if (c.scam) tags.push("⚠ scam");
-                        if (c.fake) tags.push("⚠ fake");
                         if (c.is_subscribed) tags.push("already added");
                         return (
                           <button
@@ -1093,6 +1092,12 @@ export function AddFeedModal({ onClose }: Props) {
                               {handle}
                               {c.subscribers ? ` · ${c.subscribers.toLocaleString()} subscribers` : ""}
                               {tags.length ? ` · ${tags.join(" · ")}` : ""}
+                              {(c.scam || c.fake) && (
+                                <>
+                                  {" · "}
+                                  <IconAlertTriangle size="1em" stroke={1.75} aria-hidden /> {c.scam ? "scam" : "fake"}
+                                </>
+                              )}
                             </div>
                           </button>
                         );

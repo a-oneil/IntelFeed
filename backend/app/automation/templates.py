@@ -1237,7 +1237,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
                                 "webhook_url": "",
                                 "channel": "#threat-war-room",
                                 "username": "IntelFeed",
-                                "message_template": "🚨 High priority: {title}\n{url}",
+                                "message_template": "High priority: {title}\n{url}",
                             },
                         },
                     ],

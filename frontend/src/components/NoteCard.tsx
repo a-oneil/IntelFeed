@@ -1,3 +1,4 @@
+import { IconPin } from "@tabler/icons-react";
 /**
  * NoteCard — the one note card used across the sidebar, entry panel and
  * entity profiles. Read state renders the note's saved content as formatted
@@ -129,7 +130,7 @@ export function NoteCard({
       <div className={styles.top}>
         {isPinned && (
           <span className={styles.pinIcon} title="Pinned">
-            &#128204;
+            <IconPin size="1em" stroke={1.75} aria-hidden />
           </span>
         )}
         {showTitle && title && <span className={styles.title}>{title}</span>}

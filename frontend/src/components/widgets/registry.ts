@@ -205,7 +205,6 @@ export const WIDGET_REGISTRY: WidgetDefinition[] = [
     defaultW: 6,
     defaultH: 3,
     component: TriageFlowWidget,
-    configFields: [{ key: "days", label: "Days", type: "number", min: 7, max: 90 }],
   },
   {
     type: "campaign_momentum",

@@ -1,5 +1,15 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import {
+  IconBell,
+  IconChartBar,
+  IconClipboardList,
+  IconPlug,
+  IconSearch,
+  IconShieldCheck,
+  IconSparkles,
+  type TablerIcon,
+} from "@tabler/icons-react";
 import api from "@/api/client";
 import styles from "./TemplateGallery.module.css";
 
@@ -32,15 +42,20 @@ interface TemplatesResponse {
   categories: TemplateCategory[];
 }
 
-const CATEGORY_ICONS: Record<string, string> = {
-  intelligence: "\u{1F50D}",
-  detection: "\u{1F6E1}",
-  alerting: "\u{1F514}",
-  triage: "\u{1F4CB}",
-  ai: "\u{2728}",
-  reporting: "\u{1F4CA}",
-  integration: "\u{1F517}",
+const CATEGORY_ICONS: Record<string, TablerIcon> = {
+  intelligence: IconSearch,
+  detection: IconShieldCheck,
+  alerting: IconBell,
+  triage: IconClipboardList,
+  ai: IconSparkles,
+  reporting: IconChartBar,
+  integration: IconPlug,
 };
+
+function CategoryIcon({ category }: { category: string }) {
+  const Icon = CATEGORY_ICONS[category];
+  return Icon ? <Icon size="1em" stroke={1.75} aria-hidden /> : null;
+}
 
 function formatTrigger(trigger: string): string {
   return trigger.replace("on_", "").replace(/_/g, " ");
@@ -128,7 +143,7 @@ export function TemplateGallery({ onClose, onUseTemplate }: Props) {
       >
         <div className={styles.cardHeader}>
           <span className={styles.cardIcon}>
-            {CATEGORY_ICONS[template.category] || ""}
+            <CategoryIcon category={template.category} />
           </span>
           <div className={styles.cardTitleGroup}>
             <h3 className={styles.cardTitle}>{template.name}</h3>
@@ -251,7 +266,7 @@ export function TemplateGallery({ onClose, onUseTemplate }: Props) {
               }
               title={cat.description}
             >
-              {CATEGORY_ICONS[cat.id] || ""} {cat.name}
+              <CategoryIcon category={cat.id} /> {cat.name}
             </button>
           ))}
         </div>
@@ -268,7 +283,7 @@ export function TemplateGallery({ onClose, onUseTemplate }: Props) {
               <section key={cat.id} className={styles.group}>
                 <div className={styles.groupHeader}>
                   <span className={styles.groupIcon}>
-                    {CATEGORY_ICONS[cat.id] || ""}
+                    <CategoryIcon category={cat.id} />
                   </span>
                   <h3 className={styles.groupTitle}>{cat.name}</h3>
                   <span className={styles.groupCount}>{items.length}</span>

@@ -1,3 +1,4 @@
+import { IconFlame } from "@tabler/icons-react";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -172,7 +173,7 @@ export function VulnView({ data, onFollow }: { data: StackExposureResponse; onFo
             {trending?.cve_id ?? "—"}
           </span>
           <span className={styles.tileLabel}>Trending now</span>
-          <span className={styles.tileSub}>🔥 {trending?.entry_count ?? 0} mentions</span>
+          <span className={styles.tileSub}><IconFlame size="1em" stroke={1.75} aria-hidden /> {trending?.entry_count ?? 0} mentions</span>
         </button>
       </div>
 
@@ -207,7 +208,7 @@ export function VulnView({ data, onFollow }: { data: StackExposureResponse; onFo
               aria-selected={sort === s}
               onClick={() => setSort(s)}
             >
-              {s === "new" ? "Newest" : s === "trending" ? "🔥 Trending" : "EPSS"}
+              {s === "new" ? "Newest" : s === "trending" ? <><IconFlame size="1em" stroke={1.75} aria-hidden /> Trending</> : "EPSS"}
             </button>
           ))}
         </div>
@@ -267,7 +268,7 @@ export function VulnView({ data, onFollow }: { data: StackExposureResponse; onFo
                     </div>
                     {i.entry_count > 0 && (
                       <span className={`${styles.trend} ${i.entry_count >= 40 ? styles.trendHot : ""}`}>
-                        {i.entry_count >= 40 ? "🔥 " : ""}
+                        {i.entry_count >= 40 && <><IconFlame size="1em" stroke={1.75} aria-hidden />{" "}</>}
                         {i.entry_count} mentions
                       </span>
                     )}

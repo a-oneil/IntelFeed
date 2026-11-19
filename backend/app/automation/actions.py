@@ -1195,7 +1195,7 @@ async def _action_send_notification_batch(
             ),
         }
 
-    header = f"📋 **IntelFeed Digest** — {count} {'entry' if count == 1 else 'entries'}"
+    header = f"**IntelFeed Digest** — {count} {'entry' if count == 1 else 'entries'}"
 
     # Build platform-specific payload(s). Discord may require several messages
     # to fit a long briefing within its per-message limits.

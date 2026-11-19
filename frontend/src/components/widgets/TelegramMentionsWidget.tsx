@@ -1,3 +1,4 @@
+import { IconSpeakerphone } from "@tabler/icons-react";
 import { openExternalUrl } from "@/utils/openExternal";
 import { useTelegramMentionsWidget } from "@/hooks/useWidgetTriageData";
 import { WidgetListSkeleton } from "@/components/Skeleton";
@@ -45,7 +46,7 @@ export default function TelegramMentionsWidget({ config }: Props) {
           title={m.canonical_url}
         >
           <span className={styles.telegramHandle}>
-            {m.primary_link_type === "channel" ? "\u{1F4E1} " : ""}
+            {m.primary_link_type === "channel" && <><IconSpeakerphone size="1em" stroke={1.75} aria-hidden />{" "}</>}
             {m.display_handle || m.handle}
           </span>
           <Chip pill className={styles.numBadge}>
