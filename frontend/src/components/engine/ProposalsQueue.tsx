@@ -1,3 +1,4 @@
+import { IconSettings } from "@tabler/icons-react";
 /**
  * ProposalsQueue — the Engine console's Review tab: everything the AI wants a
  * person to approve, in one queue over both proposal logs.
@@ -733,7 +734,7 @@ export function ProposalsQueue({
             aria-expanded={settingsOpen}
             onClick={onToggleSettings}
           >
-            ⚙ Settings
+            <IconSettings size="1em" stroke={1.75} aria-hidden /> Settings
           </button>
         )}
         {scans.length > 0 && (

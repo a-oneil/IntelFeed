@@ -6,6 +6,7 @@
  * checked against the card surface (#161b22); the raw --rgroup-* theme hues
  * fail adjacent-pair colorblind separation when stacked.
  */
+import { useEffect, useState } from "react";
 import styles from "./widgets.module.css";
 
 /** Categorical series slots, validated for adjacent-pair CVD separation. */
@@ -120,6 +121,27 @@ export function Sparkline({
 export function clampDays(days: unknown, min: number, max: number): number | undefined {
   if (typeof days !== "number" || Number.isNaN(days)) return undefined;
   return Math.min(max, Math.max(min, Math.round(days)));
+}
+
+/**
+ * Pixel size of a chart's box, for use as its SVG viewBox. A fixed viewBox
+ * stretched to the widget scales every label and bar with it, so on a wide
+ * widget 10px axis text renders at 16px+; drawn in the box's own pixels it
+ * stays 10px. Holds the design size until the first measurement.
+ */
+export function useChartSize(designW: number, designH: number) {
+  const [el, setEl] = useState<HTMLDivElement | null>(null);
+  const [size, setSize] = useState({ w: designW, h: designH });
+  useEffect(() => {
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      if (width > 0 && height > 0) setSize({ w: Math.round(width), h: Math.round(height) });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el]);
+  return [setEl, size] as const;
 }
 
 /** Relative day count, e.g. "62d ago" / "today". */

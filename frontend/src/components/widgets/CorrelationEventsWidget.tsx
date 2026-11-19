@@ -1,26 +1,12 @@
 import { useNavigate } from "react-router-dom";
 import { useRecentCorrelationEvents } from "@/hooks/useWidgetData";
 import { WidgetListSkeleton } from "@/components/Skeleton";
+import { CorrEventIcon } from "@/components/triage/corrEventCards";
 import styles from "./widgets.module.css";
 
 interface Props {
   config: Record<string, unknown>;
 }
-
-const EVENT_ICONS: Record<string, string> = {
-  new_ttp_for_known_actor: "\u{1F3AF}",
-  new_ttp_for_known_malware: "\u{1F41B}",
-  new_malware_for_known_actor: "\u{1F41B}",
-  actor_malware_cooccurrence: "\u{1F517}",
-  coverage_gap: "\u{26A0}",
-  exploit_status_change: "\u{1F4A5}",
-  cve_score_change: "\u{1F4CA}",
-  new_exploit_discovered: "\u{1F6A8}",
-  kev_addition: "\u{1F6E1}",
-  trending_entity: "\u{1F4C8}",
-  feed_stale: "\u{23F0}",
-  feed_error: "\u{274C}",
-};
 
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return "";
@@ -56,7 +42,7 @@ export default function CorrelationEventsWidget({ config }: Props) {
             onClick={() => evt.entry_id ? navigate(`/?entry=${evt.entry_id}`) : navigate("/workbench")}
           >
             <div className={styles.listItemMain}>
-              <span className={styles.eventIcon}>{EVENT_ICONS[evt.event_type] || "\u{26A0}"}</span>
+              <CorrEventIcon type={evt.event_type} className={styles.eventIcon} />
               <span className={styles.eventContext}>{evt.context}</span>
             </div>
             <div className={styles.listItemMeta}>{timeAgo(evt.created_at)}</div>

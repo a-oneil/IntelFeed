@@ -1,3 +1,4 @@
+import { IconSettings } from "@tabler/icons-react";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Responsive, WidthProvider, type Layout, type LayoutItem } from "react-grid-layout/legacy";
 import "react-grid-layout/css/styles.css";
@@ -304,21 +305,26 @@ export function DashboardPage() {
                         </span>
                       </div>
                       {/* Settings + remove sit OUTSIDE the drag handle, or
-                          react-grid-layout swallows the click as a drag. */}
-                      {!isVisitor && configFields && configFields.length > 0 && (
-                        <button
-                          onClick={() =>
-                            setSettingsWidgetId((id) => (id === widget.id ? null : widget.id))
-                          }
-                          className={styles.removeBtn}
-                          title="Widget settings"
-                          aria-label="Widget settings"
-                        >
-                          ⚙
-                        </button>
+                          react-grid-layout swallows the click as a drag. A
+                          locked board hides both. */}
+                      {!isVisitor && !dashboardLocked && (
+                        <div className={styles.widgetActions}>
+                          {configFields && configFields.length > 0 && (
+                            <button
+                              onClick={() =>
+                                setSettingsWidgetId((id) => (id === widget.id ? null : widget.id))
+                              }
+                              className={`${styles.removeBtn} ${styles.settingsBtn}`}
+                              title="Widget settings"
+                              aria-label="Widget settings"
+                            >
+                              <IconSettings size="1em" stroke={1.75} aria-hidden />
+                            </button>
+                          )}
+                          <button onClick={() => handleRemoveWidget(widget.id)} className={styles.removeBtn} title="Remove widget" aria-label="Remove widget">x</button>
+                        </div>
                       )}
-                      {!isVisitor && <button onClick={() => handleRemoveWidget(widget.id)} className={styles.removeBtn} title="Remove widget">x</button>}
-                      {settingsWidgetId === widget.id && configFields && (
+                      {settingsWidgetId === widget.id && !dashboardLocked && configFields && (
                         <WidgetSettingsPopover
                           fields={configFields}
                           config={widget.config as Record<string, unknown>}

@@ -1,3 +1,4 @@
+import { IconAlertTriangle, IconBolt } from "@tabler/icons-react";
 import type { CopilotConfirmRequest } from "@/hooks/useAI";
 import { Chip } from "./primitives";
 import styles from "./ConfirmCard.module.css";
@@ -64,7 +65,7 @@ export function ConfirmCard({
       aria-label="Confirm proposed action"
     >
       <div className={styles.head}>
-        <span className={styles.badge}>⚡ Proposed write</span>
+        <span className={styles.badge}><IconBolt size="1em" stroke={1.75} aria-hidden /> Proposed write</span>
         <Chip className={styles.actionType} truncate>
           {actionLabel(request.tool_name)}
         </Chip>
@@ -127,7 +128,7 @@ export function ConfirmCard({
             <span className={styles.resolvedMuted}>✕ Cancelled</span>
           )}
           {state.status === "error" && (
-            <span className={styles.resolvedError}>⚠ {state.message}</span>
+            <span className={styles.resolvedError}><IconAlertTriangle size="1em" stroke={1.75} aria-hidden /> {state.message}</span>
           )}
         </div>
       )}

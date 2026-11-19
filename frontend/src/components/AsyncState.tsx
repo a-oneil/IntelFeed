@@ -1,3 +1,4 @@
+import { IconAlertTriangle } from "@tabler/icons-react";
 import { Spinner } from "@/components/primitives";
 import styles from "./AsyncState.module.css";
 
@@ -41,7 +42,7 @@ export function AsyncStateLoading({
 export function AsyncStateError({ title, description, onRetry, retryLabel = "Retry" }: AsyncStateProps) {
   return (
     <div className={styles.state}>
-      <div className={styles.icon}>⚠</div>
+      <div className={styles.icon}><IconAlertTriangle size="1em" stroke={1.75} aria-hidden /></div>
       <div className={styles.title}>{title}</div>
       {description && <div className={styles.desc}>{description}</div>}
       {onRetry && (

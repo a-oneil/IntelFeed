@@ -355,6 +355,14 @@ button {
   vertical-align: -0.1em;
 }
 
+/* Every Tabler icon renders an svg.tabler-icon. Inline in a line of text it
+   would sit on the baseline and look dropped; this centres it like a glyph,
+   and stops a flex row from squeezing it. */
+.tabler-icon {
+  flex-shrink: 0;
+  vertical-align: -0.125em;
+}
+
 input, textarea, select {
   font-family: inherit;
   font-size: inherit;

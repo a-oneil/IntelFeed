@@ -1,3 +1,4 @@
+import { IconCircle, IconTarget } from "@tabler/icons-react";
 import { Chip, Panel } from "@/components/primitives";
 import { type GroupStat, useRansomwareStats } from "@/hooks/useRansomware";
 import { ransomwareGroupColor } from "@/utils/ransomwareColors";
@@ -243,7 +244,7 @@ export function RansomwareLandscape({
               <div className={styles.expo}>
                 {data.watchlist_exposure.map((e, i) => (
                   <div key={i} className={e.hit ? styles.erHit : styles.er}>
-                    <span className={styles.eico}>{e.hit ? "🎯" : "○"}</span>
+                    <span className={styles.eico}>{e.hit ? <IconTarget size="1em" stroke={1.75} aria-hidden /> : <IconCircle size="1em" stroke={1.75} aria-hidden />}</span>
                     <span className={styles.et}>
                       <div className={styles.en}>{e.name}</div>
                       <div className={styles.es}>

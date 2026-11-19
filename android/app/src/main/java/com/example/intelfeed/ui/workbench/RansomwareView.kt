@@ -31,6 +31,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Circle
+import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
@@ -518,7 +520,14 @@ private fun Landscape(vm: RansomwareViewModel, state: RansomwareState, openGroup
                     if (st.watchlistExposure.isEmpty()) Text("No watched groups, orgs, or sectors yet.", fontSize = 13.sp, color = TextMuted)
                     st.watchlistExposure.forEach { e ->
                         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (e.hit) "🎯" else "○", fontSize = 14.sp, color = TextMuted, modifier = Modifier.width(26.dp))
+                            Box(Modifier.width(26.dp)) {
+                                Icon(
+                                    if (e.hit) Icons.Filled.TrackChanges else Icons.Outlined.Circle,
+                                    contentDescription = if (e.hit) "Disclosed in this window" else null,
+                                    tint = TextMuted,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
                             Column(Modifier.weight(1f)) {
                                 Text(e.name, fontSize = 14.sp, color = TextPrimary)
                                 Text("${e.kind} · ${e.detail}", fontSize = 12.sp, color = TextMuted)

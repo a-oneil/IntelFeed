@@ -1,6 +1,6 @@
 import { useTriageFlow } from "@/hooks/useWidgetBoardData";
 import { WidgetChartSkeleton } from "@/components/Skeleton";
-import { clampDays } from "./boardShared";
+import { clampDays, useChartSize } from "./boardShared";
 import { useIsVisitor } from "@/stores/authStore";
 import styles from "./widgets.module.css";
 
@@ -60,13 +60,14 @@ function compact(n: number): string {
 
 export default function TriageFlowWidget({ config }: Props) {
   const { data, isLoading } = useTriageFlow(clampDays(config.days, 1, 365));
+  const [chartRef, { w: viewW, h: viewH }] = useChartSize(VIEW_W, VIEW_H);
   const isVisitor = useIsVisitor();
 
   if (isLoading) return <WidgetChartSkeleton />;
   if (!data || data.days.length === 0) return <div className={styles.noData}>No triage activity</div>;
 
-  const plotW = VIEW_W - PAD.left - PAD.right;
-  const plotH = VIEW_H - PAD.top - PAD.bottom;
+  const plotW = viewW - PAD.left - PAD.right;
+  const plotH = viewH - PAD.top - PAD.bottom;
   const mid = PAD.top + plotH / 2;
   const half = plotH / 2;
   // One shared scale for both arms. A per-arm scale would be a dual axis —
@@ -102,10 +103,11 @@ export default function TriageFlowWidget({ config }: Props) {
   };
 
   return (
-    <div>
+    <div className={styles.chartFill}>
+      <div ref={chartRef} className={styles.chartBox}>
       <svg
         className={styles.stackChart}
-        viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+        viewBox={`0 0 ${viewW} ${viewH}`}
         role="img"
         aria-label={
           isVisitor
@@ -181,13 +183,14 @@ export default function TriageFlowWidget({ config }: Props) {
           );
         })}
 
-        <text x={PAD.left} y={VIEW_H - 4} fontSize="10" fill="var(--text-muted)">
+        <text x={PAD.left} y={viewH - 4} fontSize="10" fill="var(--text-muted)">
           {axisDate(data.days[0].date)}
         </text>
-        <text x={PAD.left + plotW} y={VIEW_H - 4} textAnchor="end" fontSize="10" fill="var(--text-muted)">
+        <text x={PAD.left + plotW} y={viewH - 4} textAnchor="end" fontSize="10" fill="var(--text-muted)">
           {axisDate(data.days[data.days.length - 1].date)}
         </text>
       </svg>
+      </div>
 
       <div className={styles.chartLegend}>
         <span className={styles.chartLegendItem}>

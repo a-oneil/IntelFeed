@@ -1233,9 +1233,25 @@
 }
 
 /* ── Ransomware pulse (stacked columns) ── */
+/* Chart widgets fill the widget body: the chart box takes what the legend
+   leaves, and the SVG draws in that box's pixels (useChartSize). */
+.chartFill {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.chartBox {
+  position: relative;
+  flex: 1;
+  min-height: 120px;
+}
+
 .stackChart {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: auto;
+  height: 100%;
   display: block;
 }
 

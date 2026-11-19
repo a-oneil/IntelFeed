@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.filled.Add
@@ -63,8 +64,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -422,11 +421,11 @@ private fun FeedItem(feed: FeedSource, depth: Int, isSelected: Boolean, onClick:
             Text("(muted)", color = TextMuted, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 4.dp))
         }
         if (feed.errorCount > 0) {
-            Text(
-                "⚠",
-                color = CyberAmber,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(horizontal = 4.dp).semantics { contentDescription = "Fetch errors" }
+            Icon(
+                Icons.Filled.Warning,
+                contentDescription = "Fetch errors",
+                tint = CyberAmber,
+                modifier = Modifier.padding(horizontal = 4.dp).size(12.dp)
             )
         }
         UnreadCount(feed.unreadCount)

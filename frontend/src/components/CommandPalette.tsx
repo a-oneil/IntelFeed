@@ -3,7 +3,8 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "@/stores/authStore";
 import { useIntelStore } from "@/stores/intelStore";
 import { useUIStore } from "@/stores/uiStore";
-import { getEntityColor, getEntityLabel } from "@/utils/entityTheme";
+import { IconArrowBackUp, IconHistory, type TablerIcon } from "@tabler/icons-react";
+import { getEntityColor, getEntityCssVar, getEntityLabel } from "@/utils/entityTheme";
 import { getRouteLabel } from "@/utils/routeLabels";
 import type { EntitySearchResult } from "@/api/types";
 import {
@@ -160,6 +161,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     label: string;
     sublabel?: string;
     color?: string;
+    icon?: TablerIcon;
     shortcut?: string;
     onSelect: () => void;
   };
@@ -183,6 +185,8 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         type: "action",
         category: action.category,
         label: action.label,
+        color: action.entityType && getEntityCssVar(action.entityType),
+        icon: action.icon,
         shortcut: action.shortcut,
         onSelect: () => runAction(action),
       });
@@ -226,6 +230,8 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           type: "action",
           category: cat,
           label: action.label,
+          color: action.entityType && getEntityCssVar(action.entityType),
+          icon: action.icon,
           shortcut: action.shortcut,
           onSelect: () => runAction(action),
         });
@@ -365,25 +371,19 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                     />
                   )}
                   {item.type === "recent-entity" && !item.color && (
-                    <span className={styles.recentIcon}>↩</span>
+                    <IconArrowBackUp className={styles.recentIcon} stroke={1.75} aria-hidden />
                   )}
                   {item.type === "recent" && (
-                    <span className={styles.recentIcon}>⏱</span>
+                    <IconHistory className={styles.recentIcon} stroke={1.75} aria-hidden />
                   )}
-                  {item.type === "action" && item.category === "create" && (
-                    <span className={`${styles.actionIcon} ${styles.createIcon}`}>✚</span>
-                  )}
-                  {item.type === "action" && item.category === "navigate" && (
-                    <span className={styles.actionIcon}>→</span>
-                  )}
-                  {item.type === "action" && item.category === "browse" && (
-                    <span className={styles.actionIcon}>◆</span>
-                  )}
-                  {item.type === "action" && item.category === "manage" && (
-                    <span className={styles.actionIcon}>⚙</span>
-                  )}
-                  {item.type === "action" && item.category === "run" && (
-                    <span className={`${styles.actionIcon} ${styles.runIcon}`}>▶</span>
+                  {item.icon && (
+                    <item.icon
+                      className={`${styles.actionIcon} ${
+                        item.category === "create" ? styles.createIcon : item.category === "run" ? styles.runIcon : ""
+                      }`}
+                      stroke={1.75}
+                      aria-hidden
+                    />
                   )}
                   <span className={styles.resultLabel}>{item.label}</span>
                   {item.sublabel && (

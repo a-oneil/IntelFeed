@@ -1,4 +1,22 @@
 import { useState } from "react";
+import {
+  IconAlertCircle,
+  IconAlertTriangle,
+  IconBomb,
+  IconChartBar,
+  IconClipboardCheck,
+  IconClockExclamation,
+  IconFileSearch,
+  IconFlag,
+  IconLink,
+  IconShieldExclamation,
+  IconShieldOff,
+  IconTargetArrow,
+  IconTrendingUp,
+  IconUrgent,
+  IconVirus,
+  type TablerIcon,
+} from "@tabler/icons-react";
 import { Chip } from "@/components/primitives/Chip";
 import { getEntityCssVar, getEntityLabel } from "@/utils/entityTheme";
 import type { CorrelationEvent, GroupedCorrelationEventsEntry } from "@/api/types";
@@ -18,23 +36,29 @@ const CORR_SEVERITY_COLORS: Record<string, string> = {
   low: "var(--text-muted)",
 };
 
-export const CORR_EVENT_ICONS: Record<string, string> = {
-  new_ttp_for_known_actor: "\u{1F3AF}",
-  new_ttp_for_known_malware: "\u{1F41B}",
-  new_malware_for_known_actor: "\u{1F41B}",
-  actor_malware_cooccurrence: "\u{1F517}",
-  coverage_gap: "\u{26A0}",
-  exploit_status_change: "\u{1F4A5}",
-  cve_score_change: "\u{1F4CA}",
-  new_exploit_discovered: "\u{1F6A8}",
-  kev_addition: "\u{1F6E1}",
-  trending_entity: "\u{1F4C8}",
-  requirement_match: "\u{1F4CB}",
-  campaign_match: "\u{1F3F4}",
-  new_intel_for_rule: "\u{1F50D}",
-  feed_stale: "\u{23F0}",
-  feed_error: "\u{274C}",
+export const CORR_EVENT_ICONS: Record<string, TablerIcon> = {
+  new_ttp_for_known_actor: IconTargetArrow,
+  new_ttp_for_known_malware: IconVirus,
+  new_malware_for_known_actor: IconVirus,
+  actor_malware_cooccurrence: IconLink,
+  coverage_gap: IconShieldOff,
+  exploit_status_change: IconBomb,
+  cve_score_change: IconChartBar,
+  new_exploit_discovered: IconUrgent,
+  kev_addition: IconShieldExclamation,
+  trending_entity: IconTrendingUp,
+  requirement_match: IconClipboardCheck,
+  campaign_match: IconFlag,
+  new_intel_for_rule: IconFileSearch,
+  feed_stale: IconClockExclamation,
+  feed_error: IconAlertCircle,
 };
+
+/** The event type's icon, falling back to a warning triangle for a type this map doesn't name. */
+export function CorrEventIcon({ type, className }: { type: string; className?: string }) {
+  const Icon = CORR_EVENT_ICONS[type] ?? IconAlertTriangle;
+  return <Icon className={className} size="1em" stroke={1.75} aria-hidden />;
+}
 
 export const CORR_EVENT_LABELS: Record<string, string> = {
   new_ttp_for_known_actor: "New TTP for known actor",
@@ -157,7 +181,7 @@ export function CorrEventCard({
   return (
     <div className={`${styles.corrCard} ${nested ? styles.corrNestedCard : ""} ${!event.is_read ? styles.corrCardUnread : ""}`}>
       <div className={styles.corrCardHeader}>
-        <span className={styles.corrIcon}>{CORR_EVENT_ICONS[event.event_type] || "\u{26A0}"}</span>
+        <CorrEventIcon type={event.event_type} className={styles.corrIcon} />
         <span className={styles.corrType}>{CORR_EVENT_LABELS[event.event_type] || event.event_type}</span>
         <Chip
           tone="toned"

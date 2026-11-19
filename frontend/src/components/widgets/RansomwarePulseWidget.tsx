@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useRansomwarePulse } from "@/hooks/useWidgetBoardData";
 import { useIntelStore } from "@/stores/intelStore";
 import { WidgetChartSkeleton } from "@/components/Skeleton";
-import { DeltaText, SERIES_OTHER, seriesColor } from "./boardShared";
+import { DeltaText, SERIES_OTHER, seriesColor, useChartSize } from "./boardShared";
 import styles from "./widgets.module.css";
 
 interface Props {
@@ -24,6 +24,7 @@ export default function RansomwarePulseWidget({ config }: Props) {
   const { data, isLoading } = useRansomwarePulse({ date_from, date_to });
   const navigate = useNavigate();
   const setActiveSection = useIntelStore((s) => s.setActiveSection);
+  const [chartRef, { w: viewW, h: viewH }] = useChartSize(VIEW_W, VIEW_H);
   const openTracker = () => {
     setActiveSection("ransomware");
     navigate("/workbench/explore");
@@ -34,8 +35,8 @@ export default function RansomwarePulseWidget({ config }: Props) {
     return <div className={styles.noData}>No ransomware disclosures in this window</div>;
   }
 
-  const plotW = VIEW_W - PAD.left - PAD.right;
-  const plotH = VIEW_H - PAD.top - PAD.bottom;
+  const plotW = viewW - PAD.left - PAD.right;
+  const plotH = viewH - PAD.top - PAD.bottom;
   const maxTotal = Math.max(...data.weeks.map((w) => w.total), 1);
   const step = plotW / data.weeks.length;
   const barW = Math.min(24, Math.max(4, step - 6));
@@ -45,10 +46,11 @@ export default function RansomwarePulseWidget({ config }: Props) {
   const stackOrder = data.groups;
 
   return (
-    <div>
+    <div className={styles.chartFill}>
+      <div ref={chartRef} className={styles.chartBox}>
       <svg
         className={styles.stackChart}
-        viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+        viewBox={`0 0 ${viewW} ${viewH}`}
         role="img"
         aria-label="Weekly ransomware victim disclosures stacked by group"
       >
@@ -113,13 +115,14 @@ export default function RansomwarePulseWidget({ config }: Props) {
           );
         })}
 
-        <text x={PAD.left} y={VIEW_H - 5} fontSize="10" fill="var(--text-muted)">
+        <text x={PAD.left} y={viewH - 5} fontSize="10" fill="var(--text-muted)">
           {data.weeks[0].label}
         </text>
-        <text x={PAD.left + plotW} y={VIEW_H - 5} textAnchor="end" fontSize="10" fill="var(--text-muted)">
+        <text x={PAD.left + plotW} y={viewH - 5} textAnchor="end" fontSize="10" fill="var(--text-muted)">
           {data.weeks[data.weeks.length - 1].label}
         </text>
       </svg>
+      </div>
 
       <div className={styles.chartLegend}>
         {stackOrder.map((group, gi) => (

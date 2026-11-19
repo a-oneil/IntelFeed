@@ -117,6 +117,19 @@
   background: var(--danger);
   color: var(--bg-primary);
 }
+.widgetActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.settingsBtn {
+  font-size: var(--fs-lg);
+}
+.settingsBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
 .widgetBody {
   flex: 1;
   padding: 10px;

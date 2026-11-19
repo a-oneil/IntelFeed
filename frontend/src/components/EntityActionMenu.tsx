@@ -1,3 +1,4 @@
+import { IconSearch } from "@tabler/icons-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCampaigns, useAddCampaignEntity } from "@/hooks/useCampaigns";
@@ -162,7 +163,7 @@ export default function EntityActionMenu({
               close();
             }}
           >
-            <span className={styles.menuIcon}>&#x1F50D;</span>
+            <span className={styles.menuIcon}><IconSearch size="1em" stroke={1.75} aria-hidden /></span>
             Find in IntelFeed
           </button>
 

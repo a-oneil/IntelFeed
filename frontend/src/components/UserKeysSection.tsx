@@ -1,3 +1,4 @@
+import { IconLock } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import type { AITask } from "@/api/types";
 import { useSystemSettings, useUpdateSystemSettings } from "@/hooks/useSystemSettings";
@@ -300,7 +301,7 @@ export function UserKeysSection() {
                 <td className={styles.right}>
                   {t.user_provider_locked ? (
                     <span className={styles.lock} title="Writes results the whole instance reads">
-                      🔒 Site only
+                      <IconLock size="1em" stroke={1.75} aria-hidden /> Site only
                     </span>
                   ) : (
                     <label className={page.toggle}>

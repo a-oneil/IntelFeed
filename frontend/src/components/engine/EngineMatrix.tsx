@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { IconLink, IconScissors, IconSearch } from "@tabler/icons-react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -170,8 +171,8 @@ function cellSkipCode(cell: ProcessingStageCell | undefined): string | null {
 
 /** Verdict glyphs for the adjudicate stage's Output cell. Keys match the
  *  `detail.verdicts` counters the task returns (see pipeline_logging). */
-const VERDICT_GLYPHS: { key: string; glyph: string; title: string }[] = [
-  { key: "remove", glyph: "✂", title: "links removed" },
+const VERDICT_GLYPHS: { key: string; glyph: ReactNode; title: string }[] = [
+  { key: "remove", glyph: <IconScissors size="1em" stroke={1.75} aria-hidden />, title: "links removed" },
   { key: "reclassify", glyph: "↷", title: "links flagged for reclassification" },
   { key: "veto", glyph: "⊘", title: "new entities vetoed" },
   { key: "merge", glyph: "⇄", title: "new entities merged into existing ones" },
@@ -234,20 +235,20 @@ function AdjudicateOutputCell({ cell }: { cell: ProcessingStageCell | undefined 
  *  with per-entry output metrics render counts; the rest show a dot. */
 function OutputCell({ stage, outputs }: { stage: string; outputs: ProcessingOutputs | undefined }) {
   if (!outputs) return <span className={`${m.outCell} ${m.outZero}`}>·</span>;
-  let parts: { n: number; cls: string; glyph: string; title: string }[] = [];
+  let parts: { n: number; cls: string; glyph: ReactNode; title: string }[] = [];
   if (stage === "autolink") {
     parts = [
       {
         n: outputs.links_auto + outputs.links_other,
         cls: m.outLinks,
-        glyph: "🔗",
+        glyph: <IconLink size="1em" stroke={1.75} aria-hidden />,
         title: "entity links (dictionary + unattributed CVE/TTP links)",
       },
     ];
   } else if (stage === "analyze") {
     parts = [
       { n: outputs.entities_created, cls: m.outEnts, glyph: "◆", title: "entities created by AI" },
-      { n: outputs.links_ai, cls: m.outLinks, glyph: "🔗", title: "AI-validated links" },
+      { n: outputs.links_ai, cls: m.outLinks, glyph: <IconLink size="1em" stroke={1.75} aria-hidden />, title: "AI-validated links" },
     ];
   } else if (stage === "observables") {
     // The funnel, per entry: judged sightings over staged candidates.
@@ -267,7 +268,7 @@ function OutputCell({ stage, outputs }: { stage: string; outputs: ProcessingOutp
   return (
     <span className={m.outCell} title={shown.map((pp) => `${pp.n} ${pp.title}`).join(" · ")}>
       {shown.map((pp) => (
-        <span key={pp.glyph} className={pp.cls}>
+        <span key={pp.title} className={pp.cls}>
           {pp.n}
           {pp.glyph}
         </span>
@@ -949,7 +950,7 @@ export function EngineMatrix({
                   ))}
                 </select>
                 <div className={`${styles.search} ${m.msearch}`}>
-                  🔍
+                  <IconSearch size="1em" stroke={1.75} aria-hidden />
                   <input
                     placeholder="Search title…"
                     value={searchInput}
@@ -1245,7 +1246,7 @@ export function EngineMatrix({
               <>
                 <span className={styles.li}>
                   <span className={m.outCell}>
-                    <span className={m.outLinks}>3🔗</span>
+                    <span className={m.outLinks}>3<IconLink size="1em" stroke={1.75} aria-hidden /></span>
                   </span>{" "}
                   entity links created
                 </span>

@@ -1,3 +1,4 @@
+import { IconPin } from "@tabler/icons-react";
 import { useState, useMemo, useRef, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -62,7 +63,7 @@ function entryToMarkdown(entry: SharedEntryData): string {
   if (entry.notes.length > 0) {
     lines.push("\n---\n\n## Analyst Notes\n");
     for (const note of entry.notes) {
-      lines.push(`### ${note.is_pinned ? "📌 " : ""}${note.title}\n`);
+      lines.push(`### ${note.title}${note.is_pinned ? " (pinned)" : ""}\n`);
       lines.push((note.content_markdown || stripHtml(note.content_html || "")) + "\n");
     }
   }
@@ -668,7 +669,7 @@ export function SharedEntryPage() {
                   {entry.notes.map((note) => (
                     <div key={note.id} className={styles.sharedNoteCard}>
                       <div className={styles.sharedNoteName}>
-                        {note.is_pinned && <span style={{ marginRight: "0.25rem" }}>&#128204;</span>}
+                        {note.is_pinned && <IconPin size="1em" stroke={1.75} aria-hidden style={{ marginRight: "0.25rem" }} />}
                         {note.title}
                       </div>
                       {note.content_html ? (
