@@ -1973,8 +1973,7 @@ async def apply_alias_collision(
     if not bad_alias:
         raise AppError(code="invalid", message="missing bad_alias in proposal", status_code=400)
 
-    spec = ENTITY_TYPE_REGISTRY.get(row.entity_type)
-    if not spec:
+    if row.entity_type not in CASCADE_SPECS:
         raise AppError(
             code="invalid",
             message=f"unsupported entity_type: {row.entity_type}",
@@ -3431,6 +3430,7 @@ class ReviewGroup(BaseModel):
     kinds: list[ReviewGroupKind]  # per action code, most common first
     reclassify_to: list[ReviewGroupTarget]  # proposed target types, most proposed first
     merge_into: list[ReviewGroupMerge]
+    trim_aliases: list[str]  # the aliases its pending alias trims would remove, most proposed first
     domains: list[str]
     origin: str  # adjudicator | merge_review | scan | mixed
     confidence: str | None  # the highest verdict confidence among its proposals, where one was given
@@ -3488,6 +3488,7 @@ async def review_groups(
         g["key"]: {
             "reclassify_to": defaultdict(int),
             "merge_into": {},
+            "trim_aliases": defaultdict(int),
             "forms": defaultdict(int),
             "latest": None,  # (source, row)
             "sample_entry_id": None,
@@ -3534,6 +3535,8 @@ async def review_groups(
                 },
             )
             m["count"] += 1
+        if r.action == "alias_collision" and after.get("bad_alias"):
+            d["trim_aliases"][after["bad_alias"]] += 1
         # the forms the link matched on: a junction snapshot, or a held match
         matched = before.get("junction") or before.get("held")
         for f in (matched.get("matched_names") if isinstance(matched, dict) else None) or []:
@@ -3581,6 +3584,7 @@ async def review_groups(
                     ReviewGroupMerge(**m)
                     for m in sorted(d["merge_into"].values(), key=lambda m: (-m["count"], m["name"] or ""))
                 ],
+                trim_aliases=[a for a, _ in sorted(d["trim_aliases"].items(), key=lambda kv: (-kv[1], kv[0]))],
                 domains=g["domains"],
                 origin=origins[0] if len(origins) == 1 else "mixed",
                 confidence=_CONF_NAME.get(g["confidence"]),
