@@ -255,15 +255,17 @@ async def _import_yara_multi_rules(
     existing_rules_by_title: dict[str, DetectionRule] = {}
     if file_path:
         result = await db.execute(
-            select(DetectionRule).where(
-                DetectionRule.created_by == user_id,
+            select(DetectionRule)
+            .where(
                 DetectionRule.metadata_["file_path"].astext == file_path,
                 DetectionRule.metadata_["owner"].astext == owner,
                 DetectionRule.metadata_["repo"].astext == repo,
+                DetectionRule.derived_from.is_(None),
             )
+            .order_by(DetectionRule.created_at)
         )
         for rule in result.scalars().all():
-            existing_rules_by_title[rule.title] = rule
+            existing_rules_by_title.setdefault(rule.title, rule)
 
     # Also load rules linked to this entry_id that may lack metadata (legacy)
     result2 = await db.execute(
@@ -306,6 +308,8 @@ async def _import_yara_multi_rules(
         if existing:
             # Update existing rule
             _accumulate_commit_history(existing, commit_sha, commit_record)
+            if existing.rule_content != rule_content:
+                await _snapshot_upstream_version(db, existing, user_id, commit_sha, commit_record)
             existing.rule_content = rule_content
             existing.severity = severity
             existing.tags = tags
@@ -357,6 +361,218 @@ def _build_commit_record(entry: "Entry", commit_sha: str) -> dict:
         "date": entry.published_at.isoformat() if entry.published_at else None,
         "change_type": (entry.metadata_ or {}).get("change_type", "modified"),
     }
+
+
+def provenance_from_entry(entry: "Entry") -> dict | None:
+    """The import keys a rule mirrored from ``entry`` should carry, read from the
+    entry's own metadata (the adapter stamps owner, repo, file_path and commit
+    on every github_repo entry). None for an entry that is not a repo file."""
+    meta = entry.metadata_ or {}
+    if not (meta.get("commit_sha") and meta.get("file_path")):
+        return None
+    owner = meta.get("owner") or ""
+    repo = meta.get("repo") or ""
+    record = _build_commit_record(entry, meta["commit_sha"])
+    return {
+        "owner": owner,
+        "repo": repo,
+        "file_path": meta["file_path"],
+        "commit_sha": meta["commit_sha"],
+        "commit_author": record["author"],
+        "commit_message": record["message"],
+        "commit_date": record["date"],
+        "change_type": record["change_type"],
+        "commit_history": [record],
+    }
+
+
+def restore_provenance(rule: DetectionRule, entry: "Entry") -> list[str]:
+    """Put back the import keys a save wiped from ``rule.metadata_``, from the
+    entry it was imported from. Keys already present are left alone; an empty
+    commit_history is seeded with the entry's commit. Returns the keys set."""
+    source = provenance_from_entry(entry)
+    if source is None:
+        return []
+    meta = dict(rule.metadata_ or {})
+    restored: list[str] = []
+    for key, value in source.items():
+        if key == "commit_history":
+            if not meta.get("commit_history"):
+                meta["commit_history"] = value
+                restored.append(key)
+            continue
+        if meta.get(key) in (None, ""):
+            meta[key] = value
+            restored.append(key)
+    if restored:
+        rule.metadata_ = meta
+    return restored
+
+
+async def merge_duplicate_rules(db: AsyncSession, rules: list[DetectionRule], user_id: uuid.UUID) -> dict:
+    """Fold several rows mirrored from the same upstream file into one.
+
+    They arise when a sync could not find the row it had imported before (its
+    provenance was wiped, or it was imported under another user) and imported
+    the file again. The oldest row is kept: its id is what links, coverage and
+    conversions point at. It ends on the newest commit's body, every older
+    distinct body becomes a version in commit order, the commit histories are
+    unioned, the duplicates' own versions and derived children move across,
+    and the duplicates are deleted. The search index needs a reconcile after.
+    """
+    from sqlalchemy import func, update
+
+    from app.models.detection_rule_version import DetectionRuleVersion
+
+    if len(rules) < 2:
+        return {"keeper": str(rules[0].id) if rules else None, "removed": [], "versions_added": 0}
+
+    def _meta(r: DetectionRule) -> dict:
+        return r.metadata_ or {}
+
+    def _when(r: DetectionRule) -> str:
+        return _meta(r).get("commit_date") or (r.created_at.isoformat() if r.created_at else "")
+
+    rows = sorted(rules, key=lambda r: (r.created_at or datetime.min.replace(tzinfo=UTC), str(r.id)))
+    keeper, dupes = rows[0], rows[1:]
+    ordered = sorted(rows, key=lambda r: (_when(r), r.created_at or datetime.min.replace(tzinfo=UTC)))
+    newest = ordered[-1]
+
+    history: dict[str, dict] = {}
+    for r in rows:
+        for c in _meta(r).get("commit_history") or []:
+            if c.get("sha"):
+                history.setdefault(c["sha"], c)
+    history_list = sorted(history.values(), key=lambda c: c.get("date") or "", reverse=True)
+
+    next_ver = (
+        await db.execute(
+            select(func.coalesce(func.max(DetectionRuleVersion.version_number), 0)).where(
+                DetectionRuleVersion.rule_id == keeper.id
+            )
+        )
+    ).scalar() or 0
+
+    # The duplicates' own versions move across, in the order they were made.
+    moved = 0
+    for d in dupes:
+        versions = (
+            (
+                await db.execute(
+                    select(DetectionRuleVersion)
+                    .where(DetectionRuleVersion.rule_id == d.id)
+                    .order_by(DetectionRuleVersion.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for v in versions:
+            next_ver += 1
+            v.rule_id = keeper.id
+            v.version_number = next_ver
+            moved += 1
+
+    # Each older distinct body is a version, oldest first, so History diffs
+    # one upstream state against the next.
+    added = 0
+    for r, following in zip(ordered, ordered[1:], strict=False):
+        if r.rule_content == following.rule_content:
+            continue
+        next_ver += 1
+        sha = (_meta(r).get("commit_sha") or "")[:8]
+        message = (_meta(r).get("commit_message") or "").split("\n")[0][:200]
+        db.add(
+            DetectionRuleVersion(
+                rule_id=keeper.id,
+                version_number=next_ver,
+                rule_content=r.rule_content,
+                rule_type=r.rule_type,
+                change_description=f"Upstream {sha}: {message}".rstrip(": ") if sha else "Duplicate import",
+                changed_by=user_id,
+            )
+        )
+        added += 1
+
+    if newest is not keeper:
+        keeper.rule_content = newest.rule_content
+        keeper.title = newest.title
+        keeper.description = newest.description
+        keeper.severity = newest.severity
+        keeper.log_sources = newest.log_sources
+        keeper.data_sources = newest.data_sources
+        keeper.upstream_updated_at = newest.upstream_updated_at or keeper.upstream_updated_at
+        if newest.entry_id:
+            keeper.entry_id = newest.entry_id
+    merged_meta = dict(_meta(keeper))
+    for key in ("commit_sha", "commit_author", "commit_message", "commit_date", "change_type"):
+        if _meta(newest).get(key) is not None:
+            merged_meta[key] = _meta(newest)[key]
+    for key in ("owner", "repo", "file_path"):
+        merged_meta.setdefault(key, _meta(newest).get(key))
+    merged_meta["commit_history"] = history_list
+    keeper.metadata_ = merged_meta
+
+    entries: list = list(keeper.source_entries or [])
+    tags: list[str] = list(keeper.tags or [])
+    for d in dupes:
+        for e in d.source_entries or []:
+            if e not in entries:
+                entries.append(e)
+        for t in d.tags or []:
+            if t not in tags:
+                tags.append(t)
+    keeper.source_entries = entries
+    keeper.tags = tags
+
+    dup_ids = [d.id for d in dupes]
+    await db.execute(
+        update(DetectionRule).where(DetectionRule.derived_from.in_(dup_ids)).values(derived_from=keeper.id)
+    )
+    for d in dupes:
+        await db.delete(d)
+    await db.flush()
+    await index_rule(db, keeper)
+    return {
+        "keeper": str(keeper.id),
+        "removed": [str(i) for i in dup_ids],
+        "versions_added": added,
+        "versions_moved": moved,
+        "commits": len(history_list),
+    }
+
+
+async def _snapshot_upstream_version(
+    db: AsyncSession, rule: DetectionRule, user_id: uuid.UUID, commit_sha: str, commit_record: dict
+) -> None:
+    """Keep the body a sync is about to replace, as a version row.
+
+    The rule page's History tab lists local versions and upstream commits on
+    one timeline; without this row an upstream change has a commit entry but
+    nothing to diff against, so how the rule moved over time is lost.
+    """
+    from sqlalchemy import func
+
+    from app.models.detection_rule_version import DetectionRuleVersion
+
+    max_ver = (
+        await db.execute(
+            select(func.coalesce(func.max(DetectionRuleVersion.version_number), 0)).where(
+                DetectionRuleVersion.rule_id == rule.id
+            )
+        )
+    ).scalar() or 0
+    message = (commit_record.get("message") or "").split("\n")[0][:200]
+    db.add(
+        DetectionRuleVersion(
+            rule_id=rule.id,
+            version_number=max_ver + 1,
+            rule_content=rule.rule_content,
+            rule_type=rule.rule_type,
+            change_description=f"Upstream {commit_sha[:8]}: {message}".rstrip(": "),
+            changed_by=user_id,
+        )
+    )
 
 
 def _accumulate_commit_history(existing: DetectionRule, commit_sha: str, commit_record: dict) -> None:
@@ -496,18 +712,25 @@ async def _import_single_rule(
     existing = result.scalar_one_or_none()
 
     if not existing and file_path:
+        # By file, whoever imported it: the same file synced under another
+        # user (the system user after a feed became shared) is the same rule.
         result2 = await db.execute(
-            select(DetectionRule).where(
-                DetectionRule.created_by == user_id,
+            select(DetectionRule)
+            .where(
                 DetectionRule.metadata_["file_path"].astext == file_path,
                 DetectionRule.metadata_["owner"].astext == owner,
                 DetectionRule.metadata_["repo"].astext == repo,
+                # Extended children copy these keys; the mirror is the root row.
+                DetectionRule.derived_from.is_(None),
             )
+            .order_by(DetectionRule.created_at)
         )
-        existing = result2.scalar_one_or_none()
+        existing = result2.scalars().first()
 
     if existing:
         _accumulate_commit_history(existing, commit_sha, commit_record)
+        if existing.rule_content != rule_content:
+            await _snapshot_upstream_version(db, existing, user_id, commit_sha, commit_record)
 
         existing.title = title
         existing.description = description

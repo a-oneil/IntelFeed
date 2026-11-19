@@ -325,7 +325,16 @@ Selecting rows shows a bar with **Publish**, **Unpublish**, **Export** (ZIP), **
 
 ### Rule detail page
 
-`frontend/src/pages/RuleDetailPage.tsx` (`/workbench/rule/:id`) is the editor. The center is a CodeMirror editor with live validation. Side panes: **Details**, **AI Assist** (streaming chat), **Convert**, **History** (versions, diff and rollback), plus **Structure**, **Context** and **Compare**. The pane components live in `frontend/src/components/ruleBench/`.
+`frontend/src/pages/RuleDetailPage.tsx` (`/workbench/rule/:id`) is the editor. Three columns: the **Structure** rail (outline, attribution, provenance: techniques, CVE, created and updated, latest upstream commit, references), the editor, and the **Context** rail (source article, fresh intel, fields vs inventory with the data-source picker, near-duplicates). The headline row above the editor holds the format, a severity select and the title. The title is an input on a rule authored in the app and read-only with a lock on a rule mirrored from a git repo, because the upstream sync finds the rule by its title; `PUT /detection-rules/{id}` refuses such a rename with `rename_locked`. The pane components live in `frontend/src/components/ruleBench/`.
+
+Under the Save bar a tab strip holds everything else, at the editor's full width:
+
+- **Details**: description, tags, analyst notes, MITRE tactics, and **Auto-fill from rule body** when the metadata extractor found fields in the rule text.
+- **Convert**: every language from Settings › Reading › Preferred query language (the preferred one marked) plus the rule-only formats (Snort/Suricata, YARA, Nuclei), an optional note added to the prompt, and the existing conversions with their model, tokens, cost and time.
+- **AI Assist**: the four quick actions (Reduce noise, Evasion check, Explain, Cover a new observable) above the streaming chat; answers arrive as code blocks with **Apply to editor**.
+- **History**: one timeline of local versions (View, Diff, Rollback) and, for a mirrored rule, the upstream commits (message, author, file path, link) and the import baseline. Comparing a near-duplicate from the Context rail opens inside this tab.
+
+Below 1200px the Context rail becomes a tab here too, and below 900px so does Structure.
 
 ---
 
@@ -497,11 +506,15 @@ Two link tables in `backend/app/models/mitigation.py`:
 
 ### Rule Conversion (AI-powered)
 
-`POST /detection-rules/{id}/convert` with `{"target_type": "splunk_spl"}` asks the AI provider assigned to the `detection_rules` task to rewrite the rule in another format. It fails with `no_ai_assignment` if no provider is assigned.
+`POST /detection-rules/{id}/convert` with `{"target_type": "splunk_spl"}` asks the AI provider assigned to the `detection_rules` task to rewrite the rule in another format. It fails with `no_ai_assignment` if no provider is assigned. Two optional fields: `dialect`, a query-language id from `backend/app/ai/query_language.py` whose `rule_type` is the target (ES|QL and EQL are both stored as `elastic_ql`, so `{"target_type": "elastic_ql", "dialect": "esql"}` says which one), which also puts the language's full name in the prompt; and `notes`, free text appended to the prompt. A dialect that does not belong to the target format fails with `bad_dialect`.
 
-The result is saved as its own rule, linked to the original by `derived_from`. There is one converted rule per original and target format; converting again overwrites it and saves the old body as a version. The new rule copies the original's techniques, CVEs, actors and entries, but not its data sources or log sources, which are worked out again from the new body.
+Every language in Settings › Reading › Preferred query language is a target: `yaral`, `aql`, `sumo` and `sql` are rule types the library stores without a syntax check (`POST /detection-rules/validate` reports them valid with a suggestion saying so).
 
-The response has `converted_content`, `source_type`, `target_type`, `model`, `tokens_input`, `tokens_output`, `tokens_used`, `cost`, and the new rule's `rule_id` and `title`. `GET /detection-rules/{id}/conversions` lists a rule's conversions.
+The prompt is built in `convert_detection_rule` in `backend/app/api/intelligence.py`, not in the AI task registry, so it is not editable under Settings › AI Configuration. It carries the source rule, its title, description, severity, tactics and data sources, the notes, and six instructions (valid syntax, field-name mapping, log-source translation, preserved logic and ATT&CK mappings, a comment for anything untranslatable, target-format headers).
+
+The result is saved as its own rule, linked to the original by `derived_from`. There is one converted rule per original, target format and dialect; converting again overwrites it and saves the old body as a version. The new rule copies the original's techniques, CVEs, actors and entries, but not its data sources or log sources, which are worked out again from the new body.
+
+The response has `converted_content`, `source_type`, `target_type`, `dialect`, `model`, `tokens_input`, `tokens_output`, `tokens_used`, `cost`, and the new rule's `rule_id` and `title`. `GET /detection-rules/{id}/conversions` lists a rule's conversions.
 
 ### Extending a rule
 
@@ -523,8 +536,13 @@ Related endpoints on the rule page:
 
 - `GET /detection-rules/{id}/fresh-intel`: articles about the rule's CVEs or techniques that arrived **after** the rule was last edited. A sign the rule may be going stale.
 - `GET /detection-rules/{id}/related`: rules that share a CVE or technique, other formats of the same rule, and near-duplicates.
-- `GET /detection-rules/{id}/commits`: the upstream GitHub commit history, for mirrored rules.
+- `GET /detection-rules/{id}/commits`: the upstream GitHub commit history, for mirrored rules. The sync (`backend/app/services/github_rule_import.py`) appends each new commit here and, when the body changes, saves the body it replaces as a version (`Upstream <sha>: <message>`), so the History tab can diff one upstream state against the next.
 
+### How a mirrored rule follows its file
+
+A `github_repo` feed lists one entry per file; the entry's GUID is the file path, and its metadata carries `owner`, `repo`, `file_path` and the newest commit. When a poll lists a file again at a different commit, the fetcher (`_refresh_github_entry` in `backend/app/workers/feed_tasks.py`) updates that entry in place and runs the importer again. A full sync of the feed does the same for every known file whose git blob id no longer matches the text stored on its entry: the tree walk lists those files as `modified`, stamped with the last commit that touched them, and the worker refreshes them; files with unchanged blobs are skipped without a request. The importer finds the rule by owner, repo and file path, whoever imported it, appends the commit to `metadata.commit_history`, snapshots the old body as a version and writes the new one. A rule is "authored here" (`is_authored_local`) only when its metadata has no `repo`.
+
+Those provenance keys (`repo`, `owner`, `file_path`, `commit_*`, `commit_history`) survive every save: the metadata re-extraction that runs on a body change keeps them (`PRESERVED_METADATA_KEYS` in `backend/app/intelligence/rule_metadata.py`), and a `metadata` blob sent by a client is merged over them rather than replacing them. The editor only sends back the metadata it was given plus the chat history.
 ---
 
 ## Appendix: Frontend Components Reference
@@ -534,7 +552,7 @@ Related endpoints on the rule page:
 | `RulesSection` | `pages/WorkbenchPage.tsx` | The Rules Library: search, facets, bulk actions, import/export |
 | `DetectionWorkbenchPage` | `pages/DetectionWorkbenchPage.tsx` | AI generator, shown inside the Rules Library |
 | `RuleDetailPage` | `pages/RuleDetailPage.tsx` | Rule editor (`/workbench/rule/:id`) |
-| `ruleBench/*` | `components/ruleBench/` | Editor panes: details, chat, convert, history, compare, structure, context |
+| `ruleBench/*` | `components/ruleBench/` | Editor tabs and rails: details, chat, convert, history (with compare), structure, context |
 | `RuleBuilderShell` | `components/RuleBuilderShell.tsx` | Editor frame around CodeMirror |
 | `CodeMirrorEditor` | `components/CodeMirrorEditor.tsx` | Code editor with syntax highlighting |
 | `RuleEntryCard` | `components/RuleEntryCard.tsx` | Compact rule card |

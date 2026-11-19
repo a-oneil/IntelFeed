@@ -267,6 +267,7 @@ def _db() -> MagicMock:
     db.flush = AsyncMock()
     empty = MagicMock()
     empty.scalar_one_or_none.return_value = None
+    empty.scalars.return_value.first.return_value = None
     db.execute = AsyncMock(return_value=empty)
     return db
 

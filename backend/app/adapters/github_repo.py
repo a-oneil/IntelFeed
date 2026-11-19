@@ -158,6 +158,16 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()[:16]
 
 
+def blob_sha_of(content: str | None) -> str | None:
+    """The git blob id of a file's text, as the Trees API reports it for the
+    path. Lets a full sync tell a known file that changed from one that did
+    not without fetching either."""
+    if content is None:
+        return None
+    data = content.encode("utf-8")
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
 class GitHubRepoAdapter(ExtendedAdapter):
     """Monitors GitHub repositories for new/changed files.
 
@@ -570,15 +580,21 @@ class GitHubRepoAdapter(ExtendedAdapter):
         self,
         config: dict,
         existing_guids: set[str] | None = None,
+        known_blobs: dict[str, str] | None = None,
     ) -> tuple[ParsedFeedMeta, list[ParsedEntry]]:
-        """Walk the full Git tree and return entries for ALL matching files.
+        """Walk the full Git tree and return entries for every matching file
+        that is new, or known but changed.
 
         Unlike the commit-based modes, this enumerates every file in the repo
-        at the current branch HEAD. Files whose GUIDs appear in
-        ``existing_guids`` are skipped to avoid re-importing known entries.
+        at the current branch HEAD. A guid in ``existing_guids`` is skipped
+        when ``known_blobs`` holds the same blob id the tree reports for it;
+        when the blob moved on (or nothing is stored to compare) the file is
+        listed again as ``modified``, stamped with the last commit that touched
+        it, so the worker can bring the entry and its rule up to date. Without
+        ``known_blobs`` every known guid is skipped, as before.
 
         Uses the Git Trees API (recursive) which returns the full tree in a
-        single request, then fetches content for each new file individually.
+        single request, then fetches content for each listed file individually.
         """
         owner = config.get("owner", "")
         repo = config.get("repo", "")
@@ -613,18 +629,21 @@ class GitHubRepoAdapter(ExtendedAdapter):
             if not tree_files:
                 return meta, []
 
-            # Step 2: Filter to matching paths and skip existing entries
+            # Step 2: Filter to matching paths; skip known files that have not changed
             matching = []
+            changed: set[str] = set()
             for item in tree_files:
                 fp = item["path"]
                 guid = f"{owner}/{repo}/{fp}"
-                if guid in existing_guids:
-                    continue
                 if not _matches_any_pattern(fp, paths):
                     continue
                 # Only blobs (files), skip trees (directories)
                 if item.get("type") != "blob":
                     continue
+                if guid in existing_guids:
+                    if known_blobs is None or known_blobs.get(guid) == item.get("sha"):
+                        continue
+                    changed.add(guid)
                 # Skip oversized files
                 size = item.get("size", 0)
                 if size > MAX_FILE_SIZE_BYTES:
@@ -635,7 +654,7 @@ class GitHubRepoAdapter(ExtendedAdapter):
             logger.info(
                 f"Full tree scan of {owner}/{repo}: "
                 f"{len(tree_files)} total files, "
-                f"{len(matching)} new matching files to import"
+                f"{len(matching) - len(changed)} new and {len(changed)} changed matching files"
             )
 
             # Step 3: Get branch HEAD sha for linking
@@ -661,22 +680,39 @@ class GitHubRepoAdapter(ExtendedAdapter):
                 extracted_meta = extract_metadata(content, content_type)
                 content_html = render_content(fp, content, content_type, extracted_meta)
 
+                # A changed known file is stamped with the commit that last
+                # touched it, so the rule's history names the real change
+                # rather than the branch head.
+                guid = f"{owner}/{repo}/{fp}"
+                commit = None
+                if guid in changed:
+                    commit = await self._fetch_latest_commit_for_path(client, owner, repo, branch, fp)
+                commit_sha = (commit or {}).get("sha") or head_sha or branch
+                published = datetime.now(UTC)
+                if commit:
+                    ts = commit.get("commit", {}).get("author", {}).get("date")
+                    try:
+                        published = datetime.fromisoformat(ts.replace("Z", "+00:00")) if ts else published
+                    except (ValueError, AttributeError):
+                        pass
+
                 entry = ParsedEntry(
-                    guid=f"{owner}/{repo}/{fp}",
-                    url=f"https://github.com/{owner}/{repo}/blob/{head_sha or branch}/{fp}",
+                    guid=guid,
+                    url=f"https://github.com/{owner}/{repo}/blob/{commit_sha}/{fp}",
                     title=title,
-                    author="full-tree-import",
+                    author=_extract_commit_author(commit) if commit else "full-tree-import",
                     content_html=content_html,
-                    summary=f"Imported from full tree scan of {owner}/{repo}",
-                    published_at=datetime.now(UTC),
+                    summary=(commit.get("commit", {}).get("message", "") if commit else None)
+                    or f"Imported from full tree scan of {owner}/{repo}",
+                    published_at=published,
                     metadata={
                         "source": "github_repo",
                         "owner": owner,
                         "repo": repo,
                         "file_path": fp,
-                        "commit_sha": head_sha or branch,
-                        "commit_message": "Full tree import",
-                        "change_type": "added",
+                        "commit_sha": commit_sha,
+                        "commit_message": commit.get("commit", {}).get("message", "") if commit else "Full tree import",
+                        "change_type": "modified" if guid in changed else "added",
                         "raw_content": content,
                         "content_type": content_type,
                         "extracted": extracted_meta,
@@ -688,6 +724,27 @@ class GitHubRepoAdapter(ExtendedAdapter):
             meta.extra["_head_sha"] = head_sha
 
         return meta, entries
+
+    async def _fetch_latest_commit_for_path(
+        self,
+        client: httpx.AsyncClient,
+        owner: str,
+        repo: str,
+        branch: str,
+        file_path: str,
+    ) -> dict | None:
+        """The newest commit on ``branch`` that touched ``file_path``, or None."""
+        url = f"{GITHUB_API}/repos/{owner}/{repo}/commits"
+        try:
+            response = await client.get(url, params={"sha": branch, "path": file_path, "per_page": 1})
+            _rate_limiter.update_from_headers(response.headers)
+            if response.status_code != 200:
+                return None
+            data = response.json()
+            return data[0] if isinstance(data, list) and data else None
+        except httpx.HTTPError as e:
+            logger.debug(f"HTTP error fetching latest commit for {file_path}: {e}")
+            return None
 
     async def _fetch_recursive_tree(
         self,
