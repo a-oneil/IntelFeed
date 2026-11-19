@@ -4,6 +4,7 @@ import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import raiseload
 
 from app.models.country import Country
 from app.models.cve import CVE
@@ -306,7 +307,17 @@ async def index_rules(db: AsyncSession, rules: list[DetectionRule]) -> None:
     # Best effort, like index_entity/delete_entity: a search-index hiccup must
     # not fail the write that triggered it. Drift is healed by sync_rules.
     try:
-        rows = (await db.execute(select(DetectionRule).where(DetectionRule.id.in_(ids)))).scalars().all()
+        # raiseload: the joined entry would repeat one repo file's body per rule
+        # (a multi-rule YARA file indexes hundreds at once); docs don't read it.
+        rows = (
+            (
+                await db.execute(
+                    select(DetectionRule).options(raiseload(DetectionRule.entry)).where(DetectionRule.id.in_(ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
         if not rows:
             return
         links = await _rule_entity_links(db, [r.entry_id for r in rows])

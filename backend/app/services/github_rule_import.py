@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import raiseload
 
 from app.models.cve import CVE, EntryCVE
 from app.models.detection_rule import DetectionRule
@@ -251,11 +252,16 @@ async def _import_yara_multi_rules(
             commit_sha,
         )
 
-    # Load all existing rules for this file (by file_path + owner/repo) in one query
+    # Load all existing rules for this file (by file_path + owner/repo) in one query.
+    # raiseload: DetectionRule.entry is lazy="joined", and every row here shares
+    # one entry whose metadata holds the whole file body. Joined, Postgres sends
+    # that body once per rule; a few hundred rules in one file is gigabytes of
+    # JSON to decode, enough to OOM-kill the worker. Nothing here reads .entry.
     existing_rules_by_title: dict[str, DetectionRule] = {}
     if file_path:
         result = await db.execute(
             select(DetectionRule)
+            .options(raiseload(DetectionRule.entry))
             .where(
                 DetectionRule.metadata_["file_path"].astext == file_path,
                 DetectionRule.metadata_["owner"].astext == owner,
@@ -269,7 +275,9 @@ async def _import_yara_multi_rules(
 
     # Also load rules linked to this entry_id that may lack metadata (legacy)
     result2 = await db.execute(
-        select(DetectionRule).where(
+        select(DetectionRule)
+        .options(raiseload(DetectionRule.entry))
+        .where(
             DetectionRule.entry_id == entry.id,
             DetectionRule.rule_type == "yara",
         )
