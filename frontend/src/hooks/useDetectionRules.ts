@@ -583,66 +583,73 @@ export async function streamRuleChat(
     history: options.history,
   };
 
-  const resp = await fetch("/api/detection-rules/chat", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
+  try {
+    const resp = await fetch("/api/detection-rules/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
 
-  if (!resp.ok) {
-    const errText = await resp.text();
-    let msg = "AI chat request failed";
-    try {
-      const errJson = JSON.parse(errText);
-      msg = errJson.detail?.message || errJson.detail || msg;
-    } catch {
-      // use default
+    if (!resp.ok) {
+      const errText = await resp.text();
+      let msg = "AI chat request failed";
+      try {
+        const errJson = JSON.parse(errText);
+        msg = errJson.detail?.message || errJson.detail || msg;
+      } catch {
+        // use default
+      }
+      options.onError(msg);
+      return;
     }
-    options.onError(msg);
-    return;
-  }
 
-  const reader = resp.body?.getReader();
-  if (!reader) {
-    options.onError("No response stream");
-    return;
-  }
+    const reader = resp.body?.getReader();
+    if (!reader) {
+      options.onError("No response stream");
+      return;
+    }
 
-  const decoder = new TextDecoder();
-  let buffer = "";
+    const decoder = new TextDecoder();
+    let buffer = "";
 
-  // eslint-disable-next-line no-constant-condition -- stream read loop, exits on `done`
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+    // eslint-disable-next-line no-constant-condition -- stream read loop, exits on `done`
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
-    for (const line of lines) {
-      if (line.startsWith("data: ")) {
-        const dataStr = line.slice(6).trim();
-        if (!dataStr) continue;
-        try {
-          const data = JSON.parse(dataStr);
-          if (data.text) {
-            options.onChunk(data.text);
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const dataStr = line.slice(6).trim();
+          if (!dataStr) continue;
+          try {
+            const data = JSON.parse(dataStr);
+            if (data.text) {
+              options.onChunk(data.text);
+            }
+            if (data.error) {
+              options.onError(data.error);
+              return;
+            }
+          } catch {
+            // skip malformed SSE data
           }
-          if (data.error) {
-            options.onError(data.error);
-            return;
-          }
-        } catch {
-          // skip malformed SSE data
         }
       }
     }
-  }
 
-  options.onDone();
+    options.onDone();
+  } catch (err) {
+    if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+      return;
+    }
+    options.onError(err instanceof Error ? err.message : "Stream connection lost");
+  }
 }

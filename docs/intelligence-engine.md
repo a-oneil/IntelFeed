@@ -317,7 +317,7 @@ Correlation runs after extraction. It finds second-order facts from which entiti
 
 Other code raises the remaining event types: `campaign_match`, `requirement_match` (medium), `trending_entity` (medium), `feed_stale` (low), `feed_error` (medium), `exploit_status_change`, `cve_score_change`, `new_exploit_discovered` and `kev_addition` (high). The full map is `EVENT_SEVERITY` (`backend/app/intelligence/correlation_events.py:18`).
 
-- **Dedup.** An event with the same type and source entity inside 24 hours is not stored again; the existing row's `occurrence_count` goes up instead (`_deduplicate_event`, `backend/app/intelligence/correlation_events.py:88`).
+- **Dedup.** An event with the same type and source entity inside 24 hours is not stored again; the existing row's `occurrence_count` goes up instead (`_deduplicate_event`, `backend/app/intelligence/correlation_events.py:88`). Article-sourced events (`campaign_match`, `requirement_match`) also key on the campaign or requirement, so one article matching two requirements stores both.
 - **Delivery.** Stored events go to `correlation_event_records` and are pushed to open browsers over SSE (`publish_event("broadcast", "correlation_event", …)`). Automation rules with the `on_correlation_event` trigger can notify, call a webhook or take other actions.
 - **Retention.** The `archive-correlation-events` job (04:45 daily) deletes events that are read and older than 90 days (`archive_old_events`, `backend/app/intelligence/correlation_events.py:553`). The 24-hour window and 90 days are code defaults, not settings.
 
@@ -343,7 +343,7 @@ Adjustments:
 
 ### Timeline Construction
 
-`GET /api/intelligence/timeline/{entity_type}/{entity_id}` (`entity_timeline()`, `backend/app/intelligence/correlation.py:2336`) merges, by date: linked articles (one per duplicate story), correlation events, enrichment runs, detection rules created, typed relationships and campaign membership.
+`GET /api/intelligence/timeline/{entity_type}/{entity_id}` (`entity_timeline()`, `backend/app/intelligence/correlation.py:2354`) merges, by date: linked articles (one per duplicate story), correlation events, enrichment runs, detection rules created, typed relationships and campaign membership.
 
 ### Typed relationships
 
@@ -489,7 +489,7 @@ Endpoints: `GET/POST /api/intel-profiles`, `GET/PUT/DELETE /api/intel-profiles/{
 
 ### Report Generation
 
-A report's sources are a single entry, a list of entries, a search or a saved search (`resolve_report_sources()`). The entities linked to those entries are collected automatically. `generate_report_content()` (`backend/app/intelligence/reporting.py:311`) builds the data sections; the AI writes the narrative ones. In the report builder a data section's rows open in its editor as the Markdown the exporter would write; editing them saves the text as the section body with `items: []` and `items_edited: true`, and attaching more evidence leaves such a section alone instead of refilling its rows. Reports render to Markdown (`render_markdown()`) or HTML (`render_html()`).
+A report's sources are a single entry, a list of entries, a search or a saved search (`resolve_report_sources()`). The entities linked to those entries are collected automatically. `generate_report_content()` (`backend/app/intelligence/reporting.py:320`) builds the data sections; the AI writes the narrative ones. In the report builder a data section's rows open in its editor as the Markdown the exporter would write; editing them saves the text as the section body with `items: []` and `items_edited: true`, and attaching more evidence leaves such a section alone instead of refilling its rows. Reports render to Markdown (`render_markdown()`) or HTML (`render_html()`).
 
 ### Export Formats
 
@@ -658,7 +658,7 @@ Then it is bucketed: ≥ 0.7 high, ≥ 0.4 medium, else low. So "APT29" on an A-
 ### Operational notes
 
 - Changing a feed's mode only affects new entries. To re-process old ones, use the rescan endpoints or `autolink_batch()` (`backend/app/intelligence/autolinker.py:1621`), which commits every 100 entries.
-- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1894`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the case and context rules applied, and confidence scaled by feed reliability. The pending tier does not apply, so a match ingest would hold is not linked.
+- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1931`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the case and context rules applied, and confidence scaled by feed reliability. The pending tier does not apply, so a match ingest would hold is not linked.
 
 ### None of this uses AI
 
@@ -695,4 +695,4 @@ With `signal_engine_surface` on:
 - Per-user watch and mute (`/api/intelligence/watchlist`) boost or hide entities at read time.
 - Entity profiles show recent developments from `GET /api/engine/entities/{type}/{id}/whats-new`.
 
-The Priority Queue (`/priority-queue`) mixes open **story threads** with single ranked entries, built server-side by `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1431`). A thread ranks by the score of its best unread, non-echo article, and its articles do not also appear on their own. See [story-threads.md](story-threads.md). Signal details: [engine.md](engine.md#signal-catalog).
+The Priority Queue (`/priority-queue`) mixes open **story threads** with single ranked entries, built server-side by `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1440`). A thread ranks by the score of its best unread, non-echo article, and its articles do not also appear on their own. See [story-threads.md](story-threads.md). Signal details: [engine.md](engine.md#signal-catalog).

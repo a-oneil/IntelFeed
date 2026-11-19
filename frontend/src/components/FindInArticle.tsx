@@ -21,11 +21,6 @@ export function FindInArticle({ containerRef, onClose }: FindInArticleProps) {
     inputRef.current?.focus();
   }, []);
 
-  // Clear highlights on unmount
-  useEffect(() => {
-    return () => clearHighlights();
-  }, []);
-
   const clearHighlights = useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -40,6 +35,11 @@ export function FindInArticle({ containerRef, onClose }: FindInArticleProps) {
     });
     highlightsRef.current = [];
   }, [containerRef]);
+
+  // Clear highlights on unmount
+  useEffect(() => {
+    return () => clearHighlights();
+  }, [clearHighlights]);
 
   const doSearch = useCallback(
     (searchQuery: string) => {

@@ -45,7 +45,7 @@ async def _generate_reddit_digest():
     from app.config import settings
     from app.models.entry import Entry
     from app.models.feed import Feed
-    from app.services.sanitizer import html_to_text
+    from app.services.sanitizer import html_to_text, sanitize_html
     from app.services.system_settings import warm_settings_cache
 
     async with worker_session() as db:
@@ -180,6 +180,7 @@ async def _generate_reddit_digest():
             raw = result.get("raw", "")
             digest_html = _extract_html_from_raw(raw)
             logger.info("Extracted %d chars of HTML from raw AI response", len(digest_html))
+        digest_html = sanitize_html(digest_html) if digest_html else ""
         content_text = html_to_text(digest_html) if digest_html else ""
 
         digest_entry = Entry(

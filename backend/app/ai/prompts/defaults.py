@@ -2011,8 +2011,8 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 - NETWORK kinds (ipv4, ipv6, domain, url, uri_path, email, ja3, ja4, cert_fingerprint) and HASH kinds (md5, sha1, sha256): report a value ONLY when the article presents it as attacker infrastructure or attack material — C2 addresses, malicious domains/URLs, implant check-in or exploit URI paths, malware file hashes, phishing sender addresses, TLS client or certificate fingerprints. `uri_path` is the path (+ query template) without the host, when the author presents it as the implant's endpoint.
 - HOST kinds — the behavioral observables a write-up quotes from the intrusion:
 	- `cmdline`: the full command as executed, VERBATIM, only when it carries something the attacker chose (a path, host, filename, account, key, encoded blob, or a state-changing flag like /add, /create, -enc). Generic discovery/admin commands (whoami, systeminfo, ipconfig, nltest, net group ... /domain, tasklist, quser) are NOT observables — leave them to the technique's `observable_value`.
-	- `path`: an attacker-created or attacker-chosen absolute file path (env-var prefixes like %LOCALAPPDATA%\... are fine). Never a system binary path (C:\Windows\System32\cmd.exe), never a bare system directory, never a lab/sandbox path.
-	- `registry`: the key AND the value name the attacker wrote (HKCU\...\CurrentVersion\Run\AppResolver) — never the bare well-known key.
+	- `path`: an attacker-created or attacker-chosen absolute file path (env-var prefixes like %LOCALAPPDATA%\\... are fine). Never a system binary path (C:\\Windows\\System32\\cmd.exe), never a bare system directory, never a lab/sandbox path.
+	- `registry`: the key AND the value name the attacker wrote (HKCU\\...\\CurrentVersion\\Run\\AppResolver) — never the bare well-known key.
 	- `scheduled_task`, `service_name`, `mutex`, `named_pipe`: the exact name the attacker created, as printed.
 	- `user_agent`: the full User-Agent string the malware sends.
 	- `http_header`: a custom header the implant uses as a fingerprint (X-Mesh-Auth), optionally `Name: value`.

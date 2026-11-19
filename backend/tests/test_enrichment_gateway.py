@@ -507,8 +507,6 @@ _DIRECT_HTTP_ALLOWED = {
     ("workers/maintenance.py", "_backfill_rule_attack_mappings"),
     # The Piper TTS sidecar on the compose network.
     ("workers/tts_tasks.py", "_synthesize"),
-    # A publisher's own IOC file, linked from the article being read.
-    ("intelligence/publisher_iocs.py", "fetch_publisher_file"),
 }
 
 

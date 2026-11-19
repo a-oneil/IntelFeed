@@ -52,6 +52,23 @@ async def test_export_entry_markdown(
 
 
 @pytest.mark.asyncio
+async def test_export_entry_with_typographic_title_downloads(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_feed: Feed
+):
+    # News titles carry ’ and —; header values go out as latin-1, so a raw
+    # title in Content-Disposition used to turn the download into a 500.
+    entry = Entry(feed_id=test_feed.id, title='Microsoft’s patch — 漏洞 "fix"', guid="typo-guid", content_text="x")
+    db_session.add(entry)
+    await db_session.flush()
+    resp = await client.get(f"/api/export/entries/{entry.id}", headers=auth_headers)
+    assert resp.status_code == 200
+    disposition = resp.headers["content-disposition"]
+    assert disposition.startswith('attachment; filename="')
+    assert "filename*=UTF-8''Microsoft%E2%80%99s%20patch" in disposition
+    assert "\r" not in disposition and "\n" not in disposition
+
+
+@pytest.mark.asyncio
 async def test_export_note_markdown(
     client: AsyncClient,
     auth_headers: dict,

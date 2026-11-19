@@ -211,6 +211,9 @@ def evict_old_telegram_media():
         except OSError:
             pass
 
+    if evicted:
+        TELEGRAM_MEDIA_EVICTED_TOTAL.inc(evicted)
+        logger.info("Evicted %d Telegram media files past %dd TTL", evicted, ttl_days)
     CELERY_TASKS_TOTAL.labels(task_name="evict_old_telegram_media", status="success").inc()
     CELERY_TASK_DURATION_SECONDS.labels(task_name="evict_old_telegram_media").observe(time.monotonic() - start)
 
@@ -271,9 +274,6 @@ async def _evict_old_ingest_files(ttl_days: int) -> dict:
     if evicted:
         logger.info("Evicted %d manual-upload originals older than %d days", evicted, ttl_days)
     return {"evicted": evicted}
-    if evicted:
-        TELEGRAM_MEDIA_EVICTED_TOTAL.inc(evicted)
-        logger.info("Evicted %d Telegram media files past %dd TTL", evicted, ttl_days)
 
 
 @celery_app.task(name="app.workers.maintenance.evict_image_cache", soft_time_limit=300, time_limit=360)

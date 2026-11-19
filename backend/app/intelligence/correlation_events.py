@@ -94,15 +94,18 @@ async def _deduplicate_event(db: AsyncSession, event: CorrelationEvent) -> bool:
     from app.models.correlation_event import CorrelationEventRecord
 
     cutoff = datetime.now(UTC) - timedelta(hours=24)
-    result = await db.execute(
-        select(CorrelationEventRecord)
-        .where(
-            CorrelationEventRecord.event_type == event.event_type,
-            CorrelationEventRecord.source_entity_id == event.source_entity_id,
-            CorrelationEventRecord.created_at > cutoff,
-        )
-        .limit(1)
-    )
+    conditions = [
+        CorrelationEventRecord.event_type == event.event_type,
+        CorrelationEventRecord.source_entity_id == event.source_entity_id,
+        CorrelationEventRecord.created_at > cutoff,
+    ]
+    # An article-sourced event (campaign_match, requirement_match) names the
+    # article as its source, so the source alone would fold one article's
+    # second requirement or campaign into the first. Those also key on what
+    # they matched; every other type keeps the (type, source) rule.
+    if event.source_entity_type == "entry":
+        conditions.append(CorrelationEventRecord.related_entity_id == event.related_entity_id)
+    result = await db.execute(select(CorrelationEventRecord).where(*conditions).limit(1))
     existing = result.scalar_one_or_none()
     if existing:
         await db.execute(

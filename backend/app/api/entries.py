@@ -54,6 +54,7 @@ from app.services.entry_tags import load_entry_tags
 from app.services.feed_visibility import subscriptions_enabled, visible_feed_ids_query
 from app.services.iso_codes import ALPHA2_TO_ALPHA3
 from app.services.read_state import has_no_state_for_user
+from app.services.sanitizer import sanitize_html
 from app.services.system_settings import get_setting
 from app.services.triage import get_triage_entries
 
@@ -275,6 +276,8 @@ async def calendar_buckets(
         region=region,
         campaign_id=campaign_id,
         saved_search_id=saved_search_id,
+        user_id=None if getattr(user, "is_anonymous", False) else user.id,
+        is_admin=getattr(user, "role", None) == "admin",
     )
     if base_query is None:
         return []
@@ -388,6 +391,8 @@ async def map_buckets(
         region=region,
         campaign_id=campaign_id,
         saved_search_id=saved_search_id,
+        user_id=None if getattr(user, "is_anonymous", False) else user.id,
+        is_admin=getattr(user, "role", None) == "admin",
     )
     if base_query is None:
         return []
@@ -2710,6 +2715,8 @@ async def translate_entry(
     if not entry:
         raise AppError(code="not_found", message="Entry not found", status_code=404)
 
+    # The summary is feed HTML (the reader renders it as HTML), so it goes in as
+    # markup; the translated result is sanitized below before it is stored.
     source_html = entry.content_html or (f"<p>{entry.summary}</p>" if entry.summary else "")
     if not source_html.strip():
         raise AppError(
@@ -2778,6 +2785,7 @@ async def translate_entry(
 
     effective_source = detected_lang or body_detected
     now = datetime.now(UTC)
+    translated = sanitize_html(translated) if translated else ""
     entry.translated_html = translated
     if translated_title:
         entry.translated_title = translated_title

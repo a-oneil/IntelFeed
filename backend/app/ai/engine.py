@@ -797,7 +797,7 @@ def _get_provider_instance(
     if provider_model.user_id is not None:
         # A personal key points wherever its owner said; the outbound check
         # vetted that host, and the client must not be redirected past it.
-        merged_config.setdefault("follow_redirects", False)
+        merged_config["follow_redirects"] = False
 
     provider_type = (provider_model.provider_type or "claude").lower()
     if provider_type == "claude":

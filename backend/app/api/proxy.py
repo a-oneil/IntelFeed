@@ -226,12 +226,13 @@ async def proxy_image(
             img = Image.open(BytesIO(content))
             if img.width > w:
                 ratio = w / img.width
-                new_height = int(img.height * ratio)
+                new_height = max(1, int(img.height * ratio))
                 img = img.resize((w, new_height), Image.LANCZOS)
                 buf = BytesIO()
                 fmt = "JPEG" if content_type == "image/jpeg" else "PNG"
                 img.save(buf, format=fmt)
                 content = buf.getvalue()
+                content_type = "image/jpeg" if fmt == "JPEG" else "image/png"
         except Exception:
             pass
 

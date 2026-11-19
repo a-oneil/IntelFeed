@@ -138,7 +138,10 @@ def _rule_response(rule: AutomationRule, user: User) -> AutomationRuleResponse:
     response = AutomationRuleResponse.model_validate(rule)
     if _sees_rule_secrets(rule, user):
         return response
-    return response.model_copy(update={"actions": _mask_secrets_in_actions(response.actions or [])})
+    updates: dict = {"actions": _mask_secrets_in_actions(response.actions or [])}
+    if response.trigger_config and "webhook_url" in response.trigger_config:
+        updates["trigger_config"] = {**response.trigger_config, "webhook_url": "<REDACTED>"}
+    return response.model_copy(update=updates)
 
 
 def _collect_action_warnings(actions: list[dict]) -> list[str]:

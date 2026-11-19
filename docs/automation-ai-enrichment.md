@@ -237,7 +237,7 @@ In a dry run, both branches are listed and neither runs.
 A morning briefing over 30 articles where 8 cover the same story would spend most of the model's attention, and the reader's, on that one story. So both briefing paths fold their input through [story threads](story-threads.md) first (`fold_by_thread`, `backend/app/intelligence/story_threads.py:1004`): one article per story, keeping the **strongest** one, and dropping the rest.
 
 - **`run_ai_task` in batch mode** folds the matched entries. Set `fold_threads: false` in the action config to send every article.
-- **The daily briefing** (`_fetch_day_entries`, `backend/app/api/entries.py:1644`) folds the day's articles. This is what `use_daily_summary` and the in-app day-divider summaries read.
+- **The daily briefing** (`_fetch_day_entries`, `backend/app/api/entries.py:1653`) folds the day's articles. This is what `use_daily_summary` and the in-app day-divider summaries read.
 
 Each kept item carries what was folded into it:
 

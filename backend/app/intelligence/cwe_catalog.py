@@ -18,11 +18,12 @@ network call; ``hydrate_cwe_catalog`` is idempotent and keyed on ``cwe_id``.
 import io
 import logging
 import re
-import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from xml.etree.ElementTree import Element
 
+import defusedxml.ElementTree as DefusedET
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,10 +82,15 @@ async def fetch_cwe_catalog(db: AsyncSession, url: str = CWE_CATALOG_URL) -> byt
     with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
         # One .xml member, named for the version (cwec_v4.20.xml).
         name = next(n for n in zf.namelist() if n.endswith(".xml"))
-        return zf.read(name)
+        max_xml_bytes = 128 * 1024 * 1024
+        with zf.open(name) as member:
+            data = member.read(max_xml_bytes + 1)
+        if len(data) > max_xml_bytes:
+            raise ValueError(f"CWE catalog XML exceeds {max_xml_bytes} byte limit")
+        return data
 
 
-def _text(el: ET.Element | None) -> str | None:
+def _text(el: Element | None) -> str | None:
     """Flatten an element's text, including the XHTML markup MITRE embeds."""
     if el is None:
         return None
@@ -95,7 +101,7 @@ def _text(el: ET.Element | None) -> str | None:
 
 def parse_cwe_catalog(xml_bytes: bytes) -> list[ParsedCWE]:
     """Parse the catalog XML into ParsedCWE records. Pure — no I/O, no DB."""
-    root = ET.fromstring(xml_bytes)
+    root = DefusedET.fromstring(xml_bytes)
     ns = root.tag.split("}")[0].strip("{") if root.tag.startswith("{") else _DEFAULT_NS
     n = f"{{{ns}}}"
 
@@ -112,7 +118,7 @@ def parse_cwe_catalog(xml_bytes: bytes) -> list[ParsedCWE]:
     return out
 
 
-def _mapping_usage(el: ET.Element, n: str) -> str | None:
+def _mapping_usage(el: Element, n: str) -> str | None:
     notes = el.find(f"{n}Mapping_Notes")
     return notes.findtext(f"{n}Usage") if notes is not None else None
 
@@ -131,7 +137,7 @@ def _deprecation(name: str, status: str | None, description: str | None) -> tupl
     return True, f"CWE-{match.group(1)}" if match else None
 
 
-def _parse_weakness(w: ET.Element, n: str) -> ParsedCWE:
+def _parse_weakness(w: Element, n: str) -> ParsedCWE:
     cid = w.get("ID") or ""
     name = w.get("Name") or cid
     status = w.get("Status")
@@ -198,7 +204,7 @@ def _parse_weakness(w: ET.Element, n: str) -> ParsedCWE:
     )
 
 
-def _parse_category(c: ET.Element, n: str) -> ParsedCWE:
+def _parse_category(c: Element, n: str) -> ParsedCWE:
     cid = c.get("ID") or ""
     name = c.get("Name") or cid
     status = c.get("Status")

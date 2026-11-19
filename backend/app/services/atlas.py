@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
+from app.core.public_access import viewer_is_anonymous
 from app.models.campaign import CampaignEntry
 from app.models.country import Country, EntryCountry
 from app.models.cve import EntryCVE
@@ -59,6 +60,8 @@ async def build_atlas_entry_id_query(
     region: str | None = None,
     campaign_id: uuid.UUID | None = None,
     saved_search_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+    is_admin: bool = False,
 ):
     """Return a SELECT yielding Entry.id for entries matching the atlas filter set.
 
@@ -108,11 +111,17 @@ async def build_atlas_entry_id_query(
         )
 
     if saved_search_id is not None:
+        if user_id is None or viewer_is_anonymous():
+            raise AppError(code="not_found", message="Saved search not found", status_code=404)
         saved = await db.get(SavedSearch, saved_search_id)
         if saved is None:
             raise AppError(code="not_found", message="Saved search not found", status_code=404)
+        if not is_admin and saved.created_by != user_id:
+            raise AppError(
+                code="forbidden", message="Only the saved search's owner or an admin can use it", status_code=403
+            )
 
-        entry_ids = await _resolve_saved_search_ids(db, saved)
+        entry_ids = await _resolve_saved_search_ids(db, saved, user_id=user_id)
         if entry_ids is None:
             return None
         if not entry_ids:
@@ -122,7 +131,9 @@ async def build_atlas_entry_id_query(
     return query
 
 
-async def _resolve_saved_search_ids(db: AsyncSession, saved: SavedSearch) -> list[uuid.UUID] | None:
+async def _resolve_saved_search_ids(
+    db: AsyncSession, saved: SavedSearch, *, user_id: uuid.UUID | None = None
+) -> list[uuid.UUID] | None:
     """Run a saved search through Meilisearch and return matching entry UUIDs.
 
     Returns None when the search has no usable query (treat as empty result).
@@ -140,7 +151,7 @@ async def _resolve_saved_search_ids(db: AsyncSession, saved: SavedSearch) -> lis
     except ParseError:
         return None
 
-    plan = build_execution_plan(ast)
+    plan = build_execution_plan(ast, viewer_id=str(user_id) if user_id else None)
     await resolve_deferred_filters(db, plan)
 
     if not (plan.has_entry_queries or plan.meili_query.strip()):

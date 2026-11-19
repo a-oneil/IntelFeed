@@ -33,11 +33,22 @@ export function openExternalUrl(
   url: string,
   { features = "noopener,noreferrer", text = "" }: { features?: string; text?: string } = {},
 ): void {
-  // Not an outside link (same site, or not a web URL): exactly the plain
-  // window.open this replaced. The guard and the caller's features are for
-  // outside links only.
+  // Not an outside link (same site, or not a web URL): only allow safe
+  // same-origin relative paths (never protocol-relative // or javascript:/data:).
   if (!isExternalWebUrl(url)) {
-    window.open(url, "_blank");
+    const trimmed = url.trim();
+    if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
+      window.open(trimmed, "_blank");
+    } else {
+      try {
+        const parsed = new URL(trimmed, window.location.origin);
+        if ((parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.origin === window.location.origin) {
+          window.open(parsed.href, "_blank");
+        }
+      } catch {
+        // Ignore malformed or non-HTTP(S) schemes (javascript:, data:, etc.)
+      }
+    }
     return;
   }
   const info = evaluateProgrammaticOpen(url, currentInterceptContext(), text);

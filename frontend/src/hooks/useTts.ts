@@ -9,7 +9,8 @@ import { usePlayerStore, type QueueItem } from "@/stores/playerStore";
 /**
  * Server-side read-aloud (Piper). Enqueues synthesis, polls until the MP3 is
  * ready, then plays it through the shared audio player. Returns false on any
- * failure so callers can fall back to the browser Web Speech voice.
+ * failure so callers can fall back to the browser Web Speech voice. Cancellation
+ * returns null: callers must not start fallback speech in that case.
  *
  * Works both authenticated (default) and on the public share page — pass the
  * share token to route through the token-gated public endpoints (no JWT).
@@ -60,11 +61,16 @@ export function useTts(opts?: { shareToken?: string }) {
   const shareToken = opts?.shareToken;
   const play = usePlayerStore((s) => s.play);
   const [isPreparing, setIsPreparing] = useState(false);
-  const abortRef = useRef(false);
+  // The in-flight request; cancel() or a newer start() replaces it. Unmounting
+  // deliberately does not cancel: the player is global, so audio asked for from
+  // a day divider or the reader still plays after that view scrolls away or closes.
+  const requestRef = useRef<symbol | null>(null);
 
   const start = useCallback(
-    async (args: StartArgs): Promise<boolean> => {
-      abortRef.current = false;
+    async (args: StartArgs): Promise<boolean | null> => {
+      const request = Symbol();
+      requestRef.current = request;
+      const cancelled = () => requestRef.current !== request;
       setIsPreparing(true);
       let toastId: string | number | undefined;
       try {
@@ -91,6 +97,7 @@ export function useTts(opts?: { shareToken?: string }) {
           ).then((r) => r.data);
 
         let resp = await post();
+        if (cancelled()) return null;
         // Only toast when we actually have to wait — a cache hit plays instantly.
         if (resp.status === "pending") {
           toastId = toast.loading("Generating audio…", {
@@ -99,18 +106,14 @@ export function useTts(opts?: { shareToken?: string }) {
         }
         const startedAt = Date.now();
         while (resp.status === "pending" && Date.now() - startedAt < POLL_TIMEOUT_MS) {
-          if (abortRef.current) {
-            if (toastId !== undefined) toast.dismiss(toastId);
-            return false;
-          }
+          if (cancelled()) return null;
           await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+          if (cancelled()) return null;
           resp = await post(); // prepare is idempotent — re-POST returns current status
         }
 
-        if (abortRef.current || resp.status !== "ready" || !resp.cache_key) {
-          if (toastId !== undefined) toast.dismiss(toastId);
-          return false;
-        }
+        if (cancelled()) return null;
+        if (resp.status !== "ready" || !resp.cache_key) return false;
 
         const item: QueueItem = {
           mediaId: `tts:${resp.cache_key}`,
@@ -123,20 +126,27 @@ export function useTts(opts?: { shareToken?: string }) {
           kind: "tts",
         };
         play(item);
-        if (toastId !== undefined) toast.success("Playing audio", { id: toastId, duration: 2000 });
+        if (toastId !== undefined) {
+          toast.success("Playing audio", { id: toastId, duration: 2000 });
+          toastId = undefined;
+        }
         return true;
       } catch {
-        if (toastId !== undefined) toast.dismiss(toastId);
-        return false;
+        return cancelled() ? null : false;
       } finally {
-        setIsPreparing(false);
+        if (toastId !== undefined) toast.dismiss(toastId);
+        if (!cancelled()) {
+          requestRef.current = null;
+          setIsPreparing(false);
+        }
       }
     },
     [shareToken, play],
   );
 
   const cancel = useCallback(() => {
-    abortRef.current = true;
+    requestRef.current = null;
+    setIsPreparing(false);
   }, []);
 
   return { start, cancel, isPreparing };

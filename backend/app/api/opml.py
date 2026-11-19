@@ -366,6 +366,10 @@ async def _import_feed_outline(
         category_id = await category_for_feed_type(db, feed_type)
     # The outline's own tuning wins; the category's defaults fill the rest.
     pipeline = await new_feed_settings(db, category_id, {f: extras.pop(f, None) for f in FEED_DEFAULT_FIELDS})
+    if feed_type == "bluesky" and isinstance(extras.get("adapter_config"), dict):
+        from app.api.feeds import _encrypt_bluesky_app_password
+
+        extras["adapter_config"] = _encrypt_bluesky_app_password(extras["adapter_config"])
     feed = Feed(
         title=title,
         url=xml_url,

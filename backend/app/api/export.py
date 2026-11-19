@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.content_disposition import attachment
 from app.core.exceptions import AppError
 from app.core.security import get_current_user
 from app.database import get_db
@@ -31,6 +32,11 @@ from app.services.markdown import (
 )
 
 router = APIRouter()
+
+
+def _safe_filename(raw: str | None, fallback: str) -> str:
+    return re.sub(r'[/\\"\r\n\x00-\x1f]+', "-", (raw or "").strip())[:50].strip(" .-") or fallback
+
 
 # entity_type -> attribute holding the entity's display name/identifier
 _ENTITY_NAME_ATTR = {
@@ -86,7 +92,7 @@ async def _build_research_bundle_zip(db: AsyncSession, entry_ids: list[uuid.UUID
                 content_text=entry.content_text,
                 content_html=entry.content_html,
             )
-            safe = (entry.title or str(entry.id))[:50].replace("/", "-").replace("\\", "-")
+            safe = _safe_filename(entry.title, str(entry.id))
             name, n = safe, 2
             while name in used_names:
                 name = f"{safe}-{n}"
@@ -236,13 +242,13 @@ async def export_entry(
         notes=notes or None,
     )
 
-    safe_title = entry.title[:50].replace("/", "-").replace("\\", "-")
+    safe_title = _safe_filename(entry.title, str(entry.id))
     filename = f"{safe_title}.md"
 
     return Response(
         content=md,
         media_type="text/markdown; charset=utf-8",
-        headers={"Content-Disposition": (f'attachment; filename="{filename}"')},
+        headers={"Content-Disposition": attachment(filename)},
     )
 
 
@@ -272,13 +278,13 @@ async def export_note(
         created_at=note.created_at.strftime("%Y-%m-%d"),
     )
 
-    safe_title = note.title[:50].replace("/", "-").replace("\\", "-")
+    safe_title = _safe_filename(note.title, str(note.id))
     filename = f"{safe_title}.md"
 
     return Response(
         content=md,
         media_type="text/markdown; charset=utf-8",
-        headers={"Content-Disposition": (f'attachment; filename="{filename}"')},
+        headers={"Content-Disposition": attachment(filename)},
     )
 
 
@@ -309,7 +315,8 @@ async def bulk_export(
     (under entries/ and notes/ folders). IDs that do not resolve are silently skipped."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # Export entries
+        # Export entries (deduplicating ZIP filenames)
+        used_entry_names: set[str] = set()
         for eid in body.entry_ids:
             result = await db.execute(select(Entry).where(Entry.id == eid))
             entry = result.scalar_one_or_none()
@@ -333,10 +340,16 @@ async def bulk_export(
                 content_text=entry.content_text,
                 content_html=entry.content_html,
             )
-            safe = entry.title[:50].replace("/", "-").replace("\\", "-")
-            zf.writestr(f"entries/{safe}.md", md)
+            safe = _safe_filename(entry.title, str(entry.id))
+            name, n = safe, 2
+            while name in used_entry_names:
+                name = f"{safe}-{n}"
+                n += 1
+            used_entry_names.add(name)
+            zf.writestr(f"entries/{name}.md", md)
 
-        # Export notes
+        # Export notes (deduplicating ZIP filenames)
+        used_note_names: set[str] = set()
         for nid in body.note_ids:
             result = await db.execute(
                 select(Note).where(
@@ -352,8 +365,13 @@ async def bulk_export(
                 content_markdown=note.content_markdown,
                 created_at=note.created_at.strftime("%Y-%m-%d"),
             )
-            safe = note.title[:50].replace("/", "-").replace("\\", "-")
-            zf.writestr(f"notes/{safe}.md", md)
+            safe = _safe_filename(note.title, str(note.id))
+            name, n = safe, 2
+            while name in used_note_names:
+                name = f"{safe}-{n}"
+                n += 1
+            used_note_names.add(name)
+            zf.writestr(f"notes/{name}.md", md)
 
     buf.seek(0)
     return Response(
@@ -394,7 +412,7 @@ async def export_entity_profile(
     return Response(
         content=md,
         media_type="text/markdown; charset=utf-8",
-        headers={"Content-Disposition": (f'attachment; filename="{filename_base}.md"')},
+        headers={"Content-Disposition": attachment(f"{filename_base}.md")},
     )
 
 
@@ -545,7 +563,7 @@ async def export_research_bundle(
     return Response(
         content=zip_bytes,
         media_type="application/zip",
-        headers={"Content-Disposition": (f'attachment; filename="{safe_name}.zip"')},
+        headers={"Content-Disposition": attachment(f"{safe_name}.zip")},
     )
 
 
@@ -572,5 +590,5 @@ async def export_campaign_bundle(
     return Response(
         content=zip_bytes,
         media_type="application/zip",
-        headers={"Content-Disposition": (f'attachment; filename="{safe_name}-bundle.zip"')},
+        headers={"Content-Disposition": attachment(f"{safe_name}-bundle.zip")},
     )

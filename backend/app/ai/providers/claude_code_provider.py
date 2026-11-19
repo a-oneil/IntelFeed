@@ -400,6 +400,7 @@ class ClaudeCodeProvider(AIProvider):
                 "--help",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=_scrubbed_env(),
             )
             out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
         except TimeoutError:
@@ -988,6 +989,7 @@ class ClaudeCodeProvider(AIProvider):
                 "--version",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=_scrubbed_env(),
             )
             out, err = await asyncio.wait_for(proc.communicate(), timeout=10)
             if proc.returncode != 0:

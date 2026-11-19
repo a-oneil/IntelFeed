@@ -187,8 +187,8 @@ export default function RuleDetailPage() {
       const quotes = seed?.quotes ?? [];
       setChangeDescription(
         next.length
-          ? `Covers: ${next
-              .sort()
+          ? `Covers: ${[...next]
+              .sort((a, b) => a - b)
               .map((n) => quotes[n]?.text.slice(0, 60) ?? text)
               .join(" · ")}`
           : ""
@@ -275,9 +275,22 @@ export default function RuleDetailPage() {
   const metaTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const initializedCreate = useRef(false);
 
+  // Abort in-flight AI chat stream and clear pending timers on unmount
+  useEffect(() => {
+    return () => {
+      chatAbortRef.current?.abort();
+      clearTimeout(validateTimerRef.current);
+      clearTimeout(metaTimerRef.current);
+    };
+  }, []);
+
   // Pre-fill from query params in create mode
   useEffect(() => {
-    if (!isCreateMode || initializedCreate.current) return;
+    if (!isCreateMode) {
+      initializedCreate.current = false;
+      return;
+    }
+    if (initializedCreate.current) return;
     initializedCreate.current = true;
 
     // Seeded from the coverage workspace: technique + quotes as a cited
@@ -304,7 +317,7 @@ export default function RuleDetailPage() {
       setTags(template.tags);
     }
     setHasChanges(true);
-  }, [isCreateMode, searchParams]);
+  }, [isCreateMode, searchParams, seed]);
 
   // Sync from server data
   useEffect(() => {

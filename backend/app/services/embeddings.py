@@ -136,6 +136,11 @@ async def pending_entries(db: AsyncSession, model: str, limit: int) -> list[dict
                 FROM entries e
                 LEFT JOIN entry_embeddings ee ON ee.entry_id = e.id AND ee.model = :model
                 WHERE ee.entry_id IS NULL
+                  AND COALESCE(
+                      NULLIF(BTRIM(e.title, E' \\t\\r\\n'), ''),
+                      NULLIF(BTRIM(e.summary, E' \\t\\r\\n'), ''),
+                      NULLIF(BTRIM(e.content_text, E' \\t\\r\\n'), '')
+                  ) IS NOT NULL
                 ORDER BY e.published_at DESC NULLS LAST
                 LIMIT :limit
                 """
@@ -160,6 +165,11 @@ async def stale_entries(db: AsyncSession, model: str, limit: int) -> list[dict]:
                 FROM entries e
                 JOIN entry_embeddings ee ON ee.entry_id = e.id
                 WHERE ee.model <> :model
+                  AND COALESCE(
+                      NULLIF(BTRIM(e.title, E' \\t\\r\\n'), ''),
+                      NULLIF(BTRIM(e.summary, E' \\t\\r\\n'), ''),
+                      NULLIF(BTRIM(e.content_text, E' \\t\\r\\n'), '')
+                  ) IS NOT NULL
                 ORDER BY e.published_at DESC NULLS LAST
                 LIMIT :limit
                 """

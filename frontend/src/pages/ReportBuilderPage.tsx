@@ -127,6 +127,21 @@ const SNIPPET_INSERTS: Array<{ label: string; snippet: string }> = [
   },
 ];
 
+/** Narrative sections still unwritten, or null when none are left (or there are none). */
+function narrativeProgress(report: { content?: unknown } | null | undefined): { done: number; total: number } | null {
+  if (!report) return null;
+  const content = report.content as Record<string, unknown>;
+  const secs = (content?.sections || {}) as Record<string, { body?: string; items?: unknown[] }>;
+  const narrativeKeys = Object.keys(secs).filter((k) => {
+    const s = secs[k];
+    return s && !s.items; // narrative sections don't have items
+  });
+  if (narrativeKeys.length === 0) return null;
+  const done = narrativeKeys.filter((k) => !!(secs[k]?.body)).length;
+  if (done === narrativeKeys.length) return null; // all done
+  return { done, total: narrativeKeys.length };
+}
+
 export function ReportBuilderPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -134,6 +149,7 @@ export function ReportBuilderPage() {
 
   // Track whether a generation is in-flight for polling
   const [isGenerating, setIsGenerating] = useState(false);
+  const awaitingRegenRef = useRef(false);
 
   // Data fetching
   const { data: report, isLoading, refetch } = useIntelReport(id);
@@ -510,9 +526,24 @@ export function ReportBuilderPage() {
 
   const doRegenerate = useCallback(() => {
     if (!id) return;
+    awaitingRegenRef.current = true;
     setIsGenerating(true);
-    regenerateAll.mutate(id);
-  }, [id, regenerateAll]);
+    regenerateAll.mutate(id, {
+      onSuccess: async () => {
+        // The server cleared the narrative sections before answering, so this
+        // refetch is authoritative. With nothing left unfinished (no narrative
+        // sections, or all already written) there is nothing to wait for — don't
+        // poll until a completion event that may never arrive.
+        const { data } = await refetch();
+        awaitingRegenRef.current = false;
+        if (!narrativeProgress(data)) setIsGenerating(false);
+      },
+      onError: () => {
+        awaitingRegenRef.current = false;
+        setIsGenerating(false);
+      },
+    });
+  }, [id, regenerateAll, refetch]);
 
   const handleRegenerateAll = () => {
     if (!id || regenerateAll.isPending) return;
@@ -576,19 +607,7 @@ export function ReportBuilderPage() {
       : "";
 
   // Generation progress: count narrative sections with/without body
-  const generationProgress = useMemo(() => {
-    if (!report) return null;
-    const content = report.content as Record<string, unknown>;
-    const secs = (content?.sections || {}) as Record<string, { body?: string; items?: unknown[] }>;
-    const narrativeKeys = Object.keys(secs).filter((k) => {
-      const s = secs[k];
-      return s && !s.items; // narrative sections don't have items
-    });
-    if (narrativeKeys.length === 0) return null;
-    const done = narrativeKeys.filter((k) => !!(secs[k]?.body)).length;
-    if (done === narrativeKeys.length) return null; // all done
-    return { done, total: narrativeKeys.length };
-  }, [report]);
+  const generationProgress = useMemo(() => narrativeProgress(report), [report]);
 
   // Poll for updates while generating
   useEffect(() => {
@@ -597,12 +616,23 @@ export function ReportBuilderPage() {
     return () => clearInterval(interval);
   }, [isGenerating, refetch]);
 
+  // Reset generation state when switching reports
+  useEffect(() => {
+    awaitingRegenRef.current = false;
+    setIsGenerating(false);
+  }, [id]);
+
   // Stop polling when generation completes (all sections filled)
   useEffect(() => {
-    if (isGenerating && !generationProgress) {
+    if (!isGenerating || regenerateAll.isPending) return;
+    if (generationProgress) {
+      awaitingRegenRef.current = false;
+      return;
+    }
+    if (!awaitingRegenRef.current) {
       setIsGenerating(false);
     }
-  }, [isGenerating, generationProgress]);
+  }, [isGenerating, generationProgress, regenerateAll.isPending]);
 
   // Stop polling when SSE signals generation done (handles error/partial cases)
   useEffect(() => {
@@ -610,6 +640,7 @@ export function ReportBuilderPage() {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.reportId === id) {
+        awaitingRegenRef.current = false;
         setIsGenerating(false);
         refetch();
       }

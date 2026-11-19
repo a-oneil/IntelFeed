@@ -50,8 +50,10 @@ Run by an MCP client, e.g. LM Studio's ~/.lmstudio/mcp.json:
 
 from __future__ import annotations
 
+import copy
 import html
 import json
+import math
 import os
 import re
 import sys
@@ -99,11 +101,16 @@ def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _env_int(name: str, default: int, minimum: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    return max(minimum, int(raw or default))
+
+
 ALLOW_WRITES = _env_flag("INTELFEED_MCP_ALLOW_WRITES")
 PROPOSE_WRITES = _env_flag("INTELFEED_MCP_PROPOSE_WRITES")
 WRITES_ON = ALLOW_WRITES or PROPOSE_WRITES
-RESULT_CHARS = max(2000, int(os.environ.get("INTELFEED_MCP_RESULT_CHARS", "7000")))
-DEFAULT_LIMIT = max(1, int(os.environ.get("INTELFEED_MCP_DEFAULT_LIMIT", "10")))
+RESULT_CHARS = _env_int("INTELFEED_MCP_RESULT_CHARS", 7000, 2000)
+DEFAULT_LIMIT = _env_int("INTELFEED_MCP_DEFAULT_LIMIT", 10, 1)
 LOG_PATH = os.environ.get("INTELFEED_MCP_LOG", "").strip()
 
 
@@ -324,7 +331,16 @@ class IntelFeed:
         self._registry_lock = threading.Lock()  # concurrent first calls share one fetch
         self.registry_source = "not loaded"
 
-    def _http(self, method: str, path: str, body: dict | None = None, *, auth: bool = True, timeout: int = 120):
+    def _http(
+        self,
+        method: str,
+        path: str,
+        body: dict | None = None,
+        *,
+        auth: bool = True,
+        timeout: int = 120,
+        token: str | None = None,
+    ):
         if self.config_error:
             raise ToolError(self.config_error + " Tell the user.")
         headers = {"User-Agent": f"IntelFeed-MCP/{SERVER_VERSION}"}
@@ -332,8 +348,10 @@ class IntelFeed:
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
-        if auth and self._access:
-            headers["Authorization"] = f"Bearer {self._access}"
+        if auth:
+            bearer = self._access if token is None else token
+            if bearer:
+                headers["Authorization"] = f"Bearer {bearer}"
         req = urllib.request.Request(self.api_url + path, data=data, headers=headers, method=method)
         try:
             with _OPENER.open(req, timeout=timeout) as resp:
@@ -384,11 +402,14 @@ class IntelFeed:
         with self._lock:
             if not self._access:
                 self._login()
-        status, data = self._http(method, path, body, timeout=timeout)
+            used_token = self._access
+        status, data = self._http(method, path, body, timeout=timeout, token=used_token)
         if status == 401:
             with self._lock:
-                self._renew()
-            status, data = self._http(method, path, body, timeout=timeout)
+                if self._access == used_token:
+                    self._renew()
+                used_token = self._access
+            status, data = self._http(method, path, body, timeout=timeout, token=used_token)
         return status, data
 
     def execute(self, tool: str, args: dict) -> str:
@@ -453,6 +474,25 @@ class IntelFeed:
 UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 HANDLE_RE = re.compile(r"^u\d+$")
 
+# These registry selectors accept UUIDs or natural keys without an *_id name.
+# Keep them scoped to their tools: a sector filter or ordinary text may itself
+# contain "u1" and must not be rewritten just because a handle exists.
+_HANDLE_PARAMS_BY_TOOL = {
+    "get_observable": ("observable",),
+    "get_coverage_workspace": ("entity_key",),
+    "get_sector": ("sector",),
+    "sector_victims": ("sector",),
+    "who_targets_sector": ("sector",),
+    "set_target_sector": ("sector",),
+    "merge_entities": ("keeper", "merge"),
+    "remove_entity_aliases": ("entity",),
+}
+
+
+def _is_id_key(key: str) -> bool:
+    low = key.lower()
+    return low == "id" or low == "ids" or low.endswith(("_id", "_ids"))
+
 
 class Handles:
     def __init__(self) -> None:
@@ -470,12 +510,15 @@ class Handles:
                 self._by_handle[h] = key
             return h
 
-    def resolve(self, value: Any) -> Any:
-        """Replace handles with UUIDs anywhere in an argument value."""
+    def resolve(self, value: Any, *, _in_id: bool | None = None) -> Any:
+        """Replace handles with UUIDs in bare strings and id-keyed argument fields."""
         if isinstance(value, str):
+            if _in_id is False:
+                return value
             v = value.strip()
             if HANDLE_RE.match(v):
-                full = self._by_handle.get(v)
+                with self._lock:
+                    full = self._by_handle.get(v)
                 if full is None:
                     raise ToolError(
                         f"Unknown id handle '{v}'. Handles reset when the server restarts; "
@@ -484,9 +527,15 @@ class Handles:
                 return full
             return value
         if isinstance(value, list):
-            return [self.resolve(v) for v in value]
+            return [self.resolve(v, _in_id=_in_id) for v in value]
         if isinstance(value, dict):
-            return {k: self.resolve(v) for k, v in value.items()}
+            return {
+                k: self.resolve(
+                    v,
+                    _in_id=bool((isinstance(k, str) and _is_id_key(k)) or _in_id is True),
+                )
+                for k, v in value.items()
+            }
         return value
 
 
@@ -978,14 +1027,17 @@ def _coerce(value: Any, spec: dict, pname: str, sig: str) -> Any:
         if t == "integer" and not isinstance(value, bool):
             value = int(float(value))
         elif t == "number" and not isinstance(value, bool):
-            value = float(value)
+            num = float(value)
+            if not math.isfinite(num):
+                raise ValueError("non-finite")
+            value = num
         elif t == "boolean" and isinstance(value, str):
             value = value.strip().lower() in ("1", "true", "yes", "on")
         elif t == "array" and isinstance(value, str):
             value = [v.strip() for v in value.split(",") if v.strip()]
         elif t == "string" and isinstance(value, (int, float)) and not isinstance(value, bool):
             value = str(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         raise ToolError(f"'{pname}' must be {t}. Usage: {sig}")
     allowed = _enum(spec)
     if allowed:
@@ -1255,7 +1307,7 @@ class Server:
         self.handles = Handles()
         self.store = ResultStore()
         self.skills = load_skills()
-        self.tools = [dict(t) for t in CORE_TOOLS]
+        self.tools = copy.deepcopy(CORE_TOOLS)
         for t in self.tools:
             if t["name"] == "load_skill":
                 listing = "; ".join(f"{s['name']}: {s['description']}" for s in self.skills.values())
@@ -1264,9 +1316,9 @@ class Server:
                 )
                 t["inputSchema"]["properties"]["name"]["enum"] = list(self.skills)
         if PROPOSE_WRITES:
-            self.tools.append(PROPOSE_WRITE_TOOL_DEF)
+            self.tools.append(copy.deepcopy(PROPOSE_WRITE_TOOL_DEF))
         elif ALLOW_WRITES:
-            self.tools.append(WRITE_TOOL_DEF)
+            self.tools.append(copy.deepcopy(WRITE_TOOL_DEF))
 
     # -- result formatting -------------------------------------------------
 
@@ -1326,6 +1378,9 @@ class Server:
                 f"'{tool}' is not on this connection's reviewed read-only list (READ_ONLY_TOOLS), so it can't run."
             )
         args = self.handles.resolve(args or {})
+        for param in _HANDLE_PARAMS_BY_TOOL.get(tool, ()):
+            if param in args:
+                args[param] = self.handles.resolve(args[param])
         clean, notes = check_args(tool, definition, args)
         started = time.monotonic()
         raw = self.intelfeed.execute(tool, clean)
@@ -1394,6 +1449,8 @@ class Server:
             return self.run_registry_tool(tool, {param: self.resolve_entity(etype, args["id"], public_id_ok=True)})
         if name == "pivot_entity":
             etype = str(args.get("entity_type", "")).strip().lower()
+            if etype not in PIVOT_TYPES:
+                raise ToolError(f"entity_type must be one of {PIVOT_TYPES}.")
             if not args.get("entity_id"):
                 raise ToolError("entity_id is required.")
             call_args = {k: v for k, v in args.items() if k != "entity_id"}
@@ -1464,6 +1521,7 @@ class Transport:
         self.server = server
         self.out = out or sys.stdout
         self._write_lock = threading.Lock()
+        self._calls_lock = threading.Lock()
         self._calls: set[threading.Thread] = set()
 
     def send(self, msg: dict) -> None:
@@ -1505,7 +1563,8 @@ class Transport:
             self.reply(msg_id, {"tools": self.server.tools})
         elif method == "tools/call":
             worker = threading.Thread(target=self._call, args=(msg_id, params), daemon=True)
-            self._calls.add(worker)
+            with self._calls_lock:
+                self._calls.add(worker)
             worker.start()
         elif method in ("resources/list", "resources/templates/list", "prompts/list"):
             key = {
@@ -1527,8 +1586,11 @@ class Transport:
         except Exception as e:  # noqa: BLE001 — never let one call kill the server
             text, is_error = f"Error: internal failure in {name} ({type(e).__name__}: {e})", True
             log(traceback.format_exc())
-        self.reply(msg_id, {"content": [{"type": "text", "text": text}], "isError": is_error})
-        self._calls.discard(threading.current_thread())
+        try:
+            self.reply(msg_id, {"content": [{"type": "text", "text": text}], "isError": is_error})
+        finally:
+            with self._calls_lock:
+                self._calls.discard(threading.current_thread())
 
     def serve(self, stream=None) -> None:
         stream = stream or sys.stdin
@@ -1550,7 +1612,9 @@ class Transport:
                         if "id" in m:
                             self.error(m.get("id"), -32603, f"Internal error: {e}")
         # stdin closed: let in-flight tool calls send their replies before exiting.
-        for worker in list(self._calls):
+        with self._calls_lock:
+            workers = list(self._calls)
+        for worker in workers:
             worker.join(timeout=150)
 
 

@@ -57,7 +57,8 @@ async def test_execute_tool_success(client: AsyncClient, auth_headers: dict):
     """Test executing a tool with a mocked handler to avoid DB side effects."""
     mock_result = {"entries": [], "total": 0}
 
-    with patch("app.api.tools.execute_tool", new_callable=AsyncMock) as mock_exec:
+    # The endpoint runs tools through gate.execute_isolated (a savepoint per call).
+    with patch("app.tools.gate.execute_tool", new_callable=AsyncMock) as mock_exec:
         mock_exec.return_value = '{"entries": [], "total": 0}'
         resp = await client.post(
             "/api/tools/execute",
@@ -76,7 +77,7 @@ async def test_execute_tool_success(client: AsyncClient, auth_headers: dict):
 @pytest.mark.asyncio
 async def test_execute_tool_default_args(client: AsyncClient, auth_headers: dict):
     """Verify that omitting args defaults to empty dict."""
-    with patch("app.api.tools.execute_tool", new_callable=AsyncMock) as mock_exec:
+    with patch("app.tools.gate.execute_tool", new_callable=AsyncMock) as mock_exec:
         mock_exec.return_value = '{"ok": true}'
         resp = await client.post(
             "/api/tools/execute",

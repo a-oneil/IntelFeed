@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -687,3 +688,65 @@ def test_propose_mode_offers_every_write_through_write_action(monkeypatch):
     # Reads still go through call_tool, and write_action won't run one.
     with pytest.raises(m.ToolError, match="call_tool"):
         server.call("write_action", {"tool": "search_entries", "args": {}})
+
+
+def test_handles_preserve_non_id_text_fields():
+    server, fake = new_server({"search_entries": search_result(1), "get_entry": {"id": UUID_A, "title": "x"}})
+    # Searching or filtering by free-text "u1" or "u99" must not rewrite text or raise unknown-handle.
+    server.call("search_entries", {"query": "u1"})
+    assert fake.calls[-1] == ("search_entries", {"query": "u1", "limit": 10})
+    assert server.handles.resolve({"query": "u1", "tags": ["u99"], "filters": {"feed_id": "u1", "q": "u99"}}) == {
+        "query": "u1",
+        "tags": ["u99"],
+        "filters": {"feed_id": UUID_A, "q": "u99"},
+    }
+    # Bare strings (used by resolve_entity) and *_id keys still resolve handles.
+    assert server.handles.resolve("u1") == UUID_A
+
+
+def test_pivot_rejects_invalid_entity_type_before_search():
+    server, fake = new_server()
+    with pytest.raises(m.ToolError, match="entity_type must be one of"):
+        server.call("pivot_entity", {"entity_type": "campaign", "entity_id": "Op X"})
+    assert fake.calls == []
+
+
+def test_concurrent_401_renews_once(monkeypatch):
+    client = m.IntelFeed(api_url="http://localhost:8000", username="u", password="p")
+    client._access = "token-0"
+    renew_calls = 0
+    first_wave = threading.Barrier(4)
+
+    def fake_renew():
+        nonlocal renew_calls
+        renew_calls += 1
+        client._access = "token-1"
+
+    def fake_http(method, path, body=None, *, auth=True, timeout=120, token=None):
+        used = client._access if token is None else token
+        if used == "token-0":
+            first_wave.wait(timeout=5)
+            return 401, {"detail": "expired"}
+        return 200, {"ok": True, "token": used}
+
+    monkeypatch.setattr(client, "_renew", fake_renew)
+    monkeypatch.setattr(client, "_http", fake_http)
+
+    results = []
+    errors = []
+
+    def worker():
+        try:
+            results.append(client._authed("GET", "/api/ping"))
+        except Exception as exc:  # pragma: no cover - surfaced in assertion below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert not errors
+    assert renew_calls == 1
+    assert results == [(200, {"ok": True, "token": "token-1"})] * 4
