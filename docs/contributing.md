@@ -475,7 +475,7 @@ GitHub Actions runs one workflow, `.github/workflows/ci.yml`, on every pull requ
 | `backend` | `backend/**` changed | Lockfiles match `pyproject.toml` (`./lock.sh` + `git diff`); `ruff check`; `ruff format --check`; exactly one migration head; `alembic upgrade head` on a fresh database, then `downgrade -1` and back up; `pytest`. Uses PostgreSQL 16 + pgvector and Redis 7 service containers |
 | `frontend` | `frontend/**` changed | `pnpm install --frozen-lockfile`, `pnpm lint`, `pnpm build`, `pnpm test`, and a bundle-size report (not a gate) |
 | `android` | `android/**` changed (not on the Monday sweep) | Gradle unit tests and a debug APK. On `main`, publishes a release when `android/version.properties` has a new version |
-| `images` | A Dockerfile, lockfile, `package.json`, `nginx.conf`, compose file or `.env.example` changed | Builds the backend, frontend and db images (no push) and validates both compose files |
+| `images` | A Dockerfile, lockfile, `package.json`, an nginx config, compose file or `.env.example` changed | Builds the backend, frontend and db images (no push) and validates both compose files |
 | `security` | Always | `gitleaks` secret scan; `scripts/dev/check_doc_links.py` and `scripts/dev/check_doc_refs.py`; `pip-audit` and `pnpm audit --prod` when a manifest changed or on the Monday sweep |
 | `CI` | Always | Passes only if nothing above failed. This is the one required check |
 
