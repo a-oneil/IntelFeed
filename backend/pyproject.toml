@@ -80,6 +80,17 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["app*"]
 
+# Supply-chain cooldown: ./lock.sh never picks a release less than 7 days old.
+# A hijacked maintainer account or typo-squat upload is usually caught and
+# yanked inside that window, so we resolve to versions that have survived it.
+# The cutoff only ever moves forward, so a lock that passed once keeps passing
+# the CI drift check. To take an urgent security fix early, exempt just that
+# package with a reason, e.g.
+#   [tool.uv.exclude-newer-package]
+#   certifi = false  # 2026.10.19 drops the leaked eMudhra root; remove after 10-27
+[tool.uv]
+exclude-newer = "7 days"
+
 [tool.ruff]
 # Deliberately lags requires-python. Bumping this to py314 is not a no-op: it
 # turns on UP043 (25 findings) and changes formatter output across 45 files.

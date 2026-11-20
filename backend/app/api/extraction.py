@@ -118,6 +118,9 @@ class ExtractionStats(BaseModel):
     likely_duplicates: int
     auto_confirmed: int
     by_type: dict[str, int]
+    # Every AI-created entity's computed status, across all time: the counts
+    # of what each Review lens lists.
+    by_status: dict[str, int]
     window: str
 
 
@@ -311,14 +314,17 @@ async def extraction_stats(
     now = _now()
     rows = await _fetch_rows(db, list(AI_TYPES), None, None)
     dup = await _duplicate_map(db, list(AI_TYPES))
+    related = await _related_ids(db, rows)
 
     win_start = None if days is None else now - timedelta(days=days)
     prev_start = None if days is None else now - timedelta(days=days * 2)
 
     by_type: dict[str, int] = defaultdict(int)
+    by_status: dict[str, int] = defaultdict(int)
     created_window = created_prev = needs_review = orphaned = auto_confirmed = 0
     for r in rows:
         fs = r["first_seen_at"]
+        by_status[_status(r, dup, related, now)] += 1
         if win_start is None or fs >= win_start:
             by_type[r["entity_type"]] += 1  # the list's window, so a type's count is what it opens
         if r["needs_review"]:
@@ -341,6 +347,7 @@ async def extraction_stats(
         likely_duplicates=len(dup),
         auto_confirmed=auto_confirmed,
         by_type=dict(by_type),
+        by_status=dict(by_status),
         window=window,
     )
 

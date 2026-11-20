@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { EngineSection } from "../engine/EngineSection";
@@ -8,11 +8,13 @@ import { EngineSection } from "../engine/EngineSection";
 // wiring: default matrix, jobs/feeds/plans browse views, legacy deep links.
 vi.mock("../engine/EngineMatrix", () => ({
   MATRIX_VIEWS: ["entries", "entities", "links", "relationships", "review", "feeds"],
+  REVIEW_LENSES: ["proposals", "unconfirmed", "duplicates", "orphans", "stale", "relationships", "history"],
   EngineMatrix: ({
     initialView,
     initialOpenStage,
     initialStage,
     initialStatus,
+    initialLens,
     onBrowse,
     onHighlightSetting,
   }: {
@@ -20,6 +22,7 @@ vi.mock("../engine/EngineMatrix", () => ({
     initialOpenStage?: string | null;
     initialStage?: string;
     initialStatus?: string;
+    initialLens?: string;
     onBrowse: (v: string) => void;
     onHighlightSetting: (key: string) => void;
   }) => (
@@ -29,6 +32,7 @@ vi.mock("../engine/EngineMatrix", () => ({
       data-openstage={initialOpenStage ?? ""}
       data-stage={initialStage ?? ""}
       data-status={initialStatus ?? ""}
+      data-lens={initialLens ?? ""}
     >
       <button onClick={() => onBrowse("jobs")}>browse-jobs</button>
       <button onClick={() => onBrowse("plans")}>browse-plans</button>
@@ -109,6 +113,14 @@ describe("EngineSection", () => {
   it("opens a console tab from ?view=", () => {
     renderSection("?view=entities");
     expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-view", "entities");
+  });
+
+  it("opens a Review lens from ?lens=, and ignores an unknown one", () => {
+    renderSection("?view=review&lens=orphans");
+    expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-lens", "orphans");
+    cleanup();
+    renderSection("?view=review&lens=nope");
+    expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-lens", "");
   });
 
   it("ignores an unknown ?view=", () => {

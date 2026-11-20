@@ -28,6 +28,14 @@ from app.schemas.entity_relationship import (
 router = APIRouter()
 
 
+def unreviewed_relationship_condition():
+    """Edges the machine drew that nobody has judged: an analyst confirming or
+    rejecting one changes its source, the adjudicator sets its verdict."""
+    from app.services.entry_adjudication import REVIEWABLE_EDGE_SOURCES
+
+    return EntityRelationship.source.in_(REVIEWABLE_EDGE_SOURCES) & EntityRelationship.adjudication_verdict.is_(None)
+
+
 async def _invalidate_rel_caches(rel: EntityRelationship) -> None:
     """Drop cached pivots/graphs for both endpoints — they embed the
     relationship's verb, confidence and provenance."""
@@ -131,6 +139,11 @@ async def list_entity_relationships(
     all_confidence: bool = Query(
         False, description="Ignore the min-confidence display setting and return every stored edge."
     ),
+    unreviewed: bool = Query(
+        False,
+        description="Only machine-made edges (auto_extracted, co_occurrence) that neither an analyst nor the "
+        "adjudicator has judged yet.",
+    ),
     limit: int = Query(50, ge=1, le=500, description="Maximum relationships per page."),
     offset: int = Query(0, ge=0, description="Number of relationships to skip for pagination."),
     user: User = Depends(get_viewer),
@@ -181,6 +194,11 @@ async def list_entity_relationships(
 
     if evidence_entry_id is not None:
         condition = EntityRelationship.evidence_entry_ids.any(evidence_entry_id)
+        base = base.where(condition)
+        count_base = count_base.where(condition)
+
+    if unreviewed:
+        condition = unreviewed_relationship_condition()
         base = base.where(condition)
         count_base = count_base.where(condition)
 

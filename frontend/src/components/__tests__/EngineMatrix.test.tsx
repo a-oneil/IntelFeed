@@ -16,9 +16,13 @@ vi.mock("@/hooks/useEngine", async (importOriginal) => ({
   useRetryPipelineErrors: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 vi.mock("@/hooks/useExtraction", () => ({
-  useExtractionStats: () => ({ data: { likely_duplicates: 3, total_created: 10 } }),
+  useExtractionStats: () => ({
+    data: { total_created: 10, by_status: { dupe: 3, review: 4, orphan: 2, stale: 1 } },
+  }),
 }));
-vi.mock("@/hooks/useAutolinking", () => ({ useEntityLinkStats: () => ({ data: undefined }) }));
+vi.mock("@/hooks/useAutolinking", () => ({
+  useEntityLinkStats: () => ({ data: { total: 0, relationships_total: 9, relationships_unreviewed: 5 } }),
+}));
 vi.mock("@/hooks/useHygiene", () => ({ useHygieneStats: () => ({ data: undefined }) }));
 vi.mock("@/hooks/useAnalytics", () => ({ useFeedHealth: () => ({ data: undefined }) }));
 vi.mock("@/hooks/useFeeds", () => ({ useFeeds: () => ({ data: [] }) }));
@@ -31,12 +35,14 @@ vi.mock("../engine/ProposalsQueue", () => ({
   ),
 }));
 vi.mock("../engine/ExtractionTab", () => ({
-  ExtractionTab: ({ window, initialStatus }: { window: string; initialStatus: string }) => (
-    <div data-testid="entities" data-window={window} data-status={initialStatus} />
+  ExtractionTab: ({ window, status = "all" }: { window: string; status?: string }) => (
+    <div data-testid="entities" data-window={window} data-status={status} />
   ),
 }));
 vi.mock("../engine/AutolinkingSection", () => ({
-  AutolinkingSection: ({ hours }: { hours?: number }) => <div data-testid="links" data-hours={String(hours)} />,
+  AutolinkingSection: ({ hours, unreviewed }: { hours?: number; unreviewed?: boolean }) => (
+    <div data-testid="links" data-hours={String(hours)} data-unreviewed={String(!!unreviewed)} />
+  ),
 }));
 vi.mock("../engine/EngineSettingsSearch", () => ({ EngineSettingsSearch: () => null }));
 vi.mock("../engine/EngineSwitch", () => ({
@@ -74,11 +80,32 @@ describe("EngineMatrix", () => {
     expect(screen.queryByTestId("stage-panel")).toBeNull();
   });
 
-  it("puts the window back once the duplicates list closes", () => {
+  it("counts every Review lens on the Review tab, with no separate duplicates chip", () => {
     renderMatrix();
-    fireEvent.click(screen.getByText(/duplicate candidates/));
+    // 3 dupe + 4 review + 2 orphan + 1 stale + 5 unjudged edges.
+    expect(tab("Review")).toHaveTextContent("Review15");
+    expect(screen.queryByText(/duplicate candidates/)).toBeNull();
+  });
+
+  it("has one Needs you shortcut for Review, opening the first lens with something in it", () => {
+    renderMatrix();
+    expect(screen.queryByText(/to reclassify/)).toBeNull();
+    expect(screen.queryByText(/adjudication verdicts/)).toBeNull();
+    fireEvent.click(screen.getByText(/to review/));
+    // Proposals is empty here (no hygiene stats), so it opens Unconfirmed.
+    expect(new URL(window.location.href).searchParams.get("view")).toBe("review");
+    expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "review");
+  });
+
+  it("opens the duplicate candidates as a Review lens, over all time", () => {
+    renderMatrix();
+    fireEvent.click(tab("Review"));
+    fireEvent.click(screen.getByRole("button", { name: /^Duplicates/ }));
     expect(screen.getByTestId("entities")).toHaveAttribute("data-window", "all");
     expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "dupe");
+    expect(new URL(window.location.href).searchParams.get("view")).toBe("review");
+    expect(new URL(window.location.href).searchParams.get("lens")).toBe("duplicates");
+    // The console's own window is untouched.
     fireEvent.click(tab("Links"));
     expect(screen.getByTestId("links")).toHaveAttribute("data-hours", "24");
     fireEvent.click(tab("Entities"));
@@ -86,12 +113,25 @@ describe("EngineMatrix", () => {
     expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "all");
   });
 
-  it("keeps a window the analyst picked while the duplicates list was open", () => {
+  it("lists each entity status and the unjudged edges as their own Review lens, over all time", () => {
+    renderMatrix("review");
+    fireEvent.click(screen.getByRole("button", { name: /^Unconfirmed/ }));
+    expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "review");
+    expect(screen.getByTestId("entities")).toHaveAttribute("data-window", "all");
+    fireEvent.click(screen.getByRole("button", { name: /^Orphans/ }));
+    expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "orphan");
+    fireEvent.click(screen.getByRole("button", { name: /^Stale/ }));
+    expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "stale");
+    expect(new URL(window.location.href).searchParams.get("lens")).toBe("stale");
+    fireEvent.click(screen.getByRole("button", { name: /^Relationships5/ }));
+    expect(screen.getByTestId("links")).toHaveAttribute("data-unreviewed", "true");
+    expect(screen.getByTestId("links")).toHaveAttribute("data-hours", "undefined");
+  });
+
+  it("lists every status on Entities, with no status picker of its own", () => {
     renderMatrix();
-    fireEvent.click(screen.getByText(/duplicate candidates/));
-    fireEvent.click(screen.getByRole("button", { name: "7d" }));
-    fireEvent.click(tab("Links"));
-    expect(screen.getByTestId("links")).toHaveAttribute("data-hours", String(7 * 24));
+    fireEvent.click(tab("Entities"));
+    expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "all");
   });
 
   it("writes the open tab into the URL, so Back returns to it", () => {

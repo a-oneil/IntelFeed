@@ -628,3 +628,46 @@ async def test_list_filters_by_age_in_hours(client: AsyncClient, auth_headers: d
     )
     ids = {r["id"] for r in resp.json()["items"]}
     assert str(new.id) in ids and str(old.id) not in ids
+
+
+@pytest.mark.asyncio
+async def test_unreviewed_lists_only_machine_edges_nobody_judged(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    """Review's Relationships lens: machine-made edges with no analyst decision
+    and no adjudicator verdict, and the link stats count the same set."""
+
+    def edge(source: str, verdict: str | None = None) -> EntityRelationship:
+        return EntityRelationship(
+            source_type="threat_actor",
+            source_id=uuid.uuid4(),
+            target_type="tool",
+            target_id=uuid.uuid4(),
+            relationship_type="uses",
+            confidence="probable",
+            source=source,
+            adjudication_verdict=verdict,
+        )
+
+    open_ai, open_cooc = edge("auto_extracted"), edge("co_occurrence")
+    judged = [
+        edge("auto_extracted", "corroborated"),
+        edge("co_occurrence", "coincidental"),
+        edge("analyst_confirmed"),
+        edge("analyst_rejected"),
+        edge("analyst_created"),
+        edge("external_feed"),
+    ]
+    db_session.add_all([open_ai, open_cooc, *judged])
+    await db_session.flush()
+
+    resp = await client.get(
+        "/api/entity-relationships", params={"unreviewed": True, "all_confidence": True}, headers=auth_headers
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert {r["id"] for r in body["items"]} == {str(open_ai.id), str(open_cooc.id)}
+    assert body["total"] == 2
+
+    stats = (await client.get("/api/entity-links/stats", headers=auth_headers)).json()
+    assert stats["relationships_unreviewed"] == 2

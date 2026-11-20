@@ -29,13 +29,6 @@ import { confirmDialog, promptDialog } from "@/utils/dialog";
 
 const ALL_TYPES: ExtractionType[] = ["threat_actor", "malware", "cve", "tool", "ttp", "observable"];
 type EntityStatus = "all" | "review" | "orphan" | "dupe" | "stale";
-const STATUSES: { key: EntityStatus; label: string }[] = [
-  { key: "all", label: "Any status" },
-  { key: "review", label: "Needs review" },
-  { key: "orphan", label: "Orphans (no links)" },
-  { key: "dupe", label: "Likely duplicates" },
-  { key: "stale", label: "Stale" },
-];
 
 const CONF_BAR: Record<string, { pct: number; cls: string }> = {
   high: { pct: 92, cls: styles.confHigh },
@@ -47,15 +40,15 @@ const PAGE_SIZE = 50;
 const EMPTY_ITEMS: ExtractionEntity[] = [];
 
 export function ExtractionTab({
-  initialStatus = "all",
+  status = "all",
   window: timeWindow,
 }: {
-  initialStatus?: EntityStatus;
+  /** One status only: each of Review's entity lenses lists one; Entities lists them all. */
+  status?: EntityStatus;
   /** The console's time picker: entities first seen in this window. */
   window: NonNullable<ExtractionParams["window"]>;
 }) {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<EntityStatus>(initialStatus);
   const [entityType, setEntityType] = useState<ExtractionType | "">("");
   const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
@@ -82,7 +75,7 @@ export function ExtractionTab({
   // No type picked means every type is in play, which the API expects as no filter at all.
   const effectiveTypes = useMemo(() => (entityType ? [entityType] : undefined), [entityType]);
 
-  const { data: stats } = useExtractionStats(timeWindow);
+  const { data: stats } = useExtractionStats(timeWindow, status === "all");
   const { data, isLoading, isFetching } = useExtractionEntities({
     types: effectiveTypes,
     status,
@@ -382,24 +375,12 @@ export function ExtractionTab({
           <option value="">All entity types</option>
           {ALL_TYPES.map((t) => (
             <option key={t} value={t}>
-              {TYPE_LABELS[t]} ({(stats?.by_type[t] ?? 0).toLocaleString()})
+              {TYPE_LABELS[t]}
+              {/* The per-type counts cover every status, so only the full list shows them. */}
+              {status === "all" && ` (${(stats?.by_type[t] ?? 0).toLocaleString()})`}
             </option>
           ))}
         </select>
-
-        <select
-          className={styles.filt}
-          aria-label="Status"
-          value={status}
-          onChange={(e) => resetTo(() => setStatus(e.target.value as EntityStatus))}
-        >
-          {STATUSES.map((s) => (
-            <option key={s.key} value={s.key}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-
       </div>
 
       {/* bulk bar */}

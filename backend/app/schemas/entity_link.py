@@ -74,3 +74,5 @@ class EntityLinkStats(BaseModel):
     # because the entry's feed gets no AI analysis to confirm them.
     pending_dropped_ai_off: int = 0
     relationships_total: int
+    # Machine-made edges nobody has judged (Review's Relationships lens).
+    relationships_unreviewed: int = 0

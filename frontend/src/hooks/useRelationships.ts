@@ -112,6 +112,7 @@ export function useDeleteRelationship() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["relationships"] });
+      qc.invalidateQueries({ queryKey: ["entity-links", "stats"] });
     },
   });
 }
@@ -168,6 +169,8 @@ export function useConfirmRelationship() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["relationships"] });
       qc.invalidateQueries({ queryKey: ["pivot"] });
+      // Review's Relationships badge counts the edges nobody has judged.
+      qc.invalidateQueries({ queryKey: ["entity-links", "stats"] });
     },
   });
 }
@@ -182,6 +185,8 @@ export function useRejectRelationship() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["relationships"] });
       qc.invalidateQueries({ queryKey: ["pivot"] });
+      // Review's Relationships badge counts the edges nobody has judged.
+      qc.invalidateQueries({ queryKey: ["entity-links", "stats"] });
     },
   });
 }
