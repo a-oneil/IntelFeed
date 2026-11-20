@@ -1,0 +1,5 @@
+# Supply-chain cooldown: pnpm won't resolve a version published less than
+# 7 days ago (value in minutes), mirroring exclude-newer in
+# backend/pyproject.toml. To take an urgent fix early, list just that package
+# under minimumReleaseAgeExclude with a comment saying why and until when.
+minimumReleaseAge: 10080
