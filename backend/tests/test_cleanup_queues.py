@@ -195,8 +195,9 @@ async def test_status_counts_match_each_status_list(client, admin_headers, db_se
     that status's count in the stats."""
     db_session.add_all(
         [
-            Tool(name="Orphaned Tool", created_via="ai_extraction"),
-            ThreatActor(name="Lonely Actor", created_via="ai_extraction", needs_review=True),
+            # article_count defaults to 1, so an orphan has to say it has none.
+            Tool(name="Orphaned Tool", created_via="ai_extraction", article_count=0),
+            ThreatActor(name="Lonely Actor", created_via="ai_extraction", needs_review=True, article_count=0),
         ]
     )
     await db_session.commit()
