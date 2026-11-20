@@ -39,6 +39,8 @@ export interface ExtractionStats {
   auto_confirmed: number;
   /** Entities per type first seen in the window, what the list shows for each. */
   by_type: Partial<Record<ExtractionType, number>>;
+  /** Every AI-created entity's status, across all time: what each Review lens lists. */
+  by_status: Partial<Record<ExtractionStatus, number>>;
   window: string;
 }
 
@@ -101,13 +103,14 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
   observable: "Observable",
 };
 
-export function useExtractionStats(window: ExtractionParams["window"] = "7d") {
+export function useExtractionStats(window: ExtractionParams["window"] = "7d", enabled = true) {
   return useQuery({
     queryKey: ["extraction", "stats", window],
     queryFn: async () => {
       const { data } = await api.get<ExtractionStats>("/engine/extraction/stats", { params: { window } });
       return data;
     },
+    enabled,
   });
 }
 

@@ -174,6 +174,8 @@ async def test_not_duplicate_drops_the_pair(client, admin_headers, db_session):
     before = (await client.get("/api/engine/extraction/stats?window=all", headers=admin_headers)).json()
     listed = (await client.get("/api/engine/extraction/entities?status=dupe&window=all", headers=admin_headers)).json()
     assert before["likely_duplicates"] == 2
+    # Review's Duplicates lens badge counts what the list shows.
+    assert before["by_status"]["dupe"] == listed["total"] == 2
     row = next(r for r in listed["items"] if r["id"] == str(a.id))
     assert row["duplicate_of_id"] == str(b.id)
 
@@ -185,6 +187,26 @@ async def test_not_duplicate_drops_the_pair(client, admin_headers, db_session):
     assert resp.status_code == 200, resp.text
     after = (await client.get("/api/engine/extraction/stats?window=all", headers=admin_headers)).json()
     assert after["likely_duplicates"] == 0
+    assert after["by_status"].get("dupe", 0) == 0
+
+
+async def test_status_counts_match_each_status_list(client, admin_headers, db_session):
+    """Each Review entity lens lists one status over all time; its badge is
+    that status's count in the stats."""
+    db_session.add_all(
+        [
+            Tool(name="Orphaned Tool", created_via="ai_extraction"),
+            ThreatActor(name="Lonely Actor", created_via="ai_extraction", needs_review=True),
+        ]
+    )
+    await db_session.commit()
+    stats = (await client.get("/api/engine/extraction/stats?window=all", headers=admin_headers)).json()
+    for status in ("review", "orphan", "dupe", "stale", "linked"):
+        listed = (
+            await client.get(f"/api/engine/extraction/entities?status={status}&window=all", headers=admin_headers)
+        ).json()
+        assert stats["by_status"].get(status, 0) == listed["total"], status
+    assert stats["by_status"].get("orphan", 0) >= 2
 
 
 async def _seed_unlinks(db_session, feed):

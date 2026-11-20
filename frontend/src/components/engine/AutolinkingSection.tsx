@@ -120,6 +120,7 @@ export function AutolinkingSection({
   embedded = false,
   view: viewProp,
   hours,
+  unreviewed = false,
 }: {
   /** Render inside the Engine console card: no KPI tiles, no view toggle
    *  (the parent's tabs control links vs relationships). */
@@ -127,6 +128,8 @@ export function AutolinkingSection({
   /** Only rows from the last N hours (the console's time picker); every row when unset. */
   hours?: number;
   view?: View;
+  /** Relationships: only machine-made edges nobody has judged (Review's Relationships lens). */
+  unreviewed?: boolean;
 }) {
   const navigate = useNavigate();
   const [view, setView] = useState<View>(viewProp ?? "links");
@@ -176,6 +179,7 @@ export function AutolinkingSection({
     {
       entity_type: entityType || undefined,
       hours,
+      unreviewed,
       limit: PAGE,
       offset,
     },

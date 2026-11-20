@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import JobSchedules from "@/components/JobSchedules";
 import SystemSettings, { SettingsHighlightContext } from "@/components/SystemSettings";
 
-import { type BrowseView, EngineMatrix, MATRIX_VIEWS, type MatrixView, type ReviewLens } from "./EngineMatrix";
+import { type BrowseView, EngineMatrix, MATRIX_VIEWS, type MatrixView, REVIEW_LENSES, type ReviewLens } from "./EngineMatrix";
 import { EngineStoppedBanner } from "./EngineSwitch";
 import { EnrichmentConsole } from "./EnrichmentConsole";
 import { MaintenancePanel } from "./MaintenancePanel";
@@ -34,13 +34,13 @@ interface ConsoleState {
 }
 
 // Deep links: ?view= opens one of the console's tabs (?view=entities;
-// ?lens=history opens Review's History). The old six-tab layout (?tab=) and
-// the even older Settings sections (?section=) are mapped onto the
-// console's states.
+// ?view=review&lens=duplicates opens one of Review's lenses). The old six-tab
+// layout (?tab=) and the even older Settings sections (?section=) are mapped
+// onto the console's states.
 function legacyState(params: URLSearchParams): ConsoleState {
   const view = params.get("view");
   if (view && (MATRIX_VIEWS as readonly string[]).includes(view))
-    return { view: view as MatrixView, lens: params.get("lens") === "history" ? "history" : undefined };
+    return { view: view as MatrixView, lens: REVIEW_LENSES.find((l) => l === params.get("lens")) };
   const tab = params.get("tab");
   const stage = params.get("stage");
   if (tab === "processing")

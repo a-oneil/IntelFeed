@@ -21,6 +21,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
+from app.api.entity_relationships import unreviewed_relationship_condition
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResponse
 from app.core.security import get_current_user, get_viewer
@@ -238,6 +239,11 @@ async def entity_link_stats(
             select(func.count()).select_from(EntityRelationship).where(EntityRelationship.source != "analyst_rejected")
         )
     ).scalar() or 0
+    relationships_unreviewed = (
+        await db.execute(
+            select(func.count()).select_from(EntityRelationship).where(unreviewed_relationship_condition())
+        )
+    ).scalar() or 0
 
     return EntityLinkStats(
         total=sum(by_type.values()),
@@ -246,6 +252,7 @@ async def entity_link_stats(
         pending=pending,
         pending_dropped_ai_off=pending_dropped_ai_off,
         relationships_total=relationships_total,
+        relationships_unreviewed=relationships_unreviewed,
     )
 
 

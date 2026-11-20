@@ -23,6 +23,8 @@ export interface EntityLinkStats {
   by_type: Record<string, number>;
   pending: number;
   relationships_total: number;
+  /** Machine-made edges nobody has judged: Review's Relationships lens. */
+  relationships_unreviewed: number;
 }
 
 export interface LinkRef {
@@ -136,6 +138,8 @@ export interface RelationshipFilters {
   evidence_entry_id?: string;
   /** Only relationships created within the last N hours. */
   hours?: number;
+  /** Only machine-made edges neither an analyst nor the adjudicator has judged. */
+  unreviewed?: boolean;
   limit: number;
   offset: number;
 }
@@ -158,6 +162,7 @@ export function useAllRelationships(filters: RelationshipFilters, enabled = true
       if (filters.relationship_type) params.relationship_type = filters.relationship_type;
       if (filters.evidence_entry_id) params.evidence_entry_id = filters.evidence_entry_id;
       if (filters.hours) params.hours = filters.hours;
+      if (filters.unreviewed) params.unreviewed = true;
       const { data } = await api.get<PaginatedResponse<EntityRelationship>>("/entity-relationships", { params });
       return data;
     },
