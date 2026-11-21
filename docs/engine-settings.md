@@ -34,7 +34,7 @@ A database value that equals the default does nothing useful, and it stops you g
 |---|---|---|
 | `CONFIGURABLE_KEYS` | `backend/app/services/system_settings.py:26` | Which keys the UI can edit, and each value's type |
 | `SETTING_METADATA` | `backend/app/services/system_settings.py:227` | Label, description and group shown in the UI |
-| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1469` | Moves engine keys into the group of the Engine panel that owns them |
+| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1481` | Moves engine keys into the group of the Engine panel that owns them |
 | `SECRET_KEYS` | `backend/app/services/system_settings.py:14` | Encrypted in the database, hidden on read |
 | `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Which Engine screen shows each group; drives the Engine settings search |
 | `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:72` | Single keys that live somewhere other than their group's screen |

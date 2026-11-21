@@ -355,3 +355,62 @@ async def test_apply_changes_only_what_the_actions_allow(db_session: AsyncSessio
     assert j.rejected is None
     assert await apply_judgment(db_session, case, j, {**cfg, "actions": {"keep", "hide"}}, None) == "recorded"
     assert edge.adjudication_verdict is None
+
+
+@pytest.mark.asyncio
+async def test_the_evidence_endpoint_shows_each_article_and_every_review(
+    client, admin_headers, db_session: AsyncSession
+):
+    edge = await _claim(db_session, [ARTICLE, ROUNDUP])
+    await es.record_review(
+        db_session, edge.id, reviewer=es.SWEEP, verdict=es.KEEP, confidence="high", quote=STATED, reason="stated"
+    )
+    resp = await client.get(f"/api/entity-relationships/{edge.id}/evidence", headers=admin_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["article_count"] == 2
+    first, second = body["articles"]
+    assert first["passages"] == [ARTICLE]
+    assert second["passages"] == [] and second["source_only"].startswith("This week: Warlock claimed")
+    assert [(r["reviewer"], r["verdict"], r["quote"]) for r in body["reviews"]] == [("sweep", "keep", STATED)]
+
+
+@pytest.mark.asyncio
+async def test_the_evidence_endpoint_is_for_admins(client, auth_headers, db_session: AsyncSession):
+    edge = await _claim(db_session, [ARTICLE])
+    resp = await client.get(f"/api/entity-relationships/{edge.id}/evidence", headers=auth_headers)
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_confirm_and_reject_are_recorded_as_analyst_reviews(client, admin_headers, db_session: AsyncSession):
+    kept, hidden = await _claim(db_session, [ARTICLE]), await _claim(db_session, [ROUNDUP])
+    assert (await client.post(f"/api/entity-relationships/{kept.id}/confirm", headers=admin_headers)).status_code == 200
+    assert (
+        await client.post(f"/api/entity-relationships/{hidden.id}/reject", headers=admin_headers)
+    ).status_code == 200
+    rows = (await db_session.execute(select(RelationshipReview.relationship_id, RelationshipReview.verdict))).all()
+    assert {(kept.id, es.KEEP), (hidden.id, es.DEMOTE)} <= set(rows)
+
+
+@pytest.mark.asyncio
+async def test_an_analyst_can_set_every_verb_the_matrix_tracks(client, admin_headers, db_session: AsyncSession):
+    a, b = ThreatActor(name=f"Kapibala {uuid.uuid4().hex[:6]}"), ThreatActor(name=f"Red Heron {uuid.uuid4().hex[:6]}")
+    db_session.add_all([a, b])
+    await db_session.flush()
+    edge = EntityRelationship(
+        source_type="threat_actor",
+        source_id=a.id,
+        target_type="threat_actor",
+        target_id=b.id,
+        relationship_type="subgroup_of",
+        confidence="possible",
+        source="auto_extracted",
+        evidence_entry_ids=[],
+    )
+    db_session.add(edge)
+    await db_session.flush()
+    resp = await client.put(
+        f"/api/entity-relationships/{edge.id}", json={"relationship_type": "overlaps_with"}, headers=admin_headers
+    )
+    assert resp.status_code == 200 and resp.json()["relationship_type"] == "overlaps_with"

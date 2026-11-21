@@ -58,6 +58,8 @@ from app.models.tool import EntryTool, Tool
 from app.models.ttp import TTP, EntryTTP
 from app.models.user import User
 from app.models.vendor import EntryVendor, Vendor
+from app.schemas.entity_relationship import RelationshipEvidenceResponse
+from app.schemas.review_evidence import EvidenceArticle
 from app.services.enrichment_gaps import ENRICH_GAP_SPECS
 from app.services.entity_merge_review import ACTION_DISTINCT
 from app.services.entity_merge_review import ORIGIN as MERGE_REVIEW_ORIGIN
@@ -603,6 +605,33 @@ class FeedRow(BaseModel):
     context: str | None = None
 
 
+class EvidenceFact(BaseModel):
+    label: str
+    value: str
+
+
+class EvidenceHistoryItem(BaseModel):
+    action: str
+    when: datetime
+    subject: str | None
+    reason: str | None
+
+
+class RowEvidence(BaseModel):
+    """Everything behind one Review row, for its evidence panel."""
+
+    id: str
+    reason: str | None
+    confidence: str | None
+    quote: str | None = Field(description="The AI's own words for the match, where it gave some")
+    article: EvidenceArticle | None
+    facts: list[EvidenceFact]
+    relationship: RelationshipEvidenceResponse | None = Field(
+        default=None, description="An edge row's articles and reviews"
+    )
+    history: list[EvidenceHistoryItem] = Field(description="Earlier applied decisions about the same entity")
+
+
 class FeedResponse(BaseModel):
     rows: list[FeedRow]
     has_more: bool
@@ -1067,9 +1096,14 @@ def _context_target(row: FeedRow) -> tuple[uuid.UUID, list[str], list[int]] | No
         before = p.get("before") if isinstance(p.get("before"), dict) else {}
         after = p.get("after") if isinstance(p.get("after"), dict) else {}
         raw_entry = before.get("entry_id")
-        junction = before.get("junction") if isinstance(before.get("junction"), dict) else {}
-        needles += [n for n in junction.get("matched_names") or [] if isinstance(n, str)]
-        indices += [i for i in junction.get("paragraph_indices") or [] if isinstance(i, int)]
+        # A link (junction), a held link (held) and an IoC sighting each
+        # record where the match was.
+        for key in ("junction", "held", "sighting"):
+            snap = before.get(key) if isinstance(before.get(key), dict) else {}
+            needles += [n for n in snap.get("matched_names") or [] if isinstance(n, str)]
+            if isinstance(snap.get("surface_form"), str):
+                needles.append(snap["surface_form"])
+            indices += [i for i in snap.get("paragraph_indices") or [] if isinstance(i, int)]
         ent = before.get("entity") if isinstance(before.get("entity"), dict) else {}
         for v in (ent.get("name"), after.get("value")):
             if isinstance(v, str):
@@ -1131,6 +1165,249 @@ async def _attach_context(db: AsyncSession, rows: list[FeedRow]) -> None:
         pmap = paragraphs[entry_id]
         texts = [pmap[i] for i in indices if i in pmap] + list(pmap.values())
         r.context = _snippet_around(texts, needles)
+
+
+EVIDENCE_PARAGRAPH_MAX = 900
+_EVIDENCE_HISTORY = 10
+
+# (where in the payload, label) for the facts a reviewer weighs; a path is
+# before./after. keys, the link log's are top-level. Values that are lists
+# are joined, dicts skipped.
+_EVIDENCE_FACTS: tuple[tuple[str, str], ...] = (
+    ("original_matched_names", "Matched as"),
+    ("original_source", "Linked by"),
+    ("original_confidence", "Link confidence"),
+    ("suggested_entity_type", "Suggested type"),
+    ("before.junction.matched_names", "Matched as"),
+    ("before.junction.source", "Linked by"),
+    ("before.junction.confidence", "Link confidence"),
+    ("before.junction.role", "Role"),
+    ("before.held.matched_names", "Matched as"),
+    ("before.held.canonical_name", "Held for"),
+    ("before.held.confidence", "Held at confidence"),
+    ("before.claim", "Claim"),
+    ("after.reverb", "Correct verb"),
+    ("after.suggested_type", "Suggested type"),
+    ("after.target_type", "Suggested type"),
+    ("after.agreement", "Articles agreeing"),
+    ("after.merge_into", "Merge into"),
+    ("after.other_name", "Duplicate of"),
+    ("after.bad_alias", "Alias"),
+    ("after.matches_entity_name", "Alias also names"),
+    ("before.entity.aliases", "Current aliases"),
+    ("after.kind", "IoC kind"),
+    ("after.value", "IoC value"),
+    ("before.sighting.surface_form", "Written in the article as"),
+    ("after.proposed_id", "Proposed id"),
+)
+
+
+def _payload_path(payload: dict, path: str):
+    cur: object = payload
+    for part in path.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
+def _evidence_facts(payload: dict) -> list[EvidenceFact]:
+    out: list[EvidenceFact] = []
+    seen: set[tuple[str, str]] = set()
+    for path, label in _EVIDENCE_FACTS:
+        value = _payload_path(payload, path)
+        if isinstance(value, list):
+            value = ", ".join(str(v) for v in value if v not in (None, ""))
+        elif isinstance(value, bool) or value is None or isinstance(value, dict):
+            continue
+        text = str(value).strip()
+        if text and (label, text) not in seen:
+            seen.add((label, text))
+            out.append(EvidenceFact(label=label, value=text[:300]))
+    return out
+
+
+def _evidence_quote(payload: dict) -> str | None:
+    """The AI's own words for the match: the sentence the analysis linked it
+    from, or the evidence it gave for an IoC candidate."""
+    for path in ("before.junction.source_text", "before.held.source_text", "before.candidate.evidence"):
+        value = _payload_path(payload, path)
+        if isinstance(value, str) and value.strip():
+            return " ".join(value.split())[:EVIDENCE_PARAGRAPH_MAX]
+    return None
+
+
+def _paragraph_with(chunk: str, needles: list[str]) -> str:
+    """The paragraph, or the part of it around the first needle when long."""
+    text = " ".join(chunk.split())
+    if len(text) <= EVIDENCE_PARAGRAPH_MAX:
+        return text
+    lowered = text.lower()
+    pos = next((p for p in (lowered.find(n.lower()) for n in needles) if p != -1), 0)
+    start = max(0, pos - EVIDENCE_PARAGRAPH_MAX // 3)
+    piece = text[start : start + EVIDENCE_PARAGRAPH_MAX]
+    return ("…" if start else "") + piece + ("…" if start + EVIDENCE_PARAGRAPH_MAX < len(text) else "")
+
+
+async def article_evidence(
+    db: AsyncSession, entry_id: uuid.UUID, needles: list[str], indices: list[int]
+) -> EvidenceArticle | None:
+    """One article as evidence: its title and feed, and the paragraphs at
+    ``indices`` (where a match was recorded), else the first naming a needle."""
+    from app.intelligence.autolinker import split_into_paragraphs
+    from app.models.feed import Feed
+
+    found = (
+        await db.execute(
+            select(Entry, Feed.title).outerjoin(Feed, Feed.id == Entry.feed_id).where(Entry.id == entry_id)
+        )
+    ).first()
+    if found is None:
+        return None
+    entry, feed_title = found
+    pmap = dict(split_into_paragraphs(entry.title or "", entry.summary or "", entry.content_text or ""))
+    picked: list[str] = []
+    for i in indices:
+        if i in pmap and pmap[i] not in picked:
+            picked.append(pmap[i])
+    if not picked:
+        lowered = [n.lower() for n in needles if n]
+        picked = [t for t in pmap.values() if any(n in t.lower() for n in lowered)][:1]
+    return EvidenceArticle(
+        entry_id=entry.id,
+        title=entry.translated_title or entry.title or "",
+        feed_title=feed_title or "",
+        published_at=entry.published_at,
+        paragraphs=[_paragraph_with(t, needles) for t in picked[:2]],
+        highlight=needles,
+    )
+
+
+async def _row_article(db: AsyncSession, row: FeedRow) -> EvidenceArticle | None:
+    target = _context_target(row)
+    return await article_evidence(db, *target) if target is not None else None
+
+
+async def _row_history(db: AsyncSession, row: FeedRow, log_id: uuid.UUID) -> list[EvidenceHistoryItem]:
+    """What was already decided about this row's entity: applied proposals
+    and link removals (a dismissal deletes its row, so it isn't listed)."""
+    if row.entity_id is None:
+        return []
+    maint = (
+        (
+            await db.execute(
+                select(EntityMaintenanceLog)
+                .where(
+                    EntityMaintenanceLog.entity_id == row.entity_id,
+                    EntityMaintenanceLog.applied.is_(True),
+                    EntityMaintenanceLog.id != log_id,
+                )
+                .order_by(EntityMaintenanceLog.created_at.desc())
+                .limit(_EVIDENCE_HISTORY)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    links = (
+        (
+            await db.execute(
+                select(EntityLinkValidationLog)
+                .where(
+                    EntityLinkValidationLog.entity_id == row.entity_id,
+                    EntityLinkValidationLog.action.in_(("removed", "restored")),
+                    EntityLinkValidationLog.id != log_id,
+                )
+                .order_by(EntityLinkValidationLog.created_at.desc())
+                .limit(_EVIDENCE_HISTORY)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    items = [
+        EvidenceHistoryItem(action=r.action, when=r.created_at, subject=_maint_subject(r), reason=r.reasoning)
+        for r in maint
+    ] + [
+        EvidenceHistoryItem(action=r.action, when=r.created_at, subject=_link_subject(r), reason=r.reason)
+        for r in links
+    ]
+    items.sort(key=lambda i: i.when, reverse=True)
+    return items[:_EVIDENCE_HISTORY]
+
+
+def _link_feed_row(r: EntityLinkValidationLog) -> FeedRow:
+    # Synthesize a mode tag so the row visually matches maintenance rows:
+    # actions that mutated junctions = applied, advisories = proposed.
+    link_mode = "apply" if r.action in ("removed", "restored") else "shadow"
+    links: list[FeedLink] = []
+    if r.entity_name_snapshot and r.entity_id:
+        links.append(
+            FeedLink(
+                kind="entity",
+                entity_type=r.entity_type,
+                entity_id=str(r.entity_id),
+                label=r.entity_name_snapshot,
+                role="subject",
+            )
+        )
+    if r.entry_id:
+        links.append(FeedLink(kind="entry", entity_id=str(r.entry_id), label="source entry"))
+    return FeedRow(
+        id=f"link_validator:{r.id}",
+        source="link_validator",
+        action=r.action,
+        when=r.created_at,
+        mode=link_mode,
+        applied=r.action in ("removed", "restored"),
+        entity_type=r.entity_type,
+        entity_id=r.entity_id,
+        entity_name=r.entity_name_snapshot,
+        subject=_link_subject(r),
+        reason=r.reason,
+        payload={
+            "log_id": str(r.id),
+            "entry_id": str(r.entry_id),
+            "original_source": r.original_source,
+            "original_confidence": r.original_confidence,
+            "original_matched_names": list(r.original_matched_names or []),
+            "original_paragraph_indices": list(r.original_paragraph_indices or []),
+            "suggested_entity_type": r.suggested_entity_type,
+            "ai_result_id": str(r.ai_result_id) if r.ai_result_id else None,
+        },
+        actions=_row_actions_link(r),
+        links=links,
+        origin=ORIGIN_ADJUDICATOR,
+        domain=proposal_domain("link_validator", r.action),
+        confidence=r.verdict_confidence,
+    )
+
+
+def _maint_feed_row(r: EntityMaintenanceLog) -> FeedRow:
+    return FeedRow(
+        id=f"entity_maintenance:{r.id}",
+        source="entity_maintenance",
+        action=r.action,
+        when=r.created_at,
+        mode=r.mode,
+        applied=bool(r.applied),
+        entity_type=r.entity_type,
+        entity_id=r.entity_id,
+        entity_name=None,  # filled below for the page, from the live entity
+        subject=_maint_subject(r),
+        reason=r.reasoning,
+        payload={
+            "log_id": str(r.id),
+            "before": r.before,
+            "after": r.after,
+            "ai_result_id": str(r.ai_result_id) if r.ai_result_id else None,
+        },
+        actions=_row_actions_maint(r),
+        links=_maint_links(r),
+        origin=_maint_origin(r.action, r.after),
+        domain=proposal_domain("entity_maintenance", r.action),
+        confidence=(r.after or {}).get("confidence"),
+    )
 
 
 @router.get("/admin/hygiene/feed", response_model=FeedResponse)
@@ -1331,80 +1608,8 @@ async def hygiene_feed(
 
     # Normalize and merge.
     feed: list[FeedRow] = []
-    for r in link_rows:
-        # Synthesize a mode tag so the row visually matches maintenance rows:
-        # actions that mutated junctions = applied, advisories = proposed.
-        link_mode = "apply" if r.action in ("removed", "restored") else "shadow"
-        links: list[FeedLink] = []
-        if r.entity_name_snapshot and r.entity_id:
-            links.append(
-                FeedLink(
-                    kind="entity",
-                    entity_type=r.entity_type,
-                    entity_id=str(r.entity_id),
-                    label=r.entity_name_snapshot,
-                    role="subject",
-                )
-            )
-        if r.entry_id:
-            links.append(FeedLink(kind="entry", entity_id=str(r.entry_id), label="source entry"))
-        feed.append(
-            FeedRow(
-                id=f"link_validator:{r.id}",
-                source="link_validator",
-                action=r.action,
-                when=r.created_at,
-                mode=link_mode,
-                applied=r.action in ("removed", "restored"),
-                entity_type=r.entity_type,
-                entity_id=r.entity_id,
-                entity_name=r.entity_name_snapshot,
-                subject=_link_subject(r),
-                reason=r.reason,
-                payload={
-                    "log_id": str(r.id),
-                    "entry_id": str(r.entry_id),
-                    "original_source": r.original_source,
-                    "original_confidence": r.original_confidence,
-                    "original_matched_names": list(r.original_matched_names or []),
-                    "original_paragraph_indices": list(r.original_paragraph_indices or []),
-                    "suggested_entity_type": r.suggested_entity_type,
-                    "ai_result_id": str(r.ai_result_id) if r.ai_result_id else None,
-                },
-                actions=_row_actions_link(r),
-                links=links,
-                origin=ORIGIN_ADJUDICATOR,
-                domain=proposal_domain("link_validator", r.action),
-                confidence=r.verdict_confidence,
-            )
-        )
-    for r in maint_rows:
-        feed.append(
-            FeedRow(
-                id=f"entity_maintenance:{r.id}",
-                source="entity_maintenance",
-                action=r.action,
-                when=r.created_at,
-                mode=r.mode,
-                applied=bool(r.applied),
-                entity_type=r.entity_type,
-                entity_id=r.entity_id,
-                entity_name=None,  # filled below for the page, from the live entity
-                subject=_maint_subject(r),
-                reason=r.reasoning,
-                payload={
-                    "log_id": str(r.id),
-                    "before": r.before,
-                    "after": r.after,
-                    "ai_result_id": str(r.ai_result_id) if r.ai_result_id else None,
-                },
-                actions=_row_actions_maint(r),
-                links=_maint_links(r),
-                origin=_maint_origin(r.action, r.after),
-                domain=proposal_domain("entity_maintenance", r.action),
-                confidence=(r.after or {}).get("confidence"),
-            )
-        )
+    feed.extend(_link_feed_row(r) for r in link_rows)
+    feed.extend(_maint_feed_row(r) for r in maint_rows)
 
     feed.sort(key=lambda f: f.when, reverse=True)
     sliced = feed[offset : offset + limit]
@@ -2800,6 +3005,46 @@ async def apply_proposed_link_removal(
     return LinkLogResult(log_id=log_id, applied=True, already_removed=already_removed)
 
 
+@router.get("/admin/hygiene/feed/{source}/{row_id}/evidence", response_model=RowEvidence)
+async def feed_row_evidence(
+    source: str = Path(..., description="'link_validator' | 'entity_maintenance'"),
+    row_id: uuid.UUID = Path(..., description="The log row's id"),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> RowEvidence:
+    """The evidence behind one proposal: the article paragraph it came from,
+    the AI's quote and reason, the payload facts that decide it (matched
+    names, suggested type, alias, merge target...), an edge's articles and
+    reviews, and what was already decided about the same entity."""
+    from app.api.entity_relationships import relationship_evidence
+
+    if source == LINK_SOURCE:
+        log = await db.get(EntityLinkValidationLog, row_id)
+        row = _link_feed_row(log) if log else None
+    elif source == MAINT_SOURCE:
+        log = await db.get(EntityMaintenanceLog, row_id)
+        row = _maint_feed_row(log) if log else None
+    else:
+        raise AppError(code="invalid", message="unknown source", status_code=400)
+    if row is None:
+        raise AppError(code="not_found", message="Proposal not found", status_code=404)
+    relationship = None
+    if row.domain == "relationships" and row.entity_id:
+        edge = await db.get(EntityRelationship, row.entity_id)
+        if edge is not None:
+            relationship = await relationship_evidence(db, edge)
+    return RowEvidence(
+        id=row.id,
+        reason=row.reason,
+        confidence=row.confidence,
+        quote=_evidence_quote(row.payload),
+        article=await _row_article(db, row),
+        facts=_evidence_facts(row.payload),
+        relationship=relationship,
+        history=await _row_history(db, row, row_id),
+    )
+
+
 @router.delete("/admin/hygiene/feed/{source}/{row_id}", status_code=204)
 async def dismiss_feed_row(
     source: str = Path(..., description="Log table the row lives in: link_validator or entity_maintenance"),
@@ -3446,6 +3691,7 @@ class ReviewGroup(BaseModel):
     sample_entry_id: uuid.UUID | None
     matched_names: list[str]
     row_ids: list[str]  # the row(s) behind a group with no entity (feed id shape)
+    latest_row_id: str | None = None  # the newest proposal (feed id shape), for its evidence panel
 
 
 class ReviewFacets(BaseModel):
@@ -3600,6 +3846,7 @@ async def review_groups(
                 sample_entry_id=d["sample_entry_id"],
                 matched_names=[f for f, _ in sorted(d["forms"].items(), key=lambda kv: -kv[1])][:4],
                 row_ids=g["row_ids"],
+                latest_row_id=f"{d['latest'][0]}:{d['latest'][1].id}" if d["latest"] else None,
             )
         )
     return ReviewGroupsResponse(

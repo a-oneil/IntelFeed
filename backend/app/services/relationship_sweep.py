@@ -112,6 +112,14 @@ class Passage:
     # autolinker matched here): what a quote must name.
     source_forms: list[str] = field(default_factory=list)
     target_forms: list[str] = field(default_factory=list)
+    # What ``lines`` says, kept apart for display: the analysis's (verb,
+    # sentence) when it asserted the pair, the passages naming both ends, and
+    # failing those the first passage naming each end alone.
+    published_at: datetime | None = None
+    asserted: tuple[str, str] | None = None
+    both: list[str] = field(default_factory=list)
+    source_only: str | None = None
+    target_only: str | None = None
 
 
 @dataclass
@@ -156,7 +164,7 @@ async def _end(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> End:
     return End(entity_type, entity_id, name, forms or [name], description)
 
 
-async def build_case(db: AsyncSession, edge: EntityRelationship) -> EdgeCase | None:
+async def build_case(db: AsyncSession, edge: EntityRelationship, max_articles: int = _MAX_ARTICLES) -> EdgeCase | None:
     """The claim and up to _MAX_ARTICLES passages: articles with a sentence
     naming both ends first, one per feed before a second from any feed,
     reposts last."""
@@ -199,6 +207,8 @@ async def build_case(db: AsyncSession, edge: EntityRelationship) -> EdgeCase | N
         asserted = edge_evidence.analysis_evidence(parsed, src_forms, tgt_forms)
         if asserted and edge_evidence.quote_in(text, asserted[1]):
             lines.append(f'the analysis quoted ({asserted[0].replace("_", " ")}): "{asserted[1]}"')
+        else:
+            asserted = None
         body = paras[1:] if title else paras
         both, only_src, only_tgt = edge_evidence.passages_naming(body, src_forms, tgt_forms)
         if title and (edge_evidence.names(title, src_forms) or edge_evidence.names(title, tgt_forms)):
@@ -210,7 +220,13 @@ async def build_case(db: AsyncSession, edge: EntityRelationship) -> EdgeCase | N
                     lines.append(f'{end.name} is named (no passage names both): "{found[0]}"')
                 elif not edge_evidence.names(title, src_forms if end is source else tgt_forms):
                     lines.append(f"{end.name} is not found in the text")
-        candidates.append((bool(both), entry, text, lines, src_forms, tgt_forms, paras))
+        found = {
+            "asserted": asserted,
+            "both": both,
+            "source_only": None if both or not only_src else only_src[0],
+            "target_only": None if both or not only_tgt else only_tgt[0],
+        }
+        candidates.append((bool(both), entry, text, lines, src_forms, tgt_forms, paras, found))
 
     epoch = datetime.min.replace(tzinfo=UTC)
     candidates.sort(key=lambda c: (not c[0], c[1].id in echoes, -(c[1].published_at or epoch).timestamp()))
@@ -234,8 +250,10 @@ async def build_case(db: AsyncSession, edge: EntityRelationship) -> EdgeCase | N
             paragraphs=paras,
             source_forms=src_forms,
             target_forms=tgt_forms,
+            published_at=entry.published_at,
+            **found,
         )
-        for i, (_both, entry, text, lines, src_forms, tgt_forms, paras) in enumerate(picked[:_MAX_ARTICLES])
+        for i, (_both, entry, text, lines, src_forms, tgt_forms, paras, found) in enumerate(picked[:max_articles])
     ]
     return EdgeCase(edge=edge, source=source, target=target, passages=passages)
 

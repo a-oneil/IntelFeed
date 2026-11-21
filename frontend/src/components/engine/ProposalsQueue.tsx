@@ -55,6 +55,7 @@ import { getEntityCssVar, getEntityLabel } from "@/utils/entityTheme";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { EntityRowActions } from "./EntityRowActions";
+import { RowEvidencePanel } from "./EvidencePanel";
 import styles from "./ProposalsQueue.module.css";
 import cg from "./ProposalGroups.module.css";
 import { confirmDialog } from "@/utils/dialog";
@@ -265,71 +266,84 @@ function ProposalRow({
   sub?: boolean;
 }) {
   const navigate = useNavigate();
+  const [showEvidence, setShowEvidence] = useState(false);
   const base = CHANGE_META[row.action] ?? { label: row.action, cls: styles.tName };
   const meta = hist && row.applied ? { ...base, label: APPLIED_LABEL[row.action] ?? base.label } : base;
   const slug = row.entity_type;
   const acts = [...row.actions].sort((a, b) => ACTION_ORDER.indexOf(a) - ACTION_ORDER.indexOf(b));
   return (
-    <tr className={sub ? cg.subRow : undefined}>
-      <td>
-        <span className={`${styles.tag} ${meta.cls}`}>{meta.label}</span>
-        <ConfidenceChip value={row.confidence} />
-        {row.origin === "adjudicator" && !sub && (
-          <span className={styles.originTag} title="Filed by the post-analysis review, with the article in hand">
-            adjudicator
-          </span>
-        )}
-        {row.origin === "merge_review" && !sub && (
-          <span className={styles.originTag} title="Filed by the catalogue-wide duplicate review, from the two profiles side by side">
-            duplicate review
-          </span>
-        )}
-      </td>
-      <td className={styles.muted}>{sub ? "" : (DOMAIN_LABELS[row.domain] ?? row.domain)}</td>
-      <td>
-        {row.entity_name && !sub ? (
-          <button
-            className={styles.ent}
-            disabled={!slug || !row.entity_id}
-            onClick={() => slug && row.entity_id && navigate(`/workbench/${slug}/${row.entity_id}`)}
-            title={row.entity_type ? getEntityLabel(row.entity_type) : ""}
-          >
-            <span className={styles.entDot} style={{ background: row.entity_type ? getEntityCssVar(row.entity_type) : "var(--border)" }} />
-            {row.entity_name}
-          </button>
-        ) : (
-          <span className={styles.muted}>{sub ? "" : "—"}</span>
-        )}
-      </td>
-      <td className={styles.detail}>
-        <span className={styles.subject}>{row.subject ?? "—"}</span>
-        {row.reason && <span className={styles.reason}>{row.reason}</span>}
-        {row.context && <span className={styles.reason}>“{row.context}”</span>}
-        <LinkChips links={row.links ?? []} />
-      </td>
-      <td className={styles.when}>{formatDateTime(row.when)}</td>
-      <td>
-        <div className={styles.acts}>
-          {acts.map((a) => {
-            const b = ACTION_BTN[a];
-            if (!b) return null;
-            return (
-              <button key={a} className={`${styles.rowBtn} ${b.cls}`} disabled={busy} onClick={() => onAction(row, a)}>
-                {b.label}
-              </button>
-            );
-          })}
-          {!hist && !sub && row.entity_type && row.entity_id && (
-            <EntityRowActions
-              entityType={row.entity_type}
-              entityId={row.entity_id}
-              name={row.entity_name ?? row.subject ?? "entity"}
-              disabled={busy}
-            />
+    <>
+      <tr className={sub ? cg.subRow : undefined}>
+        <td>
+          <span className={`${styles.tag} ${meta.cls}`}>{meta.label}</span>
+          <ConfidenceChip value={row.confidence} />
+          {row.origin === "adjudicator" && !sub && (
+            <span className={styles.originTag} title="Filed by the post-analysis review, with the article in hand">
+              adjudicator
+            </span>
           )}
-        </div>
-      </td>
-    </tr>
+          {row.origin === "merge_review" && !sub && (
+            <span className={styles.originTag} title="Filed by the catalogue-wide duplicate review, from the two profiles side by side">
+              duplicate review
+            </span>
+          )}
+        </td>
+        <td className={styles.muted}>{sub ? "" : (DOMAIN_LABELS[row.domain] ?? row.domain)}</td>
+        <td>
+          {row.entity_name && !sub ? (
+            <button
+              className={styles.ent}
+              disabled={!slug || !row.entity_id}
+              onClick={() => slug && row.entity_id && navigate(`/workbench/${slug}/${row.entity_id}`)}
+              title={row.entity_type ? getEntityLabel(row.entity_type) : ""}
+            >
+              <span className={styles.entDot} style={{ background: row.entity_type ? getEntityCssVar(row.entity_type) : "var(--border)" }} />
+              {row.entity_name}
+            </button>
+          ) : (
+            <span className={styles.muted}>{sub ? "" : "—"}</span>
+          )}
+        </td>
+        <td className={styles.detail}>
+          <span className={styles.subject}>{row.subject ?? "—"}</span>
+          {row.reason && <span className={styles.reason}>{row.reason}</span>}
+          {row.context && <span className={styles.reason}>“{row.context}”</span>}
+          <LinkChips links={row.links ?? []} />
+          <button className={cg.expand} onClick={() => setShowEvidence((v) => !v)}>
+            {showEvidence ? "▾ hide evidence" : "▸ evidence"}
+          </button>
+        </td>
+        <td className={styles.when}>{formatDateTime(row.when)}</td>
+        <td>
+          <div className={styles.acts}>
+            {acts.map((a) => {
+              const b = ACTION_BTN[a];
+              if (!b) return null;
+              return (
+                <button key={a} className={`${styles.rowBtn} ${b.cls}`} disabled={busy} onClick={() => onAction(row, a)}>
+                  {b.label}
+                </button>
+              );
+            })}
+            {!hist && !sub && row.entity_type && row.entity_id && (
+              <EntityRowActions
+                entityType={row.entity_type}
+                entityId={row.entity_id}
+                name={row.entity_name ?? row.subject ?? "entity"}
+                disabled={busy}
+              />
+            )}
+          </div>
+        </td>
+      </tr>
+      {showEvidence && (
+        <tr className={cg.subRow}>
+          <td colSpan={6}>
+            <RowEvidencePanel id={row.id} names={row.entity_name ? [row.entity_name] : []} />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -887,7 +901,10 @@ export function ProposalsQueue({
                 const label = applyLabel(g);
                 const kindChips = g.kinds.filter((kd) => !RECLASSIFY_KINDS.has(kd.action));
                 const reclassifyN = g.kinds.filter((kd) => RECLASSIFY_KINDS.has(kd.action)).reduce((n, kd) => n + kd.count, 0);
-                const expandable = g.entity_id !== null && g.proposals > 1;
+                // Every row opens to its newest proposal's evidence; one
+                // with several proposals also lists them.
+                const manyRows = g.entity_id !== null && g.proposals > 1;
+                const expandable = manyRows || g.latest_row_id !== null;
                 return (
                   <Fragment key={k}>
                     <tr>
@@ -995,7 +1012,11 @@ export function ProposalsQueue({
                                   setOpen(next);
                                 }}
                               >
-                                {isOpen ? "▾ hide articles" : "▸ show articles"}
+                                {isOpen
+                                  ? "▾ hide evidence"
+                                  : manyRows
+                                    ? `▸ evidence and all ${g.proposals.toLocaleString()} articles`
+                                    : "▸ evidence"}
                               </button>
                             </>
                           )}
@@ -1032,7 +1053,14 @@ export function ProposalsQueue({
                         </div>
                       </td>
                     </tr>
-                    {isOpen && <GroupRows group={g} scope={scope} busy={busy} onAction={doRow} />}
+                    {isOpen && g.latest_row_id && (
+                      <tr className={cg.subRow}>
+                        <td colSpan={5}>
+                          <RowEvidencePanel id={g.latest_row_id} names={[g.name, ...g.matched_names]} />
+                        </td>
+                      </tr>
+                    )}
+                    {isOpen && manyRows && <GroupRows group={g} scope={scope} busy={busy} onAction={doRow} />}
                   </Fragment>
                 );
               })}

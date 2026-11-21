@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -22,6 +22,7 @@ import type { EntityType } from "@/stores/intelStore";
 import { getEntityCssVar, getEntityLabel } from "@/utils/entityTheme";
 
 import styles from "./AutolinkingSection.module.css";
+import { RelationshipEvidencePanel } from "./EvidencePanel";
 
 type View = "links" | "relationships";
 
@@ -188,6 +189,14 @@ export function AutolinkingSection({
 
   const unlink = useUnlink();
   const bulkUnlink = useBulkUnlink();
+  const [openRel, setOpenRel] = useState<Set<string>>(new Set());
+  const toggleRel = (id: string) =>
+    setOpenRel((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const confirmRel = useConfirmRelationship();
   const rejectRel = useRejectRelationship();
   const deleteRel = useDeleteRelationship();
@@ -449,61 +458,76 @@ export function AutolinkingSection({
               </thead>
               <tbody>
                 {(items as EntityRelationship[]).map((r) => (
-                  <tr key={r.id} className={selected.has(r.id) ? styles.rowSel : ""}>
-                    <td className={styles.colCheck}>
-                      <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} />
-                    </td>
-                    <td>
-                      <EntityChipLink type={r.source_type} id={r.source_id} name={r.source_name} />
-                    </td>
-                    <td>
-                      <span className={styles.verb}>{r.relationship_type}</span>
-                    </td>
-                    <td>
-                      <EntityChipLink type={r.target_type} id={r.target_id} name={r.target_name} />
-                    </td>
-                    <td>{confidenceBars(r.confidence)}</td>
-                    <td>{sourcePill(r.source)}</td>
-                    <td className={styles.ev}>
-                      <b>{r.evidence_entry_ids?.length ?? 0}</b>{" "}
-                      {(r.evidence_entry_ids?.length ?? 0) === 1 ? "entry" : "entries"}
-                    </td>
-                    <td className={styles.muted}>{new Date(r.created_at).toLocaleDateString()}</td>
-                    <td>
-                      <div className={styles.rowActs}>
+                  <Fragment key={r.id}>
+                    <tr className={selected.has(r.id) ? styles.rowSel : ""}>
+                      <td className={styles.colCheck}>
+                        <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} />
+                      </td>
+                      <td>
+                        <EntityChipLink type={r.source_type} id={r.source_id} name={r.source_name} />
+                      </td>
+                      <td>
+                        <span className={styles.verb}>{r.relationship_type}</span>
+                      </td>
+                      <td>
+                        <EntityChipLink type={r.target_type} id={r.target_id} name={r.target_name} />
+                      </td>
+                      <td>{confidenceBars(r.confidence)}</td>
+                      <td>{sourcePill(r.source)}</td>
+                      <td className={styles.ev}>
                         <button
-                          className={`${styles.iact} ${styles.iactGood}`}
-                          title="Confirm"
-                          onClick={async () => {
-                            await confirmRel.mutateAsync(r.id);
-                            toast.success("Relationship confirmed");
-                          }}
+                          className={styles.evToggle}
+                          onClick={() => toggleRel(r.id)}
+                          title="Show the articles, the sentence behind the claim, and its reviews"
                         >
-                          <Ico d={ICON.check} />
+                          {openRel.has(r.id) ? "▾" : "▸"} <b>{r.evidence_entry_ids?.length ?? 0}</b>{" "}
+                          {(r.evidence_entry_ids?.length ?? 0) === 1 ? "article" : "articles"}
                         </button>
-                        <button
-                          className={styles.iact}
-                          title="Reject"
-                          onClick={async () => {
-                            await rejectRel.mutateAsync(r.id);
-                            toast.success("Relationship rejected");
-                          }}
-                        >
-                          <Ico d={ICON.x} />
-                        </button>
-                        <button
-                          className={`${styles.iact} ${styles.iactDanger}`}
-                          title="Delete"
-                          onClick={async () => {
-                            await deleteRel.mutateAsync(r.id);
-                            toast.success("Relationship deleted");
-                          }}
-                        >
-                          <Ico d={ICON.unlink} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                      </td>
+                      <td className={styles.muted}>{new Date(r.created_at).toLocaleDateString()}</td>
+                      <td>
+                        <div className={styles.rowActs}>
+                          <button
+                            className={`${styles.iact} ${styles.iactGood}`}
+                            title="Confirm"
+                            onClick={async () => {
+                              await confirmRel.mutateAsync(r.id);
+                              toast.success("Relationship confirmed");
+                            }}
+                          >
+                            <Ico d={ICON.check} />
+                          </button>
+                          <button
+                            className={styles.iact}
+                            title="Reject"
+                            onClick={async () => {
+                              await rejectRel.mutateAsync(r.id);
+                              toast.success("Relationship rejected");
+                            }}
+                          >
+                            <Ico d={ICON.x} />
+                          </button>
+                          <button
+                            className={`${styles.iact} ${styles.iactDanger}`}
+                            title="Delete"
+                            onClick={async () => {
+                              await deleteRel.mutateAsync(r.id);
+                              toast.success("Relationship deleted");
+                            }}
+                          >
+                            <Ico d={ICON.unlink} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {openRel.has(r.id) && (
+                      <tr>
+                        <td colSpan={9}>
+                          <RelationshipEvidencePanel id={r.id} names={[r.source_name ?? "", r.target_name ?? ""]} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResponse
 from app.core.public_access import viewer_is_anonymous
-from app.core.security import get_current_user, get_viewer
+from app.core.security import get_admin_user, get_current_user, get_viewer
 from app.database import get_db
 from app.intelligence.relationship_matrix import (
     allowed_verbs_for_pair,
@@ -24,7 +24,11 @@ from app.schemas.entity_relationship import (
     EntityRelationshipResponse,
     EntityRelationshipUpdate,
     RelationClaimsResponse,
+    RelationshipEvidenceArticle,
+    RelationshipEvidenceResponse,
+    RelationshipReviewOut,
 )
+from app.services import edge_settlement as es
 
 router = APIRouter()
 
@@ -407,6 +411,78 @@ async def get_entity_relation_claims(
     }
 
 
+_EVIDENCE_ARTICLES = 10
+
+
+@router.get("/{relationship_id}/evidence", response_model=RelationshipEvidenceResponse)
+async def get_relationship_evidence(
+    relationship_id: uuid.UUID = Path(..., description="UUID of the relationship."),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """What a reviewer needs to judge an edge: each evidence article with the
+    sentence behind the claim (the analysis's own, or the passages naming both
+    ends, found the same way the reviewers find them), and every review the
+    edge has had."""
+    rel = await db.get(EntityRelationship, relationship_id)
+    if rel is None:
+        raise AppError(code="not_found", message="Relationship not found", status_code=404)
+    return await relationship_evidence(db, rel)
+
+
+async def relationship_evidence(db: AsyncSession, rel: EntityRelationship) -> RelationshipEvidenceResponse:
+    """Each evidence article with its sentence, and the edge's reviews (the
+    Relationships lens and the Review tab's edge rows both show it)."""
+    from app.models.entity_relationship import RelationshipReview
+    from app.services.relationship_sweep import build_case
+
+    case = await build_case(db, rel, max_articles=_EVIDENCE_ARTICLES)
+    articles = [
+        RelationshipEvidenceArticle(
+            entry_id=p.entry_id,
+            title=p.title,
+            feed_title=p.feed_title,
+            published_at=p.published_at,
+            analysis_verb=p.asserted[0] if p.asserted else None,
+            analysis_sentence=p.asserted[1] if p.asserted else None,
+            passages=p.both,
+            source_only=p.source_only,
+            target_only=p.target_only,
+        )
+        for p in (case.passages if case else [])
+    ]
+    reviews = (
+        (
+            await db.execute(
+                select(RelationshipReview)
+                .where(RelationshipReview.relationship_id == rel.id)
+                .order_by(RelationshipReview.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    titles = dict(
+        (
+            await db.execute(
+                select(Entry.id, func.coalesce(Entry.translated_title, Entry.title)).where(
+                    Entry.id.in_({r.entry_id for r in reviews if r.entry_id})
+                )
+            )
+        ).all()
+    )
+    return RelationshipEvidenceResponse(
+        relationship_id=rel.id,
+        adjudication_verdict=rel.adjudication_verdict,
+        article_count=len(set(rel.evidence_entry_ids or [])),
+        articles=articles,
+        reviews=[
+            RelationshipReviewOut.model_validate(r).model_copy(update={"entry_title": titles.get(r.entry_id)})
+            for r in reviews
+        ],
+    )
+
+
 @router.post("", response_model=EntityRelationshipResponse, status_code=201)
 async def create_entity_relationship(
     body: EntityRelationshipCreate,
@@ -539,6 +615,7 @@ async def confirm_entity_relationship(
     rel.source = "analyst_confirmed"
     rel.confidence = "confirmed"
     db.add(rel)
+    await es.record_review(db, rel.id, reviewer=es.ANALYST, verdict=es.KEEP, counted=True)
     await db.flush()
     await db.refresh(rel)
     await _invalidate_rel_caches(rel)
@@ -563,6 +640,7 @@ async def reject_entity_relationship(
         raise AppError(code="not_found", message="Relationship not found", status_code=404)
     rel.source = "analyst_rejected"
     db.add(rel)
+    await es.record_review(db, rel.id, reviewer=es.ANALYST, verdict=es.DEMOTE, counted=True)
     await db.flush()
     await db.refresh(rel)
     await _invalidate_rel_caches(rel)

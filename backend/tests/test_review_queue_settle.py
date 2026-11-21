@@ -511,3 +511,53 @@ async def test_id_scan_flags_implausible_cve_ids(client, admin_headers, db_sessi
     rows = (await db_session.execute(q)).scalars().all()
     assert sorted(r.after["current_id"] for r in rows) == ["CVE-2024-01234", "CVE-2024-123459812"]
     assert all(r.after["proposed_id"] is None for r in rows)  # no safe fix: dismiss or delete
+
+
+def test_context_target_finds_a_held_link_and_an_ioc_sighting():
+    entry = uuid.uuid4()
+    held = _row(
+        "entity_maintenance",
+        {"before": {"entry_id": str(entry), "held": {"matched_names": ["Everest"], "paragraph_indices": [2]}}},
+    )
+    assert _context_target(held) == (entry, ["Everest"], [2])
+    ioc = _row(
+        "entity_maintenance",
+        {
+            "before": {"entry_id": str(entry), "sighting": {"surface_form": "evil[.]com", "paragraph_indices": [1]}},
+            "after": {"value": "evil.com"},
+        },
+    )
+    assert _context_target(ioc) == (entry, ["evil[.]com", "evil.com"], [1])
+
+
+@pytest.mark.asyncio
+async def test_row_evidence_gives_the_paragraph_quote_facts_and_history(client, admin_headers, db_session, test_feed):
+    live = MalwareFamily(name="Everest")
+    db_session.add(live)
+    await db_session.flush()
+    e = await _entry(db_session, test_feed)
+    row = _unlink("malware", live.id, e)
+    row.before["junction"] = {
+        "matched_names": ["Everest"],
+        "paragraph_indices": [],
+        "source": "ai_extracted",
+        "source_text": "Everest ransomware hit a hospital.",
+    }
+    earlier = _unlink("malware", live.id, e)
+    earlier.applied, earlier.mode = True, "apply"
+    db_session.add_all([row, earlier])
+    await db_session.commit()
+
+    resp = await client.get(f"/api/admin/hygiene/feed/entity_maintenance/{row.id}/evidence", headers=admin_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["article"]["entry_id"] == str(e.id)
+    assert body["article"]["paragraphs"] == ["Everest ransomware hit a hospital."]
+    assert body["quote"] == "Everest ransomware hit a hospital."
+    facts = {(f["label"], f["value"]) for f in body["facts"]}
+    assert {("Matched as", "Everest"), ("Linked by", "ai_extracted")} <= facts
+    assert [h["action"] for h in body["history"]] == ["adjudication_unlink"]
+    missing = await client.get(
+        f"/api/admin/hygiene/feed/entity_maintenance/{uuid.uuid4()}/evidence", headers=admin_headers
+    )
+    assert missing.status_code == 404

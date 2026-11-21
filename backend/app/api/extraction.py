@@ -48,6 +48,7 @@ from app.models.threat_actor import ThreatActor
 from app.models.tool import Tool
 from app.models.ttp import TTP
 from app.models.user import User
+from app.schemas.review_evidence import EvidenceArticle
 from app.services.entity_indexer import delete_entity_document
 
 router = APIRouter()
@@ -455,6 +456,67 @@ class ConfirmRequest(BaseModel):
             }
         }
     )
+
+
+_EVIDENCE_ARTICLES = 3
+
+
+@router.get("/entities/{entity_type}/{entity_id}/evidence", response_model=list[EvidenceArticle])
+async def entity_evidence(
+    entity_type: str,
+    entity_id: uuid.UUID,
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[EvidenceArticle]:
+    """The articles behind an entity in the Review lenses: the one it was
+    created from, then its newest links, each with the paragraph naming it."""
+    from app.api.hygiene import article_evidence
+    from app.models.entry import Entry
+
+    if entity_type not in ENTITY_CONFIG:
+        raise AppError(code="invalid", message=f"unknown entity type {entity_type}", status_code=400)
+    model, junction, fk_col = ENTITY_CONFIG[entity_type]
+    entity = await db.get(model, entity_id)
+    if entity is None:
+        raise AppError(code="not_found", message="Entity not found", status_code=404)
+    names = [
+        n
+        for n in (
+            getattr(entity, "name", None),
+            getattr(entity, "technique_name", None),
+            getattr(entity, "technique_id", None),
+            getattr(entity, "cve_id", None),
+            getattr(entity, "value", None),
+            getattr(entity, "label", None),
+            *(getattr(entity, "aliases", None) or []),
+        )
+        if isinstance(n, str) and n.strip()
+    ]
+    links = (
+        (
+            await db.execute(
+                select(junction)
+                .join(Entry, Entry.id == junction.entry_id)
+                .where(fk_col == entity_id)
+                .order_by(Entry.published_at.desc().nulls_last())
+                .limit(_EVIDENCE_ARTICLES)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_entry = {link.entry_id: link for link in links}
+    created_from = getattr(entity, "created_from_entry_id", None)
+    order = list(dict.fromkeys([e for e in (created_from, *by_entry) if e]))[:_EVIDENCE_ARTICLES]
+    out: list[EvidenceArticle] = []
+    for entry_id in order:
+        link = by_entry.get(entry_id)
+        needles = [*(getattr(link, "matched_names", None) or []), *names]
+        indices = list(getattr(link, "paragraph_indices", None) or [])
+        article = await article_evidence(db, entry_id, list(dict.fromkeys(needles)), indices)
+        if article is not None:
+            out.append(article)
+    return out
 
 
 @router.post("/confirm")

@@ -3,7 +3,14 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-_ENTITY_TYPE_PATTERN = r"^(ttp|cve|threat_actor|malware|campaign|country|tool|vendor|product|mitigation)$"
+from app.intelligence.relationship_matrix import ALLOWED_RELATIONSHIPS
+
+# Every verb and endpoint type the semantic matrix tracks (the handlers then
+# check the exact triple), plus related_to for an analyst's own edges.
+_ENTITY_TYPE_PATTERN = (
+    "^(" + "|".join(sorted({t for s, _v, o in ALLOWED_RELATIONSHIPS for t in (s, o)} | {"mitigation"})) + ")$"
+)
+_VERB_PATTERN = "^(" + "|".join(sorted({v for _s, v, _o in ALLOWED_RELATIONSHIPS} | {"related_to"})) + ")$"
 
 
 class EntityRelationshipCreate(BaseModel):
@@ -11,9 +18,7 @@ class EntityRelationshipCreate(BaseModel):
     source_id: uuid.UUID
     target_type: str = Field(pattern=_ENTITY_TYPE_PATTERN)
     target_id: uuid.UUID
-    relationship_type: str = Field(
-        pattern=r"^(uses|exploits|targets|attributed_to|variant_of|communicates_with|delivers|drops|hosts|related_to)$"
-    )
+    relationship_type: str = Field(pattern=_VERB_PATTERN)
     confidence: str = Field(default="possible", pattern=r"^(confirmed|probable|possible)$")
     description: str | None = None
     evidence_entry_ids: list[uuid.UUID] = []
@@ -37,7 +42,7 @@ class EntityRelationshipCreate(BaseModel):
 class EntityRelationshipUpdate(BaseModel):
     relationship_type: str | None = Field(
         default=None,
-        pattern=r"^(uses|exploits|targets|attributed_to|variant_of|communicates_with|delivers|drops|hosts|related_to)$",
+        pattern=_VERB_PATTERN,
     )
     confidence: str | None = Field(default=None, pattern=r"^(confirmed|probable|possible)$")
     description: str | None = None
@@ -121,3 +126,41 @@ class RelationClaimsResponse(BaseModel):
             }
         }
     )
+
+
+class RelationshipEvidenceArticle(BaseModel):
+    entry_id: uuid.UUID
+    title: str
+    feed_title: str
+    published_at: datetime | None
+    # The analysis's own sentence when it asserted this pair, and the verb it used.
+    analysis_verb: str | None = None
+    analysis_sentence: str | None = None
+    # Passages naming both ends; failing those, the first naming each end alone.
+    passages: list[str] = []
+    source_only: str | None = None
+    target_only: str | None = None
+
+
+class RelationshipReviewOut(BaseModel):
+    reviewer: str
+    verdict: str
+    confidence: str | None
+    reason: str | None
+    quote: str | None
+    suggested_verb: str | None
+    flipped: bool
+    counted: bool
+    entry_id: uuid.UUID | None
+    entry_title: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class RelationshipEvidenceResponse(BaseModel):
+    relationship_id: uuid.UUID
+    adjudication_verdict: str | None
+    article_count: int = Field(description="Articles cited as evidence; `articles` holds at most the first 10")
+    articles: list[RelationshipEvidenceArticle]
+    reviews: list[RelationshipReviewOut] = Field(description="Newest first")
