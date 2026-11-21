@@ -1,7 +1,7 @@
 """Per-article relationship reviews, and a retry counter on review rows.
 
 Revision ID: g5r2v8k1e4w7
-Revises: e2w7j0t3k5m9
+Revises: f3x8k1u4l6n0
 Create Date: 2026-11-21
 
 An edge recorded only its settled verdict, so "asked and kept once", "asked
@@ -18,7 +18,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from alembic import op
 
 revision = "g5r2v8k1e4w7"
-down_revision = "e2w7j0t3k5m9"
+down_revision = "f3x8k1u4l6n0"
 branch_labels = None
 depends_on = None
 

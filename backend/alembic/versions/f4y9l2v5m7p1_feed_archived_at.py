@@ -1,7 +1,7 @@
 """Archive feeds instead of deleting them.
 
 Revision ID: f4y9l2v5m7p1
-Revises: e2w7j0t3k5m9
+Revises: g5r2v8k1e4w7
 Create Date: 2026-11-21
 
 Deleting a feed cascaded to its articles, and with them every entity link,
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "f4y9l2v5m7p1"
-down_revision = "e2w7j0t3k5m9"
+down_revision = "g5r2v8k1e4w7"
 branch_labels = None
 depends_on = None
 

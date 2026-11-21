@@ -1,7 +1,7 @@
 """Give sync-created actors and malware their own created_via.
 
-Revision ID: f3x8k1u4l6n0
-Revises: e2w7j0t3k5m9
+Revision ID: h6s3w9l2f5x8
+Revises: f4y9l2v5m7p1
 Create Date: 2026-11-21
 
 The ransomware leak-site and Cybergeist syncs create entities through the
@@ -17,8 +17,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "f3x8k1u4l6n0"
-down_revision = "e2w7j0t3k5m9"
+revision = "h6s3w9l2f5x8"
+down_revision = "f4y9l2v5m7p1"
 branch_labels = None
 depends_on = None
 
