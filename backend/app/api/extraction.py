@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.security import get_admin_user
 from app.database import get_db
-from app.intelligence.autolinker import refresh_vocabulary
+from app.intelligence.autolinker import schedule_vocabulary_refresh
 from app.intelligence.correlation import ENTITY_CONFIG
 from app.intelligence.correlation_cache import invalidate_entity_cache
 from app.intelligence.entity_resolution import (
@@ -600,10 +600,12 @@ async def extraction_delete(
 
     await db.commit()
 
-    # The vocabulary is built from live entities — rebuild so the autolinker
-    # stops matching what we just removed instead of waiting for the next sync.
+    # The vocabulary is built from live entities — queue a rebuild so the
+    # autolinker stops matching what we just removed within seconds, not at the
+    # next sync. Queued rather than inline: a bulk clean-up sends one request per
+    # row, and each inline build was ten seconds of CPU on the event loop.
     if rows:
-        await refresh_vocabulary(db)
+        await schedule_vocabulary_refresh(db)
 
     return {"deleted": len(rows), "denied": denied}
 
@@ -709,7 +711,7 @@ async def extraction_denylist_add(
     if not written:
         raise AppError(code="bad_request", message="Name normalizes to nothing", status_code=422)
     await db.commit()
-    await refresh_vocabulary(db)
+    await schedule_vocabulary_refresh(db)
 
     row = await db.scalar(
         select(EntityNameDenylist).where(
@@ -735,4 +737,4 @@ async def extraction_denylist_remove(
     await db.delete(row)
     await sync_fp_names(db, remove=[display_name])
     await db.commit()
-    await refresh_vocabulary(db)
+    await schedule_vocabulary_refresh(db)

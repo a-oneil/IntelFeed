@@ -120,7 +120,9 @@ async def search_entry_ids(
         entry_ids = sorted(constraint_ids)[:limit]
         return len(entry_ids), entry_ids
 
-    ids_result = execute_entry_search(plan, list(constraint_ids) if constraint_ids is not None else None, limit, 0)
+    ids_result = execute_entry_search(
+        plan, list(constraint_ids) if constraint_ids is not None else None, limit, 0, attributes_to_retrieve=["id"]
+    )
     entry_ids = [hit["id"] for hit in ids_result.get("hits", []) if "id" in hit]
     # The real hit count, not estimatedTotalHits — Meili overcounts that.
     return len(entry_ids), entry_ids

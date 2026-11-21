@@ -446,7 +446,10 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "task": "app.workers.saved_search_tasks.refresh_saved_search_counts",
         "description": "Refresh match counts and dispatch alerts for saved searches",
         "category": "saved_searches",
-        "default_schedule": {"type": "crontab", "minute": "*/5"},
+        # Each distinct query is one Meilisearch scan (up to 5,000 ids); the
+        # counts cache outlives two runs, so a slow run never leaves the
+        # sidebar computing them inline.
+        "default_schedule": {"type": "crontab", "minute": "*/15"},
     },
     "sync-campaign-saved-searches": {
         "task": "app.workers.saved_search_tasks.sync_campaign_saved_searches",

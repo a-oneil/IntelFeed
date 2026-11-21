@@ -60,7 +60,7 @@ Settings → Engine → *autolink* stage panel. These control the dictionary sca
 | `autolinker_blocked_surface_forms` | csv, empty | Words an analyst blocked with the reader's *Wrong? → never match this word*. Applies to **every** entity type. Managed from the reader and the autolink panel. |
 | `autolink_pending_tier_enabled` | bool, `true` | Actor, malware, tool and country matches whose only matched words are ordinary dictionary words are held for the AI to confirm, not linked at once. If the feed has AI analysis off, nothing could confirm them, so they are dropped. Off links them straight away. |
 
-The autolinker rebuilds its word list every 30 minutes (job `refresh-autolinker-vocabulary`). Changes made through the API also trigger a rebuild.
+The autolinker rebuilds its word list every 30 minutes (job `refresh-autolinker-vocabulary`). Changes made through the API (deleting or denying a name, blocking a surface form, reporting a false positive) queue the same job on the worker about ten seconds later, so a burst of changes becomes one rebuild.
 
 ---
 

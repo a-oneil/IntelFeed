@@ -1413,11 +1413,11 @@ async def deny_entity_name(
     names = deniable_names(entity_type, entity)
     denied = await deny_entity_names(db, entity_type, names, reason="Deleted from the entity profile")
     await db.commit()
-    # The names now sit in the autolinker's false-positive list — rebuild so the
-    # vocabulary drops them immediately rather than at the next sync.
-    from app.intelligence.autolinker import refresh_vocabulary
+    # The names now sit in the autolinker's false-positive list — queue a rebuild
+    # so the vocabulary drops them within seconds rather than at the next sync.
+    from app.intelligence.autolinker import schedule_vocabulary_refresh
 
-    await refresh_vocabulary(db)
+    await schedule_vocabulary_refresh(db)
     return DenyNameResponse(denied=denied, names=names)
 
 

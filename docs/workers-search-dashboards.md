@@ -180,7 +180,7 @@ When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker
 | Task | Default schedule | What it does |
 |------|------------------|--------------|
 | `run_scheduled_automations` | Every 60 s | Run `on_schedule` automation rules |
-| `refresh_saved_search_counts` | Every 5 min | Refresh each user's saved-search match and unread counts |
+| `refresh_saved_search_counts` | Every 15 min | Refresh each user's saved-search match and unread counts |
 | `sync_campaign_saved_searches` | Every 5 min | Add entries matching a campaign's saved searches to the campaign |
 | `sync_campaign_sources` | Every 15 min | Pull in articles for the entities, stories and queries each campaign follows |
 
@@ -412,7 +412,7 @@ Files: `backend/app/models/saved_search.py`, `backend/app/workers/saved_search_t
 
 A `SavedSearch` has `created_by`, `name`, `display_name`, `query`, `filters` (JSONB) and `created_at`. Saved searches belong to one user.
 
-`refresh_saved_search_counts` runs every 5 minutes. For each owner it computes match and unread counts for their saved searches, using that user's own read state, and caches them in Redis at `saved_search_counts:{user_id}` for 10 minutes. The saved-search list and the Saved Search Hits widget read that cache.
+`refresh_saved_search_counts` runs every 15 minutes. Each distinct query is scanned once in Meilisearch (ids only, up to 5,000 hits), however many people saved it; then for each owner the job counts that user's read entries among the hits and caches the match and unread counts in Redis at `saved_search_counts:{user_id}` for 30 minutes, two runs' worth, so a slow run never leaves the saved-search list computing them inline. The saved-search list and the Saved Search Hits widget read that cache.
 
 Campaigns can follow saved searches through the `CampaignSavedSearch` table. `sync_campaign_saved_searches` (every 5 minutes) adds matching entries to the campaign.
 

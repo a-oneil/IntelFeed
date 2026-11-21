@@ -2041,9 +2041,9 @@ async def add_fp_name(
     user: User = Depends(get_current_user),
     db=Depends(get_db),
 ) -> dict:
-    """Exclude a name from autolinker matching and rebuild the vocabulary."""
+    """Exclude a name from autolinker matching and queue a vocabulary rebuild."""
     _require_admin(user)
-    from app.intelligence.autolinker import refresh_vocabulary
+    from app.intelligence.autolinker import schedule_vocabulary_refresh
     from app.intelligence.entity_resolution import sync_fp_names
 
     name = body.name.strip()
@@ -2052,7 +2052,7 @@ async def add_fp_name(
     changed = await sync_fp_names(db, add=[name])
     await db.commit()
     if changed:
-        await refresh_vocabulary(db)
+        await schedule_vocabulary_refresh(db)
     return {"added": changed, "name": name.lower()}
 
 
@@ -2064,13 +2064,13 @@ async def remove_fp_name(
 ) -> None:
     """Let the autolinker match this name again."""
     _require_admin(user)
-    from app.intelligence.autolinker import refresh_vocabulary
+    from app.intelligence.autolinker import schedule_vocabulary_refresh
     from app.intelligence.entity_resolution import sync_fp_names
 
     changed = await sync_fp_names(db, remove=[name])
     await db.commit()
     if changed:
-        await refresh_vocabulary(db)
+        await schedule_vocabulary_refresh(db)
 
 
 # --- Autolink blocked surface forms ---------------------------------------
@@ -2111,9 +2111,9 @@ async def add_blocked_name(
     user: User = Depends(get_current_user),
     db=Depends(get_db),
 ) -> dict:
-    """Block a surface form from matching any entity type and rebuild the vocabulary."""
+    """Block a surface form from matching any entity type and queue a vocabulary rebuild."""
     _require_admin(user)
-    from app.intelligence.autolinker import refresh_vocabulary
+    from app.intelligence.autolinker import schedule_vocabulary_refresh
     from app.intelligence.entity_resolution import sync_name_list_setting
 
     name = body.name.strip()
@@ -2122,7 +2122,7 @@ async def add_blocked_name(
     changed = await sync_name_list_setting(db, BLOCKED_FORMS_SETTING, add=[name])
     await db.commit()
     if changed:
-        await refresh_vocabulary(db)
+        await schedule_vocabulary_refresh(db)
     return {"added": changed, "name": name.lower()}
 
 
@@ -2134,10 +2134,10 @@ async def remove_blocked_name(
 ) -> None:
     """Let every entity type match this surface form again."""
     _require_admin(user)
-    from app.intelligence.autolinker import refresh_vocabulary
+    from app.intelligence.autolinker import schedule_vocabulary_refresh
     from app.intelligence.entity_resolution import sync_name_list_setting
 
     changed = await sync_name_list_setting(db, BLOCKED_FORMS_SETTING, remove=[name])
     await db.commit()
     if changed:
-        await refresh_vocabulary(db)
+        await schedule_vocabulary_refresh(db)
