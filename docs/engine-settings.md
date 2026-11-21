@@ -404,6 +404,7 @@ The review's own pending rows settle themselves. A pair holding one of its merge
 | `relationship_sweep_min_age_hours` | int, `24` | A claim is left to the per-article review for this long first. |
 | `relationship_sweep_retry_days` | int, `30` | A claim the sweep could not settle is not asked again for this long. |
 | `relationship_sweep_min_confidence` | `high` / `medium` / `low`, `high` | In apply mode, answers below this are recorded and change nothing. |
+| `relationship_sweep_actions` | comma list, `keep` | What apply mode may change: `keep` (settle a stated claim), `correct` (fix a wrong verb or direction), `hide` (a claim no article states). Add one only once the eval shows it right often enough; the rest are recorded and the edge stays in Review. A keep of an actor or malware *targeting a country* is never applied, since origin is too often read as target. |
 
 ### Entity assessments
 

@@ -175,6 +175,7 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
             "relationship_sweep_min_age_hours",
             "relationship_sweep_retry_days",
             "relationship_sweep_min_confidence",
+            "relationship_sweep_actions",
         ],
         "task": "app.workers.relationship_sweep_tasks.sweep_relationships",
         "description": (

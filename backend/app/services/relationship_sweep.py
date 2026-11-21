@@ -48,6 +48,13 @@ LOCK_KEY = "intelfeed:relationship_sweep:lock"
 LOCK_TTL_SECONDS = 3600
 
 MODES = ("off", "shadow", "apply")
+# What apply mode may change, each switched on once the eval shows it is
+# right often enough (relationship_sweep_actions).
+ACTIONS = ("keep", "correct", "hide")
+# A keep of "X targets <country>" is never applied: origin read as target is
+# the commonest wrong claim, and the local model kept 5 of 19 such claims
+# wrongly in the 2026-11-21 eval (every other keep: 24 of 25 right).
+_NO_AUTO_KEEP = {("threat_actor", "targets", "country"), ("malware", "targets", "country")}
 DECISIONS = ("asserted", "wrong_verb", "wrong_direction", "not_asserted", "wrong_entity", "unsure")
 _CONF_RANK = {"low": 0, "medium": 1, "high": 2}
 _MAX_ARTICLES = 4
@@ -69,6 +76,11 @@ async def sweep_settings(db: AsyncSession) -> dict:
         "min_age_hours": max(0, int(await _get("relationship_sweep_min_age_hours", 24))),
         "retry_days": max(1, int(await _get("relationship_sweep_retry_days", 30))),
         "min_conf": floor if floor in _CONF_RANK else "high",
+        "actions": {
+            a.strip().lower()
+            for a in str(await _get("relationship_sweep_actions", "keep")).split(",")
+            if a.strip().lower() in ACTIONS
+        },
     }
 
 
@@ -336,7 +348,14 @@ async def apply_judgment(
         "wrong_entity": es.DEMOTE,
     }.get(j.decision, es.UNSURE)
     entry_id = j.passage.entry_id if j.passage else (case.passages[0].entry_id if case.passages else None)
-    acts = cfg["mode"] == "apply" and verdict != es.UNSURE and _CONF_RANK[j.confidence] >= _CONF_RANK[cfg["min_conf"]]
+    action = {es.KEEP: "keep", es.REVERB: "correct", es.DEMOTE: "hide"}.get(verdict)
+    claim_types = (edge.source_type, edge.relationship_type, edge.target_type)
+    acts = (
+        cfg["mode"] == "apply"
+        and action in cfg.get("actions", set(ACTIONS))
+        and not (action == "keep" and claim_types in _NO_AUTO_KEEP)
+        and _CONF_RANK[j.confidence] >= _CONF_RANK[cfg["min_conf"]]
+    )
     if not acts:
         await es.record_review(
             db,

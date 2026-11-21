@@ -77,6 +77,7 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "relationship_sweep_min_age_hours": int,
     "relationship_sweep_retry_days": int,
     "relationship_sweep_min_confidence": str,
+    "relationship_sweep_actions": str,
     "adjudication_content_max_chars": int,
     "adjudication_scope": str,
     "entity_maintenance_mode": str,
@@ -573,6 +574,17 @@ SETTING_METADATA: dict[str, dict] = {
         "description": "In apply mode, answers below this confidence are recorded but change nothing",
         "group": "adjudication",
         "options": ["high", "medium", "low"],
+    },
+    "relationship_sweep_actions": {
+        "label": "Edge Sweep: Changes It Applies",
+        "description": (
+            "Comma list of what apply mode may change: keep (settle a stated claim), correct (fix a wrong "
+            "verb or direction), hide (a claim no article states). Add one only after "
+            "scripts/maintenance/eval_relationship_sweep.py shows it right often enough; the rest are "
+            "recorded on the edge and leave it in Review. A keep of an actor or malware targeting a "
+            "country is never applied: origin is too often read as target"
+        ),
+        "group": "adjudication",
     },
     "adjudication_content_max_chars": {
         "label": "Article Text Cap",
@@ -1513,6 +1525,7 @@ _ENGINE_SECTION_GROUPS: dict[str, str] = {
     "relationship_sweep_min_age_hours": "adjudication",
     "relationship_sweep_retry_days": "adjudication",
     "relationship_sweep_min_confidence": "adjudication",
+    "relationship_sweep_actions": "adjudication",
     "adjudication_content_max_chars": "adjudication",
     "adjudication_scope": "adjudication",
     # Score stage

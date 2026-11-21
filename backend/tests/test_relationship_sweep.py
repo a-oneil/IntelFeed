@@ -314,3 +314,44 @@ def test_a_correction_without_its_direction_is_turned_the_allowed_way():
     # No orientation the matrix allows, or no change at all.
     assert corrected_orientation("malware", "targets", "country", "attributed_to", False) is None
     assert corrected_orientation("threat_actor", "uses", "tool", "uses", False) is None
+
+
+@pytest.mark.asyncio
+async def test_apply_changes_only_what_the_actions_allow(db_session: AsyncSession):
+    cfg = {"mode": "apply", "min_conf": "high", "actions": {"keep"}}
+    unstated = await _claim(db_session, [ROUNDUP])
+    case = await build_case(db_session, unstated)
+    j = parse_answer({"decision": "not_asserted", "confidence": "high", "reason": "Warlock is a separate item."}, case)
+    assert await apply_judgment(db_session, case, j, cfg, None) == "recorded"
+    assert unstated.adjudication_verdict is None  # hides are not switched on
+
+    # A country-target keep is never applied, whatever the actions say.
+    feed = await _feed(db_session)
+    actor = ThreatActor(name=f"Warlock {uuid.uuid4().hex[:6]}", aliases=["Warlock"])
+    russia = Country(name="Russia", iso_code="RU")
+    db_session.add_all([actor, russia])
+    await db_session.flush()
+    text = "Warlock hit utilities in Russia last week."
+    e = Entry(feed_id=feed.id, guid=str(uuid.uuid4()), title="t", url="https://sweep.example/c", content_text=text)
+    db_session.add(e)
+    await db_session.flush()
+    edge = EntityRelationship(
+        source_type="threat_actor",
+        source_id=actor.id,
+        target_type="country",
+        target_id=russia.id,
+        relationship_type="targets",
+        confidence="possible",
+        source="co_occurrence",
+        evidence_entry_ids=[e.id],
+    )
+    db_session.add(edge)
+    await db_session.flush()
+    case = await build_case(db_session, edge)
+    j = parse_answer(
+        {"decision": "asserted", "confidence": "high", "article": 1, "quote": text, "reason": "Warlock hit Russia."},
+        case,
+    )
+    assert j.rejected is None
+    assert await apply_judgment(db_session, case, j, {**cfg, "actions": {"keep", "hide"}}, None) == "recorded"
+    assert edge.adjudication_verdict is None
