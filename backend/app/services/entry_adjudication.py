@@ -2158,19 +2158,15 @@ def _dedupe_verdict_rows(raw: list, stats: dict, n_items: int) -> list:
 def _reverb_target(row: dict, item: ReviewItem) -> tuple[str | None, bool]:
     """The corrected claim a reverb asks for, as (verb, flip), when the
     relationship matrix allows it and it differs from the claim as stated."""
-    from app.intelligence.relationship_matrix import is_allowed_relationship
+    from app.intelligence.relationship_matrix import corrected_orientation
 
     if item.kind != "edge" or item.edge_claim is None:
         return None, False
     verb = str(row.get("suggested_verb") or "").strip().lower().replace(" ", "_") or None
     flip = bool(row.get("flip")) if not isinstance(row.get("flip"), str) else row["flip"].lower() == "true"
     src_type, current, tgt_type = item.edge_claim
-    verb = verb or current
-    if flip:
-        src_type, tgt_type = tgt_type, src_type
-    if (verb, flip) == (current, False) or not is_allowed_relationship(src_type, verb, tgt_type):
-        return None, False
-    return verb, flip
+    fixed = corrected_orientation(src_type, current, tgt_type, verb or current, flip)
+    return fixed if fixed is not None else (None, False)
 
 
 def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verdict], dict]:

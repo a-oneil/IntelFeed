@@ -91,8 +91,9 @@ class Passage:
     feed_id: uuid.UUID | None
     title: str
     feed_title: str
-    text: str  # the article text the quote must come from
+    text: str  # the article text the quote must come from (title and summary included)
     lines: list[str] = field(default_factory=list)
+    paragraphs: list[str] = field(default_factory=list)
     # The names each end goes by in this article (catalogue forms + what the
     # autolinker matched here): what a quote must name.
     source_forms: list[str] = field(default_factory=list)
@@ -174,21 +175,28 @@ async def build_case(db: AsyncSession, edge: EntityRelationship) -> EdgeCase | N
 
     candidates = []
     for entry in entries:
-        text = analysis_content_text(entry)
+        title = entry.translated_title or entry.title or ""
+        paras = edge_evidence.paragraphs(title, entry.summary, analysis_content_text(entry))
+        text = "\n\n".join(paras)
         src_forms = [*source.forms, *await edge_evidence.edge_forms(db, edge.source_type, edge.source_id, entry.id)]
         tgt_forms = [*target.forms, *await edge_evidence.edge_forms(db, edge.target_type, edge.target_id, entry.id)]
         _result, parsed = await _current_analysis(db, entry.id)
         lines: list[str] = []
         asserted = edge_evidence.analysis_evidence(parsed, src_forms, tgt_forms)
         if asserted and edge_evidence.quote_in(text, asserted[1]):
-            lines.append(f'analysis evidence ({asserted[0].replace("_", " ")}): "{asserted[1]}"')
-        both = edge_evidence.sentences_naming(text, src_forms, tgt_forms)
-        lines += [f'sentence: "{s}"' for s in both if not asserted or s not in asserted[1]]
+            lines.append(f'the analysis quoted ({asserted[0].replace("_", " ")}): "{asserted[1]}"')
+        body = paras[1:] if title else paras
+        both, only_src, only_tgt = edge_evidence.passages_naming(body, src_forms, tgt_forms)
+        if title and (edge_evidence.names(title, src_forms) or edge_evidence.names(title, tgt_forms)):
+            lines.insert(0, f'title: "{title}"')
+        lines += [f'passage: "{p}"' for p in both]
         if not both:
-            for end, forms in ((source, src_forms), (target, tgt_forms)):
-                s = edge_evidence.first_sentence_naming(text, forms)
-                lines.append(f'{end.name} is named: "{s}"' if s else f"{end.name} is not found in the text")
-        candidates.append((bool(both), entry, text, lines, src_forms, tgt_forms))
+            for end, found in ((source, only_src), (target, only_tgt)):
+                if found:
+                    lines.append(f'{end.name} is named (no passage names both): "{found[0]}"')
+                elif not edge_evidence.names(title, src_forms if end is source else tgt_forms):
+                    lines.append(f"{end.name} is not found in the text")
+        candidates.append((bool(both), entry, text, lines, src_forms, tgt_forms, paras))
 
     epoch = datetime.min.replace(tzinfo=UTC)
     candidates.sort(key=lambda c: (not c[0], c[1].id in echoes, -(c[1].published_at or epoch).timestamp()))
@@ -209,10 +217,11 @@ async def build_case(db: AsyncSession, edge: EntityRelationship) -> EdgeCase | N
             feed_title=feed_titles.get(entry.feed_id) or "",
             text=text,
             lines=lines,
+            paragraphs=paras,
             source_forms=src_forms,
             target_forms=tgt_forms,
         )
-        for i, (_both, entry, text, lines, src_forms, tgt_forms) in enumerate(picked[:_MAX_ARTICLES])
+        for i, (_both, entry, text, lines, src_forms, tgt_forms, paras) in enumerate(picked[:_MAX_ARTICLES])
     ]
     return EdgeCase(edge=edge, source=source, target=target, passages=passages)
 
@@ -234,7 +243,7 @@ def render_case(case: EdgeCase) -> str:
             line += f"; {end.description}"
         out.append(line)
     out.append("")
-    out.append(f"ARTICLES ({len(case.passages)} of {len(edge.evidence_entry_ids or [])} that name both):")
+    out.append(f"ARTICLES ({len(case.passages)} of the {len(edge.evidence_entry_ids or [])} it was drawn from):")
     for p in case.passages:
         out.append(f'[{p.index}] "{p.title}" — {p.feed_title}')
         out += [f"    {line}" for line in p.lines]
@@ -247,7 +256,7 @@ def render_case(case: EdgeCase) -> str:
 def parse_answer(result: dict, case: EdgeCase) -> Judgment:
     """The model's answer, held to the rules: a quote from the article it
     names, naming both ends, for anything but a plain 'not stated'."""
-    from app.intelligence.relationship_matrix import is_allowed_relationship
+    from app.intelligence.relationship_matrix import corrected_orientation
 
     decision = str(result.get("decision") or "unsure").strip().lower().replace(" ", "_")
     if decision not in DECISIONS:
@@ -269,22 +278,31 @@ def parse_answer(result: dict, case: EdgeCase) -> Judgment:
             j.passage = next((p for p in case.passages if edge_evidence.quote_in(p.text, quote)), None)
         if j.passage is None or not edge_evidence.quote_in(j.passage.text, quote):
             j.rejected = "quote not found in the article"
-        elif not (
-            edge_evidence.names(quote, j.passage.source_forms or case.source.forms)
-            and edge_evidence.names(quote, j.passage.target_forms or case.target.forms)
-        ):
-            j.rejected = "quote does not name both ends"
+        else:
+            # The quote names both ends, or names one and sits in a paragraph
+            # (or under a title) that names the other: "the attackers deployed
+            # MythicRatatoskr" in the paragraph about UAC-0099.
+            src_forms = j.passage.source_forms or case.source.forms
+            tgt_forms = j.passage.target_forms or case.target.forms
+            held = edge_evidence.paragraph_holding(j.passage.paragraphs, quote) or ""
+            title = j.passage.paragraphs[0] if j.passage.paragraphs else ""
+            near = f"{held}\n{title}"
+            names_src = edge_evidence.names(quote, src_forms)
+            names_tgt = edge_evidence.names(quote, tgt_forms)
+            src_ok = names_src or edge_evidence.names(near, src_forms)
+            tgt_ok = names_tgt or edge_evidence.names(near, tgt_forms)
+            if not (names_src or names_tgt) or not (src_ok and tgt_ok):
+                j.rejected = "quote does not name both ends"
     if decision in ("wrong_verb", "wrong_direction") and j.rejected is None:
         verb = str(result.get("suggested_verb") or "").strip().lower().replace(" ", "_") or case.edge.relationship_type
         flip = decision == "wrong_direction" or bool(result.get("flip"))
-        src_type, tgt_type = case.edge.source_type, case.edge.target_type
-        if flip:
-            src_type, tgt_type = tgt_type, src_type
-        unchanged = (verb, flip) == (case.edge.relationship_type, False)
-        if unchanged or not is_allowed_relationship(src_type, verb, tgt_type):
+        fixed = corrected_orientation(
+            case.edge.source_type, case.edge.relationship_type, case.edge.target_type, verb, flip
+        )
+        if fixed is None:
             j.rejected = "no allowed correction"
         else:
-            j.suggested_verb, j.flip = verb, flip
+            j.suggested_verb, j.flip = fixed
     if decision in ("not_asserted", "wrong_entity") and not reason:
         j.rejected = "no reason"
     if j.rejected:

@@ -63,6 +63,65 @@ def first_sentence_naming(text: str, forms: list[str]) -> str | None:
     return None
 
 
+PASSAGE_MAX = 700
+
+
+def _clip_around(text: str, patterns: list[re.Pattern], limit: int = PASSAGE_MAX) -> str:
+    """The paragraph, or the window of it that holds the first mention of
+    each end, at most ``limit`` characters."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    starts = [m.start() for p in patterns if (m := p.search(text))]
+    lo = max(0, min(starts) - 120) if starts else 0
+    hi = min(len(text), max(lo + limit, (max(starts) + 200) if starts else limit))
+    if hi - lo > limit:
+        hi = lo + limit
+    piece = text[lo:hi]
+    return ("…" if lo else "") + piece + ("…" if hi < len(text) else "")
+
+
+def paragraphs(title: str | None, summary: str | None, content: str | None) -> list[str]:
+    """The article split the way the autolinker records positions: title,
+    summary, then the body's paragraphs."""
+    from app.intelligence.autolinker import split_into_paragraphs
+
+    return [text for _i, text in split_into_paragraphs(title or "", summary or "", content or "")]
+
+
+def passages_naming(
+    paras: list[str], forms_a: list[str], forms_b: list[str], limit: int = 2
+) -> tuple[list[str], list[str], list[str]]:
+    """(paragraphs naming both ends, first paragraph naming only A, first naming
+    only B), clipped. A claim is often stated across a paragraph's sentences
+    ("UAC-0099 gained access … the attackers deployed MythicRatatoskr"), so the
+    judge reads the paragraph, not the sentence."""
+    pa, pb = _form_pattern(forms_a), _form_pattern(forms_b)
+    if pa is None or pb is None:
+        return [], [], []
+    both, only_a, only_b = [], [], []
+    for text in paras:
+        has_a, has_b = bool(pa.search(text)), bool(pb.search(text))
+        if has_a and has_b and len(both) < limit:
+            both.append(_clip_around(text, [pa, pb]))
+        elif has_a and not has_b and not only_a:
+            only_a.append(_clip_around(text, [pa], 400))
+        elif has_b and not has_a and not only_b:
+            only_b.append(_clip_around(text, [pb], 400))
+    return both, only_a, only_b
+
+
+def paragraph_holding(paras: list[str], quote: str) -> str | None:
+    """The paragraph a quote was taken from (its longest piece found there)."""
+    pieces = sorted(
+        (normalized(p).strip(" '\".,;:") for p in re.split(r"\.\.\.|\u2026", quote or "")), key=len, reverse=True
+    )
+    piece = next((p for p in pieces if p), "")
+    if not piece:
+        return None
+    return next((text for text in paras if piece in normalized(text)), None)
+
+
 def normalized(text: str) -> str:
     """Lowercase, quotes and dashes folded, whitespace collapsed: how a quote
     is matched against the article it claims to come from."""

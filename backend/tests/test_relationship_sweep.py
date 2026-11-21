@@ -22,7 +22,7 @@ from app.services.relationship_sweep import apply_judgment, build_case, parse_an
 
 STATED = "The Warlock operators relied on Cobalt Strike for lateral movement."
 ARTICLE = f"Researchers tracked a new campaign. {STATED} Patch now."
-ROUNDUP = "This week: Warlock claimed a utility. Separately, Cobalt Strike cracks keep circulating."
+ROUNDUP = "This week: Warlock claimed a utility.\n\nSeparately, Cobalt Strike cracks keep circulating."
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +50,7 @@ async def _feed(db: AsyncSession) -> Feed:
     return f
 
 
-async def _claim(db: AsyncSession, texts: list[str], **kw) -> EntityRelationship:
+async def _claim(db: AsyncSession, texts: list[str], title: str = "Weekly notes", **kw) -> EntityRelationship:
     feed = await _feed(db)
     tag = uuid.uuid4().hex[:6]
     actor = ThreatActor(name=f"Warlock {tag}", aliases=["Warlock"])
@@ -62,7 +62,7 @@ async def _claim(db: AsyncSession, texts: list[str], **kw) -> EntityRelationship
         e = Entry(
             feed_id=feed.id,
             guid=str(uuid.uuid4()),
-            title="Warlock campaign",
+            title=title,
             url=f"https://sweep.example/{uuid.uuid4()}",
             content_text=text,
             published_at=datetime.now(UTC),
@@ -94,15 +94,15 @@ async def _claim(db: AsyncSession, texts: list[str], **kw) -> EntityRelationship
 
 
 @pytest.mark.asyncio
-async def test_the_case_shows_the_sentence_naming_both_ends(db_session: AsyncSession):
+async def test_the_case_shows_the_passage_naming_both_ends(db_session: AsyncSession):
     edge = await _claim(db_session, [ARTICLE, ROUNDUP])
     case = await build_case(db_session, edge)
     block = render_case(case)
     assert block.startswith("CLAIM: Warlock ") and "(threat_actor) uses Cobalt Strike " in block
-    assert f'sentence: "{STATED}"' in block
+    assert f'passage: "{ARTICLE}"' in block
     # The roundup has no sentence naming both: each end's first mention instead.
-    assert 'is named: "This week: Warlock claimed a utility."' in block
-    assert case.passages[0].text == ARTICLE  # the article with a sentence naming both first
+    assert 'is named (no passage names both): "This week: Warlock claimed a utility.' in block
+    assert ARTICLE in case.passages[0].text  # the article with a passage naming both first
 
 
 @pytest.mark.asyncio
@@ -264,3 +264,53 @@ async def test_a_run_judges_and_commits_each_edge(db_session: AsyncSession, monk
     stats = await sweep_mod.sweep(db_session, limit=5)
     assert stats["status"] == "ok" and stats.get("kept") == 1
     assert edge.adjudication_verdict == es.KEPT
+
+
+@pytest.mark.asyncio
+async def test_a_quote_may_name_one_end_when_its_passage_names_the_other(db_session: AsyncSession):
+    text = "Warlock gained access through a phishing email.\n\nNothing else happened that week."
+    para = "Warlock gained access through a phishing email. One day later, the attackers deployed Cobalt Strike."
+    edge = await _claim(db_session, [para + "\n\n" + text])
+    case = await build_case(db_session, edge)
+    j = parse_answer(
+        {
+            "decision": "asserted",
+            "confidence": "high",
+            "article": 1,
+            "quote": "One day later, the attackers deployed Cobalt Strike.",
+            "reason": "Warlock's operators deployed it.",
+        },
+        case,
+    )
+    assert j.decision == "asserted" and j.rejected is None
+    # The same words with the actor named only in another paragraph do not count.
+    edge2 = await _claim(db_session, ["Warlock gained access.\n\nOne day later, the attackers deployed Cobalt Strike."])
+    case2 = await build_case(db_session, edge2)
+    j2 = parse_answer(
+        {
+            "decision": "asserted",
+            "confidence": "high",
+            "article": 1,
+            "quote": "One day later, the attackers deployed Cobalt Strike.",
+            "reason": "Warlock deployed it.",
+        },
+        case2,
+    )
+    assert j2.rejected == "quote does not name both ends"
+
+
+def test_a_correction_without_its_direction_is_turned_the_allowed_way():
+    from app.intelligence.relationship_matrix import corrected_orientation
+
+    # "Romulus distributes CNCMachineRMS", filed as malware related_to tool.
+    assert corrected_orientation("malware", "related_to", "tool", "delivers", False) == ("delivers", True)
+    # An origin country: attributed_to runs actor → country whatever flip says.
+    assert corrected_orientation("threat_actor", "targets", "country", "attributed_to", True) == (
+        "attributed_to",
+        False,
+    )
+    # Same-type pairs keep the direction they were given.
+    assert corrected_orientation("threat_actor", "uses", "threat_actor", "subgroup_of", True) == ("subgroup_of", True)
+    # No orientation the matrix allows, or no change at all.
+    assert corrected_orientation("malware", "targets", "country", "attributed_to", False) is None
+    assert corrected_orientation("threat_actor", "uses", "tool", "uses", False) is None

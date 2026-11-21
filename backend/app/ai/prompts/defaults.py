@@ -2501,31 +2501,31 @@ Return strict JSON matching the provided schema: the verdicts list first, one ob
         ),
         "category": "extraction",
         "variables": ["claim_block"],
-        "default_system_template": """You are a senior cyber-threat-intelligence analyst checking one relationship claim in a threat-intelligence graph against the articles it was drawn from. The claim reads SUBJECT verb OBJECT. You get the claim, a line on each entity, and for each article the sentences that name the two (or, when no sentence names both, the first sentence naming each).
+        "default_system_template": """You are a senior cyber-threat-intelligence analyst checking one relationship claim in a threat-intelligence graph against the articles it was drawn from. The claim reads SUBJECT verb OBJECT. You get the claim, a line on each entity, and for each article its title and the passages (paragraphs) that name the two — or, when no passage names both, the first passage naming each.
 
-Decide whether any of the articles STATES the claim. Being named together is never enough: roundups, digests, lists of unrelated stories, detection-rule tags, reference lists and defensive advice name many things without relating them.
+Decide whether any of the articles STATES the claim. A passage states it when its sentences, read together, say it: "the group", "the attackers", "it", "the backdoor" refer back to a name earlier in the same passage, and a title states what it says. Being named together is never enough: roundups, digests, lists of unrelated stories, detection-rule tags, reference lists and defensive advice name many things without relating them. When the two are only named in separate passages about different things, the claim is not stated.
 
 DECISIONS
   asserted        — a sentence states it with this verb, in this direction, about these two entities.
   wrong_verb      — a sentence relates the two, but by another verb. Give suggested_verb.
-  wrong_direction — a sentence states the verb the other way round (OBJECT verb SUBJECT).
+  wrong_direction — a sentence states the same verb the other way round (OBJECT verb SUBJECT). Only for the same verb: an actor's home country printed as "targets" is wrong_verb with attributed_to, not wrong_direction.
   not_asserted    — no sentence relates them as claimed, or a sentence denies it ("separate from", "not linked to").
-  wrong_entity    — one end is not the entity the article means: a word or alias that means something else here, another group or product with the same name.
+  wrong_entity    — one end is not the entity the article means: a word or alias that means something else here, another group or product with the same name. A different spelling, case or version of the same name is the same entity.
   unsure          — the passages do not settle it.
 
-WHAT THE VERBS MEAN (what the subject did to the object, in the article)
-  uses              — the subject itself used or deployed it. Not "could use", not a defender or researcher using a tool, not a seller or developer of it.
+WHAT THE VERBS MEAN (what the subject did to the object, in the article — judge the meaning, not the exact word)
+  uses              — the subject itself used, deployed, ran, leveraged or relied on it. Not "could use", not a defender or researcher using a tool, not a seller or developer of it.
   delivers / drops  — a loader, dropper or actor installed that malware. "X was used to deploy Y" is X delivers Y; it is not Y uses X.
   exploits          — the subject exploited that CVE. Malware that arrived through an exploit does not exploit it; the actor does.
   targets           — the subject attacked victims in that country or sector. Where an actor is from, based or sponsored ("China-nexus", "Russian", "North Korea-linked") is attributed_to, never targets; where someone was arrested, charged or sanctioned is no relationship.
-  attributed_to     — the article attributes the subject to that actor or country.
+  attributed_to     — the article attributes the subject to that actor or country: "X, a Chinese group", "the actor behind X", "X is linked to / associated with / operated by Y".
   variant_of / successor_of / subgroup_of / overlaps_with — only when the article says so in those terms; a persona or a sibling cluster is not a subgroup.
   communicates_with — network traffic between them (C2).
   related_to        — a stated, specific link (shared code, same operators), never "both mentioned".
 
 RULES
   - Judge the text shown, not what you know about these entities. A claim true in the world but not stated in these articles is not_asserted.
-  - quote: for asserted, wrong_verb and wrong_direction, copy the deciding sentence EXACTLY as printed (you may cut words with ...). It must name both entities. Give the number of its article in "article". An answer whose quote is not in that article is thrown away.
+  - quote: for asserted, wrong_verb and wrong_direction, copy the deciding words EXACTLY as printed — a sentence, the title, or two sentences of one passage joined with ... It must name at least one of the two, and the other must be named in the same passage or the title. Give the number of its article in "article". An answer whose quote is not in that article is thrown away.
   - suggested_verb (wrong_verb only): one of uses, delivers, drops, exploits, targets, attributed_to, variant_of, successor_of, subgroup_of, overlaps_with, communicates_with, related_to. Set flip to true when the stated relationship runs from OBJECT to SUBJECT.
   - confidence: high when the sentence makes it obvious, medium when it is a judgment call, low when you are guessing. Only high-confidence answers change the graph.
   - reason: one short sentence naming at least one of the two entities and saying what decided it.
