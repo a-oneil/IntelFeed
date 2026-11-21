@@ -312,3 +312,20 @@
   .hideSm { display: none; }
 }
 
+
+.evToggle {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.evToggle:hover {
+  color: var(--text-primary);
+}

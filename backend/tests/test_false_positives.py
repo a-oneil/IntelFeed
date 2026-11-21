@@ -32,6 +32,24 @@ async def fp_entry(db_session: AsyncSession) -> Entry:
     return entry
 
 
+@pytest.fixture
+def inline_rebuild(monkeypatch):
+    """Run the rebuild the endpoint queues for the worker here, so the scan
+    assertions below see it; records that the endpoint asked for one."""
+    from app.api import false_positives
+    from app.intelligence.autolinker import refresh_vocabulary
+
+    asked: list[object] = []
+
+    async def _schedule(db):
+        asked.append(db)
+        await refresh_vocabulary(db)
+        return "queued"
+
+    monkeypatch.setattr(false_positives, "schedule_vocabulary_refresh", _schedule)
+    return asked
+
+
 @pytest_asyncio.fixture
 async def fp_actor_link(db_session: AsyncSession, fp_entry: Entry) -> tuple[ThreatActor, Entry]:
     actor = ThreatActor(name="Widget")
@@ -102,7 +120,11 @@ async def test_report_false_positive_entry_scope_unlinks_only_this_entry(
 
 @pytest.mark.asyncio
 async def test_report_false_positive_global_scope_updates_autolinker_and_rebuilds_vocab(
-    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, fp_actor_link: tuple[ThreatActor, Entry]
+    client: AsyncClient,
+    auth_headers: dict,
+    db_session: AsyncSession,
+    fp_actor_link: tuple[ThreatActor, Entry],
+    inline_rebuild: list,
 ):
     from app.intelligence.autolinker import _get_blocked_forms, scan_text
     from app.intelligence.correlation import ENTITY_CONFIG
@@ -126,7 +148,8 @@ async def test_report_false_positive_global_scope_updates_autolinker_and_rebuild
     assert data["added_to_autolinker_fp_list"] is True
 
     assert "widget" in _get_blocked_forms()
-    # Vocabulary was rebuilt inside the endpoint — a fresh scan should already skip it.
+    # The endpoint queued a rebuild (run inline by the fixture) — a fresh scan skips it.
+    assert len(inline_rebuild) == 1
     assert scan_text("The Widget campaign was observed.") == []
 
     _, junction, fk_col = ENTITY_CONFIG["threat_actor"]
@@ -178,9 +201,9 @@ async def test_report_false_positive_rejects_unknown_entity_type(client: AsyncCl
 
 @pytest.mark.asyncio
 async def test_global_scope_blocks_vendor_names_too(
-    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, fp_entry: Entry
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, fp_entry: Entry, inline_rebuild: list
 ):
-    """Regression: vendor/product/tool/mitigation bypass the curated FP-name list
+    """Regression: vendor/product/tool bypass the curated FP-name list
     (their real names are common brand words), so a global report used to write a
     setting that could never take effect — the toast claimed success and matching
     carried on. Analyst blocks land in a separate all-types list now."""
@@ -211,7 +234,7 @@ async def test_global_scope_blocks_vendor_names_too(
 
 @pytest.mark.asyncio
 async def test_alias_scope_drops_alias_and_unlinks_alias_only_entries(
-    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, fp_entry: Entry
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, fp_entry: Entry, inline_rebuild: list
 ):
     feed_id = fp_entry.feed_id
     other = Entry(

@@ -17,6 +17,7 @@ from app.models.category import Category
 from app.models.feed import Feed
 from app.models.user import User
 from app.schemas.feed import SECRET_ADAPTER_KEYS
+from app.services.feed_archive import revive_feed
 from app.services.feed_defaults import FEED_DEFAULT_FIELDS, category_for_feed_type, new_feed_settings
 from app.services.feed_fetch_health import strip_client_keys
 from app.services.feed_visibility import (
@@ -354,7 +355,10 @@ async def _import_feed_outline(
 
     if feed:
         # Already in the pool — with per-user subscriptions on, importing means
-        # subscribing to it.
+        # subscribing to it. A deleted one comes back.
+        if await revive_feed(db, feed, user.id):
+            stats["feeds_skipped"] += 1
+            return
         if await subscriptions_enabled(db):
             await ensure_subscription(db, user.id, feed.id)
             await db.flush()

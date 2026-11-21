@@ -78,6 +78,7 @@ Where a user stopped in a podcast or video. Unique on `(user_id, entry_media_id)
 - Fetching: `fetch_interval_minutes` (default 30), `last_fetched_at`, `etag`, `last_modified`
 - Health: `error_count`, `last_error`, `error_since`, `auto_paused_at`. While errors continue, the poller waits longer between fetches.
 - Switches: `is_active` (indexed), `is_muted`, `visible_to_visitors` (shown in public read-only mode; default off)
+- `archived_at` (indexed) — set when the feed is deleted or loses its last subscriber. An archived feed is off every feed list and out of the reader and default search, and stops fetching; its entries stay (`backend/app/services/feed_archive.py`). Adding or subscribing to it again clears it.
 - Analyst ratings: `reliability_rating` (one letter, A–F), `timeliness_rating` (excellent / good / fair / poor), `relevance_rating` (high / medium / low), `analyst_notes`, `last_reviewed_at`
 - Pipeline switches:
   - `intel_extraction_mode` (default `selective`) — `full`, `selective`, `manual` or `none`. `none` turns off autolinking and extraction for the feed.
@@ -244,8 +245,9 @@ Table `mitigations`: MITRE ATT&CK mitigations.
 - `mitre_id` (String 20, unique) — for example `M1036`
 - `name`, `description`, `mitre_url`
 - `cis_controls`, `nist_controls` (Text[])
+- `is_catalog` (Boolean) — set by the ATT&CK import (Enterprise, ICS, Mobile). Only catalog rows are linked to articles: `store_mitigations` (`backend/app/intelligence/mitigation.py`) maps each recommendation the AI finds, or each M-ID in the text, to a catalog row and never creates one
 
-Linked to TTPs through `ttp_mitigations`.
+Linked to TTPs through `ttp_mitigations`. Linked to articles through `entry_mitigations`, whose `detail` (Text) holds the article's own wording of the advice ("upgrade Lara Dashboard to 1.3.2 or later") on its link to the catalog mitigation it falls under (Update Software).
 
 #### Tool
 Table `tools`: any named software. That includes attack tools, defensive tools, ordinary software, online services and AI models. The AI only creates new rows for software an attacker uses; the other kinds come from imports and analysts, and the AI links to them once they exist.
@@ -297,8 +299,9 @@ Audit trail for automatic entity maintenance: merges, alias and description chan
 - `ai_result_id` (SET NULL), `applied`
 
 #### EntityLinkValidationLog
-Table `entity_link_validation_log`: one row per decision about a link between an entry and an actor, malware family, vendor, product or country.
-- The adjudicate stage writes `shadow_remove` and `needs_reclassification` in shadow mode, and `removed` in apply mode.
+Table `entity_link_validation_log`: one row per decision about a link between an entry and an entity.
+- The adjudicate stage writes `shadow_remove` and `needs_reclassification` in shadow mode, and `removed` in apply mode, for actor, malware family, vendor, product and country links.
+- Every hand unlink writes `removed` too, for any linkable type except observables, with a `reason` naming the user and where it happened: an article page (`DELETE /api/entries/{id}/<type>/{entity_id}`), Engine › Autolinking (`DELETE /api/entity-links/...`, `POST /api/entity-links/bulk-unlink`), or the `unlink_entity_from_entry` / `bulk_unlink_entities` tools (`unlink_and_log`, `backend/app/intelligence/link_validation_apply.py`).
 - An analyst restore writes `restored` (via `POST /api/admin/hygiene/link-log/{id}/restore` or the adjudication undo).
 
 Each row keeps a copy of the junction row so a removal can be undone. A `restored` row from the last 90 days stops the adjudicator from changing that link again. This guard reads this table, so it only protects those five link types.
@@ -674,15 +677,28 @@ Table `entity_relationships`: a typed link between two entities, for example "AP
 - `relationship_type` (indexed) — the verb: `uses`, `exploits`, `targets`, `attributed_to`, `variant_of`, `communicates_with`, `delivers`, `drops`, `controls`, `related_to`, `successor_of`, `subgroup_of`, `overlaps_with`, `exposes` (observable → CVE), `operates_in` (vendor → sector). Which (source type, verb, target type) combinations are allowed is set by `ALLOWED_RELATIONSHIPS` in `app/intelligence/relationship_matrix.py`, checked on every write.
 - `confidence` (default `possible`) — `confirmed`, `probable` or `possible`
 - `source` (default `analyst_created`) — `co_occurrence`, `auto_extracted`, `analyst_confirmed`, `analyst_created`, `analyst_rejected` (hidden and never recreated by co-occurrence), `external_feed` or `enrichment` (held by claims in `entity_relation_claims`)
-- `description`
+- `description` — for an AI-asserted link, the sentence that first stated it
 - `evidence_entry_ids` (UUID[]) — articles that support the link (GIN-indexed)
-- `adjudication_verdict`, `adjudicated_at` — the adjudicate stage's outcome:
-  - `corroborated` — promoted to confirmed
-  - `coincidental` — demoted to possible, and never promoted again by co-occurrence
-- `reviewer_kept_entry_ids` (UUID[]) — articles whose adjudicate review explicitly kept this link in apply mode, at or above the apply confidence floor. At `relationship_evidence_promote_count` distinct articles the link becomes confirmed and corroborated.
+- `adjudication_verdict`, `adjudicated_at` — what the reviewers settled, derived from `relationship_reviews` by `app/services/edge_settlement.py`:
+  - `kept` — the edge sweep (or an analyst's Restore) found the claim stated; out of the Review lens
+  - `corroborated` — kept by articles from two or more feeds (reposts excluded), at `relationship_evidence_promote_count` articles; confidence `confirmed`
+  - `disputed` — one article kept it and another demoted it; stays in the Review lens
+  - `coincidental` — no reviewed article states it; confidence `possible`, hidden from profiles, pivots, graphs and reports, never promoted again by co-occurrence
+  - `unsure` — the retired nightly job's "could not tell"
+- `reviewer_kept_entry_ids` (UUID[]) — articles whose review counted a keep
 - `created_by` (FK, CASCADE)
 
 Unique on `(source_type, source_id, target_type, target_id, relationship_type)`.
+
+#### RelationshipReview
+Table `relationship_reviews`: one reviewer's judgment of one edge, usually against one article. The edge's verdict is derived from these rows.
+- `relationship_id` (FK → `entity_relationships`, CASCADE, indexed)
+- `entry_id` (indexed, no FK: the review outlives the article), `feed_id` — the article judged, and its feed (two feeds make a confirmation)
+- `reviewer` — `adjudicator` (the per-article review), `sweep` (the edge sweep) or `analyst` (Apply or Restore in Review)
+- `verdict` — `keep`, `demote`, `reverb` (another verb or the other direction: `suggested_verb`, `flipped`), `unanswered` (asked, and the model said nothing) or `unsure`
+- `confidence`, `reason`, `quote`, `ai_result_id`
+- `counted` — the row settles the edge (apply mode, at or above the floor); the rest are a record of what was asked and said
+- `created_at`
 
 ---
 

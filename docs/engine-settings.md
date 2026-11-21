@@ -33,8 +33,8 @@ A database value that equals the default does nothing useful, and it stops you g
 | Structure | File | Role |
 |---|---|---|
 | `CONFIGURABLE_KEYS` | `backend/app/services/system_settings.py:26` | Which keys the UI can edit, and each value's type |
-| `SETTING_METADATA` | `backend/app/services/system_settings.py:220` | Label, description and group shown in the UI |
-| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1431` | Moves engine keys into the group of the Engine panel that owns them |
+| `SETTING_METADATA` | `backend/app/services/system_settings.py:227` | Label, description and group shown in the UI |
+| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1481` | Moves engine keys into the group of the Engine panel that owns them |
 | `SECRET_KEYS` | `backend/app/services/system_settings.py:14` | Encrypted in the database, hidden on read |
 | `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Which Engine screen shows each group; drives the Engine settings search |
 | `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:72` | Single keys that live somewhere other than their group's screen |
@@ -56,11 +56,11 @@ Settings → Engine → *autolink* stage panel. These control the dictionary sca
 | `autolinker_min_name_length` | int, `3` | Names shorter than this are never matched. |
 | `autolinker_ambiguous_name_max_length` | int, `10` | A one-word, letters-only name up to this length must appear **capitalised** to match. So "Royal" the actor matches *Royal ransomware* but not *the royal family*. |
 | `autolinker_ambiguous_max_occurrences` | int, `3` | If such a name appears more than this many times in one article, it is skipped there. Heavy repetition usually means an ordinary word. |
-| `autolinker_false_positive_names` | csv, about 120 names | Names never matched: common words, malware category words, brand words, Windows built-ins and known bad aliases. Applies **only to actor, malware and country** matches, because vendor, product, tool and mitigation names often are brand words. Edited as a table on the panel, or via `GET/POST/DELETE /api/engine/autolink/fp-names`. |
+| `autolinker_false_positive_names` | csv, about 120 names | Names never matched: common words, malware category words, brand words, Windows built-ins and known bad aliases. Applies **only to actor, malware and country** matches, because vendor, product and tool names often are brand words. Edited as a table on the panel, or via `GET/POST/DELETE /api/engine/autolink/fp-names`. |
 | `autolinker_blocked_surface_forms` | csv, empty | Words an analyst blocked with the reader's *Wrong? → never match this word*. Applies to **every** entity type. Managed from the reader and the autolink panel. |
 | `autolink_pending_tier_enabled` | bool, `true` | Actor, malware, tool and country matches whose only matched words are ordinary dictionary words are held for the AI to confirm, not linked at once. If the feed has AI analysis off, nothing could confirm them, so they are dropped. Off links them straight away. |
 
-The autolinker rebuilds its word list every 30 minutes (job `refresh-autolinker-vocabulary`). Changes made through the API also trigger a rebuild.
+The autolinker rebuilds its word list every 30 minutes (job `refresh-autolinker-vocabulary`). Changes made through the API (deleting or denying a name, blocking a surface form, reporting a false positive) queue the same job on the worker about ten seconds later, so a burst of changes becomes one rebuild.
 
 ---
 
@@ -235,6 +235,7 @@ How close two entity mentions are, by paragraph. Formula: `1 / (1 + decay_rate �
 | `relationship_specificity_weight` | float, `0.5` | How much a very common entity (one that appears everywhere, like a big vendor) is pushed down related lists. `0` off, `1` full. |
 | `relationship_reporting_source_specificity` | float, `0.45` | Vendors and products below this specificity are treated as *reporting sources* (the company that wrote the report) and grouped separately on profiles. |
 | `graph_max_neighbors_per_node` | int, `30` | Most neighbours shown per node in an entity graph. |
+| `correlation_max_entries` | int, `2000` | Most recent linked articles a pivot or graph reads per entity. Co-occurrence counts on an entity linked to more articles than this cover only the most recent ones. |
 | `graph_max_claim_edges` | int, `300` | Most relationship edges in one graph, most trusted first. |
 | `correlation_cache_ttl_seconds` | int, `3600` | Seconds correlation results stay cached (`correlation_cache.py`). The `refresh-correlation-cache` job refills it hourly at :10. |
 
@@ -328,7 +329,7 @@ Settings → Engine → **Maintenance** (groups `maintenance` and `retention`). 
 
 ### Adjudicate stage (post-analysis AI review)
 
-After an article's AI analysis is saved, a second, smaller AI call reviews it. It re-reads the article next to a list of everything the analysis wrote: entity links, new entities (with similar existing names), held matches the analysis linked or rejected, relationships and observables. For each item it wants to change, it returns a verdict: remove, reclassify, veto, merge, demote, drop, or link (a held match the analysis rejected). Items it leaves out are kept, so a clean review returns an empty list. The article's observable candidates are the exception: each one needs capture or drop ([Candidates and the adjudicator](observables.md#candidates-and-the-adjudicator)).
+After an article's AI analysis is saved, a second, smaller AI call reviews it. It re-reads the article next to a list of everything the analysis wrote: entity links, new entities (with similar existing names), held matches the analysis linked or rejected, relationships and observables. For each item it wants to change, it returns a verdict: remove, reclassify, veto, merge, demote, reverb (a relationship stated with another verb or the other way round), drop, or link (a held match the analysis rejected). Items it leaves out are kept, so a clean review returns an empty list. Relationships are the other exception: each one needs keep, reverb or demote, and only a high-confidence answer counts, whatever the floor below. The article's observable candidates are the exception: each one needs capture or drop ([Candidates and the adjudicator](observables.md#candidates-and-the-adjudicator)).
 
 The list sent to the AI holds at most 60 entity links, 15 rejected held matches, 10 relationships, 25 observables and 20 candidates. When there are more, the items only this review can judge go first: new entities, then held matches, then AI claims, then plain autolink matches. The rest are recorded in the run's `detail.uncapped_links` and `detail.uncapped_edges`.
 
@@ -340,7 +341,7 @@ Code: `backend/app/services/entry_adjudication.py` and `backend/app/workers/adju
 | `adjudication_trigger` | `all` \| `created`, default `all` | `all` reviews every analysed article. `created` reviews only articles whose analysis created or claimed something (an entity, an AI link, a TTP, a relationship, a held match it linked or rejected, or an observable). Use `created` if reviews can't keep up. |
 | `adjudication_max_per_hour` | int, `0` | Most reviews started per hour. `0` means no limit; the single AI worker is then the only pacing. Set a limit to cap spend on a paid provider, or to stop reviews delaying article analysis on the same worker. With a limit, the backfill gets at most half of each hour's budget. |
 | `adjudication_min_priority_score` | float, `0` | Skip articles below this priority score (0–10). Keep it at 0: low-scoring CVE articles are the main source of junk tool entities. |
-| `adjudication_apply_min_confidence` | `high` \| `medium` \| `low`, default `high` | In apply mode, verdicts below this wait for a second look instead of applying. |
+| `adjudication_apply_min_confidence` | `high` \| `medium` \| `low`, default `high` | In apply mode, verdicts below this wait for a second look instead of applying. Relationship verdicts count only at `high` whatever this says: a demote hides the claim from every profile. |
 | `adjudication_reclassify_consensus` | int, `2` | A type change affects the whole catalogue, so in apply mode a `reclassify` verdict is applied only once this many distinct articles' reviews agree on the same target type. Each earlier review's pending proposal is a vote; the review that reaches the count converts the entity and clears the proposals. `1` applies the first verdict at the confidence floor. A name an analyst or an earlier apply folded out of a type (a reclassify tombstone) is never proposed back into it, so types cannot ping-pong. |
 | `adjudication_circuit_breaker_pct` | float, `0.5` | If more than this share of one article's items get a destructive verdict, nothing in the run applies and its verdicts wait for a second look. If the average over the last 50 apply runs goes above it (with at least 10 runs), reviews pause for an hour and a warning chip shows in the Engine console. |
 | `adjudication_circuit_breaker_min_items` | int, `5` | The circuit breaker only judges an article whose review covered at least this many items. Below that, each verdict applies on its own confidence, because on a one-item recheck a single remove is already 100%. |
@@ -369,7 +370,7 @@ Rows that pass become `pending`, then `completed`, or `failed` once retries run 
 
 **Queue.** Review › Proposals filters by what applying would change (links, entities, relationships), by origin (`adjudicator`, `merge_review` or `scan`) and by action, and sorts by newest (the default), most proposals, oldest or highest confidence. Every link-log row counts as `adjudicator`, and so do the adjudicator's alias trims (`alias_collision` rows with `after.kind = adjudicator`). The facet counts, the tab badge and the console's chips all come from the same index as the table (`_review_index`, `backend/app/api/hygiene.py`).
 
-Every button acts on what the filters show, never more: a row's **Apply** and **Dismiss**, its expanded articles, and **Apply all** (a background job, `POST /api/admin/hygiene/bulk-apply`) and **Dismiss all**. A row's Apply leaves type changes to its type chips; Apply all applies them to their proposed type. Assessments are notes and never apply. A dismissal sticks: a type change is not proposed again for the entity, a duplicate review's pair is marked as two things, and a dismissed adjudicator verdict (an unlink, held link, veto, merge, edge demote or observable drop) is neither filed nor applied again for that article (`proposal_dismissals`, kind `verdict`). A scan can propose its fix again when it runs. Each verdict shows its confidence where the stage gave one. Restore is on History, which lists what Review and the stages applied; a restore is logged as `adjudication_restored`. Stale entities (one article at most, no links, idle 90 days) are a `stale` status on Engine › Entities. `GET /api/admin/hygiene/feed?orphaned=true` lists old proposals with no article, for manual clean-up.
+Every button acts on what the filters show, never more: a row's **Apply** and **Dismiss**, its expanded articles, and **Apply all** (a background job, `POST /api/admin/hygiene/bulk-apply`) and **Dismiss all**. A row's Apply leaves type changes to its type chips; Apply all applies them to their proposed type. Assessments are notes and never apply. A dismissal sticks: a type change is not proposed again for the entity, a duplicate review's pair is marked as two things, and a dismissed adjudicator verdict (an unlink, held link, veto, merge, edge demote or observable drop) is neither filed nor applied again for that article (`proposal_dismissals`, kind `verdict`). A scan can propose its fix again when it runs. Each verdict shows its confidence where the stage gave one. Restore is on History, which lists what Review and the stages applied; a restore is logged as `adjudication_restored`. `GET /api/admin/hygiene/feed?orphaned=true` lists old proposals with no article, for manual clean-up.
 
 **Backfill.** To review older articles, run this inside the api or celery-worker container:
 
@@ -394,6 +395,17 @@ The review's own pending rows settle themselves. A pair holding one of its merge
 | `merge_review_min_similarity` | float, `0.55` | Trigram similarity two names need to be a candidate on name alone. |
 | `merge_review_min_confidence` | `high` / `medium` / `low`, `medium` | A `same` verdict below this is remembered as unsure instead of proposed. |
 | `merge_review_retry_days` | int, `30` | A pair judged different or unsure is not asked again for this long. |
+
+**The edge sweep** judges the relationship claims the per-article review left open (never answered, unsure, past the ten-edge cap, or kept by one article and demoted by another), one claim per call with passages from up to four of its articles; an answer must quote its article. Code: `backend/app/services/relationship_sweep.py`. Job `review-relationships`, every 30 minutes on the `ai` queue; AI task `relationship_review`. See [the edge sweep](intelligence-engine.md#the-edge-sweep). Measure it with `scripts/maintenance/eval_relationship_sweep.py` before switching to apply.
+
+| Setting | Type / default | What it does |
+|---|---|---|
+| `relationship_sweep_mode` | `off` \| `shadow` \| `apply`, default `shadow` | `shadow` records each answer on the edge (`relationship_reviews`) and changes nothing. `apply` keeps a stated claim, corrects a wrong verb or direction, and hides an unstated one; each change is in Review history, where Restore undoes it. |
+| `relationship_sweep_batch_size` | int, `30` | Claims judged per run, one model call each. `0` turns the sweep off. |
+| `relationship_sweep_min_age_hours` | int, `24` | A claim is left to the per-article review for this long first. |
+| `relationship_sweep_retry_days` | int, `30` | A claim the sweep could not settle is not asked again for this long. |
+| `relationship_sweep_min_confidence` | `high` / `medium` / `low`, `high` | In apply mode, answers below this are recorded and change nothing. |
+| `relationship_sweep_actions` | comma list, empty | What apply mode may change: `keep` (settle a stated claim), `correct` (fix a wrong verb or direction), `hide` (a claim no article states). Empty applies nothing (every answer is recorded and the edge stays in Review). Add one only once the eval shows it right often enough: on prod's local model (qwen3.5:9b, 790 labelled edges) keeps were right 80% of the time and hides 81%, so none is on. A keep of an actor or malware *targeting a country* is never applied, since origin is too often read as target. |
 
 ### Entity assessments
 

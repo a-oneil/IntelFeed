@@ -8,7 +8,7 @@ import { EngineSection } from "../engine/EngineSection";
 // wiring: default matrix, jobs/feeds/plans browse views, legacy deep links.
 vi.mock("../engine/EngineMatrix", () => ({
   MATRIX_VIEWS: ["entries", "entities", "links", "relationships", "review", "feeds"],
-  REVIEW_LENSES: ["proposals", "unconfirmed", "duplicates", "orphans", "stale", "relationships", "history"],
+  REVIEW_LENSES: ["proposals", "unconfirmed", "duplicates", "orphans", "relationships", "history"],
   EngineMatrix: ({
     initialView,
     initialOpenStage,

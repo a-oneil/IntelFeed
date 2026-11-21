@@ -78,17 +78,17 @@ When an entry has a translation, the autolinker and the extract stage scan the o
 
 The autolinker matches text against a dictionary of every known entity name and alias, using an Aho-Corasick automaton (one pass over the text finds every dictionary word in it).
 
-**The vocabulary.** `EntityVocabulary` (`backend/app/intelligence/autolinker.py:350`) loads the name and aliases of every threat actor, malware family, country, vendor, product and tool, plus mitigation names (mitigations have no aliases). Names shorter than `autolinker_min_name_length` (default 3) are skipped, as are names the false-positive lists rule out.
+**The vocabulary.** `EntityVocabulary` (`backend/app/intelligence/autolinker.py:350`) loads the name and aliases of every threat actor, malware family, country, vendor, product and tool. Mitigations are left out: their ATT&CK names ("Audit", "User Training") are ordinary English, so their article links come from the AI analysis and explicit M-IDs instead. Names shorter than `autolinker_min_name_length` (default 3) are skipped, as are names the false-positive lists rule out.
 
-**Keeping workers in sync.** Each worker process holds its own copy. The vocabulary's version is a hash of its contents, published to Redis under `intelfeed:autolinker:vocab_version`. Before a scan, `_ensure_vocabulary()` compares its local version with Redis and rebuilds on a mismatch. The `refresh-autolinker-vocabulary` job rebuilds every 30 minutes, and denying a name or curating extractions rebuilds at once. A brand-new entity therefore starts matching new articles within 30 minutes.
+**Keeping workers in sync.** Each worker process holds its own copy. The vocabulary's version is a hash of its contents, published to Redis under `intelfeed:autolinker:vocab_version`. Before a scan, `_ensure_vocabulary()` compares its local version with Redis and rebuilds on a mismatch. The `refresh-autolinker-vocabulary` job rebuilds every 30 minutes, and denying a name or curating extractions queues that job on the worker about ten seconds later (`schedule_vocabulary_refresh()`; a burst of changes within that window becomes one build, keyed on `intelfeed:autolinker:vocab_refresh_pending`). A request never builds the vocabulary itself: a build loads seven tables and compiles a 34,000-form automaton, around ten seconds of CPU, and each process compiles its own copy in a thread so other requests keep being served. A brand-new entity therefore starts matching new articles within 30 minutes.
 
-**The scan** (`scan_text()`, `backend/app/intelligence/autolinker.py:946`), per paragraph:
+**The scan** (`scan_text()`, `backend/app/intelligence/autolinker.py:953`), per paragraph:
 
 1. Match the lowercased text against every name and alias.
 2. Drop matches that sit inside a longer word ("APT" inside "RAPT", "RTM" inside "RTMP" or `RTM_NEWLINK`) or inside a longer matched name ("Korea" inside "North Korea").
 3. Short single words (alphabetic, up to `autolinker_ambiguous_name_max_length`, default 10) must be written the way the name is: an acronym in capitals, a mixed-case name exactly ("SynAck", not "Synack"), any other word with a capital first letter. A name written in lower case on purpose, such as the npm package "axios", matches lower-case text; capitalised mid-sentence ("reported by Axios") it is something else. For actor, malware, country and mitigation names, a short word is also dropped if it appears more than `autolinker_ambiguous_max_occurrences` (default 3) times in the entry.
 4. A name of several words must have its first real word cased as in the name: "push security" is not Push Security, and "the COM object" is not The Com.
-5. Each match is then judged in its sentence (`_occurrence_verdict()`, `backend/app/intelligence/autolinker.py:883`). It is dropped when it is:
+5. Each match is then judged in its sentence (`_occurrence_verdict()`, `backend/app/intelligence/autolinker.py:890`). It is dropped when it is:
    - inside a "Related:" / "Read more:" headline, at the start of a line or run into the body (Dark Reading), since that headline is another article's. IDs in it are skipped too;
    - part of a code or file token: a dotted package id (`com.apple.…`), a hyphenated compound with a capital or digit after the hyphen ("X-Agent-Secret", "Proton-J"; "-linked" and "-based" only describe the name), or a capitalised name written in lower case inside a file name or path (`push security-audit.yml`, `id-ed25519`);
    - a number used as a number, for a name made only of digits ("PID: 764", "port 764", "1,764", "764 seconds");
@@ -139,7 +139,7 @@ Other stages add more intelligence after (or beside) the autolinker:
 
 Five rules stop common words from becoming links:
 
-1. **False-positive name list** (`autolinker_false_positive_names`). A curated list of common words, brand names, Windows built-in tools and junk aliases ("storm", "windows", "certutil", "page", …). It applies to actor, malware and country names. Vendor, product, tool and mitigation names skip it, because many of them really are those words (Microsoft, Norton).
+1. **False-positive name list** (`autolinker_false_positive_names`). A curated list of common words, brand names, Windows built-in tools and junk aliases ("storm", "windows", "certutil", "page", …). It applies to actor, malware and country names. Vendor, product and tool names skip it, because many of them really are those words (Microsoft, Norton).
 2. **Analyst blocks** (`autolinker_blocked_surface_forms`). Words an analyst marked "never match this" from the reader. These apply to every entity type.
 3. **Case rules** for short single words and multi-word names (steps 3 and 4 of the scan above). "fox" in "Firefox" or lowercase prose does not match the "Fox" entity.
 4. **Repeat limit** for those short words (also step 3).
@@ -241,6 +241,8 @@ The API is `backend/app/api/hygiene.py`, under `/api/admin/hygiene/*` and admin-
 - `reclassify` is a catalogue-wide change, so in apply mode it needs agreement: each article's verdict is a vote (filed as a proposal), and the review that brings the count to `adjudication_reclassify_consensus` (default 2) converts the entity and clears the other proposals about it. A name that was folded out of a type (a reclassify tombstone) is never proposed back into it, so types do not ping-pong.
 - Circuit breakers hold a destructive run's verdicts for the second look; the per-article one only judges runs of at least `adjudication_circuit_breaker_min_items` items. The rolling breaker also pauses dispatch for an hour (`adjudication_breaker_until`).
 - Never touched: relationship edges an analyst confirmed, created or rejected, and external-feed edges (only `auto_extracted` and `co_occurrence` edges are reviewed). A link an analyst restored in the last 90 days is shown to the reviewer flagged, and never changed.
+- Each relationship claim is printed with the sentence to judge it by: the analysis's evidence for the pair, else the article's sentence naming both ends (`backend/app/intelligence/edge_evidence.py`). The reviewer answers every edge: keep, demote, or reverb (`suggested_verb`, `flip`) when the article states the pair with another verb or the other way round. A keep's reason must name an end of the claim. Edge verdicts count only at high confidence, whatever `adjudication_apply_min_confidence` says, and each article's answer, counted or not, is a row in `relationship_reviews` (see [edge verdicts](entity-profiles.md)). Edges past the ten-per-article cap, and the ones the model left out, are the edge sweep's.
+- A review whose answer repeats item ids keeps the first copy where the copies agree and leaves an item unanswered where they don't; only a misaligned answer (two or more conflicts, or repeats across a quarter of the list) is void, and a void or failed review is run once more.
 - `merge` can only target a name the reviewer was shown. `veto` deletes an entity only when this entry created it and nothing else uses it. Two entities that both already exist are never compared here; that is the daily duplicate review (`backend/app/services/entity_merge_review.py`, job `review-duplicate-entities`), which scores same-type pairs by name similarity and a shared alias (shared articles only break ties), asks the `entity_merge_review` task (each side shows its three most recent article titles, so a count built on false matches of a common word is visible), and files each `same` verdict as a Merge proposal on the Review tab. The next run asks about that pair again, and a second `same` applies the merge.
 - `backfill_entry_adjudications` walks older entries through the same review, using at most half of each hour's budget. Run it by hand:
 
@@ -333,7 +335,7 @@ Each related entity carries a **strength** score from 0 to 1, made of three part
 | Closeness | Mean of the top 3 per-article proximity scores | `relationship_weight_closeness` (0.40) |
 | Recency | Decays with `relationship_recency_half_life_days` (90) since the newest evidence | `relationship_weight_recency` (0.15) |
 
-**Proximity** for one article (`_compute_proximity_score`, `backend/app/intelligence/correlation.py:179`) is `1 / (1 + proximity_decay_rate × d)`, where `d` is the smallest paragraph distance between the two entities. Same paragraph = 1.0, one apart = 0.5, five apart ≈ 0.17. With no paragraph data it is `proximity_default_score` (0.3).
+**Proximity** for one article (`_compute_proximity_score`, `backend/app/intelligence/correlation.py:202`) is `1 / (1 + proximity_decay_rate × d)`, where `d` is the smallest paragraph distance between the two entities. Same paragraph = 1.0, one apart = 0.5, five apart ≈ 0.17. With no paragraph data it is `proximity_default_score` (0.3).
 
 Adjustments:
 
@@ -343,11 +345,23 @@ Adjustments:
 
 ### Timeline Construction
 
-`GET /api/intelligence/timeline/{entity_type}/{entity_id}` (`entity_timeline()`, `backend/app/intelligence/correlation.py:2354`) merges, by date: linked articles (one per duplicate story), correlation events, enrichment runs, detection rules created, typed relationships and campaign membership.
+`GET /api/intelligence/timeline/{entity_type}/{entity_id}` (`entity_timeline()`, `backend/app/intelligence/correlation.py:2378`) merges, by date: linked articles (one per duplicate story), correlation events, enrichment runs, detection rules created, typed relationships and campaign membership.
 
 ### Typed relationships
 
-Co-occurrence also writes `entity_relationships` rows (actor *uses* malware, and so on) with a trust level, but only for a pair named in the same paragraph, where that paragraph is not boilerplate and names fewer than five entities (see [architecture.md](architecture.md#7-correlation-engine)). The weekly `relationship-confidence-decay` job moves stale co-occurrence rows from `probable` back to `possible`; rows an analyst touched are never demoted. Entry-to-entity link confidence does not decay. See [entity-profiles.md](entity-profiles.md) for how relationships appear on profiles.
+Co-occurrence also writes `entity_relationships` rows (actor *uses* malware, and so on) with a trust level, but only for a pair named in the same paragraph, where that paragraph is not boilerplate and names fewer than five entities (see [architecture.md](architecture.md#7-correlation-engine)). The verb comes from the two types alone, so it is a guess: an edge is drawn only from an article the adjudicate stage will review (`entry_gets_edge_review`), which reads the sentence. The weekly `relationship-confidence-decay` job moves stale co-occurrence rows from `probable` back to `possible`; rows an analyst touched are never demoted. Entry-to-entity link confidence does not decay. See [entity-profiles.md](entity-profiles.md) for how relationships appear on profiles.
+
+The one-pass analysis asserts relationships too, each with its evidence sentence (stored as the edge's `description`). When it states another verb for a pair a co-occurrence edge drew from that article alone (`attributed_to` where the guess was `targets`, or anything where the guess was `related_to`), the guess is deleted (`retire_superseded_cooccurrence` in `backend/app/intelligence/enrichment.py`).
+
+### The edge sweep
+
+`backend/app/services/relationship_sweep.py`, job `review-relationships` (every 30 minutes, on the `ai` queue, deferred while the queue is deeper than 200). It takes up to `relationship_sweep_batch_size` machine edges that are still open — no verdict, or `disputed` — at least `relationship_sweep_min_age_hours` old and not asked within `relationship_sweep_retry_days`, disputed ones first, then oldest. Each is one `relationship_review` call: the claim, a line on each entity, and for up to four of its articles (one per feed first, reposts last) the title and the paragraphs naming both ends, or each end's first paragraph when none names both. A claim is often stated across a paragraph's sentences ("UAC-0099 gained access … the attackers deployed MythicRatatoskr"), so the judge reads paragraphs, not sentences.
+
+The answer is one of asserted, wrong_verb (with the verb), wrong_direction, not_asserted, wrong_entity or unsure, with a quote and the number of its article. A keep or correction is not accepted (it reads as unsure) when its quote is not in that article's text, or names neither end, or names one end in a paragraph that never names the other (the title counts). A correction is turned the way the relationship matrix allows: "Romulus distributes CNCMachineRMS" filed as malware related_to tool becomes Romulus delivers CNCMachineRMS.
+
+`relationship_sweep_mode` decides what an answer does. `shadow` (the default) records it as an uncounted review and changes nothing. `apply`, at `relationship_sweep_min_confidence` and only for the kinds of change listed in `relationship_sweep_actions` (default none), keeps a stated claim (`kept`, at least `probable`), corrects a wrong verb or direction (the claim is demoted and the corrected edge credited, created if missing), and hides an unstated one (`coincidental`). Demotes and corrections write `adjudication_edge_demote` rows marked `origin: sweep`, so Review history lists them and Restore undoes them.
+
+Before switching to apply, measure it: `scripts/maintenance/eval_relationship_sweep.py` runs the same judgment over hand-labelled edges and reports how often each kind of change would be right.
 
 ---
 
@@ -658,7 +672,7 @@ Then it is bucketed: ≥ 0.7 high, ≥ 0.4 medium, else low. So "APT29" on an A-
 ### Operational notes
 
 - Changing a feed's mode only affects new entries. To re-process old ones, use the rescan endpoints or `autolink_batch()` (`backend/app/intelligence/autolinker.py:1621`), which commits every 100 entries.
-- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1931`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the case and context rules applied, and confidence scaled by feed reliability. The pending tier does not apply, so a match ingest would hold is not linked.
+- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1982`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the case and context rules applied, and confidence scaled by feed reliability. The pending tier does not apply, so a match ingest would hold is not linked.
 
 ### None of this uses AI
 
@@ -695,4 +709,4 @@ With `signal_engine_surface` on:
 - Per-user watch and mute (`/api/intelligence/watchlist`) boost or hide entities at read time.
 - Entity profiles show recent developments from `GET /api/engine/entities/{type}/{id}/whats-new`.
 
-The Priority Queue (`/priority-queue`) mixes open **story threads** with single ranked entries, built server-side by `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1440`). A thread ranks by the score of its best unread, non-echo article, and its articles do not also appear on their own. See [story-threads.md](story-threads.md). Signal details: [engine.md](engine.md#signal-catalog).
+The Priority Queue (`/priority-queue`) mixes open **story threads** with single ranked entries, built server-side by `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1449`). A thread ranks by the score of its best unread, non-echo article, and its articles do not also appear on their own. See [story-threads.md](story-threads.md). Signal details: [engine.md](engine.md#signal-catalog).

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { apiErrorInfo, apiErrorReason, hasErrorEnvelope } from "../errors";
+import { TIMEOUT_MESSAGE, apiErrorInfo, apiErrorReason, hasErrorEnvelope, isTimeout } from "../errors";
 
 const axiosErr = (error: Record<string, unknown>) => ({ response: { data: { error } } });
 
@@ -55,5 +55,23 @@ describe("apiErrorInfo", () => {
   it("falls back to the thrown message without an envelope", () => {
     expect(apiErrorInfo(new Error("boom"))).toEqual({ code: null, message: "boom", details: null });
     expect(apiErrorInfo("x")).toEqual({ code: null, message: "Request failed", details: null });
+  });
+});
+
+describe("timeouts", () => {
+  it("recognizes the browser giving up, by code or by axios's message", () => {
+    expect(isTimeout({ code: "ECONNABORTED", message: "timeout of 15000ms exceeded" })).toBe(true);
+    expect(isTimeout({ message: "timeout of 15000ms exceeded" })).toBe(true);
+    // A server answer, however slow, is not a timeout.
+    expect(isTimeout({ code: "ECONNABORTED", response: { status: 500 } })).toBe(false);
+    expect(isTimeout(new Error("boom"))).toBe(false);
+  });
+
+  it("reads as plain words, not axios's wording", () => {
+    expect(apiErrorInfo({ code: "ECONNABORTED", message: "timeout of 15000ms exceeded" })).toEqual({
+      code: "timeout",
+      message: TIMEOUT_MESSAGE,
+      details: null,
+    });
   });
 });

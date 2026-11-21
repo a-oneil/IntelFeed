@@ -1168,10 +1168,12 @@ TOOLS: dict[str, dict] = {
     },
     "delete_feed": {
         "description": (
-            "Delete a feed and ALL of its entries (cascade), removing them from the search index "
-            "first. REQUIRES user confirmation. First call returns a confirmation prompt with an "
-            "entry count \u2014 present it to the user. Only call again with the confirmation_token after "
-            "the user explicitly approves."
+            "Delete a feed for every reader: it leaves every feed list and stops fetching. Its "
+            "entries stay as the evidence behind entities, relationships, campaigns and threads, out "
+            "of the reader and default search; adding the feed again brings it back. REQUIRES user "
+            "confirmation. First call returns a confirmation prompt with an entry count \u2014 present it "
+            "to the user. Only call again with the confirmation_token after the user explicitly "
+            "approves."
         ),
         "params": {
             "feed_id": {
@@ -3019,11 +3021,11 @@ TOOLS: dict[str, dict] = {
     "list_extraction_entities": {
         "description": (
             "List AI-created entities (created_via='ai_extraction') with a computed lifecycle status: "
-            "linked (in use), review (needs analyst sign-off), orphan (zero articles), or dupe "
-            "(near-duplicate sibling exists, with duplicate_of naming it). Filterable by type, "
-            "status, creation window, text search and source entry; sorted and paginated. Includes "
-            "provenance: created_confidence, needs_review, created_from_entry_id and the source entry "
-            "title."
+            "linked (in use), review (needs analyst sign-off), orphan (every article link removed, "
+            "its source article still there), or dupe (near-duplicate sibling exists, with "
+            "duplicate_of naming it). Filterable by type, status, creation window, text search and "
+            "source entry; sorted and paginated. Includes provenance: created_confidence, "
+            "needs_review, created_from_entry_id and the source entry title."
         ),
         "params": {
             "types": {
@@ -3033,7 +3035,7 @@ TOOLS: dict[str, dict] = {
             "status": {
                 "type": 'str',
                 "default": 'all',
-                "enum": ['all', 'linked', 'review', 'orphan', 'dupe', 'stale'],
+                "enum": ['all', 'linked', 'review', 'orphan', 'dupe'],
             },
             "window": {
                 "type": 'str',
@@ -3778,7 +3780,8 @@ TOOLS: dict[str, dict] = {
             "there. scope='alias' also drops entity_value from the entity's aliases and unlinks every "
             "entry that matched only via it (the entity survives and keeps matching under its other "
             "names). scope='global' instead blocks the surface form from matching any entity type and "
-            "rebuilds the vocabulary (existing links on other entries are not retroactively removed)."
+            "queues a vocabulary rebuild (existing links on other entries are not retroactively "
+            "removed)."
         ),
         "params": {
             "entity_type": {

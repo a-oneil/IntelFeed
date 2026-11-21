@@ -385,6 +385,7 @@ async def hydrate_attack_catalog(db: AsyncSession, parsed_bundles: list[ParsedBu
                 if not existing_mit.description and mit["description"]:
                     existing_mit.description = mit["description"]
                 existing_mit.mitre_url = mit["mitre_url"] or existing_mit.mitre_url
+                existing_mit.is_catalog = True
                 domain_stats["mitigations_updated"] += 1
             else:
                 new_mit = Mitigation(
@@ -393,6 +394,7 @@ async def hydrate_attack_catalog(db: AsyncSession, parsed_bundles: list[ParsedBu
                     name=mit["name"],
                     description=mit["description"],
                     mitre_url=mit["mitre_url"],
+                    is_catalog=True,
                     article_count=0,
                 )
                 db.add(new_mit)

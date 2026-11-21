@@ -327,7 +327,7 @@ async def test_ai_observables_list_in_the_extraction_table(client, admin_headers
     assert items[0]["entity_type"] == "observable"
     # The kind rides along as the qualifier — a bare value is unreadable alone.
     assert items[0]["aliases"] == ["ipv4"]
-    assert items[0]["status"] == "orphan"  # no sightings yet
+    assert items[0]["status"] == "review"  # no sightings, but no source article to have lost either
 
     stats = await client.get("/api/engine/extraction/stats?window=all", headers=admin_headers)
     assert stats.json()["by_type"]["observable"] == 1

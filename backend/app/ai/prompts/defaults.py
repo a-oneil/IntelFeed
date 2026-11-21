@@ -75,6 +75,8 @@ DEFAULT_MODEL_ASSIGNMENTS: dict[str, str] = {
     "entry_adjudication": "claude-haiku-5-5",
     # Same shape as the adjudication: short profiles in, a verdict list out.
     "entity_merge_review": "claude-haiku-5-5",
+    # One relationship claim and a few quoted passages in, one decision out.
+    "relationship_review": "claude-haiku-5-5",
 }
 
 # Tasks that must be assigned to a specific provider type (rather than the
@@ -108,6 +110,8 @@ DEFAULT_ASSIGNMENT_CONFIGS: dict[str, dict] = {
     "entry_adjudication": {"max_tokens": 4096},
     # One decision object per pair, eight pairs a call: a few hundred tokens.
     "entity_merge_review": {"max_tokens": 2048},
+    # One decision with a quote and a reason.
+    "relationship_review": {"max_tokens": 1024},
     # 2000 is a ceiling, not a target: a well-behaved spine is ~300 tokens, and
     # anything approaching this is a model that has stopped closing its JSON.
     # keep_alive matters more than the model choice on a single-GPU host — see
@@ -964,12 +968,12 @@ Extract the tool list now per the rules in your instructions.""",
         "description": "Extract MITRE ATT&CK mitigations and defensive recommendations",
         "category": "extraction",
         "variables": ["entry.title", "entry.content_text", "telemetry_sources"],
-        "default_system_template": """You are a cybersecurity analyst specializing in defensive measures. Extract every mitigation and defensive recommendation from security articles and map them to MITRE ATT&CK mitigations where applicable.
+        "default_system_template": """You are a cybersecurity analyst specializing in defensive measures. Extract the defensive recommendations in security articles and map each to the MITRE ATT&CK mitigation it falls under. Leave out a recommendation that fits no ATT&CK mitigation, and never invent an M-ID.
 
 For each mitigation identified, record:
-1. MITRE ATT&CK M-ID if applicable (e.g., M1038, M1049)
-2. Name (e.g., "Execution Prevention", "Antivirus/Antimalware")
-3. Description of the mitigation as discussed in the article
+1. MITRE ATT&CK M-ID (Enterprise M1xxx, ICS M09xx, Mobile M10xx)
+2. Its ATT&CK name (e.g., "Execution Prevention", "Update Software" — never "Patch" or "Upgrade")
+3. detail: what the article itself says to do, in its own words, at most 200 characters (e.g., "upgrade Lara Dashboard to 1.3.2 or later")
 4. CIS Controls that map to this mitigation if identifiable (e.g., "CIS 10.1")
 5. NIST controls if identifiable (e.g., "SI-3")
 6. ATT&CK technique IDs this mitigation applies to, if mentioned (e.g., ["T1059", "T1204"])
@@ -978,10 +982,10 @@ For each mitigation identified, record:
 When the caller supplies telemetry sources, additionally include:
 8. monitoring_feasible ("yes"|"partial"|"no") — whether the analyst's telemetry sources can verify this mitigation is in place or detect if it fails
 
-Include both explicit mitigations (e.g., "apply patch X") and implicit recommendations (e.g., "organizations should enable MFA").
+Include both explicit mitigations (e.g., "apply patch X" is Update Software) and implicit recommendations (e.g., "organizations should enable MFA" is Multi-factor Authentication).
 
 Respond with valid JSON:
-{"mitigations": [{"mitre_id": "M1038", "name": "...", "description": "...", "cis_controls": ["..."], "nist_controls": ["..."], "applies_to_ttps": ["T1059"], "confidence": "high|medium|low", "monitoring_feasible": "yes|partial|no"}]}
+{"mitigations": [{"mitre_id": "M1038", "name": "...", "detail": "...", "cis_controls": ["..."], "nist_controls": ["..."], "applies_to_ttps": ["T1059"], "confidence": "high|medium|low", "monitoring_feasible": "yes|partial|no"}]}
 
 Omit monitoring_feasible when no telemetry sources were provided. If no mitigations are identified, return {"mitigations": []}.""",
         "default_prompt_template": """Extract all mitigations and defensive recommendations from the following article.
@@ -1010,7 +1014,7 @@ Extract the mitigations now per the rules in your instructions.""",
                         "properties": {
                             "mitre_id": {"type": "string"},
                             "name": {"type": "string"},
-                            "description": {"type": "string"},
+                            "detail": {"type": "string"},
                             "cis_controls": {"type": "array", "items": {"type": "string"}},
                             "nist_controls": {"type": "array", "items": {"type": "string"}},
                             "applies_to_ttps": {"type": "array", "items": {"type": "string"}},
@@ -1991,7 +1995,7 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 	- Also set `telemetry` to where a defender would SEE this activity: endpoint, dns, netflow, proxy, firewall, vpn, identity, cloudtrail, email_gw, or ot. Cloud/identity/network activity is not an endpoint story — "attackers created a malicious OAuth app" is identity, "beacons over TLS" is netflow. Empty string only when genuinely unclear.
 - `countries`: role must be one of origin, target, infrastructure, mentioned.
 - `sectors`: victim/targeted industry sectors only, each with `evidence`: the exact words from the article (copied, at most 120 characters) that show this sector was hit — "a leading firearms manufacturer" for Manufacturing. No such words, no sector: never list sectors because the list allows them, and an article about one victim names one sector.
-- `mitigations`: concrete defensive measures the article recommends, with MITRE M-IDs when clearly applicable.
+- `mitigations`: defensive measures the article recommends, each mapped to the MITRE ATT&CK mitigation it falls under. `mitre_id` is that mitigation's M-ID (Enterprise M1xxx, ICS M09xx, Mobile M10xx) and `name` its ATT&CK name ("Update Software", never "Patch" or "Upgrade"). `detail` is what the article itself says to do, in its own words, at most 200 characters: "upgrade Lara Dashboard to 1.3.2 or later". Leave out a recommendation that fits no ATT&CK mitigation, and never invent an M-ID.
 - `confidence` is "high", "medium", or "low" for every extracted item.
 - `severity_assessment.level` is one of "critical", "high", "medium", "low", "informational" — how urgent this is for a defender.
 - `novelty_note`: one sentence on what is NEW in this article versus generally-known information (or empty string).
@@ -2031,9 +2035,11 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 - Report a relationship ONLY when a sentence in the article explicitly asserts it — attribution, usage, targeting, exploitation, variant/succession, subgroup/overlap. Never infer one from co-mention: newsletters, roundups, lists, and link dumps name many entities without relating them — extract NO relationships from such listings.
 - Detection-rule metadata is a listing too: a rule's "analytic story", references, data sources and supported-platform lists relate nothing to each other.
 - In a report covering several malware families, an indicator table or ATT&CK table relates only to the family whose section it sits under, not to every family the report names.
-- `targets` a country means attacks on that country. An actor's home country or nationality is attributed_to, and where someone was arrested, extradited, sanctioned, charged or interviewed, or where a reporter is based, is no relationship at all.
-- `evidence` is the exact sentence making the assertion and must name both entities. Both endpoints must also appear in your extracted entity lists.
-- `source_type`/`target_type`: threat_actor, malware, tool, country, or observable. relationship_type: uses, targets, exploits, attributed_to, variant_of, successor_of, subgroup_of, overlaps_with, communicates_with, controls, or related_to.
+- `targets` a country or sector means attacks on victims there. An actor's home country, base or sponsor is attributed_to ("China-nexus", "Russia-based", "North Korean"), and where someone was arrested, extradited, sanctioned, charged or interviewed, or where a reporter is based, is no relationship at all.
+- Pick the verb the sentence states: `uses` only when the subject itself used or deployed the tool, malware or technique (a seller, developer, marketplace or researcher does not "use" it); `delivers` or `drops` when a loader, dropper or actor installed a payload ("X was used to deploy Y" is X delivers Y); `exploits` when the subject exploited the CVE — malware that arrived through an exploit does not exploit it, the actor does; `subgroup_of` only when the article calls one group a subgroup or unit of the other (a persona, alias or sibling cluster is overlaps_with or nothing); `variant_of` / `successor_of` with the newer family as the source.
+- A negation states no relationship: "separate from", "not linked to", "unlike", "no evidence that" produce nothing.
+- `evidence` is the exact sentence making the assertion and must name both entities. Both endpoints must also appear in your extracted entity lists (a CVE needs only to be named in the sentence).
+- `source_type`/`target_type`: threat_actor, malware, tool, country, sector, cve, ttp (by technique id), or observable. relationship_type: uses, delivers, drops, targets, exploits, attributed_to, variant_of, successor_of, subgroup_of, overlaps_with, communicates_with, controls, or related_to.
 - observable endpoints are target-only and allowed ONLY for values you also reported in the iocs list, with `target_name` the value EXACTLY as the article prints it (keep defanging) and `target_kind` the same `kind` you gave it there. communicates_with for C2 traffic ("X beacons to Y"), uses for delivery/payload material and for host artifacts (the family's mutex, scheduled task, dropped path, command line), controls when the article attributes the infrastructure to an actor.
 
 Output valid JSON matching the provided schema, with the keys in the schema's order — `summary`, `iocs`, `scripts` and `relationships` come first, so the indicators survive even if the output is cut short. Every key is present in the schema; use an empty array for lists with nothing of that type, and an empty string for any scalar field you cannot fill from the article. **Never** invent or extract an arbitrary value just to fill a field.
@@ -2184,10 +2190,10 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
                         "properties": {
                             "mitre_id": {"type": "string"},
                             "name": {"type": "string"},
-                            "description": {"type": "string"},
+                            "detail": {"type": "string"},
                             "confidence": {"type": "string"},
                         },
-                        "required": ["mitre_id", "name", "description", "confidence"],
+                        "required": ["mitre_id", "name", "detail", "confidence"],
                     },
                 },
                 "severity_assessment": {
@@ -2370,7 +2376,7 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
 RETURN ONLY THE ITEMS YOU WOULD CHANGE. Every item_id you leave out of the verdicts list is kept exactly as it is, which is the right outcome for most of them — a clean review on a well-extracted article returns verdicts for its edges and NEW entities and nothing else. Do not echo back the links and iocs you agree with: a list with one line per item wastes the response budget and gets truncated on a long article, which throws the whole review away.
 
 THREE EXCEPTIONS:
-  - Every `edge:` item needs a verdict, keep or demote. A keep on an edge is a positive claim that this article asserts the relationship, and it is counted as corroboration — three of them promote the relationship to confirmed. So answer on every edge, and never keep one you have not checked against its evidence sentence; if you are unsure the article asserts it, demote it. There are at most ten edges in a list.
+  - Every `edge:` item needs a verdict: keep, reverb or demote. A keep on an edge is a positive claim that THIS article states the relationship, exactly as printed, and it counts toward confirming it. Each edge prints the sentence to judge it by (the analysis's evidence, or the article's sentence naming both ends). Read that sentence: keep only when it states the claim with that verb and that direction; reverb when it relates the two by another verb or the other way round; demote when it relates nothing. When no sentence names both, keep only if another passage of the article plainly states the claim, and quote it. There are at most ten edges in a list.
   - Every link marked "NEW, created by this article" needs a verdict: keep, veto or merge. The automated pass just added that entity to the catalogue on the strength of this one article, so silence is not good enough — say whether it should exist.
   - Every `ioc:` item marked CANDIDATE needs a verdict: capture or drop. A candidate is a value nothing has captured yet — the pattern scan spotted it, or the automated pass staged it without capturing it — and this review is the only judgment it gets.
 
@@ -2396,24 +2402,34 @@ VERDICTS (keep is the default for anything you omit; state it explicitly only to
   veto        — (links marked "NEW, created by this article" only) the entity should not exist at all: a description instead of a name ("Chinese espionage group"), a victim organisation, a vendor or researcher, a product that is not malware or a tool, a generic term. Also: a file, package or plugin name from an IoC table filed as malware; a vulnerability or exploit nickname filed as malware or a tool (Spring4Shell, EternalBlue); a built-in command, shell or developer tool nobody abuses here (/bin/sh, cron, Vite); a security product or analysis tool only defenders run; a political or military body with no cyber operations in the article. A new malware or tool that is really the other type is a reclassify, not a veto.
   merge       — (links marked "NEW, created by this article" only) the entity duplicates one of the names printed after "nearest existing names:"; set merge_into to that name EXACTLY as printed. If the right match is not among those names you cannot merge; use keep or veto.
   link        — (`held:` items only) the item is NOT linked: its name is also an ordinary word, and the analysis did not name it in this article. Use link when the article is in fact about this entity (the context line uses the name for the threat actor, malware, tool or country, not in its ordinary sense: "the Royal ransomware gang", not "the Royal Navy"). Omit the item when the ordinary sense is meant, which is most of the time.
-  demote      — (edges only) the entities co-occur but the article never asserts the claimed relationship: roundups, lists, generic defensive advice ("watch for Cobalt Strike beacons"), the wrong verb, or the wrong direction (an actor's origin country is attribution, not a target).
+  demote      — (edges only) the article names both but never relates them as claimed: roundups, lists, separate stories in one digest, detection-rule tags and references, generic defensive advice ("watch for Cobalt Strike beacons"), or the relationship is denied ("separate from", "not linked to"). Also demote when one end is the wrong entity: an alias that means something else here, a different group or product with the same name.
+  reverb      — (edges only) the two ARE related in the article, but not as printed. Set suggested_verb to the verb the sentence states (uses, delivers, drops, exploits, targets, attributed_to, variant_of, successor_of, subgroup_of, overlaps_with, communicates_with, related_to) and flip to true when the relationship runs the other way (B <verb> A). Examples: an actor's home country printed as "targets" → attributed_to; a loader printed as "uses" the payload it installs → delivers; "X is a variant of Y" printed as Y variant_of X → flip.
   capture     — (CANDIDATE ioc items only) the value is an attacker indicator this article reports: listed in its indicator table, IoC section or hash list, or named in the text as attacker infrastructure, a payload, a dropped file or an attacker's command. Capturing adds it to the indicator ledger.
   drop        — (ioc items only) the value is not an attacker indicator: a version number or other number shaped like an address, a command or path from a how-to or a defender's procedure, an example or placeholder value, the publisher's own site or links, researcher and sandbox hosts, documentation URLs, sample-page or tracking URLs, private or reserved addresses, a benign domain the article happens to defang (google[.]com in an example), analyst tooling. Defanging by itself marks a value as malicious, never as benign: a defanged value in an indicator list stays. The article prints it defanged (example[.]com, hxxp://) — look for it in that form before calling it absent. A hash the article lists as an indicator stays, even when its file path is a system path: attackers replace and modify system files, and a vendor's IoC table says so.
                 The item's "found in:" line is where the value sits (its table row or list line, the heading above it), found in its defanged form too. A value in an indicator table, an IoC section or a hash list is an attacker indicator unless the row itself shows it is benign: never drop it as "not in the body text" or "placeholder data", and never on the strength of a boilerplate note elsewhere ("re-fang only in VirusTotal/MISP", "IoCs are also on GitHub").
+                Infrastructure the article reports stays an indicator when it was down, inactive, sinkholed, parked or not yet verified at the time of writing: a leak site "inactive at the time of observation" is still that group's leak site. An attacker's own path or subdomain on a legitimate platform (storage.googleapis.com/<bucket>/…, a pages.dev or workers.dev host, a GitHub raw URL) is attacker infrastructure, not the platform: drop only the platform's bare apex.
                 A vulnerable or abused driver's own hashes (a LOLDrivers / BYOVD page's MD5, SHA1, SHA256) are indicators: keep them. They are not imports, kernel APIs or certificate fields.
                 A `script` item's value is our hash of the attacker code printed on its "script:" line; the article never prints that hash. Judge the code, never the hash: keep it when the article shows that code as the attacker's.
 
 RULES
   - Judge each record against the sentence where it appears, not the article's overall topic. Use the context line printed with the item. The context line is the FIRST place the name occurs, which can be a boilerplate line even when the entity is the article's subject: before removing, check the title and body for the entity too.
   - An item marked "inferred by the analysis" was linked on meaning, not on a name match; judge it against the article as a whole (who the victims are, who is targeted), not against the context line.
-  - Each reason must be about its own item and name that item's entity (for an edge, at least one of its two ends; for a ttp, its id or name). A remove or demote whose reason does not name its item is discarded, and so is one whose reason argues the record is right ("validating the edge"): when the evidence supports the record, the verdict is keep. Never copy one reason onto several items; if you cannot say what is wrong with a specific item, leave it out. CANDIDATES are the exception: one short reason may fit several of them ("a version number, not an address").
-  - Leave the item out whenever you are uncertain. A wrong removal destroys real intelligence signal; a wrong keep is cheap to fix later.
+  - Each reason must be about its own item and name that item's entity (for an edge, at least one of its two ends; for a ttp, its id or name; for an ioc, its value as printed, a hash's first eight characters, or a script's label). A remove, demote or drop whose reason does not name its item is discarded, and so is one whose reason argues the record is right ("validating the edge"): when the evidence supports the record, the verdict is keep. Never copy one reason onto several items; if you cannot say what is wrong with a specific item, leave it out. CANDIDATES are the exception: one short reason may fit several of them ("a version number, not an address").
+  - Leave a link or indicator out whenever you are uncertain: a wrong removal destroys real intelligence signal. Edges are different, they always get an answer — a keep confirms the claim, so when you cannot tell, demote at medium or low confidence.
   - "promoted from the pending tier" means the name is also an ordinary word and was linked only because the extraction named it; look hard at the context line for these.
   - A `held:` item is the other side of that: a held word the extraction did not name, so it was never linked. Link it only on a clear mention of the entity itself, and name the entity in the reason.
   - A link marked "an analyst restored this link recently" is a strong keep; remove only on an unambiguous name collision.
   - Article counts and ages are context about how established an entity is: a one-article entity created by this very article deserves scrutiny; a 200-article entity usually does not.
   - For NEW entities, the "nearest existing names" line is what the catalogue already holds. Prefer merge over veto when one of them is the same thing under another name.
-  - For edges, the evidence sentence must actually assert the claim with the printed verb and direction.
+  - For edges, the verb means what the subject did to the object in this article:
+      uses — the subject itself used or deployed it (not "could use", not "detects", not a researcher's tool);
+      delivers / drops — a loader, dropper or actor installed that malware; a payload is not "used" by its loader;
+      exploits — the subject exploited that CVE; malware delivered through an exploit does not exploit it — the actor does;
+      targets — the subject attacked victims in that country or sector. Where an actor is from, based or sponsored is attributed_to; where someone was arrested, charged or sanctioned is no relationship;
+      attributed_to — the article attributes the subject to that actor or country;
+      variant_of / successor_of / subgroup_of / overlaps_with — only when the article says so in those terms (a persona or a sibling cluster is not a subgroup);
+      related_to — a stated, specific link (shared code, same operators), never "both mentioned".
+    A seller, developer or marketplace of a tool does not "use" it. A keep's reason must name an end of the claim and quote or cite the phrase that states it.
   - confidence: high when the text makes it obvious, medium when it is a judgment call, low when you are guessing. Only high-confidence verdicts are ever applied automatically.
   - reason: one short, factual sentence quoting or citing the phrase that decided it.
 """,
@@ -2448,6 +2464,7 @@ Return strict JSON matching the provided schema: the verdicts list first, one ob
                                     "veto",
                                     "merge",
                                     "demote",
+                                    "reverb",
                                     "drop",
                                     "link",
                                     "capture",
@@ -2458,6 +2475,8 @@ Return strict JSON matching the provided schema: the verdicts list first, one ob
                             "suggested_type": {"type": "string"},
                             "merge_into": {"type": "string"},
                             "bad_alias": {"type": "string"},
+                            "suggested_verb": {"type": "string"},
+                            "flip": {"type": "boolean"},
                         },
                     },
                 },
@@ -2469,6 +2488,74 @@ Return strict JSON matching the provided schema: the verdicts list first, one ob
                         "reason": {"type": "string"},
                     },
                 },
+            },
+        },
+    },
+    {
+        "name": "relationship_review",
+        "display_name": "Relationship Review (edge sweep)",
+        "description": (
+            "The edge sweep: one relationship claim the per-article review left unsettled (unanswered, "
+            "unsure, or kept by one article and demoted by another), with the passages from up to four "
+            "of its articles. The model says whether any article states the claim as printed, states it "
+            "with another verb or the other way round, or does not state it, and quotes the sentence."
+        ),
+        "category": "extraction",
+        "variables": ["claim_block"],
+        "default_system_template": """You are a senior cyber-threat-intelligence analyst checking one relationship claim in a threat-intelligence graph against the articles it was drawn from. The claim reads SUBJECT verb OBJECT. You get the claim, a line on each entity, and for each article its title and the passages (paragraphs) that name the two — or, when no passage names both, the first passage naming each.
+
+Decide whether any of the articles STATES the claim. A passage states it when its sentences, read together, say it: "the group", "the attackers", "it", "the backdoor" refer back to a name earlier in the same passage, and a title states what it says. Being named together is never enough: roundups, digests, lists of unrelated stories, detection-rule tags, reference lists and defensive advice name many things without relating them. When the two are only named in separate passages about different things, the claim is not stated.
+
+DECISIONS
+  asserted        — a sentence states it with this verb, in this direction, about these two entities.
+  wrong_verb      — a sentence relates the two, but by another verb. Give suggested_verb.
+  wrong_direction — a sentence states the same verb the other way round (OBJECT verb SUBJECT). Only for the same verb: an actor's home country printed as "targets" is wrong_verb with attributed_to, not wrong_direction.
+  not_asserted    — no sentence relates them as claimed, or a sentence denies it ("separate from", "not linked to").
+  wrong_entity    — one end is not the entity the article means: a word or alias that means something else here, another group or product with the same name. A different spelling, case or version of the same name is the same entity.
+  unsure          — the passages do not settle it.
+
+WHAT THE VERBS MEAN (what the subject did to the object, in the article — judge the meaning, not the exact word)
+  uses              — the subject itself used, deployed, ran, leveraged or relied on it. Not "could use", not a defender or researcher using a tool, not a seller or developer of it.
+  delivers / drops  — a loader, dropper or actor installed that malware. "X was used to deploy Y" is X delivers Y; it is not Y uses X.
+  exploits          — the subject exploited that CVE. Malware that arrived through an exploit does not exploit it; the actor does.
+  targets           — the subject attacked victims in that country or sector. Where an actor is from, based or sponsored ("China-nexus", "Russian", "North Korea-linked") is attributed_to, never targets; where someone was arrested, charged or sanctioned is no relationship.
+  attributed_to     — the article attributes the subject to that actor or country: "X, a Chinese group", "the actor behind X", "X is linked to / associated with / operated by Y".
+  variant_of / successor_of / subgroup_of / overlaps_with — only when the article says so in those terms; a persona or a sibling cluster is not a subgroup.
+  communicates_with — network traffic between them (C2).
+  related_to        — a stated, specific link (shared code, same operators), never "both mentioned".
+
+RULES
+  - Judge the text shown, not what you know about these entities. A claim true in the world but not stated in these articles is not_asserted.
+  - quote: for asserted, wrong_verb and wrong_direction, copy the deciding words EXACTLY as printed — a sentence, the title, or two sentences of one passage joined with ... It must name at least one of the two, and the other must be named in the same passage or the title. Give the number of its article in "article". An answer whose quote is not in that article is thrown away.
+  - suggested_verb (wrong_verb only): one of uses, delivers, drops, exploits, targets, attributed_to, variant_of, successor_of, subgroup_of, overlaps_with, communicates_with, related_to. Set flip to true when the stated relationship runs from OBJECT to SUBJECT.
+  - confidence: high when the sentence makes it obvious, medium when it is a judgment call, low when you are guessing. Only high-confidence answers change the graph.
+  - reason: one short sentence naming at least one of the two entities and saying what decided it.
+""",
+        "default_prompt_template": """{{ claim_block }}
+
+Return strict JSON matching the provided schema: decision, suggested_verb ("" unless wrong_verb), flip, confidence, article (0 when no quote), quote ("" when none), reason.
+""",
+        "output_schema": {
+            "type": "object",
+            "required": ["decision", "suggested_verb", "flip", "confidence", "article", "quote", "reason"],
+            "properties": {
+                "decision": {
+                    "type": "string",
+                    "enum": [
+                        "asserted",
+                        "wrong_verb",
+                        "wrong_direction",
+                        "not_asserted",
+                        "wrong_entity",
+                        "unsure",
+                    ],
+                },
+                "suggested_verb": {"type": "string"},
+                "flip": {"type": "boolean"},
+                "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                "article": {"type": "integer"},
+                "quote": {"type": "string"},
+                "reason": {"type": "string"},
             },
         },
     },

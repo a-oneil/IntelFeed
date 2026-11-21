@@ -306,6 +306,7 @@ async def _tool_pushed(f: Facts):
 
 
 async def _country_targeted(f: Facts):
+    from app.intelligence.relationship_matrix import shown_relationship_condition
     from app.models.entity_relationship import EntityRelationship
 
     n = (
@@ -315,6 +316,7 @@ async def _country_targeted(f: Facts):
                 EntityRelationship.target_id == f.entity.id,
                 EntityRelationship.source_type == entity_types.THREAT_ACTOR,
                 EntityRelationship.relationship_type == "targets",
+                shown_relationship_condition(),
             )
         )
     ).scalar_one()

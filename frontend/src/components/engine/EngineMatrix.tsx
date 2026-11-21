@@ -52,18 +52,20 @@ export type MatrixView = (typeof MATRIX_VIEWS)[number];
 /** The Review tab's lenses: the proposals queue, the AI-created entities
  *  waiting on a person (one lens per status), the machine-made edges nobody
  *  has judged, and the applied history. */
-export const REVIEW_LENSES = ["proposals", "unconfirmed", "duplicates", "orphans", "stale", "relationships", "history"] as const;
+export const REVIEW_LENSES = ["proposals", "unconfirmed", "duplicates", "orphans", "relationships", "history"] as const;
 export type ReviewLens = (typeof REVIEW_LENSES)[number];
 // The entity lenses, each the Extraction list narrowed to one status.
-const ENTITY_LENS_STATUS = { unconfirmed: "review", duplicates: "dupe", orphans: "orphan", stale: "stale" } as const;
+const ENTITY_LENS_STATUS = { unconfirmed: "review", duplicates: "dupe", orphans: "orphan" } as const;
 type EntityLens = keyof typeof ENTITY_LENS_STATUS;
 const isEntityLens = (l: ReviewLens): l is EntityLens => l in ENTITY_LENS_STATUS;
+// Lenses that show their count but stay out of the tab badge and the "to
+// review" chip: backlogs to browse, not a queue that has to reach zero.
+const UNBADGED_LENSES: ReadonlySet<ReviewLens> = new Set(["unconfirmed", "relationships"]);
 const REVIEW_LENS_LABELS: Record<ReviewLens, string> = {
   proposals: "Proposals",
   unconfirmed: "Unconfirmed",
   duplicates: "Duplicates",
   orphans: "Orphans",
-  stale: "Stale",
   relationships: "Relationships",
   history: "History",
 };
@@ -71,11 +73,10 @@ const REVIEW_LENS_HINTS: Record<ReviewLens, string> = {
   proposals:
     "Everything the adjudicator, the duplicate review and the scans want changed, one row per entity. Its buttons settle every article's copy at once; every apply stays undoable from History.",
   unconfirmed:
-    "Entities the analysis created that nobody has confirmed. Confirm keeps one; merge, convert or delete fixes the rest. Duplicates, orphans and stale entities have their own lenses.",
+    "Entities the analysis created that nobody has confirmed. Confirm keeps one; merge, convert or delete fixes the rest. Duplicates and orphans have their own lenses.",
   duplicates:
     "AI-created actors, malware and tools whose names nearly match another entity of the same type. Merge folds one into the other; Not a dupe stops flagging the pair. A pair the AI duplicate review has already filed also shows under Proposals.",
-  orphans: "AI-created entities that no article links to. Delete them, or merge one into the entity that kept its articles.",
-  stale: "AI-created entities with one article at most, no relationships, and nothing new in 90 days.",
+  orphans: "AI-created entities whose every article link was removed. Delete the wrong ones; restore the link from History when the removal was wrong.",
   relationships:
     "Edges the analysis or co-occurrence drew that neither an analyst nor the adjudicator has judged. Confirm or Reject them here; the adjudicator works through the rest as articles come in.",
   history: "Everything that was applied, by a person or by the stage in apply mode. Restore puts it back.",
@@ -618,7 +619,7 @@ export function EngineMatrix({
 
   const failingFeeds = feedHealth?.erroring_feeds?.length ?? 0;
 
-  // What each Review lens is waiting on; the tab's badge is their sum.
+  // What each Review lens is waiting on; the tab's badge sums the badged ones.
   const reviewLensCount = (l: ReviewLens): number | undefined =>
     l === "proposals"
       ? hygieneStats?.pending_total
@@ -627,7 +628,8 @@ export function EngineMatrix({
         : isEntityLens(l)
           ? extractionStats?.by_status?.[ENTITY_LENS_STATUS[l]]
           : undefined;
-  const reviewTotal = REVIEW_LENSES.reduce((sum, l) => sum + (reviewLensCount(l) ?? 0), 0);
+  const badgedLenses = REVIEW_LENSES.filter((l) => !UNBADGED_LENSES.has(l));
+  const reviewTotal = badgedLenses.reduce((sum, l) => sum + (reviewLensCount(l) ?? 0), 0);
 
   // The queues that need a person. Each chip is a filter on the table: the
   // ones with `active` light up while their view+filter is showing and clear
@@ -664,11 +666,11 @@ export function EngineMatrix({
       onClick: () => {
         switchView("review");
         // The first lens with something in it, so the click never lands on an empty list.
-        setReviewLens(REVIEW_LENSES.find((l) => (reviewLensCount(l) ?? 0) > 0) ?? "proposals");
+        setReviewLens(badgedLenses.find((l) => (reviewLensCount(l) ?? 0) > 0) ?? "proposals");
       },
       hint: {
         title: "To review",
-        body: "Everything waiting on a person: the adjudicator's and the scans' proposals, unconfirmed, duplicate, orphaned and stale AI-created entities, and relationship edges nobody has judged.",
+        body: "The adjudicator's and the scans' proposals, and duplicate and orphaned AI-created entities. Unconfirmed entities and unjudged relationships have their own lenses under Review and are not counted here.",
         aside: "The same count as the Review tab.",
       },
     },

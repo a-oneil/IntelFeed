@@ -14,7 +14,8 @@
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  align-items: center;
+  gap: 6px 8px;
 }
 
 /* A proposed target type: clicking it converts the entity. */

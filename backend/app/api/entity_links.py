@@ -256,17 +256,15 @@ async def entity_link_stats(
     )
 
 
-async def _delete_link(db: AsyncSession, ref: LinkRef) -> bool:
-    cfg = LINK_CONFIGS.get(ref.entity_type)
-    if cfg is None:
+async def _delete_link(db: AsyncSession, ref: LinkRef, *, by: str, where: str) -> bool:
+    """Remove one link and log who (``by``) removed it and where, so History
+    shows it and Restore can put it back."""
+    from app.intelligence.link_validation_apply import unlink_and_log
+
+    if ref.entity_type not in LINK_CONFIGS:
         return False
-    j = cfg.junction
-    fk = getattr(j, cfg.fk_attr)
-    result = await db.execute(select(j).where(j.entry_id == ref.entry_id, fk == ref.entity_id))
-    row = result.scalar_one_or_none()
-    if row is None:
+    if not await unlink_and_log(db, ref.entity_type, ref.entity_id, ref.entry_id, by=by, where=where):
         return False
-    await db.delete(row)
     # Drop cached pivots/graphs that embedded this link as evidence.
     try:
         from app.intelligence.correlation_cache import invalidate_entity_cache
@@ -290,7 +288,8 @@ async def unlink(
     """Remove a single entry→entity autolink."""
     if entity_type not in LINK_CONFIGS:
         raise AppError(code="invalid", message=f"Unknown entity_type: {entity_type}", status_code=400)
-    ok = await _delete_link(db, LinkRef(entity_type=entity_type, entity_id=entity_id, entry_id=entry_id))
+    ref = LinkRef(entity_type=entity_type, entity_id=entity_id, entry_id=entry_id)
+    ok = await _delete_link(db, ref, by=user.username, where="in Engine › Autolinking")
     if not ok:
         raise AppError(code="not_found", message="Link not found", status_code=404)
     await db.flush()
@@ -307,7 +306,7 @@ async def bulk_unlink(
         raise AppError(code="invalid", message="At most 500 links per request", status_code=400)
     deleted = 0
     for ref in body.items:
-        if await _delete_link(db, ref):
+        if await _delete_link(db, ref, by=user.username, where="in Engine › Autolinking (bulk)"):
             deleted += 1
     await db.flush()
     return BulkUnlinkResponse(deleted=deleted)

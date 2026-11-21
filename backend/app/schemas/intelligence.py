@@ -665,6 +665,8 @@ class MitigationResponse(BaseModel):
     # Entry-level (when returned per-entry)
     confidence: str | None = None
     source: str | None = None
+    # The article's own wording of the advice, from the entry link.
+    detail: str | None = None
 
     model_config = {"from_attributes": True}
 

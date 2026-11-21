@@ -465,7 +465,9 @@ _IS_INDEX_FLAGS = {
 # Every value `is:` accepts: the index flags above, plus the three answered from
 # Postgres. Public because autocomplete has to offer exactly this set — listing
 # it separately is how the header came to suggest five of the eight.
-IS_FILTER_VALUES: tuple[str, ...] = (*_IS_INDEX_FLAGS, "muted", "translated", "image")
+IS_FILTER_VALUES: tuple[str, ...] = (*_IS_INDEX_FLAGS, "muted", "archived", "translated", "image")
+# `is:` values that narrow to a set of feeds, resolved against Postgres.
+_IS_FEED_VALUES = ("muted", "archived")
 
 
 def _pending_token(index: int) -> str:
@@ -591,7 +593,7 @@ def _branch_dnf(node: ASTNode, plan: ExecutionPlan, *, negated: bool) -> list[tu
             if flag:
                 attribute, expected = flag
                 return [([], [f"{attribute} = {str(expected != negated).lower()}"])]
-            if node.value != "muted":
+            if node.value not in _IS_FEED_VALUES:
                 # `is:translated` / `is:image` resolve to entry IDs; the walk
                 # takes those, with an or_group to union them by.
                 return [([], [])]
@@ -606,9 +608,10 @@ def _branch_dnf(node: ASTNode, plan: ExecutionPlan, *, negated: bool) -> list[tu
                     PendingFeedFilter(value=node.value, exact=node.exact, negated=negated, token=token)
                 )
             else:
-                # `is:muted` narrows to feed IDs like `category:` does, so it is
-                # a filter clause in the end and can hold a place in a branch.
-                kind = "is.muted" if node.field_name == "is" else node.field_name
+                # `is:muted` / `is:archived` narrow to feed IDs like `category:`
+                # does, so they are filter clauses in the end and can hold a
+                # place in a branch.
+                kind = f"is.{node.value}" if node.field_name == "is" else node.field_name
                 plan.pending_entry_filters.append(
                     PendingEntryFilter(kind=kind, value=node.value, negated=negated, token=token)
                 )
@@ -1009,11 +1012,23 @@ async def resolve_deferred_filters(db, plan: ExecutionPlan) -> None:
     Both resolvers or neither: a plan that has had only one of them run still
     holds unresolved placeholders, and the clauses they stand for are simply
     lost. Call this rather than the two functions individually.
+
+    It also keeps a deleted feed's articles out of every search that doesn't
+    ask for them with `is:archived` (services/feed_archive.py).
     """
+    asks_archived = any(pf.kind == "is.archived" for pf in plan.pending_entry_filters)
     if plan.pending_feed_filters:
         await resolve_feed_filters(db, plan)
     if plan.pending_entry_filters:
         await resolve_entry_filters(db, plan)
+    if not asks_archived:
+        from sqlalchemy import select
+
+        from app.models.feed import Feed
+
+        archived = (await db.execute(select(Feed.id).where(Feed.archived_at.is_not(None)))).scalars().all()
+        if archived:
+            add_global_filter(plan, "feed_id NOT IN [" + ", ".join(f'"{fid}"' for fid in archived) + "]")
 
 
 async def resolve_feed_filters(db, plan: ExecutionPlan) -> None:
@@ -1048,7 +1063,7 @@ async def resolve_feed_filters(db, plan: ExecutionPlan) -> None:
 
 # Feed-scoped kinds narrow to feed IDs; there are only a few hundred feeds, so
 # they become ordinary Meilisearch filter clauses.
-_FEED_SCOPED = {"category", "is.muted", "feed.reliability", "feed.timeliness", "feed.relevance"}
+_FEED_SCOPED = {"category", "is.muted", "is.archived", "feed.reliability", "feed.timeliness", "feed.relevance"}
 
 
 async def resolve_entry_filters(db, plan: ExecutionPlan) -> None:
@@ -1084,6 +1099,8 @@ async def resolve_entry_filters(db, plan: ExecutionPlan) -> None:
                 )
             elif kind == "is.muted":
                 stmt = select(Feed.id).where(Feed.is_muted.is_(True))
+            elif kind == "is.archived":
+                stmt = select(Feed.id).where(Feed.archived_at.is_not(None))
             else:
                 # Source ratings are Admiralty-code letter grades (A/B/C…), not
                 # numbers, so this is an equality match on the grade.

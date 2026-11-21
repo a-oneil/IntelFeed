@@ -51,6 +51,7 @@ from app.schemas.thread import ThreadSummary
 from app.services import meilisearch_client, translation
 from app.services.atlas import build_atlas_entry_id_query
 from app.services.entry_tags import load_entry_tags
+from app.services.feed_archive import archived_feed_ids_query
 from app.services.feed_visibility import subscriptions_enabled, visible_feed_ids_query
 from app.services.iso_codes import ALPHA2_TO_ALPHA3
 from app.services.read_state import has_no_state_for_user
@@ -595,6 +596,10 @@ async def _entry_page(
             include_muted=bool(category_id),
             category_id=category_id,
         )
+        if entity_id or country_id or campaign_id or sector:
+            # Asked for as evidence: a deleted feed's articles still back the
+            # entity, campaign or sector (services/feed_archive.py).
+            feed_query = feed_query.union(archived_feed_ids_query())
         feed_ids_result = await db.execute(feed_query)
         feed_ids = [row[0] for row in feed_ids_result.all()]
 
@@ -1164,6 +1169,10 @@ async def count_entries(
             include_muted=bool(category_id),
             category_id=category_id,
         )
+        if entity_id or country_id or campaign_id or sector:
+            # Asked for as evidence: a deleted feed's articles still back the
+            # entity, campaign or sector (services/feed_archive.py).
+            feed_query = feed_query.union(archived_feed_ids_query())
         feed_ids_result = await db.execute(feed_query)
         feed_ids = [row[0] for row in feed_ids_result.all()]
 

@@ -135,7 +135,7 @@ A provider with tool calling turned off streams plain text. The dock's header sa
 
 The Claude Code CLI needs its OAuth credentials (`~/.claude/.credentials.json`). Only the **`celery-worker-ai`** container mounts them, through the `claude_cli` volume. It is the one process that refreshes the tokens; a second container refreshing them at the same time would corrupt the file. The prod api container has no CLI, no credentials and no MCP mount.
 
-`copilot_worker_dispatch` (`backend/app/config.py:478`, default `true`) picks where the CLI runs. It only matters for the `claude_code` provider:
+`copilot_worker_dispatch` (`backend/app/config.py:488`, default `true`) picks where the CLI runs. It only matters for the `claude_code` provider:
 
 - **Worker dispatch (default)**: the api queues `run_copilot_stream` on the `ai` queue with a new `run_id`, then reads events from a Redis list while the worker runs the CLI.
 - **In-process (`false`)**: the api calls `provider.stream_agent()` itself. This only works where the api container has the CLI and credentials. The dev compose mounts `./intelfeed-mcp` into the api for this case.
@@ -313,7 +313,7 @@ Celery results share Redis with the copilot, so they expire after one hour (`res
 
 | Knob | Where | Value and effect |
 |---|---|---|
-| `copilot_worker_dispatch` | `backend/app/config.py:478` | `true` (default): run the CLI in `celery-worker-ai`. `false`: run it in the api. The Anthropic API, OpenAI-compatible and Ollama always run in the api |
+| `copilot_worker_dispatch` | `backend/app/config.py:488` | `true` (default): run the CLI in `celery-worker-ai`. `false`: run it in the api. The Anthropic API, OpenAI-compatible and Ollama always run in the api |
 | `allowed_tools`, `timeout_seconds` | Copilot assignment config (Settings → AI Configuration) | `["IntelFeed"]`, 240 s |
 | `agent_tools` | Copilot assignment config (Prompt Workspace → Routing & Visibility) | Limits the copilot on the Anthropic API, OpenAI-compatible and Ollama to exactly these tools. Unset (default): the everyday tools plus `find_tools` / `call_tool` for the rest |
 | `copilot_auto_approve_tools` | **Skip Confirm for**, the copilot's Routing & Visibility tab in the Prompt Workspace | Writes that run without the click. Empty (default): every write waits for Confirm. Admin tools and deletes always wait |

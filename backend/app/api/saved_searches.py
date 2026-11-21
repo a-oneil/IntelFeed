@@ -23,19 +23,55 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-COUNTS_TTL = 600  # 10 minutes
+# Twice the refresh job's 15-minute cadence, so one slow or skipped run never
+# leaves the sidebar computing counts inline on the request.
+COUNTS_TTL = 1800
+# Cap on ids fetched per search for the unread calculation.
+MAX_IDS_FOR_UNREAD = 5000
+
+
+def _hit_list_key(plan, constraint: list[str] | None) -> str:
+    """What decides a search's hit list, so identical searches share one scan.
+
+    Several analysts saving the same query is the common case (prod: 15 saved
+    searches, 3 distinct queries), and each Meilisearch scan of up to 5,000
+    hits is seconds. The viewer only matters to the hit list when the plan
+    still has wildcard facet filters to expand (those resolve per viewer) or a
+    `tag:` clause, which the planner already wrote into the filters with the
+    viewer's id.
+    """
+    viewer = plan.viewer_id if plan.pending_facet_filters else None
+    return json.dumps(
+        [
+            plan.meili_query,
+            plan.meili_filters,
+            [[b.query, b.filters] for b in plan.branches],
+            plan.sort,
+            sorted(constraint) if constraint is not None else None,
+            sorted(plan.db_excluded_ids),
+            viewer,
+        ]
+    )
 
 
 async def _compute_counts_inline(
     searches: list[SavedSearch],
     user_id: uuid.UUID,
     db: AsyncSession,
+    hit_lists: dict[str, list[str]] | None = None,
 ) -> dict[str, dict[str, int]]:
-    """Compute saved search counts inline when Redis cache is empty."""
+    """Compute saved search counts inline when Redis cache is empty.
+
+    ``hit_lists`` memoizes each distinct search's ids; the refresh job passes
+    one dict across every owner so a query saved by eight people is scanned
+    once. The read count is always this user's own.
+    """
     from app.search.meili_builder import execute_entry_search
     from app.search.query_parser import ParseError, parse_query
     from app.search.query_planner import build_execution_plan
 
+    if hit_lists is None:
+        hit_lists = {}
     counts: dict[str, dict[str, int]] = {}
     for s in searches:
         query_str = s.query or s.name or ""
@@ -62,10 +98,17 @@ async def _compute_counts_inline(
             continue
 
         try:
-            # Fetch entry IDs (cap at 5000) for unread calculation
             constraint = list(plan.db_entry_ids) if plan.db_entry_ids is not None else None
-            ids_result = await asyncio.to_thread(execute_entry_search, plan, constraint, 5000, 0)
-            entry_ids = [hit["id"] for hit in ids_result.get("hits", []) if "id" in hit]
+            key = _hit_list_key(plan, constraint)
+            entry_ids = hit_lists.get(key)
+            if entry_ids is None:
+                # Ids only: a full hit carries up to 50k characters of body
+                # text, and nothing here reads past the id.
+                ids_result = await asyncio.to_thread(
+                    execute_entry_search, plan, constraint, MAX_IDS_FOR_UNREAD, 0, ["id"]
+                )
+                entry_ids = [hit["id"] for hit in ids_result.get("hits", []) if "id" in hit]
+                hit_lists[key] = entry_ids
             # Use actual hit count rather than estimatedTotalHits which can overcount
             total = len(entry_ids)
 
@@ -116,7 +159,7 @@ async def list_saved_searches(
     db: AsyncSession = Depends(get_db),
 ):
     """List the current user's saved searches with their unread/total entry counts.
-    Counts come from a 10-minute Redis cache and are computed inline on a cache miss."""
+    Counts come from a 30-minute Redis cache and are computed inline on a cache miss."""
     result = await db.execute(
         select(SavedSearch).where(SavedSearch.created_by == user.id).order_by(SavedSearch.created_at.desc())
     )

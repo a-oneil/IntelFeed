@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -24,11 +24,12 @@ import {
   type ExtractionType,
 } from "@/hooks/useExtraction";
 
+import { EntityEvidencePanel } from "./EvidencePanel";
 import styles from "./ExtractionTab.module.css";
 import { confirmDialog, promptDialog } from "@/utils/dialog";
 
 const ALL_TYPES: ExtractionType[] = ["threat_actor", "malware", "cve", "tool", "ttp", "observable"];
-type EntityStatus = "all" | "review" | "orphan" | "dupe" | "stale";
+type EntityStatus = "all" | "review" | "orphan" | "dupe";
 
 const CONF_BAR: Record<string, { pct: number; cls: string }> = {
   high: { pct: 92, cls: styles.confHigh },
@@ -97,6 +98,7 @@ export function ExtractionTab({
 
   // Row whose "Merge into…" modal is open (search + fold into any same-type entity).
   const [mergeRow, setMergeRow] = useState<ExtractionEntity | null>(null);
+  const [openEvidence, setOpenEvidence] = useState<string | null>(null);
 
   const items = data?.items ?? EMPTY_ITEMS;
   const total = data?.total ?? 0;
@@ -435,112 +437,127 @@ export function ExtractionTab({
             </thead>
             <tbody>
               {items.map((e) => (
-                <tr key={e.id} className={selected.has(e.id) ? styles.selRow : ""}>
-                  <td>
-                    <span
-                      className={`${styles.cbox} ${selected.has(e.id) ? styles.cboxOn : ""}`}
-                      onClick={() => toggleSelect(e.id)}
-                      role="checkbox"
-                      aria-checked={selected.has(e.id)}
-                    />
-                  </td>
-                  <td>
-                    <div className={styles.ename}>
-                      <button
-                        className={`${styles.namelink} ${e.entity_type === "observable" ? styles.nameMono : ""}`}
-                        onClick={() => pivot(e)}
-                        title={e.name}
-                      >
-                        {e.name}
-                      </button>
-                      {e.duplicate_of && <span className={styles.provchip}>≈ {e.duplicate_of}</span>}
-                    </div>
-                    <div className={styles.aka}>
-                      {e.entity_type === "observable"
-                        ? // Backend packs [kind, label] into aliases for ledger
-                          // rows — a qualifier, not an alias claim.
-                          e.aliases.filter(Boolean).join(" · ")
-                        : e.aliases.length
-                          ? `aka ${e.aliases.slice(0, 3).join(", ")}`
-                          : "no aliases"}
-                    </div>
-                  </td>
-                  <td>
-                    <span className={`${styles.etype} ${styles[`t_${e.entity_type}`]}`}>
-                      <span className={styles.swatch} />
-                      {TYPE_LABELS[e.entity_type]}
-                    </span>
-                  </td>
-                  <td>
-                    {e.created_confidence && CONF_BAR[e.created_confidence] ? (
-                      <span className={styles.conf}>
-                        <span className={styles.cbar}>
-                          <span
-                            className={CONF_BAR[e.created_confidence].cls}
-                            style={{ width: `${CONF_BAR[e.created_confidence].pct}%` }}
-                          />
-                        </span>
-                        <span className={styles.pct}>{e.created_confidence}</span>
-                      </span>
-                    ) : (
-                      <span className={styles.mut}>—</span>
-                    )}
-                  </td>
-                  <td className={styles.num}>{e.article_count}</td>
-                  <td className={`${styles.hideSm} ${styles.mut} ${styles.sourceCell}`} title={e.source_entry_title ?? ""}>
-                    {e.source_entry_title ?? "—"}
-                  </td>
-                  <td className={`${styles.hideSm} ${styles.when}`}>{relTime(e.first_seen_at)}</td>
-                  <td>
-                    <StatusPill status={e.status} duplicateOf={e.duplicate_of} />
-                  </td>
-                  <td>
-                    <div className={styles.rowacts}>
-                      <button className={styles.iact} title="Pivot to profile" onClick={() => pivot(e)}>
-                        ↗
-                      </button>
-                      {e.status === "dupe" && e.duplicate_of_id && (
-                        <>
-                          <button
-                            className={styles.dupAct}
-                            title={`Fold ${e.name} into ${e.duplicate_of} — aliases and article links move over`}
-                            disabled={mergeMut.isPending}
-                            onClick={() => doMergeIntoSibling(e)}
-                          >
-                            Merge
-                          </button>
-                          <button
-                            className={styles.dupAct}
-                            title={`${e.name} and ${e.duplicate_of} are different things — stop flagging the pair`}
-                            disabled={notDupMut.isPending}
-                            onClick={() => doNotDuplicate(e)}
-                          >
-                            Not a dupe
-                          </button>
-                        </>
-                      )}
-                      {e.needs_review && (
-                        <button className={styles.iact} title="Confirm" onClick={() => doConfirm([e])}>
-                          ✓
-                        </button>
-                      )}
-                      <RowActionsMenu
-                        entity={e}
-                        onMergeInto={() => setMergeRow(e)}
-                        onRename={() => doRename(e)}
-                        onAddAlias={() => doAddAlias(e)}
-                        onConvert={(target) => doConvert(e, target)}
+                <Fragment key={e.id}>
+                  <tr className={selected.has(e.id) ? styles.selRow : ""}>
+                    <td>
+                      <span
+                        className={`${styles.cbox} ${selected.has(e.id) ? styles.cboxOn : ""}`}
+                        onClick={() => toggleSelect(e.id)}
+                        role="checkbox"
+                        aria-checked={selected.has(e.id)}
                       />
+                    </td>
+                    <td>
+                      <div className={styles.ename}>
+                        <button
+                          className={`${styles.namelink} ${e.entity_type === "observable" ? styles.nameMono : ""}`}
+                          onClick={() => pivot(e)}
+                          title={e.name}
+                        >
+                          {e.name}
+                        </button>
+                        {e.duplicate_of && <span className={styles.provchip}>≈ {e.duplicate_of}</span>}
+                      </div>
+                      <div className={styles.aka}>
+                        {e.entity_type === "observable"
+                          ? // Backend packs [kind, label] into aliases for ledger
+                            // rows — a qualifier, not an alias claim.
+                            e.aliases.filter(Boolean).join(" · ")
+                          : e.aliases.length
+                            ? `aka ${e.aliases.slice(0, 3).join(", ")}`
+                            : "no aliases"}
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`${styles.etype} ${styles[`t_${e.entity_type}`]}`}>
+                        <span className={styles.swatch} />
+                        {TYPE_LABELS[e.entity_type]}
+                      </span>
+                    </td>
+                    <td>
+                      {e.created_confidence && CONF_BAR[e.created_confidence] ? (
+                        <span className={styles.conf}>
+                          <span className={styles.cbar}>
+                            <span
+                              className={CONF_BAR[e.created_confidence].cls}
+                              style={{ width: `${CONF_BAR[e.created_confidence].pct}%` }}
+                            />
+                          </span>
+                          <span className={styles.pct}>{e.created_confidence}</span>
+                        </span>
+                      ) : (
+                        <span className={styles.mut}>—</span>
+                      )}
+                    </td>
+                    <td className={styles.num}>{e.article_count}</td>
+                    <td className={`${styles.hideSm} ${styles.mut} ${styles.sourceCell}`} title={e.source_entry_title ?? ""}>
                       <button
-                        className={`${styles.iact} ${styles.iactDanger}`}
-                        title={e.entity_type === "observable" ? "Deny — never capture this value again" : "Delete"}
-                        onClick={() => doDelete([e])}
+                        className={styles.evToggle}
+                        onClick={() => setOpenEvidence((cur) => (cur === e.id ? null : e.id))}
+                        title="Show the articles and the paragraphs naming it"
                       >
-                        ✕
+                        {openEvidence === e.id ? "▾" : "▸"} {e.source_entry_title ?? "articles"}
                       </button>
-                    </div>
-                  </td>
-                </tr>
+                    </td>
+                    <td className={`${styles.hideSm} ${styles.when}`}>{relTime(e.first_seen_at)}</td>
+                    <td>
+                      <StatusPill status={e.status} duplicateOf={e.duplicate_of} />
+                    </td>
+                    <td>
+                      <div className={styles.rowacts}>
+                        <button className={styles.iact} title="Pivot to profile" onClick={() => pivot(e)}>
+                          ↗
+                        </button>
+                        {e.status === "dupe" && e.duplicate_of_id && (
+                          <>
+                            <button
+                              className={styles.dupAct}
+                              title={`Fold ${e.name} into ${e.duplicate_of} — aliases and article links move over`}
+                              disabled={mergeMut.isPending}
+                              onClick={() => doMergeIntoSibling(e)}
+                            >
+                              Merge
+                            </button>
+                            <button
+                              className={styles.dupAct}
+                              title={`${e.name} and ${e.duplicate_of} are different things — stop flagging the pair`}
+                              disabled={notDupMut.isPending}
+                              onClick={() => doNotDuplicate(e)}
+                            >
+                              Not a dupe
+                            </button>
+                          </>
+                        )}
+                        {e.needs_review && (
+                          <button className={styles.iact} title="Confirm" onClick={() => doConfirm([e])}>
+                            ✓
+                          </button>
+                        )}
+                        <RowActionsMenu
+                          entity={e}
+                          onMergeInto={() => setMergeRow(e)}
+                          onRename={() => doRename(e)}
+                          onAddAlias={() => doAddAlias(e)}
+                          onConvert={(target) => doConvert(e, target)}
+                        />
+                        <button
+                          className={`${styles.iact} ${styles.iactDanger}`}
+                          title={e.entity_type === "observable" ? "Deny — never capture this value again" : "Delete"}
+                          onClick={() => doDelete([e])}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {openEvidence === e.id && (
+                    <tr>
+                      <td colSpan={9}>
+                        <EntityEvidencePanel entityType={e.entity_type} entityId={e.id} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
               {!isLoading && items.length === 0 && (
                 <tr>
@@ -628,7 +645,6 @@ function StatusPill({ status, duplicateOf }: { status: ExtractionEntity["status"
     review: { cls: styles.stReview, text: "Needs review" },
     orphan: { cls: styles.stOrphan, text: "Orphan" },
     dupe: { cls: styles.stDupe, text: duplicateOf ? `Dup of ${duplicateOf}` : "Duplicate" },
-    stale: { cls: styles.stOrphan, text: "Stale" },
   }[status];
   return <span className={`${styles.status} ${map.cls}`}>● {map.text}</span>;
 }

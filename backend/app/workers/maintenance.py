@@ -4,7 +4,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -834,23 +834,6 @@ async def _decay_relationship_confidence() -> int:
         return count
 
 
-# ---------------------------------------------------------------------------
-# Stale entity review flagging
-# ---------------------------------------------------------------------------
-
-# (entity_type, model class name). One slug now covers the maintenance log and
-# EntityRelationship rows alike — see app/entity_types.py.
-STALE_ENTITY_TYPES: list[tuple[str, str]] = [
-    ("threat_actor", "ThreatActor"),
-    ("malware", "MalwareFamily"),
-    ("tool", "Tool"),
-    ("vendor", "Vendor"),
-    ("product", "Product"),
-]
-
-_STALE_FLAGS_PER_TYPE_CAP = 500  # bound one run's log growth
-
-
 @celery_app.task(name="app.workers.maintenance.prune_entity_context", soft_time_limit=300, time_limit=360)
 def prune_entity_context():
     """Nightly: delete entity_context rows that expired more than 30 days ago,
@@ -917,10 +900,18 @@ async def _prune_engine_tables() -> int:
         total += result.rowcount or 0
         result = await db.execute(delete(JobRun).where(JobRun.finished_at < cutoff))
         total += result.rowcount or 0
+        # A row whose review is still owed is the resweep's only handle on that
+        # article: pruning it would leave the review owed for good.
+        from app.services.entry_adjudication import PENDING, RECHECK, SKIPPED_BUDGET, SKIPPED_PAUSED
+
         result = await db.execute(
             delete(AIAnalysisRequest).where(
                 AIAnalysisRequest.created_at < cutoff,
                 AIAnalysisRequest.status != "pending",
+                or_(
+                    AIAnalysisRequest.adjudication_status.is_(None),
+                    AIAnalysisRequest.adjudication_status.notin_([PENDING, RECHECK, SKIPPED_BUDGET, SKIPPED_PAUSED]),
+                ),
             )
         )
         total += result.rowcount or 0

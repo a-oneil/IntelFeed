@@ -63,7 +63,8 @@ def visible_feed_ids_query(
         q = q.where(Feed.category_id == category_id)
     if active_only:
         q = q.where(Feed.is_active.is_(True))
-    return q
+    # An archived feed reads as deleted (services/feed_archive.py).
+    return q.where(Feed.archived_at.is_(None))
 
 
 async def get_subscription(db: AsyncSession, user_id: uuid.UUID, feed_id: uuid.UUID) -> UserFeedSubscription | None:

@@ -300,6 +300,8 @@ export interface ReviewGroup {
   sample_entry_id: string | null;
   matched_names: string[];
   row_ids: string[];
+  /** The newest proposal (feed id shape), for its evidence panel. */
+  latest_row_id: string | null;
 }
 
 export type Confidence = "high" | "medium" | "low";
@@ -631,5 +633,102 @@ export function useCascadePreview(entityType: string | null, entityId: string | 
       return data;
     },
     enabled: Boolean(entityType && entityId),
+  });
+}
+
+// --- Evidence behind one proposal ------------------------------------------
+
+export interface EvidenceArticle {
+  entry_id: string;
+  title: string;
+  feed_title: string;
+  published_at: string | null;
+  paragraphs: string[];
+  highlight: string[];
+}
+
+export interface RowEvidence {
+  id: string;
+  reason: string | null;
+  confidence: string | null;
+  quote: string | null;
+  article: EvidenceArticle | null;
+  facts: { label: string; value: string }[];
+  /** A merge proposal's two entities: the one to fold, then the keeper. */
+  profiles: EvidenceProfile[];
+  relationship: RelationshipEvidence | null;
+  history: { action: string; when: string; subject: string | null; reason: string | null }[];
+}
+
+export interface EvidenceProfile {
+  entity_type: string;
+  entity_id: string;
+  name: string;
+  aliases: string[];
+  article_count: number;
+  created_via: string | null;
+  first_seen: string | null;
+  description: string | null;
+  subtype: string | null;
+}
+
+export interface RelationshipEvidenceArticle {
+  entry_id: string;
+  title: string;
+  feed_title: string;
+  published_at: string | null;
+  analysis_verb: string | null;
+  analysis_sentence: string | null;
+  passages: string[];
+  source_only: string | null;
+  target_only: string | null;
+}
+
+export interface RelationshipReview {
+  reviewer: "adjudicator" | "sweep" | "analyst";
+  verdict: string;
+  confidence: string | null;
+  reason: string | null;
+  quote: string | null;
+  suggested_verb: string | null;
+  flipped: boolean;
+  counted: boolean;
+  entry_id: string | null;
+  entry_title: string | null;
+  created_at: string;
+}
+
+export interface RelationshipEvidence {
+  relationship_id: string;
+  adjudication_verdict: string | null;
+  article_count: number;
+  articles: RelationshipEvidenceArticle[];
+  reviews: RelationshipReview[];
+}
+
+/** The evidence behind one Review row (`id` is the feed id, "source:log_id"). */
+export function useRowEvidence(id: string | null) {
+  return useQuery({
+    queryKey: ["hygiene", "evidence", id],
+    queryFn: async () => {
+      const [source, logId] = (id as string).split(":");
+      const { data } = await api.get<RowEvidence>(`/admin/hygiene/feed/${source}/${logId}/evidence`);
+      return data;
+    },
+    enabled: !!id,
+    staleTime: 60 * 1000,
+  });
+}
+
+/** One edge's evidence articles and reviews (the Relationships lens). */
+export function useRelationshipEvidence(id: string | null) {
+  return useQuery({
+    queryKey: ["relationships", "evidence", id],
+    queryFn: async () => {
+      const { data } = await api.get<RelationshipEvidence>(`/entity-relationships/${id}/evidence`);
+      return data;
+    },
+    enabled: !!id,
+    staleTime: 60 * 1000,
   });
 }
