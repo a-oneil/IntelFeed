@@ -234,7 +234,7 @@ async def test_global_scope_blocks_vendor_names_too(
 
 @pytest.mark.asyncio
 async def test_alias_scope_drops_alias_and_unlinks_alias_only_entries(
-    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, fp_entry: Entry
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, fp_entry: Entry, inline_rebuild: list
 ):
     feed_id = fp_entry.feed_id
     other = Entry(
