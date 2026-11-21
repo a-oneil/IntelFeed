@@ -2370,7 +2370,7 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
 RETURN ONLY THE ITEMS YOU WOULD CHANGE. Every item_id you leave out of the verdicts list is kept exactly as it is, which is the right outcome for most of them — a clean review on a well-extracted article returns verdicts for its edges and NEW entities and nothing else. Do not echo back the links and iocs you agree with: a list with one line per item wastes the response budget and gets truncated on a long article, which throws the whole review away.
 
 THREE EXCEPTIONS:
-  - Every `edge:` item needs a verdict, keep or demote. A keep on an edge is a positive claim that this article asserts the relationship, and it is counted as corroboration — three of them promote the relationship to confirmed. So answer on every edge, and never keep one you have not checked against its evidence sentence; if you are unsure the article asserts it, demote it. There are at most ten edges in a list.
+  - Every `edge:` item needs a verdict: keep, reverb or demote. A keep on an edge is a positive claim that THIS article states the relationship, exactly as printed, and it counts toward confirming it. Each edge prints the sentence to judge it by (the analysis's evidence, or the article's sentence naming both ends). Read that sentence: keep only when it states the claim with that verb and that direction; reverb when it relates the two by another verb or the other way round; demote when it relates nothing. When no sentence names both, keep only if another passage of the article plainly states the claim, and quote it. There are at most ten edges in a list.
   - Every link marked "NEW, created by this article" needs a verdict: keep, veto or merge. The automated pass just added that entity to the catalogue on the strength of this one article, so silence is not good enough — say whether it should exist.
   - Every `ioc:` item marked CANDIDATE needs a verdict: capture or drop. A candidate is a value nothing has captured yet — the pattern scan spotted it, or the automated pass staged it without capturing it — and this review is the only judgment it gets.
 
@@ -2396,7 +2396,8 @@ VERDICTS (keep is the default for anything you omit; state it explicitly only to
   veto        — (links marked "NEW, created by this article" only) the entity should not exist at all: a description instead of a name ("Chinese espionage group"), a victim organisation, a vendor or researcher, a product that is not malware or a tool, a generic term. Also: a file, package or plugin name from an IoC table filed as malware; a vulnerability or exploit nickname filed as malware or a tool (Spring4Shell, EternalBlue); a built-in command, shell or developer tool nobody abuses here (/bin/sh, cron, Vite); a security product or analysis tool only defenders run; a political or military body with no cyber operations in the article. A new malware or tool that is really the other type is a reclassify, not a veto.
   merge       — (links marked "NEW, created by this article" only) the entity duplicates one of the names printed after "nearest existing names:"; set merge_into to that name EXACTLY as printed. If the right match is not among those names you cannot merge; use keep or veto.
   link        — (`held:` items only) the item is NOT linked: its name is also an ordinary word, and the analysis did not name it in this article. Use link when the article is in fact about this entity (the context line uses the name for the threat actor, malware, tool or country, not in its ordinary sense: "the Royal ransomware gang", not "the Royal Navy"). Omit the item when the ordinary sense is meant, which is most of the time.
-  demote      — (edges only) the entities co-occur but the article never asserts the claimed relationship: roundups, lists, generic defensive advice ("watch for Cobalt Strike beacons"), the wrong verb, or the wrong direction (an actor's origin country is attribution, not a target).
+  demote      — (edges only) the article names both but never relates them as claimed: roundups, lists, separate stories in one digest, detection-rule tags and references, generic defensive advice ("watch for Cobalt Strike beacons"), or the relationship is denied ("separate from", "not linked to"). Also demote when one end is the wrong entity: an alias that means something else here, a different group or product with the same name.
+  reverb      — (edges only) the two ARE related in the article, but not as printed. Set suggested_verb to the verb the sentence states (uses, delivers, drops, exploits, targets, attributed_to, variant_of, successor_of, subgroup_of, overlaps_with, communicates_with, related_to) and flip to true when the relationship runs the other way (B <verb> A). Examples: an actor's home country printed as "targets" → attributed_to; a loader printed as "uses" the payload it installs → delivers; "X is a variant of Y" printed as Y variant_of X → flip.
   capture     — (CANDIDATE ioc items only) the value is an attacker indicator this article reports: listed in its indicator table, IoC section or hash list, or named in the text as attacker infrastructure, a payload, a dropped file or an attacker's command. Capturing adds it to the indicator ledger.
   drop        — (ioc items only) the value is not an attacker indicator: a version number or other number shaped like an address, a command or path from a how-to or a defender's procedure, an example or placeholder value, the publisher's own site or links, researcher and sandbox hosts, documentation URLs, sample-page or tracking URLs, private or reserved addresses, a benign domain the article happens to defang (google[.]com in an example), analyst tooling. Defanging by itself marks a value as malicious, never as benign: a defanged value in an indicator list stays. The article prints it defanged (example[.]com, hxxp://) — look for it in that form before calling it absent. A hash the article lists as an indicator stays, even when its file path is a system path: attackers replace and modify system files, and a vendor's IoC table says so.
                 The item's "found in:" line is where the value sits (its table row or list line, the heading above it), found in its defanged form too. A value in an indicator table, an IoC section or a hash list is an attacker indicator unless the row itself shows it is benign: never drop it as "not in the body text" or "placeholder data", and never on the strength of a boilerplate note elsewhere ("re-fang only in VirusTotal/MISP", "IoCs are also on GitHub").
@@ -2407,13 +2408,21 @@ RULES
   - Judge each record against the sentence where it appears, not the article's overall topic. Use the context line printed with the item. The context line is the FIRST place the name occurs, which can be a boilerplate line even when the entity is the article's subject: before removing, check the title and body for the entity too.
   - An item marked "inferred by the analysis" was linked on meaning, not on a name match; judge it against the article as a whole (who the victims are, who is targeted), not against the context line.
   - Each reason must be about its own item and name that item's entity (for an edge, at least one of its two ends; for a ttp, its id or name). A remove or demote whose reason does not name its item is discarded, and so is one whose reason argues the record is right ("validating the edge"): when the evidence supports the record, the verdict is keep. Never copy one reason onto several items; if you cannot say what is wrong with a specific item, leave it out. CANDIDATES are the exception: one short reason may fit several of them ("a version number, not an address").
-  - Leave the item out whenever you are uncertain. A wrong removal destroys real intelligence signal; a wrong keep is cheap to fix later.
+  - Leave a link or indicator out whenever you are uncertain: a wrong removal destroys real intelligence signal. Edges are different, they always get an answer — a keep confirms the claim, so when you cannot tell, demote at medium or low confidence.
   - "promoted from the pending tier" means the name is also an ordinary word and was linked only because the extraction named it; look hard at the context line for these.
   - A `held:` item is the other side of that: a held word the extraction did not name, so it was never linked. Link it only on a clear mention of the entity itself, and name the entity in the reason.
   - A link marked "an analyst restored this link recently" is a strong keep; remove only on an unambiguous name collision.
   - Article counts and ages are context about how established an entity is: a one-article entity created by this very article deserves scrutiny; a 200-article entity usually does not.
   - For NEW entities, the "nearest existing names" line is what the catalogue already holds. Prefer merge over veto when one of them is the same thing under another name.
-  - For edges, the evidence sentence must actually assert the claim with the printed verb and direction.
+  - For edges, the verb means what the subject did to the object in this article:
+      uses — the subject itself used or deployed it (not "could use", not "detects", not a researcher's tool);
+      delivers / drops — a loader, dropper or actor installed that malware; a payload is not "used" by its loader;
+      exploits — the subject exploited that CVE; malware delivered through an exploit does not exploit it — the actor does;
+      targets — the subject attacked victims in that country or sector. Where an actor is from, based or sponsored is attributed_to; where someone was arrested, charged or sanctioned is no relationship;
+      attributed_to — the article attributes the subject to that actor or country;
+      variant_of / successor_of / subgroup_of / overlaps_with — only when the article says so in those terms (a persona or a sibling cluster is not a subgroup);
+      related_to — a stated, specific link (shared code, same operators), never "both mentioned".
+    A seller, developer or marketplace of a tool does not "use" it. A keep's reason must name an end of the claim and quote or cite the phrase that states it.
   - confidence: high when the text makes it obvious, medium when it is a judgment call, low when you are guessing. Only high-confidence verdicts are ever applied automatically.
   - reason: one short, factual sentence quoting or citing the phrase that decided it.
 """,
@@ -2448,6 +2457,7 @@ Return strict JSON matching the provided schema: the verdicts list first, one ob
                                     "veto",
                                     "merge",
                                     "demote",
+                                    "reverb",
                                     "drop",
                                     "link",
                                     "capture",
@@ -2458,6 +2468,8 @@ Return strict JSON matching the provided schema: the verdicts list first, one ob
                             "suggested_type": {"type": "string"},
                             "merge_into": {"type": "string"},
                             "bad_alias": {"type": "string"},
+                            "suggested_verb": {"type": "string"},
+                            "flip": {"type": "boolean"},
                         },
                     },
                 },

@@ -880,6 +880,11 @@ def _adjudication_subject(row: EntityMaintenanceLog) -> str:
     if row.action == ACTION_HELD_LINK:
         return f"Link: {name or row.entity_type} to this article (held match the analysis rejected)"
     if row.action == ACTION_EDGE_DEMOTE:
+        reverb = after.get("reverb") if isinstance(after.get("reverb"), dict) else None
+        if reverb and reverb.get("verb"):
+            way = ", the other way round" if reverb.get("flip") else ""
+            verb = str(reverb["verb"]).replace("_", " ")
+            return f"Correct: {before.get('claim') or 'relationship'} → {verb}{way}"
         return f"Demote: {before.get('claim') or 'relationship'}"
     if row.action == ACTION_IOC_DROP:
         where = "staged candidate" if before.get("staged") else "captured sighting"

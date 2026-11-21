@@ -426,18 +426,190 @@ async def test_manifest_edges_and_ai_iocs(db_session: AsyncSession, feed):
         )
     await db_session.flush()
 
-    items, block = await build_manifest(db_session, entry, _payload())
+    asserted = {
+        "source_type": "threat_actor",
+        "source_name": "Warlock",
+        "target_type": "tool",
+        "target_name": "Cobalt Strike",
+        "relationship_type": "uses",
+        "evidence": "Warlock operators deployed Cobalt Strike after the breach.",
+    }
+    items, block = await build_manifest(db_session, entry, _payload(relationships=[asserted]))
     kinds = {it.kind for it in items}
     assert {"link", "edge", "ioc"} <= kinds
     edges = [it for it in items if it.kind == "edge"]
     assert len(edges) == 1
     edge = edges[0]
-    assert "Warlock uses Cobalt Strike" in edge.line and "Defenders should watch" in edge.line
+    # The claim, and the analysis's sentence to judge it by — never the edge's
+    # stored description, which can be an old demote reason.
+    assert "Warlock uses Cobalt Strike" in edge.line
+    assert 'analysis evidence (uses): "Warlock operators deployed Cobalt Strike after the breach."' in edge.line
+    assert "Defenders should watch" not in edge.line
+    assert edge.edge_claim == ("threat_actor", "uses", "tool")
     iocs = [it for it in items if it.kind == "ioc"]
     # the private address fails today's validators, so it is judged without a review
     assert [it.ioc_value for it in iocs] == ["cdn.vendor-research.net"]
     assert "CANDIDATE: staged by the analysis" in iocs[0].line
     assert [c["value"] for c in entry.observable_candidates if c.get("reviewed")] == ["10.0.0.1"]
+
+
+@pytest.mark.asyncio
+async def test_manifest_edge_prints_the_sentence_naming_both_ends(db_session: AsyncSession, feed):
+    entry = await _make_entry(db_session, feed)
+    entry.content_text = (
+        "Researchers tracked a new campaign this month. "
+        "The Warlock operators relied on Cobalt Strike for lateral movement. "
+        "Patch now."
+    )
+    warlock = await _link_actor(db_session, entry, "Warlock")
+    cobalt = Tool(name="Cobalt Strike", article_count=40)
+    db_session.add(cobalt)
+    await db_session.flush()
+    edge = EntityRelationship(
+        source_type="threat_actor",
+        source_id=warlock.id,
+        target_type="tool",
+        target_id=cobalt.id,
+        relationship_type="uses",
+        confidence="possible",
+        source="co_occurrence",
+        evidence_entry_ids=[uuid.uuid4(), entry.id],
+    )
+    db_session.add(edge)
+    await db_session.flush()
+    items, _ = await build_manifest(db_session, entry, _payload())
+    line = next(it.line for it in items if it.kind == "edge")
+    # A co-occurrence edge with evidence elsewhere is still this article's to judge.
+    assert 'sentence: "The Warlock operators relied on Cobalt Strike for lateral movement."' in line
+    assert "verb was chosen from the two entity types" in line
+
+
+@pytest.mark.asyncio
+async def test_manifest_offers_edges_this_article_has_not_judged_first(db_session: AsyncSession, feed, monkeypatch):
+    from app.services import edge_settlement as es
+
+    entry = await _make_entry(db_session, feed)
+    warlock = await _link_actor(db_session, entry, "Warlock")
+    tools = [Tool(name=f"Tool {n}", article_count=1) for n in range(3)]
+    db_session.add_all(tools)
+    await db_session.flush()
+    edges = []
+    for t in tools:
+        e = EntityRelationship(
+            source_type="threat_actor",
+            source_id=warlock.id,
+            target_type="tool",
+            target_id=t.id,
+            relationship_type="uses",
+            confidence="probable",
+            source="auto_extracted",
+            evidence_entry_ids=[entry.id],
+        )
+        db_session.add(e)
+        edges.append(e)
+    await db_session.flush()
+    await es.record_review(db_session, edges[0].id, reviewer=es.ADJUDICATOR, verdict=es.KEEP, entry_id=entry.id)
+    monkeypatch.setattr(adj, "_MAX_EDGES", 2)
+    dropped: list = []
+    items, _ = await build_manifest(db_session, entry, _payload(), dropped_out=dropped)
+    offered = {it.edge_id for it in items if it.kind == "edge"}
+    assert offered == {edges[1].id, edges[2].id}
+    assert [it.edge_id for it in dropped if it.kind == "edge"] == [edges[0].id]
+
+
+def test_validate_reverb_needs_a_verb_the_matrix_allows():
+    edge = _edge(forms=("Warlock", "Water Utility"))
+    edge.edge_claim = ("threat_actor", "targets", "country")
+    reason = "Warlock is described as Russia-based, so this is attribution."
+    ok, _ = _validate_verdicts(
+        {
+            "verdicts": [
+                {
+                    "item_id": edge.item_id,
+                    "verdict": "reverb",
+                    "suggested_verb": "attributed to",
+                    "confidence": "high",
+                    "reason": reason,
+                }
+            ]
+        },
+        [edge],
+    )
+    assert ok[0].verdict == "reverb" and ok[0].suggested_verb == "attributed_to" and not ok[0].flip
+    # A verb the pair cannot take, or the claim as already stated, is a plain demote.
+    for row in ({"suggested_verb": "drops"}, {"suggested_verb": "targets"}):
+        bad, _ = _validate_verdicts(
+            {
+                "verdicts": [
+                    {"item_id": edge.item_id, "verdict": "reverb", "confidence": "high", "reason": reason, **row}
+                ]
+            },
+            [edge],
+        )
+        assert bad[0].verdict == "demote" and bad[0].suggested_verb is None
+
+
+@pytest.mark.asyncio
+async def test_apply_reverb_moves_the_claim_to_the_right_verb_and_restore_takes_it_back(db_session: AsyncSession, feed):
+    from app.models.country import Country
+    from app.services import edge_settlement as es
+
+    await _seed_settings(db_session, adjudication_mode="apply")
+    entry = await _make_entry(db_session, feed)
+    warlock = await _link_actor(db_session, entry, "Warlock")
+    russia = Country(name="Russia", iso_code="RU")
+    db_session.add(russia)
+    await db_session.flush()
+    edge = EntityRelationship(
+        source_type="threat_actor",
+        source_id=warlock.id,
+        target_type="country",
+        target_id=russia.id,
+        relationship_type="targets",
+        confidence="possible",
+        source="co_occurrence",
+        evidence_entry_ids=[entry.id],
+    )
+    db_session.add(edge)
+    await db_session.flush()
+    items, _ = await build_manifest(db_session, entry, _payload())
+    verdicts, _ = _validate_verdicts(
+        {
+            "verdicts": [
+                {
+                    "item_id": f"edge:{edge.id}",
+                    "verdict": "reverb",
+                    "suggested_verb": "attributed_to",
+                    "confidence": "high",
+                    "reason": "Warlock is a Russia-based group; Russia is its origin, not a victim.",
+                }
+            ]
+        },
+        items,
+    )
+    cfg = await adj._settings(db_session)
+    await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.flush()
+    assert edge.adjudication_verdict == es.COINCIDENTAL
+    fixed = (
+        await db_session.execute(
+            select(EntityRelationship).where(
+                EntityRelationship.source_id == warlock.id,
+                EntityRelationship.target_id == russia.id,
+                EntityRelationship.relationship_type == "attributed_to",
+            )
+        )
+    ).scalar_one()
+    assert fixed.source == "auto_extracted" and fixed.evidence_entry_ids == [entry.id]
+    log = (
+        await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == ACTION_EDGE_DEMOTE))
+    ).scalar_one()
+    assert log.applied and log.after["reverb"]["edge_id"] == str(fixed.id) and log.after["reverb"]["created"]
+
+    await adj.restore_adjudication_row(db_session, log)
+    await db_session.flush()
+    assert edge.adjudication_verdict == es.KEPT
+    assert await db_session.get(EntityRelationship, fixed.id) is None
 
 
 # ------------------------------------------------------------------ validation
@@ -2194,8 +2366,8 @@ def test_the_prompt_still_demands_a_verdict_on_every_edge():
 
     task = next(t for t in SYSTEM_TASKS if t["name"] == "entry_adjudication")
     system = task["default_system_template"]
-    assert "Every `edge:` item needs a verdict, keep or demote." in system
-    assert "counted as corroboration" in system
+    assert "Every `edge:` item needs a verdict: keep, reverb or demote." in system
+    assert "counts toward confirming it" in system
     assert "`edge:` item" in task["default_prompt_template"]
     # New entities too: silence is not a verdict on something just minted.
     assert 'Every link marked "NEW, created by this article" needs a verdict' in system
@@ -2844,7 +3016,9 @@ async def _kept_elsewhere(db_session: AsyncSession, edge, n: int) -> None:
     await db_session.flush()
     for _ in range(n):
         e = await _make_entry(db_session, other)
-        await es.record_review(db_session, edge.id, reviewer=es.ADJUDICATOR, verdict=es.KEEP, entry_id=e.id, counted=True)
+        await es.record_review(
+            db_session, edge.id, reviewer=es.ADJUDICATOR, verdict=es.KEEP, entry_id=e.id, counted=True
+        )
 
 
 async def _run_task_with(db_session: AsyncSession, monkeypatch, entry, ai_result: dict) -> dict:

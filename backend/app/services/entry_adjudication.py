@@ -65,12 +65,13 @@ CONFIDENCES = ("high", "medium", "low")
 _CONF_RANK = {"low": 0, "medium": 1, "high": 2}
 _EDGE_CONF_RANK = {"possible": 0, "probable": 1, "confirmed": 2}
 
-VERDICTS = {"keep", "remove", "reclassify", "veto", "merge", "demote", "drop", "link", "capture"}
+VERDICTS = {"keep", "remove", "reclassify", "veto", "merge", "demote", "reverb", "drop", "link", "capture"}
 # Which verdicts each item kind accepts. veto/merge are additionally gated on
 # the item being minted by this entry (see _validate_verdicts).
 VALID_FOR_KIND: dict[str, set[str]] = {
     "link": {"keep", "remove", "reclassify", "veto", "merge"},
-    "edge": {"keep", "demote"},
+    # reverb: the pair is related, but by another verb or the other way round
+    "edge": {"keep", "demote", "reverb"},
     # capture only on a candidate (an item with `staged` set; see _validate_verdicts)
     "ioc": {"keep", "drop", "capture"},
     # A held match the analysis rejected: keep the reject, or link it.
@@ -79,7 +80,7 @@ VALID_FOR_KIND: dict[str, set[str]] = {
 # Verdicts that count toward the circuit breaker: the ones that take
 # something away. A merge keeps the data under the catalogue name the model
 # was shown, so it is not counted.
-DESTRUCTIVE = {"remove", "veto", "demote", "drop"}
+DESTRUCTIVE = {"remove", "veto", "demote", "reverb", "drop"}
 # Types a link can be reclassified between (the merge engine's convertible set).
 RECLASSIFY_TYPES = {THREAT_ACTOR, MALWARE, VENDOR, PRODUCT, COUNTRY, TOOL}
 
@@ -807,8 +808,9 @@ class ReviewItem:
     # capture creates the row from (a script's code included)
     staged: bool = False
     candidate: dict | None = None
-    # edge
+    # edge: its id and (source type, verb, target type)
     edge_id: uuid.UUID | None = None
+    edge_claim: tuple[str, str, str] | None = None
     # held: the pending_autolink_matches row
     held_id: uuid.UUID | None = None
 
@@ -1578,21 +1580,37 @@ async def supersede_legacy_proposals(db: AsyncSession, legacy_rows: list) -> int
     return len(legacy_rows)
 
 
-async def _edge_items(db: AsyncSession, entry, dropped_out: list | None = None) -> list[ReviewItem]:
+async def _edge_items(
+    db: AsyncSession, entry, dropped_out: list | None = None, text: str = "", parsed: dict | None = None
+) -> list[ReviewItem]:
     """The relationship claims this article is evidence for and the reviewer
     may still decide: machine-asserted edges whose verdict is open. Analyst
     and external-feed edges are not the AI's to demote, and a settled verdict
     stays settled — corroborated edges would otherwise be undone by one later
-    article that merely co-mentions the pair, and coincidental ones (sticky,
-    keeps ignored) would only spend the edge budget.
+    article that merely co-mentions the pair, and coincidental ones would
+    only spend the edge budget.
 
-    The cap keeps the claims born here (this entry is their only evidence):
-    nothing else will ever review them, while an edge with more evidence
-    gets another look from its next article. Overflow goes to ``dropped_out``
-    so the prompt can say the list is partial."""
-    from app.models.entity_relationship import EntityRelationship
+    Every article that is evidence for a claim may judge it (a demote is
+    this article's word only: see edge_settlement). The cap keeps the claims
+    this article has not judged yet first, then the ones with the least
+    evidence. Overflow goes to ``dropped_out`` so the prompt can say the list
+    is partial, and the edge sweep picks it up.
+
+    Each item carries the sentence to judge it by: the analysis's evidence
+    for the pair, else the article's sentence naming both ends."""
+    from app.intelligence import edge_evidence
+    from app.models.entity_relationship import EntityRelationship, RelationshipReview
 
     evidence_n = func.coalesce(func.array_length(EntityRelationship.evidence_entry_ids, 1), 0)
+    asked_here = (
+        select(RelationshipReview.id)
+        .where(
+            RelationshipReview.relationship_id == EntityRelationship.id,
+            RelationshipReview.entry_id == entry.id,
+            RelationshipReview.verdict != "unanswered",
+        )
+        .exists()
+    )
     rows = (
         (
             await db.execute(
@@ -1602,9 +1620,8 @@ async def _edge_items(db: AsyncSession, entry, dropped_out: list | None = None) 
                     EntityRelationship.source.in_(REVIEWABLE_EDGE_SOURCES),
                     EntityRelationship.adjudication_verdict.is_distinct_from("corroborated"),
                     EntityRelationship.adjudication_verdict.is_distinct_from("coincidental"),
-                    or_(EntityRelationship.source == "auto_extracted", evidence_n == 1),
                 )
-                .order_by(evidence_n, EntityRelationship.created_at.desc())
+                .order_by(asked_here, evidence_n, EntityRelationship.created_at.desc())
             )
         )
         .scalars()
@@ -1620,12 +1637,35 @@ async def _edge_items(db: AsyncSession, entry, dropped_out: list | None = None) 
     for edge in rows:
         src = await _entity_label(db, edge.source_type, edge.source_id)
         tgt = await _entity_label(db, edge.target_type, edge.target_id)
+        src_forms = await edge_evidence.edge_forms(db, edge.source_type, edge.source_id, entry.id)
+        tgt_forms = await edge_evidence.edge_forms(db, edge.target_type, edge.target_id, entry.id)
         claim = f"{src} {edge.relationship_type.replace('_', ' ')} {tgt} ({edge.target_type})"
-        line = f"edge:{edge.id}  {claim} · {edge.confidence} · asserted by {edge.source.replace('_', ' ')}"
-        if edge.description:
-            line += f'\n    evidence: "{edge.description[:240]}"'
+        origin = (
+            "asserted by the analysis"
+            if edge.source == "auto_extracted"
+            else "drawn because both are named in one paragraph; the verb was chosen from the two entity types"
+        )
+        line = f"edge:{edge.id}  {claim} · {edge.confidence} · {origin}"
+        asserted = edge_evidence.analysis_evidence(parsed, src_forms, tgt_forms)
+        sentences = edge_evidence.sentences_naming(text, src_forms, tgt_forms)
+        if asserted:
+            verb, sentence = asserted
+            line += f'\n    analysis evidence ({verb.replace("_", " ")}): "{sentence}"'
+        for sentence in sentences:
+            if not asserted or sentence not in asserted[1]:
+                line += f'\n    sentence: "{sentence}"'
+        if not asserted and not sentences:
+            line += "\n    sentence: none — no sentence in this article names both"
         items.append(
-            ReviewItem(item_id=f"edge:{edge.id}", kind="edge", line=line, name=claim, edge_id=edge.id, forms=[src, tgt])
+            ReviewItem(
+                item_id=f"edge:{edge.id}",
+                kind="edge",
+                line=line,
+                name=claim,
+                edge_id=edge.id,
+                forms=[src, tgt, *src_forms, *tgt_forms],
+                edge_claim=(edge.source_type, edge.relationship_type, edge.target_type),
+            )
         )
     return items
 
@@ -1872,7 +1912,7 @@ async def build_manifest(
     if "links" in scope:
         items += await _held_items(db, entry, text)
     if "relationships" in scope:
-        items += await _edge_items(db, entry, dropped_out)
+        items += await _edge_items(db, entry, dropped_out, text, parsed)
     if "observables" in scope:
         items += await _ioc_items(db, entry, text, parsed)
     if "assessment" in scope:
@@ -1954,6 +1994,10 @@ class Verdict:
     # A remove that blames one alias: that surface form is not a name for this
     # entity at all ('crypto' on crypto24). Filed as an alias proposal.
     bad_alias: str | None = None
+    # reverb: the verb the article states for the pair, and whether it runs
+    # the other way (target <verb> source).
+    suggested_verb: str | None = None
+    flip: bool = False
     # True when the model named this item. The prompt asks for changes only, so
     # most keeps are the fill-in below — an item nobody spoke about. The two
     # read the same on every path except edge corroboration, where silence must
@@ -2088,6 +2132,24 @@ def _dedupe_verdict_rows(raw: list, stats: dict, n_items: int) -> list:
     return rows + [groups[i][0] for i in order if i not in conflicting]
 
 
+def _reverb_target(row: dict, item: ReviewItem) -> tuple[str | None, bool]:
+    """The corrected claim a reverb asks for, as (verb, flip), when the
+    relationship matrix allows it and it differs from the claim as stated."""
+    from app.intelligence.relationship_matrix import is_allowed_relationship
+
+    if item.kind != "edge" or item.edge_claim is None:
+        return None, False
+    verb = str(row.get("suggested_verb") or "").strip().lower().replace(" ", "_") or None
+    flip = bool(row.get("flip")) if not isinstance(row.get("flip"), str) else row["flip"].lower() == "true"
+    src_type, current, tgt_type = item.edge_claim
+    verb = verb or current
+    if flip:
+        src_type, tgt_type = tgt_type, src_type
+    if (verb, flip) == (current, False) or not is_allowed_relationship(src_type, verb, tgt_type):
+        return None, False
+    return verb, flip
+
+
 def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verdict], dict]:
     """Per-item verdicts with the validity matrix applied. Anything missing,
     malformed or out of place is a keep. Repeated item_ids are settled by
@@ -2158,11 +2220,17 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
             # A verdict the item does not accept is no answer at all: never an
             # explicit keep, which on an edge is corroboration.
             explicit = verdict == asked
+            suggested_verb, flip = None, False
+            if verdict == "reverb":
+                suggested_verb, flip = _reverb_target(entry, item)
+                if suggested_verb is None:
+                    # Wrong as stated, and the fix is not one the matrix takes.
+                    verdict = asked = "demote"
             if verdict != asked and asked in VERDICTS:
                 stats["coerced"] += 1
             # Voided, not coerced: like a copied reason, these are not about
             # their own item (or not against it), so they are not explicit.
-            if verdict in ("remove", "demote", "link") and not _reason_names_item(reason, item):
+            if verdict in ("remove", "demote", "reverb", "link") and not _reason_names_item(reason, item):
                 verdict, explicit = "keep", False
                 stats["unnamed_reason"] += 1
             elif verdict in DESTRUCTIVE and _reason_affirms(reason):
@@ -2183,7 +2251,16 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
                 if wanted and wanted != (item.name or "").lower():
                     bad_alias = next((f for f in item.matched_names if f.lower() == wanted), None)
             verdicts[item_id] = Verdict(
-                item, verdict, confidence, reason, suggested, merge_target, bad_alias=bad_alias, explicit=explicit
+                item,
+                verdict,
+                confidence,
+                reason,
+                suggested,
+                merge_target,
+                bad_alias=bad_alias,
+                suggested_verb=suggested_verb if verdict == "reverb" else None,
+                flip=flip if verdict == "reverb" else False,
+                explicit=explicit,
             )
     if stats["duplicate"]:
         verdicts = {}
@@ -2662,6 +2739,109 @@ async def _demote_edge(
     db.add(edge)
     before["verdict_after"] = edge.adjudication_verdict
     return before
+
+
+async def _reverb_edge(
+    db: AsyncSession,
+    edge_id: uuid.UUID,
+    verb: str,
+    flip: bool,
+    entry_id: uuid.UUID,
+    reason: str,
+    *,
+    reviewer: str = "adjudicator",
+    ai_result_id: uuid.UUID | None = None,
+) -> dict | None:
+    """The corrected claim this article states instead (the old one was just
+    demoted for it): the same pair by ``verb``, the other way round when
+    ``flip``. An existing edge gains this article as evidence and its keep;
+    otherwise a new machine edge is drawn, open for review like any other.
+    Returns ``{"edge_id", "created"}``, or None when an analyst rejected the
+    corrected claim."""
+    from app.intelligence.relationship_matrix import orient_relationship
+    from app.models.entity_relationship import EntityRelationship
+    from app.services import edge_settlement as es
+
+    old = await db.get(EntityRelationship, edge_id)
+    if old is None or not verb:
+        return None
+    src = (old.source_type, old.source_id)
+    tgt = (old.target_type, old.target_id)
+    if flip:
+        src, tgt = tgt, src
+    oriented = orient_relationship(src[0], verb, tgt[0])
+    if oriented is None:
+        return None
+    if oriented[0] != src[0]:
+        src, tgt = tgt, src
+    fixed = (
+        await db.execute(
+            select(EntityRelationship).where(
+                EntityRelationship.source_type == src[0],
+                EntityRelationship.source_id == src[1],
+                EntityRelationship.target_type == tgt[0],
+                EntityRelationship.target_id == tgt[1],
+                EntityRelationship.relationship_type == verb,
+            )
+        )
+    ).scalar_one_or_none()
+    created = fixed is None
+    if fixed is not None and fixed.source == "analyst_rejected":
+        return None
+    if fixed is None:
+        fixed = EntityRelationship(
+            source_type=src[0],
+            source_id=src[1],
+            target_type=tgt[0],
+            target_id=tgt[1],
+            relationship_type=verb,
+            confidence="possible",
+            source="auto_extracted",
+            description=reason or None,
+            evidence_entry_ids=[entry_id],
+        )
+        db.add(fixed)
+        await db.flush()
+    elif entry_id not in (fixed.evidence_entry_ids or []):
+        fixed.evidence_entry_ids = [*(fixed.evidence_entry_ids or []), entry_id]
+    if fixed.source in REVIEWABLE_EDGE_SOURCES:
+        await es.record_review(
+            db,
+            fixed.id,
+            reviewer=reviewer,
+            verdict=es.KEEP,
+            entry_id=entry_id,
+            reason=reason,
+            counted=True,
+            ai_result_id=ai_result_id,
+        )
+        await es.settle_edge(db, fixed)
+    db.add(fixed)
+    await es.invalidate_edge(fixed)
+    return {"edge_id": str(fixed.id), "created": created}
+
+
+async def _unreverb_edge(db: AsyncSession, fixed: dict, entry_id: uuid.UUID) -> None:
+    """Take back what ``_reverb_edge`` did for this article."""
+    from app.models.entity_relationship import EntityRelationship, RelationshipReview
+    from app.services import edge_settlement as es
+
+    edge = await db.get(EntityRelationship, uuid.UUID(fixed["edge_id"])) if fixed.get("edge_id") else None
+    if edge is None:
+        return
+    rest = [e for e in (edge.evidence_entry_ids or []) if e != entry_id]
+    if fixed.get("created") and not rest:
+        await es.invalidate_edge(edge)
+        await db.delete(edge)
+        return
+    edge.evidence_entry_ids = rest
+    await db.execute(
+        sa_delete(RelationshipReview).where(
+            RelationshipReview.relationship_id == edge.id, RelationshipReview.entry_id == entry_id
+        )
+    )
+    await es.settle_edge(db, edge)
+    db.add(edge)
 
 
 async def _drop_ioc(db: AsyncSession, entry, kind: str, value: str, observable_id: uuid.UUID | None) -> dict | None:
@@ -3143,6 +3323,8 @@ async def _record_edge_review(
         entry_id=entry_id,
         confidence=v.confidence if v.explicit else None,
         reason=v.reason or None,
+        suggested_verb=v.suggested_verb,
+        flipped=v.flip,
         ai_result_id=ai_result_id,
     )
 
@@ -3482,7 +3664,9 @@ async def apply_verdicts(
                     _log(ACTION_HELD_LINK, item, before, {**after_base, "created_link": True}, applied=True)
             elif not await _proposal_pending(db, ACTION_HELD_LINK, item.entity_type or "", item.entity_id, entry.id):
                 _log(ACTION_HELD_LINK, item, before, after_base, applied=False)
-        elif item.kind == "edge" and v.verdict == "demote":
+        elif item.kind == "edge" and v.verdict in ("demote", "reverb"):
+            if v.verdict == "reverb":
+                after_base = {**after_base, "reverb": {"verb": v.suggested_verb, "flip": v.flip}}
             if not do_apply:
                 await _record_edge_review(db, item, entry.id, v, ai_result_id)
             if do_apply:
@@ -3495,6 +3679,17 @@ async def apply_verdicts(
                     ai_result_id=ai_result_id,
                 )
                 if before is not None:
+                    if v.verdict == "reverb":
+                        fixed = await _reverb_edge(
+                            db,
+                            item.edge_id,  # type: ignore[arg-type]
+                            v.suggested_verb or "",
+                            v.flip,
+                            entry.id,
+                            reason,
+                            ai_result_id=ai_result_id,
+                        )
+                        after_base["reverb"].update(fixed or {})
                     applied_n += 1
                     _log(
                         ACTION_EDGE_DEMOTE,
@@ -3729,6 +3924,18 @@ async def apply_adjudication_row(db: AsyncSession, row) -> dict:
         if prev is None:
             return {"applied": False, "reason": "edge gone or analyst-rejected"}
         before.update(prev)
+        if isinstance(after.get("reverb"), dict) and after["reverb"].get("verb"):
+            fixed = await _reverb_edge(
+                db,
+                row.entity_id,
+                after["reverb"]["verb"],
+                bool(after["reverb"].get("flip")),
+                entry.id,
+                reason,
+                reviewer="analyst",
+                ai_result_id=row.ai_result_id,
+            )
+            after["reverb"] = {**after["reverb"], **(fixed or {})}
     elif row.action == ACTION_IOC_DROP:
         observable_id = row.entity_id
         snap = await _drop_ioc(db, entry, after.get("kind") or "", after.get("value") or "", observable_id)
@@ -3855,6 +4062,8 @@ async def restore_adjudication_row(db: AsyncSession, row) -> dict:
             db, edge.id, reviewer=es.ANALYST, verdict=es.KEEP, entry_id=entry.id if entry else None, counted=True
         )
         await es.settle_edge(db, edge)
+        if isinstance(after.get("reverb"), dict):
+            await _unreverb_edge(db, after["reverb"], entry.id)
         prior = before.get("confidence") or "probable"
         if _EDGE_CONF_RANK.get(prior, 0) > _EDGE_CONF_RANK.get(edge.confidence or "possible", 0):
             edge.confidence = prior
