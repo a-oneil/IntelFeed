@@ -37,7 +37,6 @@ def _build(**kwargs):
         vendors=kwargs.get("vendors", []),
         products=kwargs.get("products", []),
         tools=kwargs.get("tools", []),
-        mitigations=kwargs.get("mitigations", []),
     )
     _activate(vocab)
     return vocab

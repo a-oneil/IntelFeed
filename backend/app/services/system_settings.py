@@ -101,6 +101,7 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "relationship_weight_recency": float,
     "relationship_evidence_promote_count": int,
     "graph_max_neighbors_per_node": int,
+    "correlation_max_entries": int,
     "graph_max_claim_edges": int,
     # Retention / eviction sweeps
     "engine_run_retention_days": int,
@@ -1197,6 +1198,11 @@ SETTING_METADATA: dict[str, dict] = {
     "graph_max_neighbors_per_node": {
         "label": "Graph Max Neighbors",
         "description": "Cap on neighbors expanded per node when building an entity graph",
+        "group": "intelligence",
+    },
+    "correlation_max_entries": {
+        "label": "Pivot/Graph Entry Cap",
+        "description": "Most recent linked articles a pivot or graph reads per entity (protects generic hubs)",
         "group": "intelligence",
     },
     "graph_max_claim_edges": {

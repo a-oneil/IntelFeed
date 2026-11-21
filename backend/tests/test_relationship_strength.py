@@ -11,6 +11,7 @@ from sqlalchemy import text as sql_text
 
 from app.intelligence.correlation import (
     _compute_relationship_strength,
+    _get_entry_ids_for_entity,
     _monthly_trend,
     _strength_tier,
     create_cooccurrence_relationships,
@@ -154,6 +155,57 @@ async def test_pivot_limit_and_window(db_session, test_feed, test_threat_actor):
 
     windowed = await pivot_from_entity(db_session, "threat_actor", test_threat_actor.id, window_days=30)
     assert [m["name"] for m in windowed["related"]["malwares"]] == ["LoaderOne"]
+
+
+@pytest.mark.asyncio
+async def test_pivot_entry_cap_keeps_most_recent(db_session, test_feed, test_threat_actor, monkeypatch):
+    """correlation_max_entries bounds what a pivot reads: a generic entity
+    linked to thousands of articles must not load all of them per request."""
+    from app.config import settings as env_settings
+
+    recent_mal = MalwareFamily(name="CapRecent")
+    stale_mal = MalwareFamily(name="CapStale")
+    db_session.add_all([recent_mal, stale_mal])
+    await db_session.flush()
+
+    now = datetime.now(UTC)
+    recent = Entry(
+        feed_id=test_feed.id,
+        title="recent",
+        guid="cap-recent",
+        url="https://example.com/cap-r",
+        published_at=now - timedelta(days=2),
+        content_hash="cap-r",
+    )
+    stale = Entry(
+        feed_id=test_feed.id,
+        title="stale",
+        guid="cap-stale",
+        url="https://example.com/cap-s",
+        published_at=now - timedelta(days=90),
+        content_hash="cap-s",
+    )
+    db_session.add_all([recent, stale])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            EntryThreatActor(entry_id=recent.id, threat_actor_id=test_threat_actor.id, paragraph_indices=[0]),
+            EntryMalware(entry_id=recent.id, malware_family_id=recent_mal.id, paragraph_indices=[0]),
+            EntryThreatActor(entry_id=stale.id, threat_actor_id=test_threat_actor.id, paragraph_indices=[0]),
+            EntryMalware(entry_id=stale.id, malware_family_id=stale_mal.id, paragraph_indices=[0]),
+        ]
+    )
+    await db_session.flush()
+
+    uncapped = await _get_entry_ids_for_entity(db_session, "threat_actor", test_threat_actor.id)
+    assert set(uncapped) == {recent.id, stale.id}
+    capped = await _get_entry_ids_for_entity(db_session, "threat_actor", test_threat_actor.id, limit=1)
+    assert capped == [recent.id]
+
+    monkeypatch.setattr(env_settings, "correlation_max_entries", 1)
+    pivot = await pivot_from_entity(db_session, "threat_actor", test_threat_actor.id)
+    assert [e["id"] for e in pivot["entries"]] == [str(recent.id)]
+    assert [m["name"] for m in pivot["related"]["malwares"]] == ["CapRecent"]
 
 
 @pytest.mark.asyncio

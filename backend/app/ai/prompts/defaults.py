@@ -964,12 +964,12 @@ Extract the tool list now per the rules in your instructions.""",
         "description": "Extract MITRE ATT&CK mitigations and defensive recommendations",
         "category": "extraction",
         "variables": ["entry.title", "entry.content_text", "telemetry_sources"],
-        "default_system_template": """You are a cybersecurity analyst specializing in defensive measures. Extract every mitigation and defensive recommendation from security articles and map them to MITRE ATT&CK mitigations where applicable.
+        "default_system_template": """You are a cybersecurity analyst specializing in defensive measures. Extract the defensive recommendations in security articles and map each to the MITRE ATT&CK mitigation it falls under. Leave out a recommendation that fits no ATT&CK mitigation, and never invent an M-ID.
 
 For each mitigation identified, record:
-1. MITRE ATT&CK M-ID if applicable (e.g., M1038, M1049)
-2. Name (e.g., "Execution Prevention", "Antivirus/Antimalware")
-3. Description of the mitigation as discussed in the article
+1. MITRE ATT&CK M-ID (Enterprise M1xxx, ICS M09xx, Mobile M10xx)
+2. Its ATT&CK name (e.g., "Execution Prevention", "Update Software" — never "Patch" or "Upgrade")
+3. detail: what the article itself says to do, in its own words, at most 200 characters (e.g., "upgrade Lara Dashboard to 1.3.2 or later")
 4. CIS Controls that map to this mitigation if identifiable (e.g., "CIS 10.1")
 5. NIST controls if identifiable (e.g., "SI-3")
 6. ATT&CK technique IDs this mitigation applies to, if mentioned (e.g., ["T1059", "T1204"])
@@ -978,10 +978,10 @@ For each mitigation identified, record:
 When the caller supplies telemetry sources, additionally include:
 8. monitoring_feasible ("yes"|"partial"|"no") — whether the analyst's telemetry sources can verify this mitigation is in place or detect if it fails
 
-Include both explicit mitigations (e.g., "apply patch X") and implicit recommendations (e.g., "organizations should enable MFA").
+Include both explicit mitigations (e.g., "apply patch X" is Update Software) and implicit recommendations (e.g., "organizations should enable MFA" is Multi-factor Authentication).
 
 Respond with valid JSON:
-{"mitigations": [{"mitre_id": "M1038", "name": "...", "description": "...", "cis_controls": ["..."], "nist_controls": ["..."], "applies_to_ttps": ["T1059"], "confidence": "high|medium|low", "monitoring_feasible": "yes|partial|no"}]}
+{"mitigations": [{"mitre_id": "M1038", "name": "...", "detail": "...", "cis_controls": ["..."], "nist_controls": ["..."], "applies_to_ttps": ["T1059"], "confidence": "high|medium|low", "monitoring_feasible": "yes|partial|no"}]}
 
 Omit monitoring_feasible when no telemetry sources were provided. If no mitigations are identified, return {"mitigations": []}.""",
         "default_prompt_template": """Extract all mitigations and defensive recommendations from the following article.
@@ -1010,7 +1010,7 @@ Extract the mitigations now per the rules in your instructions.""",
                         "properties": {
                             "mitre_id": {"type": "string"},
                             "name": {"type": "string"},
-                            "description": {"type": "string"},
+                            "detail": {"type": "string"},
                             "cis_controls": {"type": "array", "items": {"type": "string"}},
                             "nist_controls": {"type": "array", "items": {"type": "string"}},
                             "applies_to_ttps": {"type": "array", "items": {"type": "string"}},
@@ -1991,7 +1991,7 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 	- Also set `telemetry` to where a defender would SEE this activity: endpoint, dns, netflow, proxy, firewall, vpn, identity, cloudtrail, email_gw, or ot. Cloud/identity/network activity is not an endpoint story — "attackers created a malicious OAuth app" is identity, "beacons over TLS" is netflow. Empty string only when genuinely unclear.
 - `countries`: role must be one of origin, target, infrastructure, mentioned.
 - `sectors`: victim/targeted industry sectors only, each with `evidence`: the exact words from the article (copied, at most 120 characters) that show this sector was hit — "a leading firearms manufacturer" for Manufacturing. No such words, no sector: never list sectors because the list allows them, and an article about one victim names one sector.
-- `mitigations`: concrete defensive measures the article recommends, with MITRE M-IDs when clearly applicable.
+- `mitigations`: defensive measures the article recommends, each mapped to the MITRE ATT&CK mitigation it falls under. `mitre_id` is that mitigation's M-ID (Enterprise M1xxx, ICS M09xx, Mobile M10xx) and `name` its ATT&CK name ("Update Software", never "Patch" or "Upgrade"). `detail` is what the article itself says to do, in its own words, at most 200 characters: "upgrade Lara Dashboard to 1.3.2 or later". Leave out a recommendation that fits no ATT&CK mitigation, and never invent an M-ID.
 - `confidence` is "high", "medium", or "low" for every extracted item.
 - `severity_assessment.level` is one of "critical", "high", "medium", "low", "informational" — how urgent this is for a defender.
 - `novelty_note`: one sentence on what is NEW in this article versus generally-known information (or empty string).
@@ -2184,10 +2184,10 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
                         "properties": {
                             "mitre_id": {"type": "string"},
                             "name": {"type": "string"},
-                            "description": {"type": "string"},
+                            "detail": {"type": "string"},
                             "confidence": {"type": "string"},
                         },
-                        "required": ["mitre_id", "name", "description", "confidence"],
+                        "required": ["mitre_id", "name", "detail", "confidence"],
                     },
                 },
                 "severity_assessment": {

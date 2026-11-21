@@ -153,11 +153,24 @@ async def get_entity(db: AsyncSession, entity_type: str, entity_id: uuid.UUID):
     return result.scalar_one_or_none()
 
 
-async def _get_entry_ids_for_entity(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> list[uuid.UUID]:
-    """Get all entry IDs linked to an entity via its junction table.
+def _correlation_entry_cap() -> int:
+    from app.config import settings as env_settings
+
+    return int(env_settings.get("correlation_max_entries") or 2000)
+
+
+async def _get_entry_ids_for_entity(
+    db: AsyncSession, entity_type: str, entity_id: uuid.UUID, limit: int | None = None
+) -> list[uuid.UUID]:
+    """Get the entry IDs linked to an entity via its junction table.
 
     For a visitor, only entries in feeds shown to visitors, and no campaign's:
     every pivot, graph and relationship count is built from this list.
+
+    `limit` keeps the most recently published entries. Pivot and graph pass
+    `correlation_max_entries`: a generic entity linked to thousands of articles
+    otherwise feeds thousands of ids into every per-type query and holds the
+    whole evidence set in one api worker's memory.
     """
     from app.core.public_access import viewer_is_anonymous
     from app.services.public_view import visible_entries_only
@@ -167,11 +180,21 @@ async def _get_entry_ids_for_entity(db: AsyncSession, entity_type: str, entity_i
             return []
         from app.models.campaign import CampaignEntry
 
-        result = await db.execute(select(CampaignEntry.entry_id).where(CampaignEntry.campaign_id == entity_id))
-        return [row[0] for row in result.all()]
+        junction, fk_col = CampaignEntry, CampaignEntry.campaign_id
+    else:
+        _, junction, fk_col = ENTITY_CONFIG[entity_type]
 
-    _, junction, fk_col = ENTITY_CONFIG[entity_type]
-    stmt = visible_entries_only(select(junction.entry_id).where(fk_col == entity_id), junction.entry_id)
+    if limit is not None:
+        # Joining Entry brings the visitor filter in (see visible_entries_only).
+        stmt = (
+            select(junction.entry_id)
+            .join(Entry, Entry.id == junction.entry_id)
+            .where(fk_col == entity_id)
+            .order_by(Entry.published_at.desc().nullslast())
+            .limit(limit)
+        )
+    else:
+        stmt = visible_entries_only(select(junction.entry_id).where(fk_col == entity_id), junction.entry_id)
     result = await db.execute(stmt)
     return [row[0] for row in result.all()]
 
@@ -988,7 +1011,7 @@ async def pivot_from_entity(
     if not entity:
         return {}
 
-    entry_ids = await _get_entry_ids_for_entity(db, entity_type, entity_id)
+    entry_ids = await _get_entry_ids_for_entity(db, entity_type, entity_id, limit=_correlation_entry_cap())
 
     # Prefetch entry metadata once — it powers the strength components in each
     # of the 9 per-type related queries plus the evidence window filter.
@@ -1026,8 +1049,9 @@ async def pivot_from_entity(
             .distinct(Entry.content_hash)
             .order_by(Entry.content_hash, Entry.created_at.asc())
         ).subquery()
+        # Columns, not Entry rows: a row carries the article body.
         entry_result = await db.execute(
-            select(Entry)
+            select(Entry.id, Entry.title, Entry.url, Entry.published_at, Entry.created_at, Entry.feed_id)
             .where(
                 or_(
                     Entry.content_hash.is_(None),
@@ -1046,7 +1070,7 @@ async def pivot_from_entity(
                 "created_at": _dt(e.created_at),
                 "feed_id": str(e.feed_id),
             }
-            for e in entry_result.scalars().all()
+            for e in entry_result.all()
         ]
 
         # Corpus size for the specificity (IDF) damping — memoized per process.
@@ -1452,7 +1476,7 @@ async def build_entity_graph(
         if current_depth <= 0:
             return
 
-        entry_ids = await _get_entry_ids_for_entity(db, etype, eid)
+        entry_ids = await _get_entry_ids_for_entity(db, etype, eid, limit=_correlation_entry_cap())
         if window_days and entry_ids:
             cutoff = datetime.now(UTC) - timedelta(days=window_days)
             win_result = await db.execute(select(Entry.id).where(Entry.id.in_(entry_ids), Entry.published_at >= cutoff))

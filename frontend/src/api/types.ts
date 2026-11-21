@@ -864,6 +864,8 @@ export interface Mitigation {
   wikipedia_image_url?: string | null;
   confidence?: string | null;
   source?: string | null;
+  /** The article's own wording of the advice (per-entry lists only). */
+  detail?: string | null;
 }
 
 export interface OffensiveTool {

@@ -180,7 +180,7 @@ async def test_report_false_positive_rejects_unknown_entity_type(client: AsyncCl
 async def test_global_scope_blocks_vendor_names_too(
     client: AsyncClient, auth_headers: dict, db_session: AsyncSession, fp_entry: Entry
 ):
-    """Regression: vendor/product/tool/mitigation bypass the curated FP-name list
+    """Regression: vendor/product/tool bypass the curated FP-name list
     (their real names are common brand words), so a global report used to write a
     setting that could never take effect — the toast claimed success and matching
     carried on. Analyst blocks land in a separate all-types list now."""

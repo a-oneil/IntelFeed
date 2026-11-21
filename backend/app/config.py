@@ -386,6 +386,8 @@ class Settings(BaseSettings):
     relationship_reliability_high_multiplier: float = 1.15
     relationship_reliability_low_multiplier: float = 0.85
     graph_max_neighbors_per_node: int = 30
+    # Most recent linked entries a pivot or graph reads per entity.
+    correlation_max_entries: int = 2000
     graph_max_claim_edges: int = 300
     # Feed intel-value scoring weights (normalized to sum 1.0 at compute time)
     feed_value_weight_entity_yield: float = 0.25

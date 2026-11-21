@@ -1,10 +1,13 @@
-"""Mitigation / Course-of-Action extraction — regex (Layer 1) + AI (Layer 2)."""
+"""Mitigation / Course-of-Action extraction — regex (Layer 1) + AI (Layer 2).
+
+Both layers link articles to ATT&CK catalog mitigations only; see store_mitigations.
+"""
 
 import re
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, literal_column, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,77 +86,82 @@ async def extract_mitigations(
     return list(merged.values()), status, ai_error
 
 
+_DETAIL_MAX = 500
+
+
+async def resolve_catalog_mitigation(db: AsyncSession, mitre_id: str | None, name: str | None) -> Mitigation | None:
+    """The ATT&CK catalog mitigation an extracted item refers to, or None.
+
+    By M-ID first, then by exact catalog name. Enterprise and ICS share names
+    ("Audit" is M1047 and M0947), so a name-only match prefers Enterprise.
+    """
+    mitre_id = (mitre_id or "").strip().upper()
+    if mitre_id:
+        found = await db.scalar(
+            select(Mitigation).where(Mitigation.is_catalog.is_(True), Mitigation.mitre_id == mitre_id)
+        )
+        if found is not None:
+            return found
+    name = (name or "").strip()
+    if not name:
+        return None
+    return await db.scalar(
+        select(Mitigation)
+        .where(Mitigation.is_catalog.is_(True), func.lower(Mitigation.name) == name.lower())
+        .order_by(case((Mitigation.mitre_id.like("M1%"), 0), else_=1), Mitigation.mitre_id)
+        .limit(1)
+    )
+
+
+def _link_detail(m_data: dict, catalog: Mitigation) -> str | None:
+    """The article's own wording, kept on the link: the AI's `detail`, else its
+    description, else the name it gave when that isn't the catalog name."""
+    name = (m_data.get("name") or "").strip()
+    for text in (m_data.get("detail"), m_data.get("description"), name):
+        text = (text or "").strip()
+        if text and text.lower() not in (catalog.name.lower(), (catalog.mitre_id or "").lower()):
+            return text[:_DETAIL_MAX]
+    return None
+
+
 async def store_mitigations(
     db: AsyncSession,
     entry_id: uuid.UUID,
     mitigations: list[dict],
 ) -> list[tuple[Mitigation, bool]]:
-    """Upsert mitigations and link to entry. Returns list of (Mitigation, is_new)."""
+    """Link the entry to the ATT&CK catalog mitigations the items map to.
+
+    Only catalog rows are mitigation entities: an item that maps to none (a
+    one-off "upgrade X to 1.3.2", a generic "Patch", an invented M-ID) creates
+    nothing and stays in the article's AI analysis. The article's wording rides
+    on the link as `detail`. Returns (Mitigation, is_new) pairs; is_new is
+    always False since nothing is created, kept for the callers' shape.
+    """
     stored: list[tuple[Mitigation, bool]] = []
+    seen: set[uuid.UUID] = set()
 
     for m_data in mitigations:
-        mitre_id = (m_data.get("mitre_id") or "").strip() or None
-        name = (m_data.get("name") or "").strip()
-        if not name:
+        mit_obj = await resolve_catalog_mitigation(db, m_data.get("mitre_id"), m_data.get("name"))
+        if mit_obj is None or mit_obj.id in seen:
             continue
+        seen.add(mit_obj.id)
 
-        # Lookup: prefer M-ID match, fall back to name
-        existing = None
-        if mitre_id:
-            result = await db.execute(select(Mitigation).where(Mitigation.mitre_id == mitre_id))
-            existing = result.scalar_one_or_none()
-        if not existing:
-            result = await db.execute(select(Mitigation).where(func.lower(Mitigation.name) == name.lower()))
-            existing = result.scalar_one_or_none()
-
-        if existing:
-            existing.last_seen_at = datetime.now(UTC)
-            existing.article_count += 1
-            if mitre_id and not existing.mitre_id:
-                existing.mitre_id = mitre_id
-            if not existing.description and m_data.get("description"):
-                existing.description = m_data["description"]
-            if m_data.get("cis_controls"):
-                existing_set = set(existing.cis_controls or [])
-                merged_cis = list(existing.cis_controls or [])
-                for c in m_data["cis_controls"]:
-                    if c not in existing_set:
-                        merged_cis.append(c)
-                        existing_set.add(c)
-                existing.cis_controls = merged_cis
-            if m_data.get("nist_controls"):
-                existing_set = set(existing.nist_controls or [])
-                merged_nist = list(existing.nist_controls or [])
-                for c in m_data["nist_controls"]:
-                    if c not in existing_set:
-                        merged_nist.append(c)
-                        existing_set.add(c)
-                existing.nist_controls = merged_nist
-            mit_obj = existing
-            is_new = False
-        else:
-            mit_obj = Mitigation(
-                mitre_id=mitre_id,
-                name=name if name != mitre_id else mitre_id,
-                description=m_data.get("description"),
-                mitre_url=m_data.get("mitre_url"),
-                cis_controls=m_data.get("cis_controls", []),
-                nist_controls=m_data.get("nist_controls", []),
-            )
-            db.add(mit_obj)
-            await db.flush()
-            is_new = True
-
-        await db.execute(
-            pg_insert(EntryMitigation)
-            .values(
-                entry_id=entry_id,
-                mitigation_id=mit_obj.id,
-                confidence=m_data.get("confidence"),
-                source=m_data.get("source", "ai"),
-            )
-            .on_conflict_do_nothing()
+        stmt = pg_insert(EntryMitigation).values(
+            entry_id=entry_id,
+            mitigation_id=mit_obj.id,
+            confidence=m_data.get("confidence"),
+            source=m_data.get("source", "ai"),
+            detail=_link_detail(m_data, mit_obj),
         )
+        inserted = await db.scalar(
+            stmt.on_conflict_do_update(
+                index_elements=[EntryMitigation.entry_id, EntryMitigation.mitigation_id],
+                set_={"detail": func.coalesce(EntryMitigation.detail, stmt.excluded.detail)},
+            ).returning(literal_column("xmax = 0"))
+        )
+        mit_obj.last_seen_at = datetime.now(UTC)
+        if inserted:
+            mit_obj.article_count = (mit_obj.article_count or 0) + 1
 
         # Link to TTPs mentioned in the same extraction result
         for ttp_id_str in m_data.get("applies_to_ttps", []):
@@ -164,7 +172,7 @@ async def store_mitigations(
                     pg_insert(TTPMitigation).values(ttp_id=ttp.id, mitigation_id=mit_obj.id).on_conflict_do_nothing()
                 )
 
-        stored.append((mit_obj, is_new))
+        stored.append((mit_obj, False))
 
     await db.flush()
     return stored

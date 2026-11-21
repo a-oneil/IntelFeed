@@ -4954,6 +4954,7 @@ def _mitigation_to_response(m: Mitigation, entry_link: EntryMitigation | None = 
         wikipedia_image_url=m.wikipedia_image_url,
         confidence=entry_link.confidence if entry_link else None,
         source=entry_link.source if entry_link else None,
+        detail=entry_link.detail if entry_link else None,
     )
 
 

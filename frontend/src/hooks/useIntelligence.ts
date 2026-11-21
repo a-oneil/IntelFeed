@@ -157,7 +157,7 @@ export function useCreateMitigation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (body: {
-      name: string;
+      name?: string;
       mitre_id?: string;
       description?: string;
       mitre_url?: string;
