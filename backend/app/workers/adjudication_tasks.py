@@ -218,6 +218,9 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
                 "unnamed_reason",
                 "affirming_reason",
                 "bystander_reason",
+                "unnamed_keep",
+                "duplicate_agreeing",
+                "duplicate_conflicting",
                 "new_unanswered",
                 "candidates_unanswered",
             ):
@@ -226,6 +229,13 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
             for kind, key in (("link", "uncapped_links"), ("edge", "uncapped_edges")):
                 if n := sum(1 for it in dropped if it.kind == kind):
                     detail[key] = n
+            if stats["duplicate"] and not (row.adjudication_retries or 0):
+                # A misaligned answer is the model losing its place, not a
+                # verdict: ask once more before giving up on the article.
+                row.adjudication_retries = 1
+                detail["skipped"] = "ai_bad_shape"
+                detail["retry"] = True
+                return await _finish(RECHECK, detail)
             if stats["duplicate"]:
                 detail["skipped"] = "ai_bad_shape"
                 # Its candidates count as judged anyway: they stay on the

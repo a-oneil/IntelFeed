@@ -63,11 +63,13 @@ An `enrichment` row exists while some source's claim in `entity_relation_claims`
 
 Writes check (source type, verb, target type) against the allowlist in `backend/app/intelligence/relationship_matrix.py`; a disallowed combination is flipped to its allowed direction or dropped.
 
-The adjudicate stage reviews machine links (`auto_extracted`, `co_occurrence`) against the evidence article:
-- **Demote** sets `adjudication_verdict = coincidental` and confidence `possible`; the link is never promoted again.
-- **Keep** adds the article to `reviewer_kept_entry_ids`. Once `relationship_evidence_promote_count` different articles keep it, it becomes `confirmed` / `corroborated`.
+Machine links (`auto_extracted`, `co_occurrence`) are judged by two reviewers, and each judgment is a row in `relationship_reviews`; `backend/app/services/edge_settlement.py` derives the link's verdict from them:
+- The adjudicate stage judges a link against one article at a time, by the sentence that would state it. **Keep** is that article's vote for it; **demote** its vote against; **reverb** says the article states the pair with another verb or the other way round, which demotes the claim for that article and credits the corrected link. Only high-confidence answers count.
+- Keeps from articles in two or more feeds (reposts excluded), at `relationship_evidence_promote_count` articles, make it `confirmed` / `corroborated`. A demote with no keep standing makes it `coincidental`: confidence `possible`, hidden from profiles, pivots and graphs. A keep and a demote from different articles make it `disputed`, which stays in Review.
+- The edge sweep takes the links still open after a day and judges each against passages from up to four of its articles. In apply mode a stated claim becomes `kept`; see [the edge sweep](intelligence-engine.md#the-edge-sweep).
+- Restore on a demote settles the link as `kept`.
 
-A link with a verdict leaves the review list, so later co-mentions can't undo it. Analyst, `external_feed` and `enrichment` links are never reviewed.
+A settled link (`kept`, `corroborated`, `coincidental`) leaves the review list, so later co-mentions can't undo it. Analyst, `external_feed` and `enrichment` links are never reviewed.
 
 Two tombstones stop rejected data returning:
 - `source = analyst_rejected` rows stay, so co-occurrence never recreates a rejected pair.

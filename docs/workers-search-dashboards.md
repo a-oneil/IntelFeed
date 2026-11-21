@@ -193,7 +193,7 @@ When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker
 
 ### Beat Schedule and Runtime Overrides
 
-`build_beat_schedule()` (`backend/app/workers/job_registry.py:655`) builds the schedule when beat starts:
+`build_beat_schedule()` (`backend/app/workers/job_registry.py:675`) builds the schedule when beat starts:
 
 1. Read overrides from the Redis key `intelfeed:job_schedule_overrides`.
 2. For each job, skip it if the override disables it, or if it has `enabled_by_default: False` and no override turns it on.

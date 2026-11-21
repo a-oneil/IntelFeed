@@ -318,6 +318,14 @@ class Settings(BaseSettings):
     merge_review_min_similarity: float = 0.55
     merge_review_min_confidence: str = "medium"  # high | medium | low
     merge_review_retry_days: int = 30
+    # Edge sweep (services/relationship_sweep.py): open relationship claims
+    # judged against all their articles. shadow records answers only.
+    relationship_sweep_mode: str = "shadow"  # off | shadow | apply
+    relationship_sweep_batch_size: int = 30
+    relationship_sweep_min_age_hours: int = 24
+    relationship_sweep_retry_days: int = 30
+    relationship_sweep_min_confidence: str = "high"  # high | medium | low
+    relationship_sweep_actions: str = ""  # comma list of keep, correct, hide; empty = none
     adjudication_content_max_chars: int = 8000
     adjudication_scope: str = "links,entities,relationships,observables"
     # ICS/OT context keywords — ICS-matrix (T0xxx) ATT&CK techniques are only

@@ -72,6 +72,12 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "merge_review_min_similarity": float,
     "merge_review_min_confidence": str,
     "merge_review_retry_days": int,
+    "relationship_sweep_mode": str,
+    "relationship_sweep_batch_size": int,
+    "relationship_sweep_min_age_hours": int,
+    "relationship_sweep_retry_days": int,
+    "relationship_sweep_min_confidence": str,
+    "relationship_sweep_actions": str,
     "adjudication_content_max_chars": int,
     "adjudication_scope": str,
     "entity_maintenance_mode": str,
@@ -535,6 +541,50 @@ SETTING_METADATA: dict[str, dict] = {
     "merge_review_retry_days": {
         "label": "Duplicate Review: Retry After (days)",
         "description": "A pair the model called different or unsure is not asked again for this long",
+        "group": "adjudication",
+    },
+    "relationship_sweep_mode": {
+        "label": "Edge Sweep: Mode",
+        "description": (
+            "The edge sweep judges relationship claims the per-article review left open (never answered, "
+            "unsure, or kept by one article and demoted by another), with passages from up to four of "
+            "their articles. shadow records each answer on the edge and changes nothing; apply keeps a "
+            "claim an article states, corrects a wrong verb or direction, and hides a claim no article "
+            "states. Every change is in Review history, where Restore undoes it"
+        ),
+        "group": "adjudication",
+        "options": ["off", "shadow", "apply"],
+    },
+    "relationship_sweep_batch_size": {
+        "label": "Edge Sweep: Claims Per Run",
+        "description": "Claims judged per run, one model call each. 0 turns the sweep off",
+        "group": "adjudication",
+    },
+    "relationship_sweep_min_age_hours": {
+        "label": "Edge Sweep: Minimum Age (hours)",
+        "description": "A claim is left to the per-article review for this long before the sweep takes it",
+        "group": "adjudication",
+    },
+    "relationship_sweep_retry_days": {
+        "label": "Edge Sweep: Retry After (days)",
+        "description": "A claim the sweep could not settle is not asked again for this long",
+        "group": "adjudication",
+    },
+    "relationship_sweep_min_confidence": {
+        "label": "Edge Sweep: Apply At Confidence",
+        "description": "In apply mode, answers below this confidence are recorded but change nothing",
+        "group": "adjudication",
+        "options": ["high", "medium", "low"],
+    },
+    "relationship_sweep_actions": {
+        "label": "Edge Sweep: Changes It Applies",
+        "description": (
+            "Comma list of what apply mode may change: keep (settle a stated claim), correct (fix a wrong "
+            "verb or direction), hide (a claim no article states). Add one only after "
+            "scripts/maintenance/eval_relationship_sweep.py shows it right often enough; the rest are "
+            "recorded on the edge and leave it in Review. A keep of an actor or malware targeting a "
+            "country is never applied: origin is too often read as target"
+        ),
         "group": "adjudication",
     },
     "adjudication_content_max_chars": {
@@ -1476,6 +1526,12 @@ _ENGINE_SECTION_GROUPS: dict[str, str] = {
     "merge_review_min_similarity": "adjudication",
     "merge_review_min_confidence": "adjudication",
     "merge_review_retry_days": "adjudication",
+    "relationship_sweep_mode": "adjudication",
+    "relationship_sweep_batch_size": "adjudication",
+    "relationship_sweep_min_age_hours": "adjudication",
+    "relationship_sweep_retry_days": "adjudication",
+    "relationship_sweep_min_confidence": "adjudication",
+    "relationship_sweep_actions": "adjudication",
     "adjudication_content_max_chars": "adjudication",
     "adjudication_scope": "adjudication",
     # Score stage

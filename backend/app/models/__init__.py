@@ -51,7 +51,7 @@ from app.models.entity_maintenance import (
     EntityReclassifyTombstone,
 )
 from app.models.entity_note import EntityNote
-from app.models.entity_relationship import EntityRelationship
+from app.models.entity_relationship import EntityRelationship, RelationshipReview
 from app.models.entry import Entry
 from app.models.entry_embedding import EntryEmbedding
 from app.models.entry_media import EntryMedia
@@ -202,6 +202,7 @@ __all__ = [
     "ReportTemplate",
     "DetectionRuleVersion",
     "EntityRelationship",
+    "RelationshipReview",
     "EntityNote",
     "EntityFieldClaim",
     "TelemetrySource",

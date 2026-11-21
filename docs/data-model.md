@@ -676,15 +676,28 @@ Table `entity_relationships`: a typed link between two entities, for example "AP
 - `relationship_type` (indexed) — the verb: `uses`, `exploits`, `targets`, `attributed_to`, `variant_of`, `communicates_with`, `delivers`, `drops`, `controls`, `related_to`, `successor_of`, `subgroup_of`, `overlaps_with`, `exposes` (observable → CVE), `operates_in` (vendor → sector). Which (source type, verb, target type) combinations are allowed is set by `ALLOWED_RELATIONSHIPS` in `app/intelligence/relationship_matrix.py`, checked on every write.
 - `confidence` (default `possible`) — `confirmed`, `probable` or `possible`
 - `source` (default `analyst_created`) — `co_occurrence`, `auto_extracted`, `analyst_confirmed`, `analyst_created`, `analyst_rejected` (hidden and never recreated by co-occurrence), `external_feed` or `enrichment` (held by claims in `entity_relation_claims`)
-- `description`
+- `description` — for an AI-asserted link, the sentence that first stated it
 - `evidence_entry_ids` (UUID[]) — articles that support the link (GIN-indexed)
-- `adjudication_verdict`, `adjudicated_at` — the adjudicate stage's outcome:
-  - `corroborated` — promoted to confirmed
-  - `coincidental` — demoted to possible, and never promoted again by co-occurrence
-- `reviewer_kept_entry_ids` (UUID[]) — articles whose adjudicate review explicitly kept this link in apply mode, at or above the apply confidence floor. At `relationship_evidence_promote_count` distinct articles the link becomes confirmed and corroborated.
+- `adjudication_verdict`, `adjudicated_at` — what the reviewers settled, derived from `relationship_reviews` by `app/services/edge_settlement.py`:
+  - `kept` — the edge sweep (or an analyst's Restore) found the claim stated; out of the Review lens
+  - `corroborated` — kept by articles from two or more feeds (reposts excluded), at `relationship_evidence_promote_count` articles; confidence `confirmed`
+  - `disputed` — one article kept it and another demoted it; stays in the Review lens
+  - `coincidental` — no reviewed article states it; confidence `possible`, hidden from profiles, pivots, graphs and reports, never promoted again by co-occurrence
+  - `unsure` — the retired nightly job's "could not tell"
+- `reviewer_kept_entry_ids` (UUID[]) — articles whose review counted a keep
 - `created_by` (FK, CASCADE)
 
 Unique on `(source_type, source_id, target_type, target_id, relationship_type)`.
+
+#### RelationshipReview
+Table `relationship_reviews`: one reviewer's judgment of one edge, usually against one article. The edge's verdict is derived from these rows.
+- `relationship_id` (FK → `entity_relationships`, CASCADE, indexed)
+- `entry_id` (indexed, no FK: the review outlives the article), `feed_id` — the article judged, and its feed (two feeds make a confirmation)
+- `reviewer` — `adjudicator` (the per-article review), `sweep` (the edge sweep) or `analyst` (Apply or Restore in Review)
+- `verdict` — `keep`, `demote`, `reverb` (another verb or the other direction: `suggested_verb`, `flipped`), `unanswered` (asked, and the model said nothing) or `unsure`
+- `confidence`, `reason`, `quote`, `ai_result_id`
+- `counted` — the row settles the edge (apply mode, at or above the floor); the rest are a record of what was asked and said
+- `created_at`
 
 ---
 

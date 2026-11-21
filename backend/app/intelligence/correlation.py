@@ -11,7 +11,11 @@ from sqlalchemy import String, cast, func, or_, select, type_coerce
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.intelligence.cve import risk_tier_for
-from app.intelligence.relationship_matrix import hidden_relationship_confidences, is_allowed_relationship
+from app.intelligence.relationship_matrix import (
+    hidden_relationship_confidences,
+    is_allowed_relationship,
+    shown_relationship_condition,
+)
 from app.models.campaign import Campaign
 from app.models.country import Country, EntryCountry
 from app.models.cve import CVE, EntryCVE
@@ -885,7 +889,7 @@ async def _claimed_observables(db: AsyncSession, entity_type: str, entity_id: uu
         .where(
             EntityRelationship.source_type == entity_type,
             EntityRelationship.source_id == entity_id,
-            EntityRelationship.source != "analyst_rejected",
+            shown_relationship_condition(),
             Observable.is_denied.is_(False),
         )
     )
@@ -909,7 +913,7 @@ async def _get_manual_relationships(db: AsyncSession, entity_type: str, entity_i
             (EntityRelationship.source_type == entity_type) & (EntityRelationship.source_id == entity_id),
             (EntityRelationship.target_type == entity_type) & (EntityRelationship.target_id == entity_id),
         ),
-        EntityRelationship.source != "analyst_rejected",
+        shown_relationship_condition(),
     )
     hidden = hidden_relationship_confidences()
     if hidden:
@@ -2898,10 +2902,21 @@ async def create_cooccurrence_relationships(
 
     Queries all junction tables for the given entry and upserts an
     EntityRelationship (source='co_occurrence') for each pair named in the same
-    paragraph, where that paragraph is neither boilerplate nor a list.
+    paragraph, where that paragraph is neither boilerplate nor a list, and
+    whose type pair COOCCURRENCE_RELATIONSHIP_MAP gives a verb.
+
+    The verb is a guess from the two types, right about a third of the time
+    (labelled sample, 2026-11-20), so an edge is drawn only from an article
+    the adjudicator will review: it reads the sentence and keeps, corrects or
+    demotes the claim. An article from a feed with AI analysis off, or whose
+    plan skips the review, draws nothing.
 
     Returns the count of new or updated relationships.
     """
+    from app.services.entry_adjudication import entry_gets_edge_review
+
+    if not await entry_gets_edge_review(db, entry_id):
+        return 0
     # 1. Gather all entities linked to this entry with their paragraph_indices
     entity_refs: list[tuple[str, uuid.UUID, list[int] | None]] = []
 
@@ -2951,7 +2966,11 @@ async def create_cooccurrence_relationships(
         if not ((para_a & para_b) - crowded):
             continue
 
-        src_type, src_id, tgt_type, tgt_id, rel_type, _mapped = _directed_pair(type_a, id_a, type_b, id_b)
+        src_type, src_id, tgt_type, tgt_id, rel_type, mapped = _directed_pair(type_a, id_a, type_b, id_b)
+        # A pair the map has no verb for would be "related_to": co-mention
+        # restated as a claim (tool related_to ttp from detection-rule tags).
+        if not mapped:
+            continue
         # Pairs outside the semantic allowlist (country↔cve, country↔tool, …)
         # are never stored, no matter how close the co-mention.
         if not is_allowed_relationship(src_type, rel_type, tgt_type):

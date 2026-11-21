@@ -734,8 +734,9 @@ Entity types: `ttp`, `cve`, `threat_actor`, `malware`, `campaign`, `country`, `t
 | POST | `/api/entity-relationships/signals/{entity_type}` | Visitor | Body `{"ids": [...]}`: per id, the count and top 3 relationships. A POST because the id list is too long for a URL |
 | POST | `/api/entity-relationships` | User | Create one. Creating an existing one merges the evidence (200 instead of 201); re-creating a rejected one restores it |
 | PUT | `/api/entity-relationships/{relationship_id}` | User | Change verb, confidence, description or evidence |
-| POST | `/api/entity-relationships/{relationship_id}/confirm` | User | Mark it analyst-confirmed |
-| POST | `/api/entity-relationships/{relationship_id}/reject` | User | Mark it rejected (hidden, not deleted) |
+| GET | `/api/entity-relationships/{relationship_id}/evidence` | Admin | Each evidence article (up to 10) with the sentence behind the claim, and every review the edge has had |
+| POST | `/api/entity-relationships/{relationship_id}/confirm` | User | Mark it analyst-confirmed (recorded as an analyst keep) |
+| POST | `/api/entity-relationships/{relationship_id}/reject` | User | Mark it rejected (hidden, not deleted; recorded as an analyst demote) |
 | DELETE | `/api/entity-relationships/{relationship_id}` | User | Delete it. Prefer reject: after a delete, new articles can create it again |
 
 #### Entity Links
@@ -797,6 +798,7 @@ Proposed fixes to entity data wait in review queues. Every route here is Admin. 
 | Method | Path | What it does |
 | --- | --- | --- |
 | GET | `/api/admin/hygiene/feed` | Every proposal from both logs, newest first (`entity_type` + `entity_id` narrow it to one entity). `context=true` adds each row's article text around the match (at most 320 characters); the Review tab asks for it on one entity's rows |
+| GET | `/api/admin/hygiene/feed/{source}/{row_id}/evidence` | Everything behind one proposal: the article paragraph, the AI's reason, confidence and quote, the payload facts that decide it, an edge's articles and reviews, and earlier applied changes to the same entity |
 | GET | `/api/admin/hygiene/review-groups` | Every pending proposal, one row per entity, with what each kind wants done. Filters `action`, `origin`, `domain`, `entity_type`, `q`; `sort` = `newest` (default), `count`, `oldest` or `confidence`. `facets` gives proposals per domain and per origin under the other filters |
 | POST | `/api/admin/hygiene/decisions` | Decide many proposals in one call: `[{id: "<source>:<log_id>", decision: "apply" \| "dismiss" \| "reclassify:<type>"}]`, one result per row. A row an earlier decision already closed comes back `settled`; an apply with nothing left to do comes back `resolved` |
 | POST | `/api/admin/hygiene/review-groups/apply` | Apply what the filters show for the named groups (`items`), or for every group without `items`, up to `limit` rows; `has_more` says to call again, passing the `unapplied` rows back in `exclude` so nothing is tried twice. Type changes only with `include_reclassify`; assessments never |
@@ -828,6 +830,7 @@ Proposed fixes to entity data wait in review queues. Every route here is Admin. 
 | --- | --- | --- |
 | GET | `/api/engine/extraction/stats` | Totals for entities the AI created: by type, needing review, orphaned, likely duplicates |
 | GET | `/api/engine/extraction/entities` | List them with a status (linked, review, orphan, dupe) |
+| GET | `/api/engine/extraction/entities/{entity_type}/{entity_id}/evidence` | The entity's articles (the creating one first, then the newest links, 3 at most) with the paragraph naming it |
 | POST | `/api/engine/extraction/confirm` | Sign off on them |
 | POST | `/api/engine/extraction/not-duplicate` | Mark two entities as different things |
 | POST | `/api/engine/extraction/delete` | Delete entities (AI-created types plus vendor, product, country) with their links, relationships and pending proposals; unless `deny=false`, ban their names (countries are never banned) |

@@ -26,6 +26,7 @@ from app.models.country import Country, EntryCountry
 from app.models.entity_relationship import EntityRelationship
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.observable import ALL_KINDS as ALL_OBSERVABLE_KINDS
+from app.models.sector import Sector
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.services.claim_provenance import record_claims
 
@@ -75,6 +76,7 @@ _ENTITY_TYPE_MODEL_MAP = {
     "cve": None,  # resolved by cve_id
     "ttp": None,  # resolved by technique_id
     "country": (Country, "name"),
+    "sector": (Sector, "name"),
 }
 
 
@@ -157,18 +159,24 @@ _AI_RELATIONSHIP_TYPES = {
     "subgroup_of",
     "overlaps_with",
     "related_to",
+    # A loader or dropper installing the payload (matrix: actor/malware/tool → malware).
+    "delivers",
+    "drops",
     # Observable-target verbs (matrix: actor/malware/tool → observable).
     "communicates_with",
     "controls",
 }
-_AI_RELATIONSHIP_ENTITY_TYPES = {"threat_actor", "malware", "tool", "country", "cve", "ttp", "observable"}
+_AI_RELATIONSHIP_ENTITY_TYPES = {"threat_actor", "malware", "tool", "country", "sector", "cve", "ttp", "observable"}
+# Endpoints the payload has no list for (CVE ids come from the regex pass):
+# the evidence sentence naming them is the whole check.
+_UNLISTED_ENDPOINT_TYPES = {"cve"}
 _CONFIDENCE_RANK = {"possible": 0, "probable": 1, "confirmed": 2}
 
 
 def _payload_entity_names(parsed: dict) -> set[str]:
     """Lowercased names + aliases of every entity the payload extracted."""
     names: set[str] = set()
-    for key in ("threat_actors", "malware", "tools", "countries"):
+    for key in ("threat_actors", "malware", "tools", "countries", "sectors"):
         for item in parsed.get(key) or []:
             if isinstance(item, dict):
                 candidates = [item.get("name") or ""] + list(item.get("aliases") or [])
@@ -183,6 +191,11 @@ def _payload_entity_names(parsed: dict) -> set[str]:
     for item in parsed.get("iocs") or []:
         if isinstance(item, dict) and item.get("value"):
             names.add(str(item["value"]).strip().lower())
+    for item in parsed.get("ttps") or []:
+        if isinstance(item, dict):
+            names.update(
+                str(item[k]).strip().lower() for k in ("technique_id", "technique_name", "name") if item.get(k)
+            )
     return names
 
 
@@ -210,6 +223,7 @@ async def store_ai_relationships(
     conf_map = {"high": "probable", "medium": "probable", "low": "possible"}
     stored = 0
     touched: set[tuple[str, uuid.UUID]] = set()
+    asserted: list[tuple[str, uuid.UUID, str, str, uuid.UUID]] = []
     for rel in relationships:
         if not isinstance(rel, dict):
             continue
@@ -247,8 +261,10 @@ async def store_ai_relationships(
             continue
         # Self-consistency: both endpoints must be entities the same payload
         # extracted (hallucinated pairs don't survive this).
-        if payload_names is not None and (
-            src_name.lower() not in payload_names or tgt_name.lower() not in payload_names
+        if payload_names is not None and any(
+            name.lower() not in payload_names
+            for name, etype in ((src_name, src_type), (tgt_name, tgt_type))
+            if etype not in _UNLISTED_ENDPOINT_TYPES
         ):
             continue
 
@@ -258,6 +274,7 @@ async def store_ai_relationships(
             continue
         touched.add((src_type, src_id))
         touched.add((tgt_type, tgt_id))
+        asserted.append((src_type, src_id, rel_type, tgt_type, tgt_id))
 
         # Merge with an existing edge in either orientation so an AI assertion
         # strengthens the co-occurrence row instead of minting a mirror edge.
@@ -312,12 +329,16 @@ async def store_ai_relationships(
                 relationship_type=rel_type,
                 confidence=confidence,
                 source="auto_extracted",
+                # The sentence that first stated it, for whoever judges it next.
+                description=evidence[:500],
                 evidence_entry_ids=[entry_id],
             )
             .on_conflict_do_nothing()
         )
         stored += 1
 
+    if asserted:
+        await retire_superseded_cooccurrence(db, entry_id, asserted)
     if stored:
         await db.flush()
     if stored and touched:
@@ -332,6 +353,54 @@ async def store_ai_relationships(
         except Exception:
             logger.debug("pivot cache invalidation skipped", exc_info=True)
     return stored
+
+
+# A co-occurrence verb the analysis's verb for the same pair replaces: the
+# guess from the two types was the wrong reading of the sentence. Any verb
+# replaces related_to, which said nothing.
+_SUPERSEDED_COOCCURRENCE_VERBS = {
+    ("targets", "attributed_to"),
+}
+
+
+async def retire_superseded_cooccurrence(
+    db: AsyncSession,
+    entry_id: uuid.UUID,
+    asserted: list[tuple[str, uuid.UUID, str, str, uuid.UUID]],
+) -> int:
+    """Delete co-occurrence edges this article alone drew when its analysis
+    read the same pair and stated another verb ("X-based APT targets X" next
+    to the analysis's "attributed_to X"). Nothing else stands behind such an
+    edge, and the analysis's own claim now carries the pair. Returns the
+    number deleted."""
+    retired = 0
+    for src_type, src_id, verb, tgt_type, tgt_id in asserted:
+        rows = (
+            (
+                await db.execute(
+                    select(EntityRelationship).where(
+                        EntityRelationship.source == "co_occurrence",
+                        EntityRelationship.adjudication_verdict.is_(None),
+                        EntityRelationship.relationship_type != verb,
+                        EntityRelationship.evidence_entry_ids == [entry_id],
+                        or_(
+                            (EntityRelationship.source_id == src_id) & (EntityRelationship.target_id == tgt_id),
+                            (EntityRelationship.source_id == tgt_id) & (EntityRelationship.target_id == src_id),
+                        ),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for edge in rows:
+            superseded = (edge.relationship_type, verb) in _SUPERSEDED_COOCCURRENCE_VERBS
+            if edge.relationship_type == "related_to" or superseded:
+                await db.delete(edge)
+                retired += 1
+    if retired:
+        await db.flush()
+    return retired
 
 
 async def extract_threat_actors(

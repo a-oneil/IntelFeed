@@ -378,6 +378,18 @@
 .ev b {
   color: var(--text-primary);
 }
+.evToggle {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.evToggle:hover {
+  color: var(--text-primary);
+}
 
 .rowActs {
   display: flex;

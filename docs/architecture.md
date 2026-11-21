@@ -396,7 +396,8 @@ A *correlation event* is a notable finding, such as a new technique for a known 
 
 `create_cooccurrence_relationships(entry_id)` builds links from articles:
 
-- A pair of different-type entities is linked only when both are named in the same paragraph, and that paragraph reads as one statement. It picks a verb and direction from the pair's types (for example actor → malware is `uses`); a pair with no known verb gets `related_to`.
+- A pair of different-type entities is linked only when both are named in the same paragraph, and that paragraph reads as one statement. It picks a verb and direction from the pair's types (for example actor → malware is `uses`); a pair with no known verb is not linked.
+- Only an article the adjudicate stage will review draws links (its feed's AI analysis is on, and its plan runs the review), because the verb is a guess the review checks against the sentence.
 - Some co-mentions never count: entities in different paragraphs, links with no recorded paragraph (most AI-sourced links), boilerplate paragraphs ("Related:", "Read more", sources, references, a detection rule's analytic stories) and paragraphs naming five or more entities (a roundup or list line).
 - An existing link gains the article as evidence. A `co_occurrence` link moves from `possible` to `probable` after `relationship_evidence_promote_count` separate articles from at least two feeds.
 - A link an analyst rejected is never recreated.

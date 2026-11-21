@@ -109,12 +109,48 @@ def orient_relationship(source_type: str, relationship_type: str, target_type: s
     return None
 
 
+def corrected_orientation(
+    source_type: str, current_verb: str, target_type: str, verb: str, flip: bool
+) -> tuple[str, bool] | None:
+    """A reviewer's correction (``verb``, ``flip``) of the claim
+    ``source_type current_verb target_type``, as (verb, flip) the matrix
+    allows, or None. A pair of different types allows each verb one way
+    only, so a correction naming the verb without the direction ("Romulus
+    distributes it": delivers, from the tool) is turned the allowed way.
+    A correction that changes nothing is None."""
+    if source_type != target_type:
+        if (source_type, verb, target_type) in ALLOWED_RELATIONSHIPS:
+            flip = False
+        elif (target_type, verb, source_type) in ALLOWED_RELATIONSHIPS:
+            flip = True
+        else:
+            return None
+    else:
+        if (source_type, verb, target_type) not in ALLOWED_RELATIONSHIPS:
+            return None
+    if (verb, flip) == (current_verb, False):
+        return None
+    return verb, flip
+
+
 def allowed_verbs_for_pair(source_type: str, target_type: str) -> list[str]:
     """Verbs valid for source→target as stored, for error messages."""
     return sorted(rt for st, rt, tt in ALLOWED_RELATIONSHIPS if st == source_type and tt == target_type)
 
 
 _CONFIDENCE_ORDER = ("possible", "probable", "confirmed")
+
+
+def shown_relationship_condition():
+    """Edges display surfaces (profiles, graphs, pivots, reports) show: not
+    rejected by an analyst, and not ruled coincidental by the reviewers — a
+    claim no reviewed article states. Both stay in the management views
+    (Engine › Links, Review history), where Restore brings them back."""
+    from app.models.entity_relationship import EntityRelationship
+
+    return (EntityRelationship.source != "analyst_rejected") & EntityRelationship.adjudication_verdict.is_distinct_from(
+        "coincidental"
+    )
 
 
 def hidden_relationship_confidences() -> frozenset[str]:

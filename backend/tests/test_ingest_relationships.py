@@ -290,3 +290,127 @@ async def test_unresolvable_relationship_name_skipped(db_session: AsyncSession, 
     ]
     stored = await store_ai_relationships(db_session, rels, entry.id, parsed=parsed)
     assert stored == 0
+
+
+@pytest.mark.asyncio
+async def test_relationship_keeps_its_evidence_sentence(db_session: AsyncSession, feed):
+    entry = await _make_entry(db_session, feed)
+    actor, _malware = await _mk_actor_and_malware(db_session)
+    sentence = "APT-Storm deployed StormLoader against victims."
+    rels = [
+        {
+            "source_type": "threat_actor",
+            "source_name": "APT-Storm",
+            "target_type": "malware",
+            "target_name": "StormLoader",
+            "relationship_type": "delivers",
+            "evidence": sentence,
+            "confidence": "high",
+        }
+    ]
+    assert await store_ai_relationships(db_session, rels, entry.id, parsed=_rel_payload()) == 1
+    row = (
+        await db_session.execute(select(EntityRelationship).where(EntityRelationship.source_id == actor.id))
+    ).scalar_one()
+    assert row.relationship_type == "delivers"  # no longer flattened to related_to
+    assert row.description == sentence
+
+
+@pytest.mark.asyncio
+async def test_relationship_to_a_cve_and_a_sector(db_session: AsyncSession, feed):
+    from app.models.cve import CVE
+    from app.models.sector import Sector
+
+    entry = await _make_entry(db_session, feed)
+    actor, _malware = await _mk_actor_and_malware(db_session)
+    cve = CVE(cve_id="CVE-2026-1111")
+    db_session.add(cve)
+    sector = (await db_session.execute(select(Sector).where(Sector.slug == "healthcare"))).scalar_one_or_none()
+    if sector is None:
+        sector = Sector(slug="healthcare", name="Healthcare")
+        db_session.add(sector)
+    await db_session.flush()
+    rels = [
+        {
+            "source_type": "threat_actor",
+            "source_name": "APT-Storm",
+            "target_type": "cve",
+            "target_name": "CVE-2026-1111",
+            "relationship_type": "exploits",
+            "evidence": "APT-Storm exploited CVE-2026-1111 for initial access.",
+            "confidence": "high",
+        },
+        {
+            "source_type": "threat_actor",
+            "source_name": "APT-Storm",
+            "target_type": "sector",
+            "target_name": "Healthcare",
+            "relationship_type": "targets",
+            "evidence": "APT-Storm hit Healthcare providers across the region.",
+            "confidence": "high",
+        },
+    ]
+    payload = _rel_payload()
+    payload["sectors"] = [{"name": "Healthcare", "evidence": "x", "confidence": "high"}]
+    assert await store_ai_relationships(db_session, rels, entry.id, parsed=payload) == 2
+    rows = (
+        await db_session.execute(select(EntityRelationship).where(EntityRelationship.source_id == actor.id))
+    ).scalars()
+    assert {(r.relationship_type, r.target_type) for r in rows} == {("exploits", "cve"), ("targets", "sector")}
+
+
+@pytest.mark.asyncio
+async def test_analysis_retires_the_cooccurrence_guess_it_contradicts(db_session: AsyncSession, feed):
+    from app.models.country import Country
+
+    entry = await _make_entry(db_session, feed)
+    other = await _make_entry(db_session, feed)
+    actor, _malware = await _mk_actor_and_malware(db_session)
+    russia = Country(name="Russia", iso_code="RU")
+    db_session.add(russia)
+    await db_session.flush()
+
+    def guess(evidence):
+        return EntityRelationship(
+            source_type="threat_actor",
+            source_id=actor.id,
+            target_type="country",
+            target_id=russia.id,
+            relationship_type="targets",
+            confidence="possible",
+            source="co_occurrence",
+            evidence_entry_ids=evidence,
+        )
+
+    alone = guess([entry.id])
+    db_session.add(alone)
+    await db_session.flush()
+    rels = [
+        {
+            "source_type": "threat_actor",
+            "source_name": "APT-Storm",
+            "target_type": "country",
+            "target_name": "Russia",
+            "relationship_type": "attributed_to",
+            "evidence": "APT-Storm is a Russia-based group.",
+            "confidence": "high",
+        }
+    ]
+    payload = _rel_payload()
+    payload["countries"] = [{"name": "Russia", "iso_code": "RU", "role": "origin", "confidence": "high"}]
+    await store_ai_relationships(db_session, rels, entry.id, parsed=payload)
+    assert await db_session.get(EntityRelationship, alone.id) is None
+
+    # Another article stands behind it too: that guess is the reviewer's to judge.
+    await db_session.delete(
+        (
+            await db_session.execute(
+                select(EntityRelationship).where(EntityRelationship.relationship_type == "attributed_to")
+            )
+        ).scalar_one()
+    )
+    shared = guess([other.id, entry.id])
+    db_session.add(shared)
+    await db_session.flush()
+    await store_ai_relationships(db_session, rels, entry.id, parsed=payload)
+    assert await db_session.get(EntityRelationship, shared.id) is not None

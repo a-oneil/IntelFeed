@@ -27,6 +27,7 @@ from typing import Literal
 from fastapi import APIRouter, Body, Depends, Path
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import or_, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,7 +37,7 @@ from app.core.security import get_admin_user
 from app.database import get_db
 from app.models.country_junction import ThreatActorTargetCountry
 from app.models.entity_maintenance import EntityMaintenanceLog, EntityReclassifyTombstone
-from app.models.entity_relationship import EntityRelationship
+from app.models.entity_relationship import EntityRelationship, RelationshipReview
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.product import EntryProduct, Product
 from app.models.threat_actor import EntryThreatActor, ThreatActor
@@ -194,6 +195,7 @@ async def _repoint_entity_relationships(
     """
     from app.enrichment.context import rehome_context
     from app.enrichment.relations import rehome_claims
+    from app.services.edge_settlement import settle_edge
 
     await rehome_claims(db, old_type, old_id, new_type, new_id)
     # The sources' profile context follows the entity too.
@@ -239,13 +241,28 @@ async def _repoint_entity_relationships(
             merged = list(existing.evidence_entry_ids or [])
             merged += [e for e in (rel.evidence_entry_ids or []) if e not in merged]
             existing.evidence_entry_ids = merged
+            kept = list(existing.reviewer_kept_entry_ids or [])
+            kept += [e for e in (rel.reviewer_kept_entry_ids or []) if e not in kept]
+            existing.reviewer_kept_entry_ids = kept
             # A coincidental adjudication verdict survives the merge — folding
             # in a duplicate must not silently undo the AI's demotion.
             if existing.adjudication_verdict != "coincidental" and _CONFIDENCE_ORDER.get(
                 rel.confidence, 0
             ) > _CONFIDENCE_ORDER.get(existing.confidence, 0):
                 existing.confidence = rel.confidence
+            # The twin's reviews are reviews of the same claim: they move, and
+            # the survivor's verdict is re-derived from both sets.
+            await db.execute(
+                sa_update(RelationshipReview)
+                .where(RelationshipReview.relationship_id == rel.id)
+                .values(relationship_id=existing.id)
+            )
+            if existing.adjudication_verdict is None and rel.adjudication_verdict == "corroborated":
+                existing.adjudication_verdict = "corroborated"
+                existing.confidence = "confirmed"
             await db.delete(rel)
+            await db.flush()
+            await settle_edge(db, existing)
         else:
             rel.source_type, rel.source_id = s_type, s_id
             rel.target_type, rel.target_id = t_type, t_id

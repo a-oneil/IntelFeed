@@ -4,7 +4,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -900,10 +900,18 @@ async def _prune_engine_tables() -> int:
         total += result.rowcount or 0
         result = await db.execute(delete(JobRun).where(JobRun.finished_at < cutoff))
         total += result.rowcount or 0
+        # A row whose review is still owed is the resweep's only handle on that
+        # article: pruning it would leave the review owed for good.
+        from app.services.entry_adjudication import PENDING, RECHECK, SKIPPED_BUDGET, SKIPPED_PAUSED
+
         result = await db.execute(
             delete(AIAnalysisRequest).where(
                 AIAnalysisRequest.created_at < cutoff,
                 AIAnalysisRequest.status != "pending",
+                or_(
+                    AIAnalysisRequest.adjudication_status.is_(None),
+                    AIAnalysisRequest.adjudication_status.notin_([PENDING, RECHECK, SKIPPED_BUDGET, SKIPPED_PAUSED]),
+                ),
             )
         )
         total += result.rowcount or 0
