@@ -82,13 +82,13 @@ The autolinker matches text against a dictionary of every known entity name and 
 
 **Keeping workers in sync.** Each worker process holds its own copy. The vocabulary's version is a hash of its contents, published to Redis under `intelfeed:autolinker:vocab_version`. Before a scan, `_ensure_vocabulary()` compares its local version with Redis and rebuilds on a mismatch. The `refresh-autolinker-vocabulary` job rebuilds every 30 minutes, and denying a name or curating extractions queues that job on the worker about ten seconds later (`schedule_vocabulary_refresh()`; a burst of changes within that window becomes one build, keyed on `intelfeed:autolinker:vocab_refresh_pending`). A request never builds the vocabulary itself: a build loads seven tables and compiles a 34,000-form automaton, around ten seconds of CPU, and each process compiles its own copy in a thread so other requests keep being served. A brand-new entity therefore starts matching new articles within 30 minutes.
 
-**The scan** (`scan_text()`, `backend/app/intelligence/autolinker.py:946`), per paragraph:
+**The scan** (`scan_text()`, `backend/app/intelligence/autolinker.py:953`), per paragraph:
 
 1. Match the lowercased text against every name and alias.
 2. Drop matches that sit inside a longer word ("APT" inside "RAPT", "RTM" inside "RTMP" or `RTM_NEWLINK`) or inside a longer matched name ("Korea" inside "North Korea").
 3. Short single words (alphabetic, up to `autolinker_ambiguous_name_max_length`, default 10) must be written the way the name is: an acronym in capitals, a mixed-case name exactly ("SynAck", not "Synack"), any other word with a capital first letter. A name written in lower case on purpose, such as the npm package "axios", matches lower-case text; capitalised mid-sentence ("reported by Axios") it is something else. For actor, malware, country and mitigation names, a short word is also dropped if it appears more than `autolinker_ambiguous_max_occurrences` (default 3) times in the entry.
 4. A name of several words must have its first real word cased as in the name: "push security" is not Push Security, and "the COM object" is not The Com.
-5. Each match is then judged in its sentence (`_occurrence_verdict()`, `backend/app/intelligence/autolinker.py:883`). It is dropped when it is:
+5. Each match is then judged in its sentence (`_occurrence_verdict()`, `backend/app/intelligence/autolinker.py:890`). It is dropped when it is:
    - inside a "Related:" / "Read more:" headline, at the start of a line or run into the body (Dark Reading), since that headline is another article's. IDs in it are skipped too;
    - part of a code or file token: a dotted package id (`com.apple.…`), a hyphenated compound with a capital or digit after the hyphen ("X-Agent-Secret", "Proton-J"; "-linked" and "-based" only describe the name), or a capitalised name written in lower case inside a file name or path (`push security-audit.yml`, `id-ed25519`);
    - a number used as a number, for a name made only of digits ("PID: 764", "port 764", "1,764", "764 seconds");
@@ -672,7 +672,7 @@ Then it is bucketed: ≥ 0.7 high, ≥ 0.4 medium, else low. So "APT29" on an A-
 ### Operational notes
 
 - Changing a feed's mode only affects new entries. To re-process old ones, use the rescan endpoints or `autolink_batch()` (`backend/app/intelligence/autolinker.py:1621`), which commits every 100 entries.
-- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1931`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the case and context rules applied, and confidence scaled by feed reliability. The pending tier does not apply, so a match ingest would hold is not linked.
+- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1982`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the case and context rules applied, and confidence scaled by feed reliability. The pending tier does not apply, so a match ingest would hold is not linked.
 
 ### None of this uses AI
 
@@ -709,4 +709,4 @@ With `signal_engine_surface` on:
 - Per-user watch and mute (`/api/intelligence/watchlist`) boost or hide entities at read time.
 - Entity profiles show recent developments from `GET /api/engine/entities/{type}/{id}/whats-new`.
 
-The Priority Queue (`/priority-queue`) mixes open **story threads** with single ranked entries, built server-side by `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1440`). A thread ranks by the score of its best unread, non-echo article, and its articles do not also appear on their own. See [story-threads.md](story-threads.md). Signal details: [engine.md](engine.md#signal-catalog).
+The Priority Queue (`/priority-queue`) mixes open **story threads** with single ranked entries, built server-side by `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1449`). A thread ranks by the score of its best unread, non-echo article, and its articles do not also appear on their own. See [story-threads.md](story-threads.md). Signal details: [engine.md](engine.md#signal-catalog).

@@ -528,7 +528,7 @@ Tool pages (Workbench, Settings, Search, Automation) use `SidebarLayout` instead
 
 The **Dashboard** (`/workbench/dashboard`, `frontend/src/pages/DashboardPage.tsx`) is the Workbench home page and shows what is happening now. `/workbench`, `/triage`, `/dashboards` and `/atlas` all go there. The entity browser is at `/workbench/explore`.
 
-The **Priority Queue** (`/priority-queue`) is the reader layout in `priorityMode`: the entry list sorted by score (`radar`), with story threads folded in as single rows, and a card in the reader explaining why the article ranked (`WhyRankedCard.tsx`). The server builds the ranking (`GET /api/entries/priority-queue`, `build_priority_queue`, `backend/app/api/entries.py:1440`). It is linked from a chip under the unread count in the sidebar.
+The **Priority Queue** (`/priority-queue`) is the reader layout in `priorityMode`: the entry list sorted by score (`radar`), with story threads folded in as single rows, and a card in the reader explaining why the article ranked (`WhyRankedCard.tsx`). The server builds the ranking (`GET /api/entries/priority-queue`, `build_priority_queue`, `backend/app/api/entries.py:1449`). It is linked from a chip under the unread count in the sidebar.
 
 **Daily summaries** are AI recaps of each day, shown on the day dividers in the entry list and shared by all users. The `generate-daily-summaries` job (daily 06:00 UTC, `backend/app/workers/daily_summary_tasks.py`) writes yesterday's summary ahead of time.
 

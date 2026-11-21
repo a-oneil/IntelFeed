@@ -4,7 +4,7 @@ For operators and contributors. It explains how story threads are built, how eac
 
 One news story often arrives twenty times from different outlets. A **story thread** groups those articles into one object: a spine that says what changed in each wave of coverage, the outlet that reported it first, and the re-reports folded under the article they repeat. The same vectors that build threads also power "find articles like this one".
 
-Without threads, the platform could only lower the score of repeats (the `feed_echo` signal, `_feed_echo` in `backend/app/intelligence/signals.py:761`) or group them on the fly by shared entities (`temporal_clusters()`, `backend/app/intelligence/correlation.py:3056`). Neither leaves anything you can name, read or come back to.
+Without threads, the platform could only lower the score of repeats (the `feed_echo` signal, `_feed_echo` in `backend/app/intelligence/signals.py:761`) or group them on the fly by shared entities (`temporal_clusters()`, `backend/app/intelligence/correlation.py:3075`). Neither leaves anything you can name, read or come back to.
 
 - [Vector substrate](#vector-substrate)
 - [How a thread is built](#how-a-thread-is-built)
@@ -75,7 +75,7 @@ Feed summaries arrive in any shape (raw `<p>` markup, a Google News link wrapped
 
 ## Where threads appear
 
-**Priority Queue.** `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1440`) returns entries and threads as one ranked list; `ThreadRow` draws the thread rows. A thread ranks by the score of its best *unread, non-echo* article, and its articles are left out of the list as single rows: the thread row stands for them. A thread with nothing unread does not appear, because the queue answers "what to read next".
+**Priority Queue.** `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1449`) returns entries and threads as one ranked list; `ThreadRow` draws the thread rows. A thread ranks by the score of its best *unread, non-echo* article, and its articles are left out of the list as single rows: the thread row stands for them. A thread with nothing unread does not appear, because the queue answers "what to read next".
 
 Leaving members out is safe because a thread always scores at least as high as each article it folds, so its row comes before them. With infinite scroll, a thread that outranks nothing on the current page waits for a later page instead of being added at the end. Otherwise the next page would insert it mid-list and shift every row under the reader's cursor. Threads still waiting when the last page loads go at the end. The reader, the CLI and agents all get the same order from this one endpoint.
 
