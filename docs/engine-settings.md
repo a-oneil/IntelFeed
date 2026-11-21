@@ -33,8 +33,8 @@ A database value that equals the default does nothing useful, and it stops you g
 | Structure | File | Role |
 |---|---|---|
 | `CONFIGURABLE_KEYS` | `backend/app/services/system_settings.py:26` | Which keys the UI can edit, and each value's type |
-| `SETTING_METADATA` | `backend/app/services/system_settings.py:220` | Label, description and group shown in the UI |
-| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1431` | Moves engine keys into the group of the Engine panel that owns them |
+| `SETTING_METADATA` | `backend/app/services/system_settings.py:227` | Label, description and group shown in the UI |
+| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1469` | Moves engine keys into the group of the Engine panel that owns them |
 | `SECRET_KEYS` | `backend/app/services/system_settings.py:14` | Encrypted in the database, hidden on read |
 | `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Which Engine screen shows each group; drives the Engine settings search |
 | `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:72` | Single keys that live somewhere other than their group's screen |
@@ -328,7 +328,7 @@ Settings → Engine → **Maintenance** (groups `maintenance` and `retention`). 
 
 ### Adjudicate stage (post-analysis AI review)
 
-After an article's AI analysis is saved, a second, smaller AI call reviews it. It re-reads the article next to a list of everything the analysis wrote: entity links, new entities (with similar existing names), held matches the analysis linked or rejected, relationships and observables. For each item it wants to change, it returns a verdict: remove, reclassify, veto, merge, demote, drop, or link (a held match the analysis rejected). Items it leaves out are kept, so a clean review returns an empty list. The article's observable candidates are the exception: each one needs capture or drop ([Candidates and the adjudicator](observables.md#candidates-and-the-adjudicator)).
+After an article's AI analysis is saved, a second, smaller AI call reviews it. It re-reads the article next to a list of everything the analysis wrote: entity links, new entities (with similar existing names), held matches the analysis linked or rejected, relationships and observables. For each item it wants to change, it returns a verdict: remove, reclassify, veto, merge, demote, reverb (a relationship stated with another verb or the other way round), drop, or link (a held match the analysis rejected). Items it leaves out are kept, so a clean review returns an empty list. Relationships are the other exception: each one needs keep, reverb or demote, and only a high-confidence answer counts, whatever the floor below. The article's observable candidates are the exception: each one needs capture or drop ([Candidates and the adjudicator](observables.md#candidates-and-the-adjudicator)).
 
 The list sent to the AI holds at most 60 entity links, 15 rejected held matches, 10 relationships, 25 observables and 20 candidates. When there are more, the items only this review can judge go first: new entities, then held matches, then AI claims, then plain autolink matches. The rest are recorded in the run's `detail.uncapped_links` and `detail.uncapped_edges`.
 
@@ -340,7 +340,7 @@ Code: `backend/app/services/entry_adjudication.py` and `backend/app/workers/adju
 | `adjudication_trigger` | `all` \| `created`, default `all` | `all` reviews every analysed article. `created` reviews only articles whose analysis created or claimed something (an entity, an AI link, a TTP, a relationship, a held match it linked or rejected, or an observable). Use `created` if reviews can't keep up. |
 | `adjudication_max_per_hour` | int, `0` | Most reviews started per hour. `0` means no limit; the single AI worker is then the only pacing. Set a limit to cap spend on a paid provider, or to stop reviews delaying article analysis on the same worker. With a limit, the backfill gets at most half of each hour's budget. |
 | `adjudication_min_priority_score` | float, `0` | Skip articles below this priority score (0–10). Keep it at 0: low-scoring CVE articles are the main source of junk tool entities. |
-| `adjudication_apply_min_confidence` | `high` \| `medium` \| `low`, default `high` | In apply mode, verdicts below this wait for a second look instead of applying. |
+| `adjudication_apply_min_confidence` | `high` \| `medium` \| `low`, default `high` | In apply mode, verdicts below this wait for a second look instead of applying. Relationship verdicts count only at `high` whatever this says: a demote hides the claim from every profile. |
 | `adjudication_reclassify_consensus` | int, `2` | A type change affects the whole catalogue, so in apply mode a `reclassify` verdict is applied only once this many distinct articles' reviews agree on the same target type. Each earlier review's pending proposal is a vote; the review that reaches the count converts the entity and clears the proposals. `1` applies the first verdict at the confidence floor. A name an analyst or an earlier apply folded out of a type (a reclassify tombstone) is never proposed back into it, so types cannot ping-pong. |
 | `adjudication_circuit_breaker_pct` | float, `0.5` | If more than this share of one article's items get a destructive verdict, nothing in the run applies and its verdicts wait for a second look. If the average over the last 50 apply runs goes above it (with at least 10 runs), reviews pause for an hour and a warning chip shows in the Engine console. |
 | `adjudication_circuit_breaker_min_items` | int, `5` | The circuit breaker only judges an article whose review covered at least this many items. Below that, each verdict applies on its own confidence, because on a one-item recheck a single remove is already 100%. |
@@ -394,6 +394,16 @@ The review's own pending rows settle themselves. A pair holding one of its merge
 | `merge_review_min_similarity` | float, `0.55` | Trigram similarity two names need to be a candidate on name alone. |
 | `merge_review_min_confidence` | `high` / `medium` / `low`, `medium` | A `same` verdict below this is remembered as unsure instead of proposed. |
 | `merge_review_retry_days` | int, `30` | A pair judged different or unsure is not asked again for this long. |
+
+**The edge sweep** judges the relationship claims the per-article review left open (never answered, unsure, past the ten-edge cap, or kept by one article and demoted by another), one claim per call with passages from up to four of its articles; an answer must quote its article. Code: `backend/app/services/relationship_sweep.py`. Job `review-relationships`, every 30 minutes on the `ai` queue; AI task `relationship_review`. See [the edge sweep](intelligence-engine.md#the-edge-sweep). Measure it with `scripts/maintenance/eval_relationship_sweep.py` before switching to apply.
+
+| Setting | Type / default | What it does |
+|---|---|---|
+| `relationship_sweep_mode` | `off` \| `shadow` \| `apply`, default `shadow` | `shadow` records each answer on the edge (`relationship_reviews`) and changes nothing. `apply` keeps a stated claim, corrects a wrong verb or direction, and hides an unstated one; each change is in Review history, where Restore undoes it. |
+| `relationship_sweep_batch_size` | int, `30` | Claims judged per run, one model call each. `0` turns the sweep off. |
+| `relationship_sweep_min_age_hours` | int, `24` | A claim is left to the per-article review for this long first. |
+| `relationship_sweep_retry_days` | int, `30` | A claim the sweep could not settle is not asked again for this long. |
+| `relationship_sweep_min_confidence` | `high` / `medium` / `low`, `high` | In apply mode, answers below this are recorded and change nothing. |
 
 ### Entity assessments
 

@@ -31,11 +31,13 @@ stateDiagram-v2
     note right of co_occurrence
         New articles add to evidence_entry_ids
         instead of creating a second row.
-        The adjudicate stage (per entry, on the ai queue)
-        can mark co_occurrence and auto_extracted edges
-        corroborated (→ confirmed, after
-        relationship_evidence_promote_count reviews keep it)
-        or coincidental (→ possible, never promoted again).
+        Drawn only from articles the adjudicate stage reviews.
+        Each article's review and the edge sweep write
+        relationship_reviews rows; the verdict follows from them:
+        kept (a review found it stated),
+        corroborated (kept by 2+ feeds → confirmed),
+        disputed (articles disagree, stays in Review),
+        coincidental (→ possible, hidden from pivots and graphs).
     end note
 ```
 
