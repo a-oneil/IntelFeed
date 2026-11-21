@@ -57,7 +57,7 @@ export const FIELD_GROUPS: QueryFieldGroup[] = [
       {
         token: "is:",
         hint: "Entry state",
-        values: ["unread", "read", "starred", "bookmarked", "noted", "muted", "translated", "image"],
+        values: ["unread", "read", "starred", "bookmarked", "noted", "muted", "archived", "translated", "image"],
       },
       {
         token: "sort:",

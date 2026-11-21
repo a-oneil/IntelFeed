@@ -252,7 +252,7 @@ All paths below start with `/api` unless shown otherwise. `{id}`-style names are
 | POST | `/api/feeds/{feed_id}/refresh` | User | Fetch the feed now (queued) |
 | POST | `/api/feeds/{feed_id}/resume` | Admin | Turn back on a feed the health check paused, and clear its failure count |
 | POST | `/api/feeds/{feed_id}/pause` | Admin | Stop polling a feed for everyone (the PUT `is_active` toggle pauses only your own subscription) |
-| POST | `/api/feeds/{feed_id}/remove` | Admin | Unsubscribe every reader and stop polling; entries stay (DELETE without `purge` unsubscribes only you) |
+| POST | `/api/feeds/{feed_id}/remove` | Admin | Unsubscribe every reader and archive the feed; entries stay (DELETE without `purge` unsubscribes only you) |
 | GET | `/api/feeds/health` | User | Counts of healthy, stale, erroring and disabled feeds |
 | GET | `/api/feeds/health/failing` | User | Feeds failing `threshold` times in a row (default 5). High-value feeds (rated A/B) come first |
 | GET | `/api/feeds/{feed_id}/analytics` | User | Source reliability numbers for one feed |
@@ -268,7 +268,7 @@ All paths below start with `/api` unless shown otherwise. `{id}`-style names are
 
 **Editing a feed.** Anyone may change curation fields: `custom_title`, `category_id`, `is_muted`, the ratings and `analyst_notes`. Only an admin may change the shared settings: `url`, `feed_type`, `fetch_interval_minutes`, `retention_days`, `adapter_config`, `exclude_shorts`, `intel_extraction_mode`, `ai_analysis_enabled`, `auto_extract_on_ingest`, `extract_detection_rules`, `extract_tools`, `exclude_title_patterns` and `visible_to_visitors`. `is_active` is admin-only too, unless per-user subscriptions are on (then pausing is personal).
 
-**Deleting a feed.** With the `per_user_subscriptions_enabled` setting off, only an admin may delete, and the feed's articles go with it. With it on, `DELETE` unsubscribes the caller and leaves the feed for everyone else. A feed nobody subscribes to stops fetching. An admin passes `?purge=true` to really delete it.
+**Deleting a feed.** With the `per_user_subscriptions_enabled` setting off, only an admin may delete. With it on, `DELETE` unsubscribes the caller and leaves the feed for everyone else, and an admin passes `?purge=true` to delete it for everyone. A deleted feed, and one whose last subscriber leaves, is archived (`feeds.archived_at`, `backend/app/services/feed_archive.py`): it stops fetching and leaves every feed list, the reader and default search, and its articles and everything linked to them stay. They show on entity, country, sector and campaign article lists and in relationship evidence, and search reaches them with `is:archived`. Adding or subscribing to the feed again brings it back.
 
 **Exclude-title lists** are plain phrases, one per line, matched anywhere in the title, ignoring case. A line under 3 or over 200 characters, or more than 50 lines, returns 422 `invalid_title_filter`.
 
@@ -734,8 +734,9 @@ Entity types: `ttp`, `cve`, `threat_actor`, `malware`, `campaign`, `country`, `t
 | POST | `/api/entity-relationships/signals/{entity_type}` | Visitor | Body `{"ids": [...]}`: per id, the count and top 3 relationships. A POST because the id list is too long for a URL |
 | POST | `/api/entity-relationships` | User | Create one. Creating an existing one merges the evidence (200 instead of 201); re-creating a rejected one restores it |
 | PUT | `/api/entity-relationships/{relationship_id}` | User | Change verb, confidence, description or evidence |
-| POST | `/api/entity-relationships/{relationship_id}/confirm` | User | Mark it analyst-confirmed |
-| POST | `/api/entity-relationships/{relationship_id}/reject` | User | Mark it rejected (hidden, not deleted) |
+| GET | `/api/entity-relationships/{relationship_id}/evidence` | Admin | Each evidence article (up to 10) with the sentence behind the claim, and every review the edge has had |
+| POST | `/api/entity-relationships/{relationship_id}/confirm` | User | Mark it analyst-confirmed (recorded as an analyst keep) |
+| POST | `/api/entity-relationships/{relationship_id}/reject` | User | Mark it rejected (hidden, not deleted; recorded as an analyst demote) |
 | DELETE | `/api/entity-relationships/{relationship_id}` | User | Delete it. Prefer reject: after a delete, new articles can create it again |
 
 #### Entity Links
@@ -797,6 +798,7 @@ Proposed fixes to entity data wait in review queues. Every route here is Admin. 
 | Method | Path | What it does |
 | --- | --- | --- |
 | GET | `/api/admin/hygiene/feed` | Every proposal from both logs, newest first (`entity_type` + `entity_id` narrow it to one entity). `context=true` adds each row's article text around the match (at most 320 characters); the Review tab asks for it on one entity's rows |
+| GET | `/api/admin/hygiene/feed/{source}/{row_id}/evidence` | Everything behind one proposal: the article paragraph, the AI's reason, confidence and quote, the payload facts that decide it, an edge's articles and reviews, and earlier applied changes to the same entity |
 | GET | `/api/admin/hygiene/review-groups` | Every pending proposal, one row per entity, with what each kind wants done. Filters `action`, `origin`, `domain`, `entity_type`, `q`; `sort` = `newest` (default), `count`, `oldest` or `confidence`. `facets` gives proposals per domain and per origin under the other filters |
 | POST | `/api/admin/hygiene/decisions` | Decide many proposals in one call: `[{id: "<source>:<log_id>", decision: "apply" \| "dismiss" \| "reclassify:<type>"}]`, one result per row. A row an earlier decision already closed comes back `settled`; an apply with nothing left to do comes back `resolved` |
 | POST | `/api/admin/hygiene/review-groups/apply` | Apply what the filters show for the named groups (`items`), or for every group without `items`, up to `limit` rows; `has_more` says to call again, passing the `unapplied` rows back in `exclude` so nothing is tried twice. Type changes only with `include_reclassify`; assessments never |
@@ -828,6 +830,7 @@ Proposed fixes to entity data wait in review queues. Every route here is Admin. 
 | --- | --- | --- |
 | GET | `/api/engine/extraction/stats` | Totals for entities the AI created: by type, needing review, orphaned, likely duplicates |
 | GET | `/api/engine/extraction/entities` | List them with a status (linked, review, orphan, dupe) |
+| GET | `/api/engine/extraction/entities/{entity_type}/{entity_id}/evidence` | The entity's articles (the creating one first, then the newest links, 3 at most) with the paragraph naming it |
 | POST | `/api/engine/extraction/confirm` | Sign off on them |
 | POST | `/api/engine/extraction/not-duplicate` | Mark two entities as different things |
 | POST | `/api/engine/extraction/delete` | Delete entities (AI-created types plus vendor, product, country) with their links, relationships and pending proposals; unless `deny=false`, ban their names (countries are never banned) |

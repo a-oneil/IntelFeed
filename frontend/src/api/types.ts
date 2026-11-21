@@ -864,6 +864,8 @@ export interface Mitigation {
   wikipedia_image_url?: string | null;
   confidence?: string | null;
   source?: string | null;
+  /** The article's own wording of the advice (per-entry lists only). */
+  detail?: string | null;
 }
 
 export interface OffensiveTool {
@@ -1771,7 +1773,7 @@ export interface EntitySearchResult {
   relationship_source?: string;
   relationship_direction?: 'outbound' | 'inbound';
   relationship_description?: string | null;
-  relationship_adjudication?: 'corroborated' | 'coincidental' | 'unsure' | null;
+  relationship_adjudication?: 'kept' | 'corroborated' | 'disputed' | 'coincidental' | 'unsure' | null;
   relationship_evidence_count?: number;
   /** Ubiquitous vendors/products folded as reporting sources in context views. */
   context_role?: 'reporting_source';

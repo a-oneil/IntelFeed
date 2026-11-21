@@ -52,10 +52,13 @@ async def _refresh_counts():
         for s in searches:
             by_owner.setdefault(s.created_by, []).append(s)
 
+        # One Meilisearch scan per distinct search across every owner; the
+        # per-owner part (their read state) is a single Postgres count each.
+        hit_lists: dict[str, list[str]] = {}
         for owner_id, owned in by_owner.items():
             try:
                 # Caches to saved_search_counts:{owner_id} itself
-                await _compute_counts_inline(owned, owner_id, db)
+                await _compute_counts_inline(owned, owner_id, db, hit_lists)
             except Exception:
                 # One analyst's searches failing must not cost everyone else
                 # their refresh — the next run retries them.

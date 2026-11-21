@@ -168,8 +168,11 @@ def refresh_autolinker_vocabulary():
 
 
 async def _refresh_autolinker_vocabulary():
-    from app.intelligence.autolinker import refresh_vocabulary
+    from app.intelligence.autolinker import _clear_vocabulary_refresh_pending, refresh_vocabulary
 
+    # A change landing during this build queues the next one instead of being
+    # folded into a request that has already started.
+    await _clear_vocabulary_refresh_pending()
     async with _get_worker_session() as db:
         vocab_size = await refresh_vocabulary(db)
         logger.info("Auto-linker vocabulary refreshed: %d entries", vocab_size)

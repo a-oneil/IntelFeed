@@ -58,7 +58,7 @@ async def discover_my_channels(
         ) from e
 
     # Build a set of (channel_id) and (username) already subscribed
-    feed_rows = await db.execute(select(Feed).where(Feed.feed_type == "telegram"))
+    feed_rows = await db.execute(select(Feed).where(Feed.feed_type == "telegram", Feed.archived_at.is_(None)))
     subscribed_channel_ids: set[int] = set()
     subscribed_usernames: set[str] = set()
     feed_id_by_channel: dict[int, str] = {}
@@ -280,7 +280,7 @@ async def list_telegram_mentions(
     is_subscribed reflects current state even if the cached feed_id is stale.
     """
     # Which mentioned channels are already ingested, keyed by handle
-    feed_rows = await db.execute(select(Feed).where(Feed.feed_type == "telegram"))
+    feed_rows = await db.execute(select(Feed).where(Feed.feed_type == "telegram", Feed.archived_at.is_(None)))
     handle_to_feed: dict[str, str] = {}
     for f in feed_rows.scalars().all():
         cfg = f.adapter_config or {}
@@ -472,9 +472,17 @@ async def subscribe_to_telegram_mention(
     handle = ch.display_handle
     url = f"https://t.me/{handle}"
 
-    # Refuse to clobber an existing telegram feed at the same URL
-    existing = await db.execute(select(Feed).where(Feed.url == url))
-    if existing.scalar_one_or_none():
+    # Refuse to clobber an existing telegram feed at the same URL, unless it
+    # was deleted: then subscribing brings it back.
+    from app.services.feed_archive import revive_feed
+
+    existing = (await db.execute(select(Feed).where(Feed.url == url))).scalar_one_or_none()
+    if existing is not None and await revive_feed(db, existing, user.id):
+        ch.feed_id = existing.id
+        db.add(ch)
+        await db.commit()
+        return {"id": str(ch.id), "subscribed": True, "feed_id": str(existing.id), "url": url}
+    if existing is not None:
         raise AppError(
             code="conflict",
             message="A Telegram feed for this channel already exists.",

@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.security import get_admin_user
 from app.database import get_db
-from app.intelligence.autolinker import refresh_vocabulary
+from app.intelligence.autolinker import schedule_vocabulary_refresh
 from app.intelligence.correlation import ENTITY_CONFIG
 from app.intelligence.correlation_cache import invalidate_entity_cache
 from app.intelligence.entity_resolution import (
@@ -48,6 +48,7 @@ from app.models.threat_actor import ThreatActor
 from app.models.tool import Tool
 from app.models.ttp import TTP
 from app.models.user import User
+from app.schemas.review_evidence import EvidenceArticle
 from app.services.entity_indexer import delete_entity_document
 
 router = APIRouter()
@@ -78,12 +79,7 @@ _NO_DENY_TYPES = {"country"}
 _CONF_RANK = {"high": 3, "medium": 2, "low": 1}
 _WINDOW_DAYS = {"1h": 1 / 24, "24h": 1, "7d": 7, "30d": 30, "all": None}
 
-Status = Literal["linked", "review", "orphan", "dupe", "stale"]
-# A stale entity: one article at most, no relationship, and nothing seen for
-# this long. This used to be a weekly job that wrote flag rows; the adjudicate
-# stage made that job redundant, so stale is now a live filter.
-STALE_MAX_ARTICLES = 1
-STALE_IDLE_DAYS = 90
+Status = Literal["linked", "review", "orphan", "dupe"]
 
 
 class ExtractionEntity(BaseModel):
@@ -259,39 +255,19 @@ async def _fetch_rows(db: AsyncSession, types: list[str], window_start: datetime
     return rows
 
 
-async def _related_ids(db: AsyncSession, rows: list[dict]) -> set[uuid.UUID]:
-    """Entity ids that sit on at least one relationship edge (for the stale test)."""
-    from app.models.entity_relationship import EntityRelationship
-
-    ids = [r["id"] for r in rows if r["article_count"] <= STALE_MAX_ARTICLES]
-    if not ids:
-        return set()
-    related: set[uuid.UUID] = set()
-    for col in (EntityRelationship.source_id, EntityRelationship.target_id):
-        related.update((await db.execute(select(col).where(col.in_(ids)).distinct())).scalars().all())
-    return related
+def _is_orphan(row: dict) -> bool:
+    """No article links, though the article it came from still exists: every
+    link was removed, so either the removal or the entity is wrong. A deleted
+    source (its feed went) nulls created_from_entry_id, and the entity is kept
+    as intelligence already extracted, not queued for review."""
+    return row["article_count"] == 0 and row["created_from_entry_id"] is not None
 
 
-def _is_stale(row: dict, related: set[uuid.UUID], now: datetime) -> bool:
-    if row["article_count"] > STALE_MAX_ARTICLES or row["id"] in related:
-        return False
-    seen = row.get("last_seen_at") or row.get("first_seen_at")
-    if seen is None:
-        return False
-    if seen.tzinfo is None:
-        seen = seen.replace(tzinfo=UTC)
-    return (now - seen).days >= STALE_IDLE_DAYS
-
-
-def _status(
-    row: dict, dup: dict[str, str], related: set[uuid.UUID] | None = None, now: datetime | None = None
-) -> Status:
+def _status(row: dict, dup: dict[str, str]) -> Status:
     if str(row["id"]) in dup:
         return "dupe"
-    if row["article_count"] == 0:
+    if _is_orphan(row):
         return "orphan"
-    if related is not None and _is_stale(row, related, now or _now()):
-        return "stale"
     if row["needs_review"]:
         return "review"
     return "linked"
@@ -314,7 +290,6 @@ async def extraction_stats(
     now = _now()
     rows = await _fetch_rows(db, list(AI_TYPES), None, None)
     dup = await _duplicate_map(db, list(AI_TYPES))
-    related = await _related_ids(db, rows)
 
     win_start = None if days is None else now - timedelta(days=days)
     prev_start = None if days is None else now - timedelta(days=days * 2)
@@ -324,14 +299,14 @@ async def extraction_stats(
     created_window = created_prev = needs_review = orphaned = auto_confirmed = 0
     for r in rows:
         fs = r["first_seen_at"]
-        by_status[_status(r, dup, related, now)] += 1
+        by_status[_status(r, dup)] += 1
         if win_start is None or fs >= win_start:
             by_type[r["entity_type"]] += 1  # the list's window, so a type's count is what it opens
         if r["needs_review"]:
             needs_review += 1
         else:
             auto_confirmed += 1
-        if r["article_count"] == 0:
+        if _is_orphan(r):
             orphaned += 1
         if win_start is not None and fs >= win_start:
             created_window += 1
@@ -357,8 +332,8 @@ async def extraction_entities(
     types: str | None = Query(None, description="CSV of entity types to include; default all"),
     status: str = Query(
         "all",
-        pattern="^(all|linked|review|orphan|dupe|stale)$",
-        description="Filter by computed lifecycle status (linked, review, orphan, dupe, stale).",
+        pattern="^(all|linked|review|orphan|dupe)$",
+        description="Filter by computed lifecycle status (linked, review, orphan, dupe).",
     ),
     window: str = Query(
         "7d", pattern="^(1h|24h|7d|30d|all)$", description="Only entities first seen within this window."
@@ -388,11 +363,9 @@ async def extraction_entities(
     if source_entry_id is not None:
         rows = [r for r in rows if r["created_from_entry_id"] == source_entry_id]
     dup = await _duplicate_map(db, requested)
-    related = await _related_ids(db, rows)
-    now = _now()
 
     for r in rows:
-        r["status"] = _status(r, dup, related, now)
+        r["status"] = _status(r, dup)
         sibling = dup.get(str(r["id"]))
         r["duplicate_of"], r["duplicate_of_id"] = sibling if sibling else (None, None)
 
@@ -455,6 +428,67 @@ class ConfirmRequest(BaseModel):
             }
         }
     )
+
+
+_EVIDENCE_ARTICLES = 3
+
+
+@router.get("/entities/{entity_type}/{entity_id}/evidence", response_model=list[EvidenceArticle])
+async def entity_evidence(
+    entity_type: str,
+    entity_id: uuid.UUID,
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[EvidenceArticle]:
+    """The articles behind an entity in the Review lenses: the one it was
+    created from, then its newest links, each with the paragraph naming it."""
+    from app.api.hygiene import article_evidence
+    from app.models.entry import Entry
+
+    if entity_type not in ENTITY_CONFIG:
+        raise AppError(code="invalid", message=f"unknown entity type {entity_type}", status_code=400)
+    model, junction, fk_col = ENTITY_CONFIG[entity_type]
+    entity = await db.get(model, entity_id)
+    if entity is None:
+        raise AppError(code="not_found", message="Entity not found", status_code=404)
+    names = [
+        n
+        for n in (
+            getattr(entity, "name", None),
+            getattr(entity, "technique_name", None),
+            getattr(entity, "technique_id", None),
+            getattr(entity, "cve_id", None),
+            getattr(entity, "value", None),
+            getattr(entity, "label", None),
+            *(getattr(entity, "aliases", None) or []),
+        )
+        if isinstance(n, str) and n.strip()
+    ]
+    links = (
+        (
+            await db.execute(
+                select(junction)
+                .join(Entry, Entry.id == junction.entry_id)
+                .where(fk_col == entity_id)
+                .order_by(Entry.published_at.desc().nulls_last())
+                .limit(_EVIDENCE_ARTICLES)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_entry = {link.entry_id: link for link in links}
+    created_from = getattr(entity, "created_from_entry_id", None)
+    order = list(dict.fromkeys([e for e in (created_from, *by_entry) if e]))[:_EVIDENCE_ARTICLES]
+    out: list[EvidenceArticle] = []
+    for entry_id in order:
+        link = by_entry.get(entry_id)
+        needles = [*(getattr(link, "matched_names", None) or []), *names]
+        indices = list(getattr(link, "paragraph_indices", None) or [])
+        article = await article_evidence(db, entry_id, list(dict.fromkeys(needles)), indices)
+        if article is not None:
+            out.append(article)
+    return out
 
 
 @router.post("/confirm")
@@ -628,10 +662,12 @@ async def extraction_delete(
 
     await db.commit()
 
-    # The vocabulary is built from live entities — rebuild so the autolinker
-    # stops matching what we just removed instead of waiting for the next sync.
+    # The vocabulary is built from live entities — queue a rebuild so the
+    # autolinker stops matching what we just removed within seconds, not at the
+    # next sync. Queued rather than inline: a bulk clean-up sends one request per
+    # row, and each inline build was ten seconds of CPU on the event loop.
     if rows:
-        await refresh_vocabulary(db)
+        await schedule_vocabulary_refresh(db)
 
     return {"deleted": len(rows), "denied": denied}
 
@@ -737,7 +773,7 @@ async def extraction_denylist_add(
     if not written:
         raise AppError(code="bad_request", message="Name normalizes to nothing", status_code=422)
     await db.commit()
-    await refresh_vocabulary(db)
+    await schedule_vocabulary_refresh(db)
 
     row = await db.scalar(
         select(EntityNameDenylist).where(
@@ -763,4 +799,4 @@ async def extraction_denylist_remove(
     await db.delete(row)
     await sync_fp_names(db, remove=[display_name])
     await db.commit()
-    await refresh_vocabulary(db)
+    await schedule_vocabulary_refresh(db)

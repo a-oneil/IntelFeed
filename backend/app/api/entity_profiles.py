@@ -226,7 +226,7 @@ class CountryCreate(BaseModel):
 
 
 class MitigationCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=255)
+    name: str | None = Field(None, max_length=255)
     mitre_id: str | None = None
     description: str | None = None
     mitre_url: str | None = None
@@ -819,45 +819,32 @@ async def create_mitigation_manual(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Manually create a mitigation and optionally link it to an entry."""
-    if body.mitre_id:
-        result = await db.execute(select(Mitigation).where(func.upper(Mitigation.mitre_id) == body.mitre_id.upper()))
-    else:
-        result = await db.execute(select(Mitigation).where(func.lower(Mitigation.name) == body.name.lower()))
-    mitigation = result.scalar_one_or_none()
-    is_new = mitigation is None
+    """Link an ATT&CK catalog mitigation, optionally to an entry.
 
-    if is_new:
-        mitigation = Mitigation(
-            name=body.name,
-            mitre_id=body.mitre_id,
-            description=body.description,
-            mitre_url=body.mitre_url,
+    Only catalog mitigations are entities (see app/intelligence/mitigation.py),
+    so this resolves `mitre_id` or the exact catalog name and never creates a
+    row; anything else is a 400. `description` is kept on the entry link as
+    the article's own wording, not written over the catalog description.
+    """
+    from app.intelligence.mitigation import resolve_catalog_mitigation
+
+    mitigation = await resolve_catalog_mitigation(db, body.mitre_id, body.name)
+    if mitigation is None:
+        raise AppError(
+            code="bad_request",
+            message="Not an ATT&CK mitigation: use a catalog M-ID (e.g. M1017) or its exact name",
+            status_code=400,
         )
-        db.add(mitigation)
-        await db.flush()
-        await db.refresh(mitigation)
-    else:
-        if body.description:
-            mitigation.description = body.description
-        if body.mitre_url:
-            mitigation.mitre_url = body.mitre_url
 
     if body.entry_id:
-        existing_link = await db.execute(
-            select(EntryMitigation).where(
-                EntryMitigation.entry_id == body.entry_id,
-                EntryMitigation.mitigation_id == mitigation.id,
-            )
-        )
-        if not existing_link.scalar_one_or_none():
-            db.add(EntryMitigation(entry_id=body.entry_id, mitigation_id=mitigation.id))
+        detail = (body.description or "").strip()[:500] or None
+        link = await db.get(EntryMitigation, (body.entry_id, mitigation.id))
+        if link is None:
+            db.add(EntryMitigation(entry_id=body.entry_id, mitigation_id=mitigation.id, source="manual", detail=detail))
+        elif detail and not link.detail:
+            link.detail = detail
 
     await db.flush()
-    await db.refresh(mitigation)
-
-    if is_new:
-        dispatch_entity_backlink("mitigation", str(mitigation.id))
 
     return {
         "id": str(mitigation.id),
@@ -1413,11 +1400,11 @@ async def deny_entity_name(
     names = deniable_names(entity_type, entity)
     denied = await deny_entity_names(db, entity_type, names, reason="Deleted from the entity profile")
     await db.commit()
-    # The names now sit in the autolinker's false-positive list — rebuild so the
-    # vocabulary drops them immediately rather than at the next sync.
-    from app.intelligence.autolinker import refresh_vocabulary
+    # The names now sit in the autolinker's false-positive list — queue a rebuild
+    # so the vocabulary drops them within seconds rather than at the next sync.
+    from app.intelligence.autolinker import schedule_vocabulary_refresh
 
-    await refresh_vocabulary(db)
+    await schedule_vocabulary_refresh(db)
     return DenyNameResponse(denied=denied, names=names)
 
 
@@ -2337,8 +2324,8 @@ async def get_entity_field_provenance(
 # ENTITY_MODEL_MAP lives in app/services/entity_summary.py so the
 # assessment-backfill worker can share it without importing the API layer.
 
-# link_entity_to_existing_entries() also supports "mitigation" (name+alias
-# search) — ENTITY_MODEL_MAP above omits it because it's scoped to
+# link_entity_to_existing_entries() also supports "mitigation" (M-ID search,
+# catalog rows only) — ENTITY_MODEL_MAP above omits it because it's scoped to
 # Wikipedia-relevant types, not because rescan doesn't apply.
 # Sectors are summarizable (ENTITY_MODEL_MAP) but never autolinked, so there is
 # nothing to rescan for one — the gate below returns 400 rather than handing the

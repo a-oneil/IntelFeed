@@ -482,7 +482,7 @@ It uses the same three-tier match as coverage (`get_available_telemetry()` and `
 Two link tables in `backend/app/models/mitigation.py`:
 
 - **`TTPMitigation`**: `ttp_id`, `mitigation_id`, `created_at`. Which mitigations address which techniques (from ATT&CK).
-- **`EntryMitigation`**: `entry_id`, `mitigation_id`, `confidence`, `source` (`regex` or `ai`), `extracted_at`, `paragraph_indices`. Which articles mention which mitigations.
+- **`EntryMitigation`**: `entry_id`, `mitigation_id`, `confidence`, `source` (`regex`, `ai`, `manual`, or `auto_link` for an M-ID backlink), `extracted_at`, `paragraph_indices`, `detail` (the article's own wording). Which articles recommend which ATT&CK catalog mitigations. A recommendation that fits no catalog mitigation creates nothing.
 
 ### MITRE ATT&CK Integration
 

@@ -318,6 +318,14 @@ class Settings(BaseSettings):
     merge_review_min_similarity: float = 0.55
     merge_review_min_confidence: str = "medium"  # high | medium | low
     merge_review_retry_days: int = 30
+    # Edge sweep (services/relationship_sweep.py): open relationship claims
+    # judged against all their articles. shadow records answers only.
+    relationship_sweep_mode: str = "shadow"  # off | shadow | apply
+    relationship_sweep_batch_size: int = 30
+    relationship_sweep_min_age_hours: int = 24
+    relationship_sweep_retry_days: int = 30
+    relationship_sweep_min_confidence: str = "high"  # high | medium | low
+    relationship_sweep_actions: str = ""  # comma list of keep, correct, hide; empty = none
     adjudication_content_max_chars: int = 8000
     adjudication_scope: str = "links,entities,relationships,observables"
     # ICS/OT context keywords — ICS-matrix (T0xxx) ATT&CK techniques are only
@@ -386,6 +394,8 @@ class Settings(BaseSettings):
     relationship_reliability_high_multiplier: float = 1.15
     relationship_reliability_low_multiplier: float = 0.85
     graph_max_neighbors_per_node: int = 30
+    # Most recent linked entries a pivot or graph reads per entity.
+    correlation_max_entries: int = 2000
     graph_max_claim_edges: int = 300
     # Feed intel-value scoring weights (normalized to sum 1.0 at compute time)
     feed_value_weight_entity_yield: float = 0.25

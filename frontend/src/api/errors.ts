@@ -23,7 +23,24 @@ export function hasErrorEnvelope(err: unknown): boolean {
   return !!(err as { response?: { data?: { error?: unknown } } })?.response?.data?.error;
 }
 
+/**
+ * True when the browser gave up waiting (axios `timeout`), as opposed to the
+ * server answering with an error. Axios sets `ECONNABORTED` for its own
+ * deadline and `ETIMEDOUT` for a socket one; the message check covers an
+ * error that was rewrapped on the way up and lost its code.
+ */
+export function isTimeout(err: unknown): boolean {
+  const e = err as { code?: unknown; message?: unknown; response?: unknown } | null;
+  if (!e || typeof e !== "object" || e.response) return false;
+  if (e.code === "ECONNABORTED" || e.code === "ETIMEDOUT") return true;
+  return typeof e.message === "string" && /^timeout of \d+ms exceeded/i.test(e.message);
+}
+
+/** The plain reading of a timeout, instead of axios's "timeout of 15000ms exceeded". */
+export const TIMEOUT_MESSAGE = "The server took too long to respond. Try again in a moment.";
+
 export function apiErrorInfo(err: unknown): ApiErrorInfo {
+  if (isTimeout(err)) return { code: "timeout", message: TIMEOUT_MESSAGE, details: null };
   const data = (err as { response?: { data?: { error?: { code?: string; message?: string; details?: unknown } } } })
     ?.response?.data;
   if (data?.error) {

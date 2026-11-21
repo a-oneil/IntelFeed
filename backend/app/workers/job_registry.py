@@ -168,6 +168,26 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         # the ai worker so the daily batch paces itself.
         "default_schedule": {"type": "crontab", "minute": "45", "hour": "5"},
     },
+    "review-relationships": {
+        "settings_keys": [
+            "relationship_sweep_mode",
+            "relationship_sweep_batch_size",
+            "relationship_sweep_min_age_hours",
+            "relationship_sweep_retry_days",
+            "relationship_sweep_min_confidence",
+            "relationship_sweep_actions",
+        ],
+        "task": "app.workers.relationship_sweep_tasks.sweep_relationships",
+        "description": (
+            "Judge the relationship claims the per-article review left open, one claim at a time with "
+            "passages from up to four of its articles. In shadow mode the answers are only recorded; in "
+            "apply mode a stated claim is kept, a wrong verb or direction corrected, and an unstated "
+            "claim hidden. Waits while the AI queue is deep."
+        ),
+        "category": "intelligence",
+        "uses_ai": True,
+        "default_schedule": {"type": "interval", "seconds": 1800},
+    },
     "review-duplicate-entities": {
         "settings_keys": [
             "merge_review_batch_size",
@@ -446,7 +466,10 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "task": "app.workers.saved_search_tasks.refresh_saved_search_counts",
         "description": "Refresh match counts and dispatch alerts for saved searches",
         "category": "saved_searches",
-        "default_schedule": {"type": "crontab", "minute": "*/5"},
+        # Each distinct query is one Meilisearch scan (up to 5,000 ids); the
+        # counts cache outlives two runs, so a slow run never leaves the
+        # sidebar computing them inline.
+        "default_schedule": {"type": "crontab", "minute": "*/15"},
     },
     "sync-campaign-saved-searches": {
         "task": "app.workers.saved_search_tasks.sync_campaign_saved_searches",

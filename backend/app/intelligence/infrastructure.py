@@ -23,6 +23,7 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.intelligence.relationship_matrix import shown_relationship_condition
 from app.models.campaign import Campaign, CampaignEntry
 from app.models.entity_relationship import EntityRelationship
 from app.models.entry import Entry
@@ -80,7 +81,7 @@ async def _claimed(db: AsyncSession, entity_type: str, entity_id: uuid.UUID, lim
                 EntityRelationship.source_type == entity_type,
                 EntityRelationship.source_id == entity_id,
                 EntityRelationship.target_type == "observable",
-                EntityRelationship.source != "analyst_rejected",
+                shown_relationship_condition(),
                 Observable.is_denied.is_(False),
             )
             .order_by(Observable.last_seen_at.desc())
@@ -252,7 +253,7 @@ async def get_observable_backlinks(db: AsyncSession, observable_id: uuid.UUID, *
             .where(
                 EntityRelationship.target_type == "observable",
                 EntityRelationship.target_id == observable_id,
-                EntityRelationship.source != "analyst_rejected",
+                shown_relationship_condition(),
             )
             .order_by(EntityRelationship.updated_at.desc())
             .limit(limit)

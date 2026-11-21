@@ -195,7 +195,7 @@ These filter articles.
 | `tag:` | `tag:critical` | |
 | `type:` | `type:rss`, `type:youtube`, `type:podcast` | Feed type |
 | `date:` | `date:>2026-03-01`, `date:2026-01..2026-03` | |
-| `is:` | `is:starred`, `is:unread`, `is:read`, `is:bookmarked`, `is:noted`, `is:muted`, `is:translated`, `is:image` | |
+| `is:` | `is:starred`, `is:unread`, `is:read`, `is:bookmarked`, `is:noted`, `is:muted`, `is:archived`, `is:translated`, `is:image` | |
 | `media:` | `media:audio`, `media:video`, `media:image`, `media:document` | |
 | `lang:` | `lang:en` | |
 | `signal:` | `signal:under_reported`, `signal:kev_added`, `signal:novel_entity` | Why the signal engine ranked the article |

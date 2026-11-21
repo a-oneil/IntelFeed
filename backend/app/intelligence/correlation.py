@@ -11,7 +11,11 @@ from sqlalchemy import String, cast, func, or_, select, type_coerce
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.intelligence.cve import risk_tier_for
-from app.intelligence.relationship_matrix import hidden_relationship_confidences, is_allowed_relationship
+from app.intelligence.relationship_matrix import (
+    hidden_relationship_confidences,
+    is_allowed_relationship,
+    shown_relationship_condition,
+)
 from app.models.campaign import Campaign
 from app.models.country import Country, EntryCountry
 from app.models.cve import CVE, EntryCVE
@@ -153,11 +157,24 @@ async def get_entity(db: AsyncSession, entity_type: str, entity_id: uuid.UUID):
     return result.scalar_one_or_none()
 
 
-async def _get_entry_ids_for_entity(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> list[uuid.UUID]:
-    """Get all entry IDs linked to an entity via its junction table.
+def _correlation_entry_cap() -> int:
+    from app.config import settings as env_settings
+
+    return int(env_settings.get("correlation_max_entries") or 2000)
+
+
+async def _get_entry_ids_for_entity(
+    db: AsyncSession, entity_type: str, entity_id: uuid.UUID, limit: int | None = None
+) -> list[uuid.UUID]:
+    """Get the entry IDs linked to an entity via its junction table.
 
     For a visitor, only entries in feeds shown to visitors, and no campaign's:
     every pivot, graph and relationship count is built from this list.
+
+    `limit` keeps the most recently published entries. Pivot and graph pass
+    `correlation_max_entries`: a generic entity linked to thousands of articles
+    otherwise feeds thousands of ids into every per-type query and holds the
+    whole evidence set in one api worker's memory.
     """
     from app.core.public_access import viewer_is_anonymous
     from app.services.public_view import visible_entries_only
@@ -167,11 +184,21 @@ async def _get_entry_ids_for_entity(db: AsyncSession, entity_type: str, entity_i
             return []
         from app.models.campaign import CampaignEntry
 
-        result = await db.execute(select(CampaignEntry.entry_id).where(CampaignEntry.campaign_id == entity_id))
-        return [row[0] for row in result.all()]
+        junction, fk_col = CampaignEntry, CampaignEntry.campaign_id
+    else:
+        _, junction, fk_col = ENTITY_CONFIG[entity_type]
 
-    _, junction, fk_col = ENTITY_CONFIG[entity_type]
-    stmt = visible_entries_only(select(junction.entry_id).where(fk_col == entity_id), junction.entry_id)
+    if limit is not None:
+        # Joining Entry brings the visitor filter in (see visible_entries_only).
+        stmt = (
+            select(junction.entry_id)
+            .join(Entry, Entry.id == junction.entry_id)
+            .where(fk_col == entity_id)
+            .order_by(Entry.published_at.desc().nullslast())
+            .limit(limit)
+        )
+    else:
+        stmt = visible_entries_only(select(junction.entry_id).where(fk_col == entity_id), junction.entry_id)
     result = await db.execute(stmt)
     return [row[0] for row in result.all()]
 
@@ -862,7 +889,7 @@ async def _claimed_observables(db: AsyncSession, entity_type: str, entity_id: uu
         .where(
             EntityRelationship.source_type == entity_type,
             EntityRelationship.source_id == entity_id,
-            EntityRelationship.source != "analyst_rejected",
+            shown_relationship_condition(),
             Observable.is_denied.is_(False),
         )
     )
@@ -886,7 +913,7 @@ async def _get_manual_relationships(db: AsyncSession, entity_type: str, entity_i
             (EntityRelationship.source_type == entity_type) & (EntityRelationship.source_id == entity_id),
             (EntityRelationship.target_type == entity_type) & (EntityRelationship.target_id == entity_id),
         ),
-        EntityRelationship.source != "analyst_rejected",
+        shown_relationship_condition(),
     )
     hidden = hidden_relationship_confidences()
     if hidden:
@@ -988,7 +1015,7 @@ async def pivot_from_entity(
     if not entity:
         return {}
 
-    entry_ids = await _get_entry_ids_for_entity(db, entity_type, entity_id)
+    entry_ids = await _get_entry_ids_for_entity(db, entity_type, entity_id, limit=_correlation_entry_cap())
 
     # Prefetch entry metadata once — it powers the strength components in each
     # of the 9 per-type related queries plus the evidence window filter.
@@ -1026,8 +1053,9 @@ async def pivot_from_entity(
             .distinct(Entry.content_hash)
             .order_by(Entry.content_hash, Entry.created_at.asc())
         ).subquery()
+        # Columns, not Entry rows: a row carries the article body.
         entry_result = await db.execute(
-            select(Entry)
+            select(Entry.id, Entry.title, Entry.url, Entry.published_at, Entry.created_at, Entry.feed_id)
             .where(
                 or_(
                     Entry.content_hash.is_(None),
@@ -1046,7 +1074,7 @@ async def pivot_from_entity(
                 "created_at": _dt(e.created_at),
                 "feed_id": str(e.feed_id),
             }
-            for e in entry_result.scalars().all()
+            for e in entry_result.all()
         ]
 
         # Corpus size for the specificity (IDF) damping — memoized per process.
@@ -1452,7 +1480,7 @@ async def build_entity_graph(
         if current_depth <= 0:
             return
 
-        entry_ids = await _get_entry_ids_for_entity(db, etype, eid)
+        entry_ids = await _get_entry_ids_for_entity(db, etype, eid, limit=_correlation_entry_cap())
         if window_days and entry_ids:
             cutoff = datetime.now(UTC) - timedelta(days=window_days)
             win_result = await db.execute(select(Entry.id).where(Entry.id.in_(entry_ids), Entry.published_at >= cutoff))
@@ -2866,6 +2894,30 @@ async def _passes_theme_floor(db: AsyncSession, evidence_entry_ids: list[uuid.UU
     return verdict is not False
 
 
+async def _analysis_supersedes(
+    db: AsyncSession, entry_id: uuid.UUID, id_a: uuid.UUID, id_b: uuid.UUID, verb: str
+) -> bool:
+    """True when this article's analysis already states the pair with a verb
+    the guess defers to ("attributed_to" over "targets"). The analysis
+    retires such a guess when it lands second (retire_superseded_cooccurrence);
+    this is the same rule when it landed first, or the stage is re-run."""
+    from app.intelligence.enrichment import _SUPERSEDED_COOCCURRENCE_VERBS
+
+    verbs = (
+        await db.execute(
+            select(EntityRelationship.relationship_type).where(
+                EntityRelationship.source != "co_occurrence",
+                EntityRelationship.evidence_entry_ids.any(entry_id),
+                or_(
+                    (EntityRelationship.source_id == id_a) & (EntityRelationship.target_id == id_b),
+                    (EntityRelationship.source_id == id_b) & (EntityRelationship.target_id == id_a),
+                ),
+            )
+        )
+    ).scalars()
+    return any((verb, stated) in _SUPERSEDED_COOCCURRENCE_VERBS for stated in verbs)
+
+
 async def create_cooccurrence_relationships(
     db: AsyncSession,
     entry_id: uuid.UUID,
@@ -2874,10 +2926,21 @@ async def create_cooccurrence_relationships(
 
     Queries all junction tables for the given entry and upserts an
     EntityRelationship (source='co_occurrence') for each pair named in the same
-    paragraph, where that paragraph is neither boilerplate nor a list.
+    paragraph, where that paragraph is neither boilerplate nor a list, and
+    whose type pair COOCCURRENCE_RELATIONSHIP_MAP gives a verb.
+
+    The verb is a guess from the two types, right about a third of the time
+    (labelled sample, 2026-11-20), so an edge is drawn only from an article
+    the adjudicator will review: it reads the sentence and keeps, corrects or
+    demotes the claim. An article from a feed with AI analysis off, or whose
+    plan skips the review, draws nothing.
 
     Returns the count of new or updated relationships.
     """
+    from app.services.entry_adjudication import entry_gets_edge_review
+
+    if not await entry_gets_edge_review(db, entry_id):
+        return 0
     # 1. Gather all entities linked to this entry with their paragraph_indices
     entity_refs: list[tuple[str, uuid.UUID, list[int] | None]] = []
 
@@ -2927,7 +2990,11 @@ async def create_cooccurrence_relationships(
         if not ((para_a & para_b) - crowded):
             continue
 
-        src_type, src_id, tgt_type, tgt_id, rel_type, _mapped = _directed_pair(type_a, id_a, type_b, id_b)
+        src_type, src_id, tgt_type, tgt_id, rel_type, mapped = _directed_pair(type_a, id_a, type_b, id_b)
+        # A pair the map has no verb for would be "related_to": co-mention
+        # restated as a claim (tool related_to ttp from detection-rule tags).
+        if not mapped:
+            continue
         # Pairs outside the semantic allowlist (country↔cve, country↔tool, …)
         # are never stored, no matter how close the co-mention.
         if not is_allowed_relationship(src_type, rel_type, tgt_type):
@@ -2981,6 +3048,8 @@ async def create_cooccurrence_relationships(
                 ):
                     rel.confidence = "probable"
         else:
+            if await _analysis_supersedes(db, entry_id, src_id, tgt_id, rel_type):
+                continue
             # New edges always start at "possible" — probable is earned by
             # corroboration, never granted on first sight.
             db.add(

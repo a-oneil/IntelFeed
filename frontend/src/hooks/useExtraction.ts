@@ -1,8 +1,9 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import api from "@/api/client";
+import type { EvidenceArticle } from "@/hooks/useHygiene";
 
-export type ExtractionStatus = "linked" | "review" | "orphan" | "dupe" | "stale";
+export type ExtractionStatus = "linked" | "review" | "orphan" | "dupe";
 export type ExtractionType = "threat_actor" | "malware" | "tool" | "cve" | "ttp" | "observable";
 
 export interface ExtractionEntity {
@@ -341,5 +342,19 @@ export function useRemoveDenylistEntry() {
       await api.delete(`/engine/extraction/denylist/${id}`);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["extraction", "denylist"] }),
+  });
+}
+
+/** The articles behind an entity in the Review lenses: its creating article
+ * first, then its newest links, each with the paragraph naming it. */
+export function useEntityEvidence(entityType: string, entityId: string | null) {
+  return useQuery({
+    queryKey: ["extraction", "evidence", entityType, entityId],
+    queryFn: async () => {
+      const { data } = await api.get<EvidenceArticle[]>(`/engine/extraction/entities/${entityType}/${entityId}/evidence`);
+      return data;
+    },
+    enabled: !!entityId,
+    staleTime: 60 * 1000,
   });
 }

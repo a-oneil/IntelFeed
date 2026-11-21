@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, SmallInteger, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, SmallInteger, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,6 +20,9 @@ class Mitigation(Base):
     cis_controls: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     nist_controls: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     article_count: Mapped[int] = mapped_column(Integer, default=1)
+    # Owned by the ATT&CK import (attack_catalog.py). Only catalog rows are
+    # linked to articles; see app/intelligence/mitigation.py.
+    is_catalog: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", index=True)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     wikipedia_url: Mapped[str | None] = mapped_column(Text)
@@ -44,6 +47,8 @@ class EntryMitigation(Base):
     source: Mapped[str | None] = mapped_column(String(20))  # regex | ai
     extracted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     paragraph_indices: Mapped[list[int] | None] = mapped_column(ARRAY(SmallInteger), nullable=True)
+    # The article's own wording of the advice ("upgrade X to 1.3.2").
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
     entry = relationship("Entry", back_populates="entry_mitigations")
