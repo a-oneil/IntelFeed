@@ -439,6 +439,29 @@ async def enqueue_adjudication(
     return await _write(PENDING)
 
 
+async def entry_gets_edge_review(db: AsyncSession, entry_id: uuid.UUID) -> bool:
+    """Whether a review will ever read this article's relationship claims:
+    the stage is on and judges relationships, the feed's plan runs it, and
+    the AI analysis it reviews will run. Co-occurrence draws no edge from an
+    article that fails this: nobody would check its verb."""
+    from app.models.entry import Entry
+    from app.models.feed import Feed
+    from app.pipeline.plans import resolve_feed_plan
+    from app.services.ai_eligibility import entry_will_get_ai_analysis
+
+    cfg = await _settings(db)
+    if cfg["mode"] == "off" or "relationships" not in cfg["scope"]:
+        return False
+    feed = (
+        await db.execute(select(Feed).join(Entry, Entry.feed_id == Feed.id).where(Entry.id == entry_id))
+    ).scalar_one_or_none()
+    if feed is not None:
+        plan = await resolve_feed_plan(db, feed)
+        if plan is not None and not plan.get("adjudicate", {}).get("enabled", True):
+            return False
+    return await entry_will_get_ai_analysis(db, entry_id)
+
+
 def dispatch_adjudication(entry_id: uuid.UUID | str, countdown: int = 5) -> None:
     """Queue the review task on the ai queue. Call after the enqueue decision
     has been committed."""

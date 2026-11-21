@@ -248,40 +248,62 @@ async def test_cooccurrence_respects_rejected(db_session, test_entry, test_threa
 
 
 @pytest.mark.asyncio
-async def test_cooccurrence_suppresses_weak_unmapped_pairs(db_session, test_feed):
+async def test_cooccurrence_draws_nothing_for_a_pair_with_no_verb(db_session, test_feed):
+    """(tool, ttp) has no verb in the map: a "related_to" from the same
+    paragraph is co-mention restated as a claim (detection-rule tags, mostly)."""
     tool = Tool(name="TestTool")
     ttp = TTP(technique_id="T9999", technique_name="Test Technique")
     db_session.add_all([tool, ttp])
     await db_session.flush()
-
-    # Adjacent paragraphs → proximity 0.5, below the strong threshold: an
-    # unmapped (tool, ttp) pair earns no generic related_to edge.
-    weak = Entry(feed_id=test_feed.id, title="weak", guid="cooc-weak", url="https://example.com/w")
-    db_session.add(weak)
+    entry = Entry(feed_id=test_feed.id, title="strong", guid="cooc-strong", url="https://example.com/s")
+    db_session.add(entry)
     await db_session.flush()
     db_session.add_all(
         [
-            EntryTool(entry_id=weak.id, tool_id=tool.id, paragraph_indices=[0]),
-            EntryTTP(entry_id=weak.id, ttp_id=ttp.id, paragraph_indices=[1]),
+            EntryTool(entry_id=entry.id, tool_id=tool.id, paragraph_indices=[2]),
+            EntryTTP(entry_id=entry.id, ttp_id=ttp.id, paragraph_indices=[2]),
         ]
     )
     await db_session.flush()
-    assert await create_cooccurrence_relationships(db_session, weak.id) == 0
+    assert await create_cooccurrence_relationships(db_session, entry.id) == 0
 
-    # Same paragraph → proximity 1.0: kept as related_to.
-    strong = Entry(feed_id=test_feed.id, title="strong", guid="cooc-strong", url="https://example.com/s")
-    db_session.add(strong)
+
+@pytest.mark.asyncio
+async def test_cooccurrence_draws_nothing_from_an_article_nobody_reviews(
+    db_session, test_feed, test_threat_actor, malware_row, monkeypatch
+):
+    from app.services import entry_adjudication as adj
+
+    async def entry(guid):
+        e = Entry(feed_id=test_feed.id, title=guid, guid=guid, url=f"https://example.com/{guid}")
+        db_session.add(e)
+        await db_session.flush()
+        db_session.add_all(
+            [
+                EntryThreatActor(entry_id=e.id, threat_actor_id=test_threat_actor.id, paragraph_indices=[0]),
+                EntryMalware(entry_id=e.id, malware_family_id=malware_row.id, paragraph_indices=[0]),
+            ]
+        )
+        await db_session.flush()
+        return e
+
+    # The feed's AI analysis is off: no analysis, so no review of the verb.
+    test_feed.ai_analysis_enabled = False
     await db_session.flush()
-    db_session.add_all(
-        [
-            EntryTool(entry_id=strong.id, tool_id=tool.id, paragraph_indices=[2]),
-            EntryTTP(entry_id=strong.id, ttp_id=ttp.id, paragraph_indices=[2]),
-        ]
-    )
+    assert await create_cooccurrence_relationships(db_session, (await entry("cooc-ai-off")).id) == 0
+
+    # The review stage is off.
+    test_feed.ai_analysis_enabled = True
     await db_session.flush()
-    assert await create_cooccurrence_relationships(db_session, strong.id) == 1
-    rel = (await db_session.execute(select(EntityRelationship))).scalars().one()
-    assert (rel.source_type, rel.relationship_type, rel.target_type) == ("tool", "related_to", "ttp")
+    real = adj._settings
+
+    async def stage_off(db):
+        return {**(await real(db)), "mode": "off"}
+
+    monkeypatch.setattr(adj, "_settings", stage_off)
+    assert await create_cooccurrence_relationships(db_session, (await entry("cooc-stage-off")).id) == 0
+    monkeypatch.setattr(adj, "_settings", real)
+    assert await create_cooccurrence_relationships(db_session, (await entry("cooc-reviewed")).id) == 1
 
 
 @pytest.mark.asyncio
