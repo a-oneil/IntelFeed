@@ -58,6 +58,9 @@ export type ReviewLens = (typeof REVIEW_LENSES)[number];
 const ENTITY_LENS_STATUS = { unconfirmed: "review", duplicates: "dupe", orphans: "orphan", stale: "stale" } as const;
 type EntityLens = keyof typeof ENTITY_LENS_STATUS;
 const isEntityLens = (l: ReviewLens): l is EntityLens => l in ENTITY_LENS_STATUS;
+// Lenses that show their count but stay out of the tab badge and the "to
+// review" chip: backlogs to browse, not a queue that has to reach zero.
+const UNBADGED_LENSES: ReadonlySet<ReviewLens> = new Set(["unconfirmed", "relationships"]);
 const REVIEW_LENS_LABELS: Record<ReviewLens, string> = {
   proposals: "Proposals",
   unconfirmed: "Unconfirmed",
@@ -618,7 +621,7 @@ export function EngineMatrix({
 
   const failingFeeds = feedHealth?.erroring_feeds?.length ?? 0;
 
-  // What each Review lens is waiting on; the tab's badge is their sum.
+  // What each Review lens is waiting on; the tab's badge sums the badged ones.
   const reviewLensCount = (l: ReviewLens): number | undefined =>
     l === "proposals"
       ? hygieneStats?.pending_total
@@ -627,7 +630,8 @@ export function EngineMatrix({
         : isEntityLens(l)
           ? extractionStats?.by_status?.[ENTITY_LENS_STATUS[l]]
           : undefined;
-  const reviewTotal = REVIEW_LENSES.reduce((sum, l) => sum + (reviewLensCount(l) ?? 0), 0);
+  const badgedLenses = REVIEW_LENSES.filter((l) => !UNBADGED_LENSES.has(l));
+  const reviewTotal = badgedLenses.reduce((sum, l) => sum + (reviewLensCount(l) ?? 0), 0);
 
   // The queues that need a person. Each chip is a filter on the table: the
   // ones with `active` light up while their view+filter is showing and clear
@@ -664,11 +668,11 @@ export function EngineMatrix({
       onClick: () => {
         switchView("review");
         // The first lens with something in it, so the click never lands on an empty list.
-        setReviewLens(REVIEW_LENSES.find((l) => (reviewLensCount(l) ?? 0) > 0) ?? "proposals");
+        setReviewLens(badgedLenses.find((l) => (reviewLensCount(l) ?? 0) > 0) ?? "proposals");
       },
       hint: {
         title: "To review",
-        body: "Everything waiting on a person: the adjudicator's and the scans' proposals, unconfirmed, duplicate, orphaned and stale AI-created entities, and relationship edges nobody has judged.",
+        body: "The adjudicator's and the scans' proposals, and duplicate, orphaned and stale AI-created entities. Unconfirmed entities and unjudged relationships have their own lenses under Review and are not counted here.",
         aside: "The same count as the Review tab.",
       },
     },

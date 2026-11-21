@@ -80,10 +80,14 @@ describe("EngineMatrix", () => {
     expect(screen.queryByTestId("stage-panel")).toBeNull();
   });
 
-  it("counts every Review lens on the Review tab, with no separate duplicates chip", () => {
+  it("counts the Review lenses on the Review tab, except unconfirmed and unjudged edges", () => {
     renderMatrix();
-    // 3 dupe + 4 review + 2 orphan + 1 stale + 5 unjudged edges.
-    expect(tab("Review")).toHaveTextContent("Review15");
+    // 3 dupe + 2 orphan + 1 stale; the 4 unconfirmed and 5 unjudged edges keep their lens counts only.
+    expect(tab("Review")).toHaveTextContent("Review6");
+    expect(screen.getByText(/to review/).textContent).toContain("6");
+    fireEvent.click(tab("Review"));
+    expect(screen.getByRole("button", { name: /^Unconfirmed4/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Relationships5/ })).toBeInTheDocument();
     expect(screen.queryByText(/duplicate candidates/)).toBeNull();
   });
 
@@ -92,9 +96,9 @@ describe("EngineMatrix", () => {
     expect(screen.queryByText(/to reclassify/)).toBeNull();
     expect(screen.queryByText(/adjudication verdicts/)).toBeNull();
     fireEvent.click(screen.getByText(/to review/));
-    // Proposals is empty here (no hygiene stats), so it opens Unconfirmed.
+    // Proposals is empty here (no hygiene stats) and Unconfirmed isn't counted, so it opens Duplicates.
     expect(new URL(window.location.href).searchParams.get("view")).toBe("review");
-    expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "review");
+    expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "dupe");
   });
 
   it("opens the duplicate candidates as a Review lens, over all time", () => {
