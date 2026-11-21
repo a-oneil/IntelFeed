@@ -56,7 +56,7 @@ def _get_blocked_forms() -> frozenset[str]:
 
     Separate from :func:`_get_fp_names` because that list is a curated vocabulary
     of ambiguous codenames and brand words (``windows``, ``chrome``, ``microsoft``)
-    that vendor/product/tool/mitigation intentionally bypass — those words are
+    that vendor/product/tool intentionally bypass — those words are
     those entities' real names. This list is written only when an analyst
     explicitly reports "never match this word", so it binds everywhere.
     """
@@ -216,7 +216,7 @@ def pending_tier_enabled() -> bool:
 # same words ARE the canonical names of vendor/product entities (Microsoft,
 # Windows, Chrome, …), so these types bypass it. The is_ambiguous +
 # uppercase-first check at match time still prevents lowercase prose matches.
-_FP_LIST_EXEMPT_TYPES = frozenset({"vendor", "product", "tool", "mitigation"})
+_FP_LIST_EXEMPT_TYPES = frozenset({"vendor", "product", "tool"})
 
 
 def _surface_form_filtered(entity_type: str, form: str) -> bool:
@@ -328,7 +328,7 @@ def split_into_paragraphs(title: str, summary: str, content_text: str) -> list[t
 
 @dataclass
 class VocabEntry:
-    entity_type: str  # threat_actor, malware, country, vendor, product, tool, mitigation
+    entity_type: str  # threat_actor, malware, country, vendor, product, tool
     entity_id: uuid.UUID
     canonical_name: str
     surface_form: str  # The text being matched (name or alias)
@@ -367,9 +367,14 @@ class EntityVocabulary:
         vendors: list[Vendor] | None = None,
         products: list[Product] | None = None,
         tools: list[Tool] | None = None,
-        mitigations: list[Mitigation] | None = None,
     ) -> int:
-        """Build Aho-Corasick automaton from entity names and aliases."""
+        """Build Aho-Corasick automaton from entity names and aliases.
+
+        Mitigations are not in it: their catalog names ("Audit", "User
+        Training") are ordinary English, so a name match is almost never a
+        mention of the ATT&CK mitigation. Their links come from AI analysis
+        and explicit M-IDs (app/intelligence/mitigation.py).
+        """
         self.automaton = ahocorasick.Automaton()
         self._fingerprints = []
         count = 0
@@ -391,10 +396,6 @@ class EntityVocabulary:
 
         for tool in tools or []:
             count += self._add_entity("tool", tool.id, tool.name, tool.aliases or [])
-
-        # Mitigations have no aliases column; match on the canonical name only.
-        for mitigation in mitigations or []:
-            count += self._add_entity("mitigation", mitigation.id, mitigation.name, [])
 
         if count > 0:
             self.automaton.make_automaton()
@@ -1015,8 +1016,6 @@ def scan_text(text_or_paragraphs: str | list[tuple[int, str]]) -> list[dict]:
                     # Frequency gate only applies to actor/malware-style codenames
                     # (e.g. "Storm", "Agent") — for vendor/product/tool proper
                     # nouns, high frequency means the article is about that entity.
-                    # Mitigations stay gated: a generic word like "Audit" repeated
-                    # in prose is noise, not a mention of the MITRE mitigation.
                     if vocab_entry.entity_type not in ("vendor", "product", "tool"):
                         term_lower = vocab_entry.surface_form.lower()
                         if combined_lower.count(term_lower) > max_occurrences:
@@ -1436,27 +1435,6 @@ async def store_autolink_matches(
                 await _bump_entity_stats(db, Tool, tool_id)
                 stored.append(match)
 
-            elif entity_type == "mitigation":
-                # EntryMitigation has no matched_names column — surface forms are
-                # carried in the returned match for the description/summary linkers.
-                mitigation_id = uuid.UUID(match["entity_id"])
-                result = await db.execute(
-                    pg_insert(EntryMitigation)
-                    .values(
-                        entry_id=entry_id,
-                        mitigation_id=mitigation_id,
-                        confidence=_weighted_confidence(match["confidence"], source_confidence_weight),
-                        source="auto_link",
-                        paragraph_indices=para_indices,
-                    )
-                    .on_conflict_do_nothing()
-                    .returning(EntryMitigation.entry_id)
-                )
-                if not result.scalar_one_or_none():
-                    continue
-                await _bump_entity_stats(db, Mitigation, mitigation_id)
-                stored.append(match)
-
             elif entity_type == "cve":
                 lookup_key = match.get("lookup_key")
                 if not lookup_key:
@@ -1851,18 +1829,15 @@ async def _rebuild_vocabulary(db: AsyncSession) -> tuple[int, list]:
     tools_result = await db.execute(select(Tool))
     tools = tools_result.scalars().all()
 
-    mitigations_result = await db.execute(select(Mitigation))
-    mitigations = mitigations_result.scalars().all()
-
     vocab = EntityVocabulary()
     # Pure CPU (Aho-Corasick over every name and alias) with nothing to await:
     # inline, it froze the event loop — and every other request on this worker
     # — for the whole build. The rows are fully loaded, so the thread only reads
     # plain attributes and never touches the session.
     count = await asyncio.to_thread(
-        vocab.build_from_entities, actors, malware_families, countries, vendors, products, tools, mitigations
+        vocab.build_from_entities, actors, malware_families, countries, vendors, products, tools
     )
-    loaded = [*actors, *malware_families, *countries, *vendors, *products, *tools, *mitigations]
+    loaded = [*actors, *malware_families, *countries, *vendors, *products, *tools]
 
     _vocabulary = vocab
     _vocab_version = vocab.version
@@ -2022,7 +1997,8 @@ async def link_entity_to_existing_entries(
     - cve: CVE ID pattern search
     - cwe: weakness ID pattern search
     - ttp: technique ID pattern search
-    - tool, mitigation: name + aliases text search
+    - tool: name + aliases text search
+    - mitigation: M-ID search, catalog rows only (names are ordinary English)
     """
     stats = {"scanned": 0, "linked": 0, "entity_type": entity_type}
 
@@ -2099,9 +2075,9 @@ async def _link_entity_to_existing_entries_inner(
         entity = (await db.execute(select(Mitigation).where(Mitigation.id == entity_id))).scalar_one_or_none()
         if not entity:
             return {**stats, "error": "entity_not_found"}
-        search_terms = [entity.name]
-        if entity.mitre_id:
-            search_terms.append(entity.mitre_id)
+        if not entity.is_catalog or not entity.mitre_id:
+            return stats
+        search_terms = [entity.mitre_id]
     elif entity_type == "cve":
         entity = (await db.execute(select(CVE).where(CVE.id == entity_id))).scalar_one_or_none()
         if not entity:

@@ -1379,9 +1379,9 @@ function MitigationList({ mitigations, entryId, hasExtracted, readOnly }: { miti
             {m.mitre_id && <Chip className={styles.typeBadge}>{m.mitre_id}</Chip>}
             <span className={styles.entityName}>{m.name}</span>
           </div>
-          {m.description && (
+          {(m.detail || m.description) && (
             <div className={styles.entityCardDesc}>
-              {m.description.length > 150 ? m.description.slice(0, 150) + "..." : m.description}
+              {m.detail || (m.description!.length > 150 ? m.description!.slice(0, 150) + "..." : m.description)}
             </div>
           )}
           <div className={styles.entityCardMeta}>

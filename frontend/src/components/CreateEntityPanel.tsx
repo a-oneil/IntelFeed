@@ -224,10 +224,10 @@ export function CreateEntityPanel({ entryId, initialText, initialType, onClose, 
         onCreated?.("country", result.id);
         navigate(`/workbench/country/${result.id}`);
       } else if (entityType === "mitigation") {
-        if (!name.trim()) { setError("Name is required"); return; }
+        if (!name.trim() && !mitreId.trim()) { setError("An ATT&CK M-ID or mitigation name is required"); return; }
         const result = await createMitigation.mutateAsync({
-          name: name.trim(),
-          mitre_id: mitreId || undefined,
+          name: name.trim() || undefined,
+          mitre_id: mitreId.trim() || undefined,
           description: description || undefined,
           entry_id: entryId || undefined,
         });
@@ -446,18 +446,21 @@ export function CreateEntityPanel({ entryId, initialText, initialType, onClose, 
 
         {entityType === "mitigation" && (
           <>
+            <p className={styles.optional}>Mitigations come from the MITRE ATT&CK catalog. Enter its M-ID or exact name.</p>
             <label className={styles.label}>
-              Name
-              <input className={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Network Segmentation" autoFocus />
+              ATT&CK ID
+              <input className={styles.input} value={mitreId} onChange={(e) => setMitreId(e.target.value)} placeholder="e.g. M1030" autoFocus />
             </label>
             <label className={styles.label}>
-              MITRE ID <span className={styles.optional}>(optional)</span>
-              <input className={styles.input} value={mitreId} onChange={(e) => setMitreId(e.target.value)} placeholder="e.g. M1030" />
+              Name <span className={styles.optional}>(or)</span>
+              <input className={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Network Segmentation" />
             </label>
-            <label className={styles.label}>
-              Description <span className={styles.optional}>(optional)</span>
-              <textarea className={styles.textarea} value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
-            </label>
+            {entryId && (
+              <label className={styles.label}>
+                What the article recommends <span className={styles.optional}>(optional)</span>
+                <textarea className={styles.textarea} value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+              </label>
+            )}
           </>
         )}
 

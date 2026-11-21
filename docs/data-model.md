@@ -244,8 +244,9 @@ Table `mitigations`: MITRE ATT&CK mitigations.
 - `mitre_id` (String 20, unique) — for example `M1036`
 - `name`, `description`, `mitre_url`
 - `cis_controls`, `nist_controls` (Text[])
+- `is_catalog` (Boolean) — set by the ATT&CK import (Enterprise, ICS, Mobile). Only catalog rows are linked to articles: `store_mitigations` (`backend/app/intelligence/mitigation.py`) maps each recommendation the AI finds, or each M-ID in the text, to a catalog row and never creates one
 
-Linked to TTPs through `ttp_mitigations`.
+Linked to TTPs through `ttp_mitigations`. Linked to articles through `entry_mitigations`, whose `detail` (Text) holds the article's own wording of the advice ("upgrade Lara Dashboard to 1.3.2 or later") on its link to the catalog mitigation it falls under (Update Software).
 
 #### Tool
 Table `tools`: any named software. That includes attack tools, defensive tools, ordinary software, online services and AI models. The AI only creates new rows for software an attacker uses; the other kinds come from imports and analysts, and the AI links to them once they exist.

@@ -56,7 +56,7 @@ Settings → Engine → *autolink* stage panel. These control the dictionary sca
 | `autolinker_min_name_length` | int, `3` | Names shorter than this are never matched. |
 | `autolinker_ambiguous_name_max_length` | int, `10` | A one-word, letters-only name up to this length must appear **capitalised** to match. So "Royal" the actor matches *Royal ransomware* but not *the royal family*. |
 | `autolinker_ambiguous_max_occurrences` | int, `3` | If such a name appears more than this many times in one article, it is skipped there. Heavy repetition usually means an ordinary word. |
-| `autolinker_false_positive_names` | csv, about 120 names | Names never matched: common words, malware category words, brand words, Windows built-ins and known bad aliases. Applies **only to actor, malware and country** matches, because vendor, product, tool and mitigation names often are brand words. Edited as a table on the panel, or via `GET/POST/DELETE /api/engine/autolink/fp-names`. |
+| `autolinker_false_positive_names` | csv, about 120 names | Names never matched: common words, malware category words, brand words, Windows built-ins and known bad aliases. Applies **only to actor, malware and country** matches, because vendor, product and tool names often are brand words. Edited as a table on the panel, or via `GET/POST/DELETE /api/engine/autolink/fp-names`. |
 | `autolinker_blocked_surface_forms` | csv, empty | Words an analyst blocked with the reader's *Wrong? → never match this word*. Applies to **every** entity type. Managed from the reader and the autolink panel. |
 | `autolink_pending_tier_enabled` | bool, `true` | Actor, malware, tool and country matches whose only matched words are ordinary dictionary words are held for the AI to confirm, not linked at once. If the feed has AI analysis off, nothing could confirm them, so they are dropped. Off links them straight away. |
 
@@ -235,6 +235,7 @@ How close two entity mentions are, by paragraph. Formula: `1 / (1 + decay_rate �
 | `relationship_specificity_weight` | float, `0.5` | How much a very common entity (one that appears everywhere, like a big vendor) is pushed down related lists. `0` off, `1` full. |
 | `relationship_reporting_source_specificity` | float, `0.45` | Vendors and products below this specificity are treated as *reporting sources* (the company that wrote the report) and grouped separately on profiles. |
 | `graph_max_neighbors_per_node` | int, `30` | Most neighbours shown per node in an entity graph. |
+| `correlation_max_entries` | int, `2000` | Most recent linked articles a pivot or graph reads per entity. Co-occurrence counts on an entity linked to more articles than this cover only the most recent ones. |
 | `graph_max_claim_edges` | int, `300` | Most relationship edges in one graph, most trusted first. |
 | `correlation_cache_ttl_seconds` | int, `3600` | Seconds correlation results stay cached (`correlation_cache.py`). The `refresh-correlation-cache` job refills it hourly at :10. |
 

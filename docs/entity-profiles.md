@@ -41,7 +41,7 @@ Every profile — actors, malware, CVEs, CWEs, TTPs, countries, sectors, tools, 
 
 | Source | How | What it fills |
 |---|---|---|
-| Autolinker | Dictionary scan at ingest (`backend/app/intelligence/autolinker.py`), with junk-alias and LOLBin filtering | Entry links for actors, malware, countries, vendors, products, tools, mitigations |
+| Autolinker | Dictionary scan at ingest (`backend/app/intelligence/autolinker.py`), with junk-alias and LOLBin filtering | Entry links for actors, malware, countries, vendors, products, tools |
 | Regex and AI extraction | `CVE-YYYY-NNNN` and `TNNNN(.NNN)` regex; one-pass AI analysis | CVE and TTP links, new entities, sectors, indicators |
 | NVD / EPSS / KEV / GitHub PoC | Scheduled syncs ([entries.md](entries.md#beat-scheduled-enrichment)) | CVE scores, exploit status, affected products |
 | MITRE ATT&CK / Malpedia / Wikipedia | Weekly syncs | TTP details and mitigations; actor and malware descriptions and aliases |

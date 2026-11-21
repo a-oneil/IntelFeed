@@ -78,7 +78,7 @@ When an entry has a translation, the autolinker and the extract stage scan the o
 
 The autolinker matches text against a dictionary of every known entity name and alias, using an Aho-Corasick automaton (one pass over the text finds every dictionary word in it).
 
-**The vocabulary.** `EntityVocabulary` (`backend/app/intelligence/autolinker.py:350`) loads the name and aliases of every threat actor, malware family, country, vendor, product and tool, plus mitigation names (mitigations have no aliases). Names shorter than `autolinker_min_name_length` (default 3) are skipped, as are names the false-positive lists rule out.
+**The vocabulary.** `EntityVocabulary` (`backend/app/intelligence/autolinker.py:350`) loads the name and aliases of every threat actor, malware family, country, vendor, product and tool. Mitigations are left out: their ATT&CK names ("Audit", "User Training") are ordinary English, so their article links come from the AI analysis and explicit M-IDs instead. Names shorter than `autolinker_min_name_length` (default 3) are skipped, as are names the false-positive lists rule out.
 
 **Keeping workers in sync.** Each worker process holds its own copy. The vocabulary's version is a hash of its contents, published to Redis under `intelfeed:autolinker:vocab_version`. Before a scan, `_ensure_vocabulary()` compares its local version with Redis and rebuilds on a mismatch. The `refresh-autolinker-vocabulary` job rebuilds every 30 minutes, and denying a name or curating extractions queues that job on the worker about ten seconds later (`schedule_vocabulary_refresh()`; a burst of changes within that window becomes one build, keyed on `intelfeed:autolinker:vocab_refresh_pending`). A request never builds the vocabulary itself: a build loads seven tables and compiles a 34,000-form automaton, around ten seconds of CPU, and each process compiles its own copy in a thread so other requests keep being served. A brand-new entity therefore starts matching new articles within 30 minutes.
 
@@ -139,7 +139,7 @@ Other stages add more intelligence after (or beside) the autolinker:
 
 Five rules stop common words from becoming links:
 
-1. **False-positive name list** (`autolinker_false_positive_names`). A curated list of common words, brand names, Windows built-in tools and junk aliases ("storm", "windows", "certutil", "page", …). It applies to actor, malware and country names. Vendor, product, tool and mitigation names skip it, because many of them really are those words (Microsoft, Norton).
+1. **False-positive name list** (`autolinker_false_positive_names`). A curated list of common words, brand names, Windows built-in tools and junk aliases ("storm", "windows", "certutil", "page", …). It applies to actor, malware and country names. Vendor, product and tool names skip it, because many of them really are those words (Microsoft, Norton).
 2. **Analyst blocks** (`autolinker_blocked_surface_forms`). Words an analyst marked "never match this" from the reader. These apply to every entity type.
 3. **Case rules** for short single words and multi-word names (steps 3 and 4 of the scan above). "fox" in "Firefox" or lowercase prose does not match the "Fox" entity.
 4. **Repeat limit** for those short words (also step 3).
@@ -333,7 +333,7 @@ Each related entity carries a **strength** score from 0 to 1, made of three part
 | Closeness | Mean of the top 3 per-article proximity scores | `relationship_weight_closeness` (0.40) |
 | Recency | Decays with `relationship_recency_half_life_days` (90) since the newest evidence | `relationship_weight_recency` (0.15) |
 
-**Proximity** for one article (`_compute_proximity_score`, `backend/app/intelligence/correlation.py:179`) is `1 / (1 + proximity_decay_rate × d)`, where `d` is the smallest paragraph distance between the two entities. Same paragraph = 1.0, one apart = 0.5, five apart ≈ 0.17. With no paragraph data it is `proximity_default_score` (0.3).
+**Proximity** for one article (`_compute_proximity_score`, `backend/app/intelligence/correlation.py:202`) is `1 / (1 + proximity_decay_rate × d)`, where `d` is the smallest paragraph distance between the two entities. Same paragraph = 1.0, one apart = 0.5, five apart ≈ 0.17. With no paragraph data it is `proximity_default_score` (0.3).
 
 Adjustments:
 
@@ -343,7 +343,7 @@ Adjustments:
 
 ### Timeline Construction
 
-`GET /api/intelligence/timeline/{entity_type}/{entity_id}` (`entity_timeline()`, `backend/app/intelligence/correlation.py:2354`) merges, by date: linked articles (one per duplicate story), correlation events, enrichment runs, detection rules created, typed relationships and campaign membership.
+`GET /api/intelligence/timeline/{entity_type}/{entity_id}` (`entity_timeline()`, `backend/app/intelligence/correlation.py:2378`) merges, by date: linked articles (one per duplicate story), correlation events, enrichment runs, detection rules created, typed relationships and campaign membership.
 
 ### Typed relationships
 
