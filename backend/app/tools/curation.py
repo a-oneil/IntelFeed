@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 from typing import get_args
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.entity_links import LINK_CONFIGS
@@ -140,6 +140,14 @@ async def _get_entity_link_stats(db: AsyncSession, user_id: uuid.UUID) -> dict:
     return (await _route(user=None, db=db)).model_dump()
 
 
+async def _username(db: AsyncSession, user_id: uuid.UUID) -> str:
+    """Who a tool unlink is logged under: the copilot, an agent and the CLI
+    all call tools as a user."""
+    from app.models.user import User
+
+    return (await db.execute(select(User.username).where(User.id == user_id))).scalar_one_or_none() or str(user_id)
+
+
 @_tool(
     name="unlink_entity_from_entry",
     description=(
@@ -172,7 +180,8 @@ async def _unlink_entity_from_entry(
     if isinstance(ety_uuid, dict):
         return ety_uuid
 
-    ok = await _delete_link(db, LinkRef(entity_type=entity_type, entity_id=ent_uuid, entry_id=ety_uuid))
+    ref = LinkRef(entity_type=entity_type, entity_id=ent_uuid, entry_id=ety_uuid)
+    ok = await _delete_link(db, ref, by=await _username(db, user_id), where="with the unlink_entity_from_entry tool")
     if not ok:
         return {"error": "Link not found"}
     await db.flush()
@@ -227,9 +236,10 @@ async def _bulk_unlink_entities(db: AsyncSession, user_id: uuid.UUID, items: lis
             return ety
         refs.append(LinkRef(entity_type=etype, entity_id=ent, entry_id=ety))
 
+    by = await _username(db, user_id)
     deleted = 0
     for ref in refs:
-        if await _delete_link(db, ref):
+        if await _delete_link(db, ref, by=by, where="with the bulk_unlink_entities tool"):
             deleted += 1
     await db.flush()
     return {"deleted": deleted, "requested": len(refs)}
@@ -510,10 +520,10 @@ async def _get_extraction_stats(db: AsyncSession, user_id: uuid.UUID, window: st
     name="list_extraction_entities",
     description=(
         "List AI-created entities (created_via='ai_extraction') with a computed lifecycle status: linked "
-        "(in use), review (needs analyst sign-off), orphan (zero articles), or dupe (near-duplicate sibling "
-        "exists, with duplicate_of naming it). Filterable by type, status, creation window, text search and "
-        "source entry; sorted and paginated. Includes provenance: created_confidence, needs_review, "
-        "created_from_entry_id and the source entry title."
+        "(in use), review (needs analyst sign-off), orphan (every article link removed, its source article "
+        "still there), or dupe (near-duplicate sibling exists, with duplicate_of naming it). Filterable by "
+        "type, status, creation window, text search and source entry; sorted and paginated. Includes "
+        "provenance: created_confidence, needs_review, created_from_entry_id and the source entry title."
     ),
     input_schema={
         "properties": {

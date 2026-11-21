@@ -297,8 +297,9 @@ Audit trail for automatic entity maintenance: merges, alias and description chan
 - `ai_result_id` (SET NULL), `applied`
 
 #### EntityLinkValidationLog
-Table `entity_link_validation_log`: one row per decision about a link between an entry and an actor, malware family, vendor, product or country.
-- The adjudicate stage writes `shadow_remove` and `needs_reclassification` in shadow mode, and `removed` in apply mode.
+Table `entity_link_validation_log`: one row per decision about a link between an entry and an entity.
+- The adjudicate stage writes `shadow_remove` and `needs_reclassification` in shadow mode, and `removed` in apply mode, for actor, malware family, vendor, product and country links.
+- Every hand unlink writes `removed` too, for any linkable type except observables, with a `reason` naming the user and where it happened: an article page (`DELETE /api/entries/{id}/<type>/{entity_id}`), Engine › Autolinking (`DELETE /api/entity-links/...`, `POST /api/entity-links/bulk-unlink`), or the `unlink_entity_from_entry` / `bulk_unlink_entities` tools (`unlink_and_log`, `backend/app/intelligence/link_validation_apply.py`).
 - An analyst restore writes `restored` (via `POST /api/admin/hygiene/link-log/{id}/restore` or the adjudication undo).
 
 Each row keeps a copy of the junction row so a removal can be undone. A `restored` row from the last 90 days stops the adjudicator from changing that link again. This guard reads this table, so it only protects those five link types.

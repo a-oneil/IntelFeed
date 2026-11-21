@@ -27,7 +27,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Body, Depends, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import and_, case, false, func, literal, or_, select, true, tuple_
+from sqlalchemy import and_, case, false, func, literal, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.entity_merge import (
@@ -37,6 +37,7 @@ from app.api.entity_merge import (
 from app.core.exceptions import AppError
 from app.core.security import get_admin_user, get_current_user
 from app.database import get_db
+from app.intelligence.link_validation_apply import HAND_UNLINK_PREFIX
 from app.models.ai_result import AIResult
 from app.models.ai_task import AITask
 from app.models.campaign import CampaignEntity
@@ -617,8 +618,8 @@ ADJUDICATOR_ALIAS_KIND = "adjudicator"
 PROPOSAL_ORIGINS = (ORIGIN_ADJUDICATOR, ORIGIN_MERGE_REVIEW, ORIGIN_SCAN)
 _ORIGIN_HELP = (
     "'adjudicator' = rows the post-analysis adjudicate stage filed with the article in hand (every link-log "
-    "row, the retired link validator's included); 'merge_review' = the catalogue-wide duplicate review; "
-    "'scan' = the on-demand scans. Omit for all."
+    "row but a hand unlink, the retired link validator's included); 'merge_review' = the catalogue-wide "
+    "duplicate review; 'scan' = the on-demand scans. Omit for all."
 )
 
 
@@ -665,8 +666,12 @@ def _maint_origin_clause(origin: str):
 def _link_origin_clause(origin: str):
     """The origin facet as a link-log predicate. Every link-log proposal is
     the adjudicator's: the stage files them, and the ones the retired link
-    validator left are its to settle too."""
-    return true() if origin == ORIGIN_ADJUDICATOR else false()
+    validator left are its to settle too. A hand unlink is nobody's proposal,
+    so it is under no origin (it shows when the facet is off)."""
+    if origin != ORIGIN_ADJUDICATOR:
+        return false()
+    reason = EntityLinkValidationLog.reason
+    return or_(reason.is_(None), ~reason.startswith(HAND_UNLINK_PREFIX, autoescape=True))
 
 
 _LINK_VALIDATOR_ACTIONS = {"shadow_remove", "removed", "restored", "needs_reclassification"}
@@ -1368,7 +1373,7 @@ async def hygiene_feed(
                 },
                 actions=_row_actions_link(r),
                 links=links,
-                origin=ORIGIN_ADJUDICATOR,
+                origin=None if (r.reason or "").startswith(HAND_UNLINK_PREFIX) else ORIGIN_ADJUDICATOR,
                 domain=proposal_domain("link_validator", r.action),
                 confidence=r.verdict_confidence,
             )

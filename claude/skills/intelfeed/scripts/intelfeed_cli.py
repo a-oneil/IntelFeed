@@ -3019,11 +3019,11 @@ TOOLS: dict[str, dict] = {
     "list_extraction_entities": {
         "description": (
             "List AI-created entities (created_via='ai_extraction') with a computed lifecycle status: "
-            "linked (in use), review (needs analyst sign-off), orphan (zero articles), or dupe "
-            "(near-duplicate sibling exists, with duplicate_of naming it). Filterable by type, "
-            "status, creation window, text search and source entry; sorted and paginated. Includes "
-            "provenance: created_confidence, needs_review, created_from_entry_id and the source entry "
-            "title."
+            "linked (in use), review (needs analyst sign-off), orphan (every article link removed, "
+            "its source article still there), or dupe (near-duplicate sibling exists, with "
+            "duplicate_of naming it). Filterable by type, status, creation window, text search and "
+            "source entry; sorted and paginated. Includes provenance: created_confidence, "
+            "needs_review, created_from_entry_id and the source entry title."
         ),
         "params": {
             "types": {
@@ -3033,7 +3033,7 @@ TOOLS: dict[str, dict] = {
             "status": {
                 "type": 'str',
                 "default": 'all',
-                "enum": ['all', 'linked', 'review', 'orphan', 'dupe', 'stale'],
+                "enum": ['all', 'linked', 'review', 'orphan', 'dupe'],
             },
             "window": {
                 "type": 'str',

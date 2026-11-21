@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -1704,6 +1705,7 @@ async def _ioc_items(db: AsyncSession, entry, text: str = "", parsed: dict | Non
                 kind="ioc",
                 line=line,
                 name=obs.value,
+                forms=[f for f in (sighting.surface_form, obs.label) if f],
                 ioc_kind=obs.kind,
                 ioc_value=obs.value,
                 observable_id=obs.id,
@@ -1972,6 +1974,47 @@ def _reason_names_item(reason: str, item: ReviewItem) -> bool:
     return False
 
 
+_HASH_PREFIX = 6
+# The words a reason uses for an indicator of a kind ("the MD5 hash", "the
+# script"): enough to name it when it is the only one of its kind under review.
+_IOC_KIND_WORDS = {
+    "md5": ("hash", "md5"),
+    "sha1": ("hash", "sha1", "sha 1"),
+    "sha256": ("hash", "sha256", "sha 256"),
+    "script": ("script", "snippet", "code"),
+    "ipv4": ("ip", "address"),
+    "ipv6": ("ip", "address"),
+    "domain": ("domain", "host", "hostname"),
+    "url": ("url", "link"),
+    "uri_path": ("path", "uri", "url"),
+}
+
+
+def _reason_names_ioc(reason: str, item: ReviewItem, alone: bool = False) -> bool:
+    """A drop of a captured indicator must name it too: its value, plain or
+    defanged, the form the article printed, a hash's first six characters
+    ("fbff21…"), or a script's label. When it is the only captured indicator
+    of its kind in the review, its kind will do ("the MD5 hash is a test
+    vector"): nothing else could be meant. A drop argued over "NFT gifts"
+    filed against three script hashes, or one reason filed against four IPs
+    without naming any, names nothing and is discarded."""
+    value = item.ioc_value or item.name
+    said = _norm_words(reason)
+    for form in [value, *item.forms]:
+        pattern = _value_pattern(form or "")
+        if pattern is not None and pattern.search(reason):
+            return True
+        words = _norm_words(form or "")
+        if words.strip() and words in said:
+            return True
+    if re.fullmatch(r"[0-9a-f]{32,}", (value or "").lower()) and value.lower()[:_HASH_PREFIX] in reason.lower():
+        return True
+    if alone:
+        kind = item.ioc_kind or ""
+        return any(f" {w} " in said for w in (*_IOC_KIND_WORDS.get(kind, ()), kind) if w)
+    return False
+
+
 # A reason that argues FOR the record it is filed against ("… explicitly
 # states MANTLEMAZE uses Cairn, validating the edge") paired the wrong
 # verdict with it. A negation shortly before the phrase ("never states",
@@ -2043,6 +2086,7 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
     malformed or out of place is a keep. A duplicate item_id voids the whole
     response (all keep), the same rule the one-pass path uses."""
     by_id = {it.item_id: it for it in items}
+    ioc_kinds = Counter(it.ioc_kind for it in items if it.kind == "ioc" and not it.staged)
     raw = result.get("verdicts")
     # unknown: item ids not in the manifest; coerced: verdicts the item's kind
     # or state does not accept (treated as keep).
@@ -2110,6 +2154,15 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
             # their own item (or not against it), so they are not explicit.
             explicit = True
             if verdict in ("remove", "demote", "link") and not _reason_names_item(reason, item):
+                verdict, explicit = "keep", False
+                stats["unnamed_reason"] += 1
+            elif (
+                verdict == "drop"
+                and not item.staged
+                and not _reason_names_ioc(reason, item, ioc_kinds[item.ioc_kind] == 1)
+            ):
+                # Candidates are exempt, as from the copied-reason check: one
+                # reason fits many of them, and a drop there removes no data.
                 verdict, explicit = "keep", False
                 stats["unnamed_reason"] += 1
             elif verdict in DESTRUCTIVE and _reason_affirms(reason):
@@ -2586,9 +2639,12 @@ async def _demote_edge(db: AsyncSession, edge_id: uuid.UUID, reason: str) -> dic
 
 async def _drop_ioc(db: AsyncSession, entry, kind: str, value: str, observable_id: uuid.UUID | None) -> dict | None:
     """A candidate → remove it from the entry's candidate list; a captured
-    value → remove this entry's sighting and recount the ledger row."""
+    value → remove this entry's sighting and recount the ledger row. A row a
+    model captured that is left with no sighting is tombstoned: exact-match
+    sighting would otherwise attach it to the next article that prints it."""
     from app.intelligence.observables import recount_observable
-    from app.models.observable import EntryObservable
+    from app.models.observable import STATUS_EXPIRED, VIA_ADJUDICATOR, VIA_AI, VIA_TTP, EntryObservable, Observable
+    from app.services.entity_indexer import delete_entity_document
 
     before = list(entry.observable_candidates or [])
     dropped = [c for c in before if isinstance(c, dict) and c.get("kind") == kind and c.get("value") == value]
@@ -2618,6 +2674,20 @@ async def _drop_ioc(db: AsyncSession, entry, kind: str, value: str, observable_i
             await db.delete(sighting)
             await db.flush()
             await recount_observable(db, observable_id)
+            obs = await db.get(Observable, observable_id)
+            if obs is not None:
+                await db.refresh(obs, ["sighting_count"])
+            if (
+                obs is not None
+                and not obs.is_denied
+                and not obs.sighting_count
+                and obs.created_via in (VIA_AI, VIA_TTP, VIA_ADJUDICATOR)
+            ):
+                snap["tombstoned"] = {"status": obs.status}
+                obs.is_denied = True
+                obs.status = STATUS_EXPIRED
+                db.add(obs)
+                delete_entity_document(OBSERVABLE, observable_id)
     return snap or None
 
 
@@ -3761,8 +3831,17 @@ async def restore_adjudication_row(db: AsyncSession, row) -> dict:
                 entry.observable_candidates = cands
                 db.add(entry)
         sighting = before.get("sighting")
+        if not sighting and not before.get("candidate") and row.entity_id:
+            # A drop from before sightings were snapshotted: put the bare
+            # sighting back rather than report a restore that changed nothing.
+            sighting = {"observable_id": str(row.entity_id)}
         if sighting and sighting.get("observable_id"):
             obs = await db.get(Observable, uuid.UUID(sighting["observable_id"]))
+            if obs is not None and before.get("tombstoned") and obs.is_denied:
+                # The drop tombstoned the row with its last sighting.
+                obs.is_denied = False
+                obs.status = before["tombstoned"].get("status") or obs.status
+                db.add(obs)
             if obs is not None:
                 await record_sighting(
                     db,

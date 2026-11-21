@@ -5,7 +5,9 @@ on an entry after the one-pass analysis has landed and acts on the verdicts
 through these primitives: the junction specs, the ``LinkRow`` snapshot
 shape, and the mutation/audit writes into ``entity_link_validation_log``.
 ``restore_from_log`` is the undo for a ``removed`` row, used by the Proposals
-queue and the entry drawer.
+queue and the entry drawer. ``unlink_and_log`` is the same removal for an
+analyst, an agent or a tool unlinking by hand, so every removed link has a
+``removed`` row that History shows and Restore can undo.
 """
 
 import logging
@@ -17,10 +19,17 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.country import Country, EntryCountry
+from app.models.cve import CVE, EntryCVE
+from app.models.cwe import CWE, EntryCWE
 from app.models.entity_link_validation_log import EntityLinkValidationLog
+from app.models.entry_sector import EntrySector
 from app.models.malware_family import EntryMalware, MalwareFamily
+from app.models.mitigation import EntryMitigation, Mitigation
 from app.models.product import EntryProduct, Product
+from app.models.sector import Sector
 from app.models.threat_actor import EntryThreatActor, ThreatActor
+from app.models.tool import EntryTool, Tool
+from app.models.ttp import TTP, EntryTTP
 from app.models.vendor import EntryVendor, Vendor
 
 logger = logging.getLogger(__name__)
@@ -34,6 +43,27 @@ JUNCTION_SPECS: list[tuple[type, type, str, str]] = [
     (EntryCountry, Country, "country_id", "country"),
 ]
 ENTITY_TYPES = {label: (jmodel, emodel, fk) for jmodel, emodel, fk, label in JUNCTION_SPECS}
+
+# A hand unlink's reason starts with this, which is how the origin facet
+# tells it from the adjudicator's removals in the same log.
+HAND_UNLINK_PREFIX = "Unlinked by "
+
+# Every type a link can be removed from by hand, with the entity column the log
+# names it by. Restore covers the same set; a junction without source,
+# confidence or matched_names just leaves those snapshot columns empty.
+UNLINK_SPECS: dict[str, tuple[type, type, str, object]] = {
+    "threat_actor": (EntryThreatActor, ThreatActor, "threat_actor_id", ThreatActor.name),
+    "malware": (EntryMalware, MalwareFamily, "malware_family_id", MalwareFamily.name),
+    "tool": (EntryTool, Tool, "tool_id", Tool.name),
+    "vendor": (EntryVendor, Vendor, "vendor_id", Vendor.name),
+    "product": (EntryProduct, Product, "product_id", Product.name),
+    "country": (EntryCountry, Country, "country_id", Country.name),
+    "ttp": (EntryTTP, TTP, "ttp_id", TTP.technique_id),
+    "cve": (EntryCVE, CVE, "cve_id", CVE.cve_id),
+    "cwe": (EntryCWE, CWE, "cwe_id", CWE.cwe_id),
+    "sector": (EntrySector, Sector, "sector_id", Sector.name),
+    "mitigation": (EntryMitigation, Mitigation, "mitigation_id", Mitigation.name),
+}
 
 
 @dataclass
@@ -110,6 +140,44 @@ async def apply_removal(
         .where(emodel.id == link.entity_id)
         .values(article_count=func.greatest(emodel.article_count - 1, 0))
     )
+    return True
+
+
+async def unlink_and_log(
+    db: AsyncSession, entity_type: str, entity_id: uuid.UUID, entry_id: uuid.UUID, *, by: str, where: str
+) -> bool:
+    """Remove one entry↔entity link by hand and log it as ``removed``, with the
+    junction snapshot Restore needs and a reason naming the user (``by``) and
+    the surface (``where``). Returns False when there was no link."""
+    jmodel, emodel, fk_attr, name_col = UNLINK_SPECS[entity_type]
+    junction = (
+        await db.execute(select(jmodel).where(jmodel.entry_id == entry_id, getattr(jmodel, fk_attr) == entity_id))
+    ).scalar_one_or_none()
+    if junction is None:
+        return False
+    name = (await db.execute(select(name_col).where(emodel.id == entity_id))).scalar_one_or_none()
+    db.add(
+        EntityLinkValidationLog(
+            entry_id=entry_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            entity_name_snapshot=name,
+            action="removed",
+            reason=f"{HAND_UNLINK_PREFIX}{by} {where}"[:500],
+            original_source=getattr(junction, "source", None),
+            original_confidence=getattr(junction, "confidence", None),
+            original_matched_names=list(getattr(junction, "matched_names", None) or []),
+            original_paragraph_indices=list(junction.paragraph_indices or []),
+            original_extracted_at=junction.extracted_at,
+        )
+    )
+    await db.delete(junction)
+    if hasattr(emodel, "article_count"):  # a CVE counts its links live
+        await db.execute(
+            update(emodel)
+            .where(emodel.id == entity_id)
+            .values(article_count=func.greatest(emodel.article_count - 1, 0))
+        )
     return True
 
 
@@ -200,10 +268,10 @@ async def restore_from_log(db: AsyncSession, log_id: uuid.UUID) -> tuple[bool, s
         return False, "log entry not found"
     if log_row.action != "removed":
         return False, f"cannot restore action={log_row.action}"
-    spec = ENTITY_TYPES.get(log_row.entity_type)
+    spec = UNLINK_SPECS.get(log_row.entity_type)
     if spec is None:
         return False, f"unknown entity_type {log_row.entity_type}"
-    jmodel, emodel, fk_attr = spec
+    jmodel, emodel, fk_attr, _ = spec
 
     # Re-check entity still exists
     ent_result = await db.execute(select(emodel.id).where(emodel.id == log_row.entity_id))
@@ -228,11 +296,12 @@ async def restore_from_log(db: AsyncSession, log_id: uuid.UUID) -> tuple[bool, s
     }
     if log_row.original_extracted_at is not None:
         junction_kwargs["extracted_at"] = log_row.original_extracted_at
-    db.add(jmodel(**junction_kwargs))
+    db.add(jmodel(**{k: v for k, v in junction_kwargs.items() if hasattr(jmodel, k)}))
     # Reverse the article_count decrement
-    await db.execute(
-        update(emodel).where(emodel.id == log_row.entity_id).values(article_count=emodel.article_count + 1)
-    )
+    if hasattr(emodel, "article_count"):
+        await db.execute(
+            update(emodel).where(emodel.id == log_row.entity_id).values(article_count=emodel.article_count + 1)
+        )
     # Record the restore as its own audit row
     db.add(
         EntityLinkValidationLog(

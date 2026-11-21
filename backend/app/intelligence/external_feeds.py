@@ -315,6 +315,7 @@ async def sync_cybergeist_threat_actors(db: AsyncSession) -> dict:
                     aliases=await gate_aliases(db, "threat_actor", name, sorted(new_aliases)),
                     description=desc_text[:2000] if desc_text else None,
                     metadata_={"cybergeist": cybergeist_meta},
+                    created_via="cybergeist",
                 )
                 db.add(actor)
                 await db.flush()
@@ -416,6 +417,7 @@ async def sync_cybergeist_malware(db: AsyncSession) -> dict:
                     aliases=await gate_aliases(db, "malware", name, sorted(new_aliases)),
                     description=desc_text[:2000] if desc_text else None,
                     metadata_={"cybergeist": cybergeist_meta},
+                    created_via="cybergeist",
                 )
                 db.add(malware)
                 await db.flush()

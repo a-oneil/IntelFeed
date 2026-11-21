@@ -17,7 +17,7 @@ vi.mock("@/hooks/useEngine", async (importOriginal) => ({
 }));
 vi.mock("@/hooks/useExtraction", () => ({
   useExtractionStats: () => ({
-    data: { total_created: 10, by_status: { dupe: 3, review: 4, orphan: 2, stale: 1 } },
+    data: { total_created: 10, by_status: { dupe: 3, review: 4, orphan: 2 } },
   }),
 }));
 vi.mock("@/hooks/useAutolinking", () => ({
@@ -82,9 +82,9 @@ describe("EngineMatrix", () => {
 
   it("counts the Review lenses on the Review tab, except unconfirmed and unjudged edges", () => {
     renderMatrix();
-    // 3 dupe + 2 orphan + 1 stale; the 4 unconfirmed and 5 unjudged edges keep their lens counts only.
-    expect(tab("Review")).toHaveTextContent("Review6");
-    expect(screen.getByText(/to review/).textContent).toContain("6");
+    // 3 dupe + 2 orphan; the 4 unconfirmed and 5 unjudged edges keep their lens counts only.
+    expect(tab("Review")).toHaveTextContent("Review5");
+    expect(screen.getByText(/to review/).textContent).toContain("5");
     fireEvent.click(tab("Review"));
     expect(screen.getByRole("button", { name: /^Unconfirmed4/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Relationships5/ })).toBeInTheDocument();
@@ -124,9 +124,7 @@ describe("EngineMatrix", () => {
     expect(screen.getByTestId("entities")).toHaveAttribute("data-window", "all");
     fireEvent.click(screen.getByRole("button", { name: /^Orphans/ }));
     expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "orphan");
-    fireEvent.click(screen.getByRole("button", { name: /^Stale/ }));
-    expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "stale");
-    expect(new URL(window.location.href).searchParams.get("lens")).toBe("stale");
+    expect(new URL(window.location.href).searchParams.get("lens")).toBe("orphans");
     fireEvent.click(screen.getByRole("button", { name: /^Relationships5/ }));
     expect(screen.getByTestId("links")).toHaveAttribute("data-unreviewed", "true");
     expect(screen.getByTestId("links")).toHaveAttribute("data-hours", "undefined");

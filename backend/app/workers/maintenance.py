@@ -834,23 +834,6 @@ async def _decay_relationship_confidence() -> int:
         return count
 
 
-# ---------------------------------------------------------------------------
-# Stale entity review flagging
-# ---------------------------------------------------------------------------
-
-# (entity_type, model class name). One slug now covers the maintenance log and
-# EntityRelationship rows alike — see app/entity_types.py.
-STALE_ENTITY_TYPES: list[tuple[str, str]] = [
-    ("threat_actor", "ThreatActor"),
-    ("malware", "MalwareFamily"),
-    ("tool", "Tool"),
-    ("vendor", "Vendor"),
-    ("product", "Product"),
-]
-
-_STALE_FLAGS_PER_TYPE_CAP = 500  # bound one run's log growth
-
-
 @celery_app.task(name="app.workers.maintenance.prune_entity_context", soft_time_limit=300, time_limit=360)
 def prune_entity_context():
     """Nightly: delete entity_context rows that expired more than 30 days ago,

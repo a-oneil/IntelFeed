@@ -45,7 +45,7 @@ class ThreatActor(Base):
     wikipedia_image_url: Mapped[str | None] = mapped_column(Text)
     metadata_: Mapped[dict] = mapped_column("metadata_", JSONB, default=dict)
     # --- AI-extraction provenance (Engine → Extraction management tab) ---
-    # created_via: 'ai_extraction' | 'manual' | 'seed' | NULL(unknown/legacy)
+    # created_via: 'ai_extraction' | 'manual' | 'seed' | 'leak_site' | 'cybergeist' | NULL(unknown/legacy)
     created_via: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     created_from_entry_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("entries.id", ondelete="SET NULL"), nullable=True

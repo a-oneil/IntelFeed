@@ -28,7 +28,7 @@ import styles from "./ExtractionTab.module.css";
 import { confirmDialog, promptDialog } from "@/utils/dialog";
 
 const ALL_TYPES: ExtractionType[] = ["threat_actor", "malware", "cve", "tool", "ttp", "observable"];
-type EntityStatus = "all" | "review" | "orphan" | "dupe" | "stale";
+type EntityStatus = "all" | "review" | "orphan" | "dupe";
 
 const CONF_BAR: Record<string, { pct: number; cls: string }> = {
   high: { pct: 92, cls: styles.confHigh },
@@ -628,7 +628,6 @@ function StatusPill({ status, duplicateOf }: { status: ExtractionEntity["status"
     review: { cls: styles.stReview, text: "Needs review" },
     orphan: { cls: styles.stOrphan, text: "Orphan" },
     dupe: { cls: styles.stDupe, text: duplicateOf ? `Dup of ${duplicateOf}` : "Duplicate" },
-    stale: { cls: styles.stOrphan, text: "Stale" },
   }[status];
   return <span className={`${styles.status} ${map.cls}`}>● {map.text}</span>;
 }

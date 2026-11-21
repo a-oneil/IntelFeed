@@ -165,6 +165,7 @@ async def _resolve_group(
         aliases=await gate_aliases(db, "threat_actor", proper, candidates, source=source),
         actor_type="ransomware",
         metadata_={"actor_class": "ransomware", "source": source},
+        created_via="leak_site",
     )
     db.add(actor)
     await db.flush()

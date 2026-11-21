@@ -453,6 +453,7 @@ def _item(item_id, kind="link", minted=False, candidates=None, entity_type="thre
         name=item_id,
         minted_here=minted,
         candidates=candidates or [],
+        ioc_value=item_id.split(":", 2)[2] if kind == "ioc" else None,
     )
 
 
@@ -485,7 +486,7 @@ def test_validate_matrix_and_defaults():
                 "merge_into": "warlock ransomware",
             },
             {"item_id": "edge:1", "verdict": "remove", "confidence": "high"},
-            {"item_id": "ioc:domain:x", "verdict": "drop", "confidence": "medium"},
+            {"item_id": "ioc:domain:x", "verdict": "drop", "confidence": "medium", "reason": "x is a docs link"},
             {"item_id": "link:nope", "verdict": "remove"},
         ]
     }
@@ -759,6 +760,69 @@ def test_validate_remove_and_demote_reasons_must_name_their_item():
         ]
     )
     assert [v.verdict for v in right] == ["demote", "remove", "remove"]
+    assert stats["unnamed_reason"] == 0
+
+
+def test_validate_voids_a_captured_ioc_drop_whose_reason_names_another_value():
+    # Two script hashes dropped over "NFT gifts"; two IPs dropped on one
+    # reason naming neither. A lone MD5 needs only its kind named.
+    def ioc(kind, value, forms=()):
+        return ReviewItem(
+            item_id=f"ioc:{kind}:{value}",
+            kind="ioc",
+            line="",
+            name=value,
+            ioc_kind=kind,
+            ioc_value=value,
+            forms=list(forms),
+        )
+
+    scripts = [
+        ioc("script", "cd20d76f" + "0" * 56, ["User instruction synchronization script"]),
+        ioc("script", "bafe9af6" + "0" * 56, ["Memory file synchronization script"]),
+    ]
+    ips = [ioc("ipv4", "54.183.158.198", ["54.183.158[.]198"]), ioc("ipv4", "5.105.74.172")]
+    md5 = ioc("md5", "f3c43f1f39a61012e634983008213633")
+    cand = ReviewItem(
+        item_id="ioc:domain:example.org", kind="ioc", line="", name="example.org", ioc_value="example.org", staged=True
+    )
+    items = [*scripts, *ips, md5, cand]
+
+    def verdicts_for(reasons):
+        return _validate_verdicts(
+            {
+                "verdicts": [
+                    {"item_id": it.item_id, "verdict": "drop", "confidence": "high", "reason": r}
+                    for it, r in zip(items, reasons, strict=True)
+                ]
+            },
+            items,
+        )
+
+    wrong, stats = verdicts_for(
+        [
+            "The context mentions 'nft' in the phrase 'NFT gifts', not a tool.",
+            "The script is a generic placeholder.",
+            "The IP addresses are listed as printed defanged and look like placeholders.",
+            "These IPs look like placeholders too.",
+            "A shared reason about something else entirely.",
+            "a documentation example",  # a candidate: no name needed
+        ]
+    )
+    assert [v.verdict for v in wrong] == ["keep"] * 5 + ["drop"]
+    assert stats["unnamed_reason"] == 5
+
+    right, stats = verdicts_for(
+        [
+            "The user instruction synchronization script is the vendor's own sample.",
+            "bafe9a… is the memory sync script from the tutorial.",
+            "54.183.158[.]198 is the researcher's scanner.",
+            "5.105.74.172 is a sinkhole run by the publisher.",
+            "The MD5 hash is a test vector from the reference implementation.",
+            "a documentation example",
+        ]
+    )
+    assert [v.verdict for v in right] == ["drop"] * 6
     assert stats["unnamed_reason"] == 0
 
 
@@ -1552,7 +1616,12 @@ async def test_apply_demotes_edge_like_the_nightly_job_and_drops_iocs(db_session
                 "confidence": "high",
                 "reason": "own blog",
             },
-            {"item_id": f"ioc:sha256:{'9f3a' * 16}", "verdict": "drop", "confidence": "high", "reason": "sample"},
+            {
+                "item_id": f"ioc:sha256:{'9f3a' * 16}",
+                "verdict": "drop",
+                "confidence": "high",
+                "reason": "9f3a9f3a… is the sample file's hash",
+            },
         ],
     )
     assert not any(it.item_id == f"edge:{rejected.id}" for it in items)  # analyst-rejected edges never listed
@@ -1844,7 +1913,12 @@ def test_the_reviewer_is_asked_for_changes_only():
     assert not stats["duplicate"] and not any(v for k, v in stats.items() if k != "duplicate")
     # And the usual case: one changed item, the rest kept by omission.
     verdicts, _stats = _validate_verdicts(
-        {"verdicts": [{"item_id": "ioc:domain:x", "verdict": "drop", "confidence": "high"}]}, items
+        {
+            "verdicts": [
+                {"item_id": "ioc:domain:x", "verdict": "drop", "confidence": "high", "reason": "x: a docs link"}
+            ]
+        },
+        items,
     )
     by = {v.item.item_id: v.verdict for v in verdicts}
     assert by == {"link:threat_actor:a": "keep", "edge:1": "keep", "ioc:domain:x": "drop"}
@@ -2031,32 +2105,6 @@ def test_the_prompt_still_demands_a_verdict_on_every_edge():
     # New entities too: silence is not a verdict on something just minted.
     assert 'Every link marked "NEW, created by this article" needs a verdict' in system
     assert "every item marked NEW" in task["default_prompt_template"]
-
-
-@pytest.mark.asyncio
-async def test_stale_status_is_a_live_filter(client, admin_headers, db_session: AsyncSession, feed):
-    from datetime import timedelta
-
-    entry = await _make_entry(db_session, feed)
-    old = ThreatActor(
-        name="tortilla crew",
-        article_count=1,
-        created_via="ai_extraction",
-        created_from_entry_id=entry.id,
-        first_seen_at=datetime.now(UTC) - timedelta(days=205),
-        last_seen_at=datetime.now(UTC) - timedelta(days=205),
-    )
-    fresh = ThreatActor(
-        name="Warlock Group", article_count=1, created_via="ai_extraction", created_from_entry_id=entry.id
-    )
-    db_session.add_all([old, fresh])
-    await db_session.commit()
-    resp = await client.get(
-        "/api/engine/extraction/entities", params={"status": "stale", "window": "all"}, headers=admin_headers
-    )
-    assert resp.status_code == 200, resp.text
-    names = {i["name"] for i in resp.json()["items"]}
-    assert names == {"tortilla crew"}
 
 
 @pytest.mark.asyncio
@@ -3661,6 +3709,36 @@ async def test_shadow_held_link_is_a_proposal_that_applies_and_restores(db_sessi
 
 
 @pytest.mark.asyncio
+async def test_restoring_an_ioc_drop_with_no_sighting_snapshot_sights_it_again(db_session: AsyncSession, feed):
+    # Drops filed before sightings were snapshotted keep only the entry id;
+    # a restore used to report success and put nothing back.
+    from app.models.observable import EntryObservable, Observable
+
+    entry = await _make_entry(db_session, feed)
+    obs = Observable(kind="ipv4", value="54.183.158.198", sighting_count=0, article_count=0)
+    db_session.add(obs)
+    await db_session.flush()
+    row = EntityMaintenanceLog(
+        entity_type="observable",
+        entity_id=obs.id,
+        action=adj.ACTION_IOC_DROP,
+        mode="apply",
+        before={"staged": False, "entry_id": str(entry.id)},
+        after={"kind": "ipv4", "value": "54.183.158.198", "reason": "placeholder data"},
+        applied=True,
+    )
+    db_session.add(row)
+    await db_session.flush()
+
+    assert (await adj.restore_adjudication_row(db_session, row))["restored"] is True
+    await db_session.flush()
+    sighting = (
+        await db_session.execute(select(EntryObservable).where(EntryObservable.entry_id == entry.id))
+    ).scalar_one()
+    assert sighting.observable_id == obs.id
+
+
+@pytest.mark.asyncio
 async def test_a_held_link_proposal_still_links_after_its_held_row_is_pruned(db_session: AsyncSession, feed):
     await _seed_settings(db_session)
     entry, royal, held = await _held_royal(db_session, feed)
@@ -4167,3 +4245,56 @@ def test_dismissals_are_recorded_only_for_verdicts_a_review_checks():
         assert _verdict_record(MAINT_SOURCE, maint(action)) is None
     # a duplicate review's merge is remembered as a pair instead
     assert _verdict_record(MAINT_SOURCE, maint(adj.ACTION_MERGE, origin="merge_review")) is None
+
+
+@pytest.mark.asyncio
+async def test_a_drop_of_the_last_sighting_tombstones_the_row_and_restore_revives_it(db_session: AsyncSession, feed):
+    # A zero-sighting row would attach itself to the next article that prints
+    # the value (exact-match sighting), so the drop tombstones it.
+    from app.models.observable import EntryObservable, Observable
+
+    entry = await _make_entry(db_session, feed)
+    other = await _make_entry(db_session, feed)
+    lone = Observable(kind="domain", value="docs.example.com", created_via="ai_extraction", status="active")
+    shared = Observable(kind="domain", value="evil.example.net", created_via="ai_extraction", status="active")
+    fed = Observable(kind="domain", value="list.example.org", created_via="ioc_list", status="active")
+    db_session.add_all([lone, shared, fed])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            EntryObservable(entry_id=entry.id, observable_id=lone.id, source="ai"),
+            EntryObservable(entry_id=entry.id, observable_id=shared.id, source="ai"),
+            EntryObservable(entry_id=other.id, observable_id=shared.id, source="ai"),
+            EntryObservable(entry_id=entry.id, observable_id=fed.id, source="feed"),
+        ]
+    )
+    await db_session.flush()
+
+    snaps = {}
+    for obs in (lone, shared, fed):
+        snaps[obs.value] = await adj._drop_ioc(db_session, entry, obs.kind, obs.value, obs.id)
+    await db_session.flush()
+    for obs in (lone, shared, fed):
+        await db_session.refresh(obs)
+    assert lone.is_denied and lone.status == "expired" and snaps[lone.value]["tombstoned"] == {"status": "active"}
+    assert not shared.is_denied and "tombstoned" not in snaps[shared.value]  # still sighted elsewhere
+    assert not fed.is_denied  # a curated feed's row is not the model's to retire
+
+    row = EntityMaintenanceLog(
+        entity_type="observable",
+        entity_id=lone.id,
+        action=adj.ACTION_IOC_DROP,
+        mode="apply",
+        before={"staged": False, "entry_id": str(entry.id), **snaps[lone.value]},
+        after={"kind": "domain", "value": lone.value, "reason": "docs.example.com is the vendor's docs"},
+        applied=True,
+    )
+    db_session.add(row)
+    await db_session.flush()
+    assert (await adj.restore_adjudication_row(db_session, row))["restored"] is True
+    await db_session.flush()
+    await db_session.refresh(lone)
+    assert not lone.is_denied and lone.status == "active"
+    assert (
+        await db_session.execute(select(EntryObservable).where(EntryObservable.observable_id == lone.id))
+    ).scalar_one().entry_id == entry.id

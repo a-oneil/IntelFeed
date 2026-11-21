@@ -190,24 +190,30 @@ async def test_not_duplicate_drops_the_pair(client, admin_headers, db_session):
     assert after["by_status"].get("dupe", 0) == 0
 
 
-async def test_status_counts_match_each_status_list(client, admin_headers, db_session):
+async def test_status_counts_match_each_status_list(client, admin_headers, db_session, test_feed):
     """Each Review entity lens lists one status over all time; its badge is
     that status's count in the stats."""
+    [source] = await _entries(db_session, test_feed, 1)
+    kept = dict(created_via="ai_extraction", article_count=0)  # article_count defaults to 1
     db_session.add_all(
         [
-            # article_count defaults to 1, so an orphan has to say it has none.
-            Tool(name="Orphaned Tool", created_via="ai_extraction", article_count=0),
-            ThreatActor(name="Lonely Actor", created_via="ai_extraction", needs_review=True, article_count=0),
+            Tool(name="Orphaned Tool", created_from_entry_id=source.id, **kept),
+            ThreatActor(name="Lonely Actor", needs_review=True, created_from_entry_id=source.id, **kept),
+            # Its article went with its feed: kept as extracted, not an orphan.
+            Tool(name="Feedless Tool", **kept),
         ]
     )
     await db_session.commit()
     stats = (await client.get("/api/engine/extraction/stats?window=all", headers=admin_headers)).json()
-    for status in ("review", "orphan", "dupe", "stale", "linked"):
+    for status in ("review", "orphan", "dupe", "linked"):
         listed = (
             await client.get(f"/api/engine/extraction/entities?status={status}&window=all", headers=admin_headers)
         ).json()
         assert stats["by_status"].get(status, 0) == listed["total"], status
     assert stats["by_status"].get("orphan", 0) >= 2
+    orphans = await client.get("/api/engine/extraction/entities?status=orphan&window=all", headers=admin_headers)
+    names = {r["name"] for r in orphans.json()["items"]}
+    assert {"Orphaned Tool", "Lonely Actor"} <= names and "Feedless Tool" not in names
 
 
 async def _seed_unlinks(db_session, feed):

@@ -13,7 +13,6 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import case, cast, delete, func, or_, select, type_coerce
 from sqlalchemy import false as sa_false
 from sqlalchemy import text as sa_text
-from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -1433,6 +1432,20 @@ async def get_sector_profile(
 # --- Unlink Entity from Entry ---
 
 
+async def _unlink_logged(
+    db: AsyncSession, entity_type: str, entity_id: uuid.UUID, entry_id: uuid.UUID, user: User
+) -> Response:
+    """Remove one link from an article page and log it, so History shows who
+    removed it and Restore can put it back."""
+    from app.intelligence.link_validation_apply import unlink_and_log
+
+    if not await unlink_and_log(db, entity_type, entity_id, entry_id, by=user.username, where="from the article"):
+        raise AppError(code="not_found", message="Association not found", status_code=404)
+    await db.commit()
+    await _invalidate_after_unlink(entity_type, entity_id, entry_id, db)
+    return Response(status_code=204)
+
+
 async def _invalidate_after_unlink(
     entity_type: str, entity_id: uuid.UUID, entry_id: uuid.UUID, db: AsyncSession
 ) -> None:
@@ -1546,12 +1559,7 @@ async def unlink_entry_ttp(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove the entry-TTP association (the TTP itself is kept) and invalidate correlation caches."""
-    result = await db.execute(delete(EntryTTP).where(EntryTTP.entry_id == entry_id, EntryTTP.ttp_id == ttp_id))
-    if result.rowcount == 0:
-        raise AppError(code="not_found", message="Association not found", status_code=404)
-    await db.commit()
-    await _invalidate_after_unlink("ttp", ttp_id, entry_id, db)
-    return Response(status_code=204)
+    return await _unlink_logged(db, "ttp", ttp_id, entry_id, user)
 
 
 @router.delete("/entries/{entry_id}/cves/{cve_id}", status_code=204)
@@ -1562,12 +1570,7 @@ async def unlink_entry_cve(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove the entry-CVE association (the CVE itself is kept) and invalidate correlation caches."""
-    result = await db.execute(delete(EntryCVE).where(EntryCVE.entry_id == entry_id, EntryCVE.cve_id == cve_id))
-    if result.rowcount == 0:
-        raise AppError(code="not_found", message="Association not found", status_code=404)
-    await db.commit()
-    await _invalidate_after_unlink("cve", cve_id, entry_id, db)
-    return Response(status_code=204)
+    return await _unlink_logged(db, "cve", cve_id, entry_id, user)
 
 
 @router.delete("/entries/{entry_id}/threat-actors/{actor_id}", status_code=204)
@@ -1578,17 +1581,7 @@ async def unlink_entry_threat_actor(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove the entry-actor association (the actor itself is kept) and invalidate correlation caches."""
-    result = await db.execute(
-        delete(EntryThreatActor).where(
-            EntryThreatActor.entry_id == entry_id,
-            EntryThreatActor.threat_actor_id == actor_id,
-        )
-    )
-    if result.rowcount == 0:
-        raise AppError(code="not_found", message="Association not found", status_code=404)
-    await db.commit()
-    await _invalidate_after_unlink("threat_actor", actor_id, entry_id, db)
-    return Response(status_code=204)
+    return await _unlink_logged(db, "threat_actor", actor_id, entry_id, user)
 
 
 @router.delete("/entries/{entry_id}/malware/{malware_id}", status_code=204)
@@ -1599,17 +1592,7 @@ async def unlink_entry_malware(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove the entry-malware association (the family itself is kept) and invalidate correlation caches."""
-    result = await db.execute(
-        delete(EntryMalware).where(
-            EntryMalware.entry_id == entry_id,
-            EntryMalware.malware_family_id == malware_id,
-        )
-    )
-    if result.rowcount == 0:
-        raise AppError(code="not_found", message="Association not found", status_code=404)
-    await db.commit()
-    await _invalidate_after_unlink("malware", malware_id, entry_id, db)
-    return Response(status_code=204)
+    return await _unlink_logged(db, "malware", malware_id, entry_id, user)
 
 
 @router.delete("/entries/{entry_id}/countries/{country_id}", status_code=204)
@@ -1620,17 +1603,7 @@ async def unlink_entry_country(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove the entry-country association (the country itself is kept) and invalidate correlation caches."""
-    result = await db.execute(
-        delete(EntryCountry).where(
-            EntryCountry.entry_id == entry_id,
-            EntryCountry.country_id == country_id,
-        )
-    )
-    if result.rowcount == 0:
-        raise AppError(code="not_found", message="Association not found", status_code=404)
-    await db.commit()
-    await _invalidate_after_unlink("country", country_id, entry_id, db)
-    return Response(status_code=204)
+    return await _unlink_logged(db, "country", country_id, entry_id, user)
 
 
 @router.delete("/entries/{entry_id}/sectors/{sector_id}", status_code=204)
@@ -1641,19 +1614,7 @@ async def unlink_entry_sector(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove the entry-sector association (the sector itself is kept) and invalidate correlation caches."""
-    result = await db.execute(
-        delete(EntrySector).where(EntrySector.entry_id == entry_id, EntrySector.sector_id == sector_id)
-    )
-    if result.rowcount == 0:
-        raise AppError(code="not_found", message="Association not found", status_code=404)
-    await db.execute(
-        sa_update(Sector)
-        .where(Sector.id == sector_id, Sector.article_count > 0)
-        .values(article_count=Sector.article_count - 1)
-    )
-    await db.commit()
-    await _invalidate_after_unlink("sector", sector_id, entry_id, db)
-    return Response(status_code=204)
+    return await _unlink_logged(db, "sector", sector_id, entry_id, user)
 
 
 @router.delete("/entries/{entry_id}/mitigations/{mitigation_id}", status_code=204)
@@ -1664,17 +1625,7 @@ async def unlink_entry_mitigation(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove the entry-mitigation association (the mitigation itself is kept) and invalidate correlation caches."""
-    result = await db.execute(
-        delete(EntryMitigation).where(
-            EntryMitigation.entry_id == entry_id,
-            EntryMitigation.mitigation_id == mitigation_id,
-        )
-    )
-    if result.rowcount == 0:
-        raise AppError(code="not_found", message="Association not found", status_code=404)
-    await db.commit()
-    await _invalidate_after_unlink("mitigation", mitigation_id, entry_id, db)
-    return Response(status_code=204)
+    return await _unlink_logged(db, "mitigation", mitigation_id, entry_id, user)
 
 
 @router.delete("/entries/{entry_id}/cwes/{cwe_id}", status_code=204)
@@ -1685,12 +1636,7 @@ async def unlink_entry_cwe(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove the entry-weakness association (the catalog row is kept) and invalidate correlation caches."""
-    result = await db.execute(delete(EntryCWE).where(EntryCWE.entry_id == entry_id, EntryCWE.cwe_id == cwe_id))
-    if result.rowcount == 0:
-        raise AppError(code="not_found", message="Association not found", status_code=404)
-    await db.commit()
-    await _invalidate_after_unlink("cwe", cwe_id, entry_id, db)
-    return Response(status_code=204)
+    return await _unlink_logged(db, "cwe", cwe_id, entry_id, user)
 
 
 @router.delete("/entries/{entry_id}/tools/{tool_id}", status_code=204)
@@ -1701,17 +1647,7 @@ async def unlink_entry_tool(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove the entry-tool association (the tool itself is kept) and invalidate correlation caches."""
-    result = await db.execute(
-        delete(EntryTool).where(
-            EntryTool.entry_id == entry_id,
-            EntryTool.tool_id == tool_id,
-        )
-    )
-    if result.rowcount == 0:
-        raise AppError(code="not_found", message="Association not found", status_code=404)
-    await db.commit()
-    await _invalidate_after_unlink("tool", tool_id, entry_id, db)
-    return Response(status_code=204)
+    return await _unlink_logged(db, "tool", tool_id, entry_id, user)
 
 
 @router.delete("/entries/{entry_id}/vendors/{vendor_id}", status_code=204)
@@ -1722,17 +1658,7 @@ async def unlink_entry_vendor(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove the entry-vendor association (the vendor itself is kept) and invalidate correlation caches."""
-    result = await db.execute(
-        delete(EntryVendor).where(
-            EntryVendor.entry_id == entry_id,
-            EntryVendor.vendor_id == vendor_id,
-        )
-    )
-    if result.rowcount == 0:
-        raise AppError(code="not_found", message="Association not found", status_code=404)
-    await db.commit()
-    await _invalidate_after_unlink("vendor", vendor_id, entry_id, db)
-    return Response(status_code=204)
+    return await _unlink_logged(db, "vendor", vendor_id, entry_id, user)
 
 
 @router.delete("/entries/{entry_id}/products/{product_id}", status_code=204)
@@ -1743,17 +1669,7 @@ async def unlink_entry_product(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove the entry-product association (the product itself is kept) and invalidate correlation caches."""
-    result = await db.execute(
-        delete(EntryProduct).where(
-            EntryProduct.entry_id == entry_id,
-            EntryProduct.product_id == product_id,
-        )
-    )
-    if result.rowcount == 0:
-        raise AppError(code="not_found", message="Association not found", status_code=404)
-    await db.commit()
-    await _invalidate_after_unlink("product", product_id, entry_id, db)
-    return Response(status_code=204)
+    return await _unlink_logged(db, "product", product_id, entry_id, user)
 
 
 # --- Detection Rules Routes ---
