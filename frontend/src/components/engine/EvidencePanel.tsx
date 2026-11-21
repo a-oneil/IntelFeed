@@ -1,7 +1,9 @@
 import { Fragment, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 
 import {
   type EvidenceArticle,
+  type EvidenceProfile,
   type RelationshipEvidence,
   useRelationshipEvidence,
   useRowEvidence,
@@ -203,9 +205,21 @@ function RelationshipBody({
   );
 }
 
-/** The evidence behind one Review row: its article paragraph, the AI's quote
- * and reason, the facts that decide it, an edge's articles and reviews, and
- * what was already decided about the same entity. */
+function originLine(p: EvidenceProfile): string {
+  const origin =
+    p.created_via === "ai_extraction"
+      ? "created by the analysis"
+      : p.created_via
+        ? `created by ${p.created_via.replace(/_/g, " ")}`
+        : "catalogue entry";
+  return p.first_seen ? `${origin} · first seen ${p.first_seen}` : origin;
+}
+
+/** The evidence behind one Review row: what the row cannot hold. The row
+ * already says the reason, confidence, origin and merge target, so the panel
+ * shows a merge's two profiles, the facts the chips don't, the article
+ * paragraph with the AI's quote, an edge's articles and reviews, and what
+ * was already decided about the same entity. */
 export function RowEvidencePanel({
   id,
   names = [],
@@ -218,21 +232,45 @@ export function RowEvidencePanel({
   if (q.isError || !q.data)
     return <div className={styles.panel}>Couldn't load the evidence.</div>;
   const d = q.data;
+  const profiles = d.profiles ?? [];
+  const quote = d.quote && (
+    <p className={styles.quote}>
+      <span className={styles.muted}>The AI quoted: </span>“
+      {highlight(d.quote, [...(d.article?.highlight ?? []), ...names])}”
+    </p>
+  );
   return (
     <div className={styles.panel}>
-      {(d.reason || d.quote) && (
+      {profiles.length > 0 && (
         <div className={styles.section}>
-          <div className={styles.label}>
-            Why it was proposed
-            {d.confidence ? ` (${d.confidence} confidence)` : ""}
+          <div className={styles.label}>Both profiles</div>
+          <div className={styles.profiles}>
+            {profiles.map((p) => (
+              <div key={p.entity_id} className={styles.profile}>
+                <span>
+                  <Link
+                    className={styles.profileName}
+                    to={`/workbench/${p.entity_type}/${p.entity_id}`}
+                  >
+                    {p.name}
+                  </Link>
+                  <span className={styles.muted}>
+                    {" · "}
+                    {p.article_count.toLocaleString()} article
+                    {p.article_count === 1 ? "" : "s"}
+                    {p.subtype ? ` · ${p.subtype}` : ""}
+                  </span>
+                </span>
+                <span className={styles.muted}>
+                  aliases: {p.aliases.length > 0 ? p.aliases.join(", ") : "none"}
+                </span>
+                <span className={styles.muted}>{originLine(p)}</span>
+                {p.description && (
+                  <span className={styles.profileDesc}>{p.description}</span>
+                )}
+              </div>
+            ))}
           </div>
-          {d.reason && <p className={styles.reason}>{d.reason}</p>}
-          {d.quote && (
-            <p className={styles.quote}>
-              <span className={styles.muted}>The AI quoted: </span>“
-              {highlight(d.quote, [...(d.article?.highlight ?? []), ...names])}”
-            </p>
-          )}
         </div>
       )}
       {d.facts.length > 0 && (
@@ -245,11 +283,14 @@ export function RowEvidencePanel({
           ))}
         </dl>
       )}
-      {d.article && (
+      {d.article ? (
         <div className={styles.section}>
           <div className={styles.label}>Article</div>
           <Article article={d.article} names={names} />
+          {quote}
         </div>
+      ) : (
+        quote && <div className={styles.section}>{quote}</div>
       )}
       {d.relationship && (
         <RelationshipBody data={d.relationship} names={names} />
@@ -269,11 +310,15 @@ export function RowEvidencePanel({
           </ul>
         </div>
       )}
-      {!d.article && !d.relationship && !d.quote && d.facts.length === 0 && (
-        <p className={styles.muted}>
-          This proposal has no article or recorded evidence.
-        </p>
-      )}
+      {!d.article &&
+        !d.relationship &&
+        !d.quote &&
+        d.facts.length === 0 &&
+        profiles.length === 0 && (
+          <p className={styles.muted}>
+            This proposal has no article or recorded evidence.
+          </p>
+        )}
     </div>
   );
 }
@@ -307,7 +352,7 @@ export function EntityEvidencePanel({ entityType, entityId }: { entityType: stri
       {q.data.length === 0 && <p className={styles.muted}>No article is linked to it.</p>}
       {q.data.map((a, i) => (
         <div key={a.entry_id} className={styles.section}>
-          <div className={styles.label}>{i === 0 ? "Articles (the first created it, when known)" : ""}</div>
+          <div className={styles.label}>{i === 0 ? "Articles" : ""}</div>
           <Article article={a} names={[]} />
         </div>
       ))}

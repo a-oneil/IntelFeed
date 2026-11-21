@@ -85,6 +85,35 @@
   overflow-wrap: anywhere;
 }
 
+/* A merge proposal's two entities, side by side: the one to fold, then the keeper. */
+.profiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--sp-2);
+  max-width: 90ch;
+}
+.profile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+  overflow-wrap: anywhere;
+}
+.profileName {
+  color: var(--text-primary);
+  font-weight: 500;
+  text-decoration: none;
+}
+.profileName:hover {
+  text-decoration: underline;
+}
+.profileDesc {
+  margin-top: 2px;
+  line-height: 1.45;
+}
+
 .reviews {
   list-style: none;
   margin: 0;

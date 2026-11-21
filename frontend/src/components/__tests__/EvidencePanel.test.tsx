@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const get = vi.fn();
@@ -9,7 +10,11 @@ import { RelationshipEvidencePanel, RowEvidencePanel } from "../engine/EvidenceP
 
 function renderIt(node: React.ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={qc}>{node}</QueryClientProvider>);
+  return render(
+    <MemoryRouter>
+      <QueryClientProvider client={qc}>{node}</QueryClientProvider>
+    </MemoryRouter>,
+  );
 }
 
 const edge = {
@@ -46,6 +51,25 @@ const edge = {
   ],
 };
 
+const proposal = {
+  id: "entity_maintenance:l1",
+  reason: "only a passing mention",
+  confidence: "medium",
+  quote: "Everest hit a hospital",
+  article: {
+    entry_id: "a2",
+    title: "Hospital attack",
+    feed_title: "News",
+    published_at: null,
+    paragraphs: ["Everest hit a hospital."],
+    highlight: ["Everest"],
+  },
+  facts: [{ label: "Matched as", value: "Everest" }],
+  profiles: [],
+  relationship: null,
+  history: [],
+};
+
 describe("EvidencePanel", () => {
   it("shows an edge's articles with both ends marked, and its reviews", async () => {
     get.mockResolvedValue({ data: edge });
@@ -61,31 +85,60 @@ describe("EvidencePanel", () => {
     expect(get).toHaveBeenCalledWith("/entity-relationships/e1/evidence");
   });
 
-  it("shows a proposal's quote, facts and article", async () => {
+  it("shows a proposal's article, quote and facts, not the reason the row already says", async () => {
+    get.mockResolvedValue({ data: proposal });
+    renderIt(<RowEvidencePanel id="entity_maintenance:l1" />);
+    expect(await screen.findByRole("link", { name: "Hospital attack" })).toBeTruthy();
+    expect(screen.getByText("Matched as")).toBeTruthy();
+    expect(screen.getByText(/The AI quoted/)).toBeTruthy();
+    expect(screen.queryByText("only a passing mention")).toBeNull();
+    expect(screen.queryByText(/Why it was proposed/)).toBeNull();
+    expect(screen.queryByText(/medium confidence/)).toBeNull();
+    expect(get).toHaveBeenCalledWith("/admin/hygiene/feed/entity_maintenance/l1/evidence");
+  });
+
+  it("shows a merge proposal's two profiles side by side", async () => {
     get.mockResolvedValue({
       data: {
-        id: "entity_maintenance:l1",
-        reason: "only a passing mention",
-        confidence: "medium",
-        quote: "Everest hit a hospital",
-        article: {
-          entry_id: "a2",
-          title: "Hospital attack",
-          feed_title: "News",
-          published_at: null,
-          paragraphs: ["Everest hit a hospital."],
-          highlight: ["Everest"],
-        },
-        facts: [{ label: "Matched as", value: "Everest" }],
-        relationship: null,
-        history: [],
+        ...proposal,
+        article: null,
+        quote: null,
+        facts: [],
+        profiles: [
+          {
+            entity_type: "threat_actor",
+            entity_id: "t1",
+            name: "UAC-0051",
+            aliases: [],
+            article_count: 0,
+            created_via: "ai_extraction",
+            first_seen: "2026-11-19",
+            description: null,
+            subtype: null,
+          },
+          {
+            entity_type: "threat_actor",
+            entity_id: "t2",
+            name: "UNC1151",
+            aliases: ["Ghostwriter", "TA445"],
+            article_count: 72,
+            created_via: null,
+            first_seen: null,
+            description: "Belarus-aligned group.",
+            subtype: "nation-state",
+          },
+        ],
       },
     });
     renderIt(<RowEvidencePanel id="entity_maintenance:l1" />);
-    expect(await screen.findByText("only a passing mention")).toBeTruthy();
-    expect(screen.getByText("Why it was proposed (medium confidence)")).toBeTruthy();
-    expect(screen.getByText("Matched as")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Hospital attack" })).toBeTruthy();
-    expect(get).toHaveBeenCalledWith("/admin/hygiene/feed/entity_maintenance/l1/evidence");
+    expect(await screen.findByText("Both profiles")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "UAC-0051" }).getAttribute("href")).toBe("/workbench/threat_actor/t1");
+    expect(screen.getByRole("link", { name: "UNC1151" }).getAttribute("href")).toBe("/workbench/threat_actor/t2");
+    expect(screen.getByText("aliases: none")).toBeTruthy();
+    expect(screen.getByText("aliases: Ghostwriter, TA445")).toBeTruthy();
+    expect(screen.getByText("created by the analysis · first seen 2026-11-19")).toBeTruthy();
+    expect(screen.getByText("catalogue entry")).toBeTruthy();
+    expect(screen.getByText(/72 articles · nation-state/)).toBeTruthy();
+    expect(screen.queryByText(/no article or recorded evidence/)).toBeNull();
   });
 });

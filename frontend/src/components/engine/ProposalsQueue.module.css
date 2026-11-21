@@ -188,12 +188,19 @@
   flex: none;
 }
 
+/* The Proposed column holds a steady grid of chips. A fixed width keeps every
+   row's chips wrapping at the same point, so chip edges line up down the
+   table; without it the greedy Why column starves this one and the chips
+   stack one per line, a different height on every row. */
+.proposedCol {
+  width: 230px;
+  min-width: 230px;
+}
 /* A td must stay display:table-cell (flex here collapses the column and
-   strands the leftover width as a gap); width:100% makes this the greedy
-   column that absorbs the table's free space. */
-/* the reasoning: the column that grows, and never narrower than a readable line */
+   strands the leftover width as a gap). With no width set this is the
+   column with the most text, so it is the one that absorbs the table's free
+   space; never narrower than a readable line. */
 .detail {
-  width: 100%;
   min-width: 280px;
 }
 .subject {

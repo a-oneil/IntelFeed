@@ -654,8 +654,22 @@ export interface RowEvidence {
   quote: string | null;
   article: EvidenceArticle | null;
   facts: { label: string; value: string }[];
+  /** A merge proposal's two entities: the one to fold, then the keeper. */
+  profiles: EvidenceProfile[];
   relationship: RelationshipEvidence | null;
   history: { action: string; when: string; subject: string | null; reason: string | null }[];
+}
+
+export interface EvidenceProfile {
+  entity_type: string;
+  entity_id: string;
+  name: string;
+  aliases: string[];
+  article_count: number;
+  created_via: string | null;
+  first_seen: string | null;
+  description: string | null;
+  subtype: string | null;
 }
 
 export interface RelationshipEvidenceArticle {

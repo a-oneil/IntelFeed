@@ -348,7 +348,7 @@ async def _load_profiles(db: AsyncSession, cands: list[Candidate]) -> None:
         objs = {}
         for side in ("a", "b"):
             objs[side] = await db.get(model, getattr(c, f"{side}_id"))
-            setattr(c, side, _profile(objs[side]))
+            setattr(c, side, profile_of(objs[side]))
             # An article count says nothing on its own: a common-word name
             # (jupiter) piles up links to unrelated articles. The titles let the
             # model see whether the count is about this thing.
@@ -380,7 +380,9 @@ async def _load_profiles(db: AsyncSession, cands: list[Candidate]) -> None:
             c.sample_titles = [t for t in titles if t]
 
 
-def _profile(obj) -> dict:
+def profile_of(obj) -> dict:
+    """One entity as the duplicate review and the Review tab show it: name,
+    aliases, article count, origin, first sighting, type and description."""
     if obj is None:
         return {}
     desc = (getattr(obj, "description", None) or "").strip().replace("\n", " ")

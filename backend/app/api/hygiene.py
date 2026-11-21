@@ -618,8 +618,24 @@ class EvidenceHistoryItem(BaseModel):
     reason: str | None
 
 
+class EvidenceProfile(BaseModel):
+    """One side of a merge proposal, as the duplicate review saw it."""
+
+    entity_type: str
+    entity_id: str
+    name: str
+    aliases: list[str]
+    article_count: int
+    created_via: str | None
+    first_seen: str | None = Field(description="ISO date of the entity's first sighting")
+    description: str | None
+    subtype: str | None = Field(description="The actor / malware / tool type, where the model has one")
+
+
 class RowEvidence(BaseModel):
-    """Everything behind one Review row, for its evidence panel."""
+    """Everything behind one Review row, for its evidence panel. The row
+    itself already shows the reason, confidence, origin and merge target;
+    the panel carries what the row cannot hold."""
 
     id: str
     reason: str | None
@@ -627,6 +643,10 @@ class RowEvidence(BaseModel):
     quote: str | None = Field(description="The AI's own words for the match, where it gave some")
     article: EvidenceArticle | None
     facts: list[EvidenceFact]
+    profiles: list[EvidenceProfile] = Field(
+        default_factory=list,
+        description="A merge proposal's two entities side by side: the one to fold, then the keeper",
+    )
     relationship: RelationshipEvidenceResponse | None = Field(
         default=None, description="An edge row's articles and reviews"
     )
@@ -1177,12 +1197,12 @@ _EVIDENCE_HISTORY = 10
 
 # (where in the payload, label) for the facts a reviewer weighs; a path is
 # before./after. keys, the link log's are top-level. Values that are lists
-# are joined, dicts skipped.
+# are joined, dicts skipped. The suggested type and the merge target are
+# left out on purpose: the row's chips already show them.
 _EVIDENCE_FACTS: tuple[tuple[str, str], ...] = (
     ("original_matched_names", "Matched as"),
     ("original_source", "Linked by"),
     ("original_confidence", "Link confidence"),
-    ("suggested_entity_type", "Suggested type"),
     ("before.junction.matched_names", "Matched as"),
     ("before.junction.source", "Linked by"),
     ("before.junction.confidence", "Link confidence"),
@@ -1192,10 +1212,7 @@ _EVIDENCE_FACTS: tuple[tuple[str, str], ...] = (
     ("before.held.confidence", "Held at confidence"),
     ("before.claim", "Claim"),
     ("after.reverb", "Correct verb"),
-    ("after.suggested_type", "Suggested type"),
-    ("after.target_type", "Suggested type"),
     ("after.agreement", "Articles agreeing"),
-    ("after.merge_into", "Merge into"),
     ("after.other_name", "Duplicate of"),
     ("after.bad_alias", "Alias"),
     ("after.matches_entity_name", "Alias also names"),
@@ -1291,6 +1308,61 @@ async def article_evidence(
 async def _row_article(db: AsyncSession, row: FeedRow) -> EvidenceArticle | None:
     target = _context_target(row)
     return await article_evidence(db, *target) if target is not None else None
+
+
+def _merge_sides(log: EntityMaintenanceLog) -> list[tuple[str, str]]:
+    """(entity_type, id) of the entity to fold and the keeper, for a merge
+    proposal from the adjudicator or the duplicate review (`after.target_id`)
+    or the dedup scan (`before.source` / `before.target`); [] otherwise."""
+    before, after = log.before or {}, log.after or {}
+    if log.action == ACTION_MERGE and after.get("target_id") and log.entity_id:
+        return [
+            (log.entity_type, str(log.entity_id)),
+            (after.get("target_type") or log.entity_type, str(after["target_id"])),
+        ]
+    if log.action == "merge":
+        src = before.get("source") if isinstance(before.get("source"), dict) else None
+        tgt = before.get("target") if isinstance(before.get("target"), dict) else None
+        if src and tgt and src.get("id") and tgt.get("id"):
+            return [
+                (before.get("source_type") or log.entity_type, str(src["id"])),
+                (before.get("target_type") or log.entity_type, str(tgt["id"])),
+            ]
+    return []
+
+
+async def _row_profiles(db: AsyncSession, log: EntityMaintenanceLog | None) -> list[EvidenceProfile]:
+    """A merge proposal's two entities as they stand now, so the reviewer
+    compares them without opening either profile."""
+    from app.intelligence.correlation import ENTITY_CONFIG
+    from app.services.entity_merge_review import profile_of
+
+    if log is None:
+        return []
+    out: list[EvidenceProfile] = []
+    for etype, eid in _merge_sides(log):
+        config = ENTITY_CONFIG.get(etype)
+        try:
+            obj = await db.get(config[0], uuid.UUID(eid)) if config else None
+        except ValueError:
+            obj = None
+        if obj is None:
+            continue
+        p = profile_of(obj)
+        out.append(
+            EvidenceProfile(
+                entity_type=etype,
+                entity_id=p["id"],
+                name=p["name"],
+                aliases=p["aliases"],
+                article_count=p["article_count"],
+                created_via=p["created_via"],
+                first_seen=p["first_seen"],
+                description=p["description"] or None,
+                subtype=p["subtype"],
+            )
+        )
+    return out
 
 
 async def _row_history(db: AsyncSession, row: FeedRow, log_id: uuid.UUID) -> list[EvidenceHistoryItem]:
@@ -3038,13 +3110,19 @@ async def feed_row_evidence(
         edge = await db.get(EntityRelationship, row.entity_id)
         if edge is not None:
             relationship = await relationship_evidence(db, edge)
+    profiles = await _row_profiles(db, log if source == MAINT_SOURCE else None)
+    facts = _evidence_facts(row.payload)
+    if profiles:
+        # the profiles list each side's aliases
+        facts = [f for f in facts if f.label != "Current aliases"]
     return RowEvidence(
         id=row.id,
         reason=row.reason,
         confidence=row.confidence,
         quote=_evidence_quote(row.payload),
         article=await _row_article(db, row),
-        facts=_evidence_facts(row.payload),
+        facts=facts,
+        profiles=profiles,
         relationship=relationship,
         history=await _row_history(db, row, row_id),
     )

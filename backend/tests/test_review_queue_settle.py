@@ -561,3 +561,40 @@ async def test_row_evidence_gives_the_paragraph_quote_facts_and_history(client, 
         f"/api/admin/hygiene/feed/entity_maintenance/{uuid.uuid4()}/evidence", headers=admin_headers
     )
     assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_merge_evidence_shows_both_profiles_and_not_what_the_row_says(client, admin_headers, db_session):
+    """The row's chips already carry the merge target and a suggested type,
+    so the panel lists the two entities side by side instead."""
+    keeper = MalwareFamily(name="NotPetya", aliases=["Nyetya", "Petrwrap"], article_count=72)
+    loser = MalwareFamily(name="nyetya", article_count=0, created_via="ai_extraction")
+    db_session.add_all([keeper, loser])
+    await db_session.flush()
+    merge = EntityMaintenanceLog(
+        entity_type="malware",
+        entity_id=loser.id,
+        action="adjudication_merge",
+        mode="shadow",
+        before={"entity": {"name": "nyetya", "aliases": []}},
+        after={
+            "target_id": str(keeper.id),
+            "target_type": "malware",
+            "merge_into": "NotPetya",
+            "suggested_type": "malware",
+            "reason": "same family, lower-cased",
+        },
+        applied=False,
+    )
+    db_session.add(merge)
+    await db_session.commit()
+
+    resp = await client.get(f"/api/admin/hygiene/feed/entity_maintenance/{merge.id}/evidence", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert [(p["name"], p["article_count"], p["aliases"]) for p in body["profiles"]] == [
+        ("nyetya", 0, []),
+        ("NotPetya", 72, ["Nyetya", "Petrwrap"]),
+    ]
+    assert body["profiles"][0]["created_via"] == "ai_extraction"
+    assert {f["label"] for f in body["facts"]}.isdisjoint({"Merge into", "Suggested type", "Current aliases"})

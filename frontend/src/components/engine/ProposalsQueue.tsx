@@ -883,7 +883,7 @@ export function ProposalsQueue({
             ) : (
               <tr>
                 <th>Entity</th>
-                <th>Proposed</th>
+                <th className={styles.proposedCol}>Proposed</th>
                 <th>Why</th>
                 <th>Latest</th>
                 <th className={styles.actCol} />
@@ -905,6 +905,7 @@ export function ProposalsQueue({
                 // with several proposals also lists them.
                 const manyRows = g.entity_id !== null && g.proposals > 1;
                 const expandable = manyRows || g.latest_row_id !== null;
+                const mergeTargets = new Set(g.merge_into.map((m) => m.target_id));
                 return (
                   <Fragment key={k}>
                     <tr>
@@ -932,7 +933,7 @@ export function ProposalsQueue({
                           {g.linked !== null && g.linked !== undefined ? ` · ${g.linked.toLocaleString()} article${g.linked === 1 ? "" : "s"}` : ""}
                         </span>
                       </td>
-                      <td>
+                      <td className={styles.proposedCol}>
                         <div className={cg.chips}>
                           {kindChips.map((kd) => {
                             const meta = CHANGE_META[kd.action] ?? { label: kd.action, cls: styles.tName };
@@ -987,7 +988,8 @@ export function ProposalsQueue({
                           <span className={styles.subject}>{g.subject}</span>
                         )}
                         {g.reason && <span className={styles.reason}>{g.reason}</span>}
-                        <LinkChips links={g.links} />
+                        {/* the merge target is already the "into …" chip in Proposed */}
+                        <LinkChips links={g.links.filter((l) => !(l.role === "target" && mergeTargets.has(l.entity_id ?? "")))} />
                         <span className={cg.meta}>
                           {g.proposals.toLocaleString()} proposal{g.proposals === 1 ? "" : "s"}
                           {reclassifyN > 0 && kindChips.length > 0 ? ` (${reclassifyN.toLocaleString()} to reclassify)` : ""}
