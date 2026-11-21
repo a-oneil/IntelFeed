@@ -117,6 +117,18 @@ def allowed_verbs_for_pair(source_type: str, target_type: str) -> list[str]:
 _CONFIDENCE_ORDER = ("possible", "probable", "confirmed")
 
 
+def shown_relationship_condition():
+    """Edges display surfaces (profiles, graphs, pivots, reports) show: not
+    rejected by an analyst, and not ruled coincidental by the reviewers — a
+    claim no reviewed article states. Both stay in the management views
+    (Engine › Links, Review history), where Restore brings them back."""
+    from app.models.entity_relationship import EntityRelationship
+
+    return (EntityRelationship.source != "analyst_rejected") & EntityRelationship.adjudication_verdict.is_distinct_from(
+        "coincidental"
+    )
+
+
 def hidden_relationship_confidences() -> frozenset[str]:
     """Confidence levels hidden from display surfaces (profiles, graphs,
     timelines) per the ``relationship_min_confidence`` setting.

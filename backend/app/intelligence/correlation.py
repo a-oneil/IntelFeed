@@ -11,7 +11,11 @@ from sqlalchemy import String, cast, func, or_, select, type_coerce
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.intelligence.cve import risk_tier_for
-from app.intelligence.relationship_matrix import hidden_relationship_confidences, is_allowed_relationship
+from app.intelligence.relationship_matrix import (
+    hidden_relationship_confidences,
+    is_allowed_relationship,
+    shown_relationship_condition,
+)
 from app.models.campaign import Campaign
 from app.models.country import Country, EntryCountry
 from app.models.cve import CVE, EntryCVE
@@ -862,7 +866,7 @@ async def _claimed_observables(db: AsyncSession, entity_type: str, entity_id: uu
         .where(
             EntityRelationship.source_type == entity_type,
             EntityRelationship.source_id == entity_id,
-            EntityRelationship.source != "analyst_rejected",
+            shown_relationship_condition(),
             Observable.is_denied.is_(False),
         )
     )
@@ -886,7 +890,7 @@ async def _get_manual_relationships(db: AsyncSession, entity_type: str, entity_i
             (EntityRelationship.source_type == entity_type) & (EntityRelationship.source_id == entity_id),
             (EntityRelationship.target_type == entity_type) & (EntityRelationship.target_id == entity_id),
         ),
-        EntityRelationship.source != "analyst_rejected",
+        shown_relationship_condition(),
     )
     hidden = hidden_relationship_confidences()
     if hidden:

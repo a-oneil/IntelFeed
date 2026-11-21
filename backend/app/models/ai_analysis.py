@@ -52,6 +52,8 @@ class AIAnalysisRequest(Base):
     adjudicated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     adjudication_queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     adjudication_recheck_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Reviews re-run after a failure or a void response; one retry each.
+    adjudication_retries: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     __table_args__ = (Index("ix_ai_analysis_status_created", "status", "created_at"),)
 

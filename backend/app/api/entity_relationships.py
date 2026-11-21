@@ -14,6 +14,7 @@ from app.intelligence.relationship_matrix import (
     hidden_relationship_confidences,
     is_allowed_relationship,
     orient_relationship,
+    shown_relationship_condition,
 )
 from app.models.entity_relationship import EntityRelationship
 from app.models.entry import Entry
@@ -29,11 +30,15 @@ router = APIRouter()
 
 
 def unreviewed_relationship_condition():
-    """Edges the machine drew that nobody has judged: an analyst confirming or
-    rejecting one changes its source, the adjudicator sets its verdict."""
+    """Edges the machine drew that nobody has settled: an analyst confirming or
+    rejecting one changes its source, the reviewers set its verdict. A
+    disputed edge (one article keeps it, another demotes it) stays."""
+    from app.services.edge_settlement import OPEN_VERDICTS
     from app.services.entry_adjudication import REVIEWABLE_EDGE_SOURCES
 
-    return EntityRelationship.source.in_(REVIEWABLE_EDGE_SOURCES) & EntityRelationship.adjudication_verdict.is_(None)
+    return EntityRelationship.source.in_(REVIEWABLE_EDGE_SOURCES) & (
+        EntityRelationship.adjudication_verdict.is_(None) | EntityRelationship.adjudication_verdict.in_(OPEN_VERDICTS)
+    )
 
 
 async def _invalidate_rel_caches(rel: EntityRelationship) -> None:
@@ -159,8 +164,8 @@ async def list_entity_relationships(
 
     # A rejection is an analyst's call on this instance: visitors don't see them.
     if not include_rejected or user.is_anonymous:
-        base = base.where(EntityRelationship.source != "analyst_rejected")
-        count_base = count_base.where(EntityRelationship.source != "analyst_rejected")
+        base = base.where(shown_relationship_condition())
+        count_base = count_base.where(shown_relationship_condition())
 
     # Display surfaces respect the min-confidence setting; management views
     # (engine Links tab) pass all_confidence=true to see every stored edge.
@@ -246,7 +251,7 @@ async def relationship_signals(
     id_set = set(id_list)
 
     signals_query = select(EntityRelationship).where(
-        EntityRelationship.source != "analyst_rejected",
+        shown_relationship_condition(),
         or_(
             (EntityRelationship.source_type == entity_type) & (EntityRelationship.source_id.in_(id_list)),
             (EntityRelationship.target_type == entity_type) & (EntityRelationship.target_id.in_(id_list)),
@@ -310,7 +315,7 @@ async def get_entity_relationships(
     )
     query = select(EntityRelationship).where(condition)
     if not include_rejected or user.is_anonymous:
-        query = query.where(EntityRelationship.source != "analyst_rejected")
+        query = query.where(shown_relationship_condition())
     hidden = hidden_relationship_confidences()
     if hidden:
         query = query.where(EntityRelationship.confidence.notin_(hidden))

@@ -216,6 +216,7 @@ async def collect_report_observables(
     its attribution claims ("Qakbot · communicates_with") from the trust
     ladder. Claimed rows sort first — they're the ones worth leading with.
     """
+    from app.intelligence.relationship_matrix import shown_relationship_condition
     from app.models.entity_relationship import EntityRelationship
     from app.models.observable import EntryObservable, Observable
 
@@ -256,7 +257,7 @@ async def collect_report_observables(
                 select(EntityRelationship).where(
                     EntityRelationship.target_type == "observable",
                     EntityRelationship.target_id.in_([o.id for o in observables]),
-                    EntityRelationship.source != "analyst_rejected",
+                    shown_relationship_condition(),
                 )
             )
         )

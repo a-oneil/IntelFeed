@@ -642,7 +642,7 @@ def test_validate_misaligned_response_voids_everything():
     assert all(v.verdict == "keep" and not v.explicit for v in verdicts)
 
 
-def test_validate_merge_to_unlisted_name_is_keep_and_duplicates_void_all():
+def test_validate_merge_to_unlisted_name_is_keep_and_a_conflicting_repeat_is_unanswered():
     item = _item(
         "link:threat_actor:b",
         minted=True,
@@ -653,6 +653,7 @@ def test_validate_merge_to_unlisted_name_is_keep_and_duplicates_void_all():
     )
     assert verdicts[0].verdict == "keep"
 
+    # One item answered two ways is left unanswered; the rest of the response stands.
     other = _item("link:threat_actor:c")
     verdicts, stats = _validate_verdicts(
         {
@@ -663,7 +664,8 @@ def test_validate_merge_to_unlisted_name_is_keep_and_duplicates_void_all():
         },
         [other],
     )
-    assert stats["duplicate"] and verdicts[0].verdict == "keep"
+    assert not stats["duplicate"] and stats["duplicate_conflicting"] == 1
+    assert verdicts[0].verdict == "keep" and not verdicts[0].explicit
 
 
 def test_validate_voids_one_reason_copied_onto_several_links():
@@ -2024,14 +2026,21 @@ async def test_keep_counter_promotes_edge_after_three_distinct_entries(db_sessio
         await db_session.flush()
         await db_session.refresh(edge)
 
+    other = Feed(title="Second Feed", url="https://adj.example/second", feed_type="rss")
+    db_session.add(other)
+    await db_session.flush()
     e1, e2, e3 = [await _make_entry(db_session, feed) for _ in range(3)]
+    e4 = await _make_entry(db_session, other)
     await keep_from(e1)
     await keep_from(e1)  # same entry again does not count twice
     assert len(edge.reviewer_kept_entry_ids) == 1 and edge.confidence == "probable"
+    # One keep leaves the edge in Review: a single article's word is not enough.
+    assert edge.adjudication_verdict is None
     await keep_from(e2)
-    assert len(edge.reviewer_kept_entry_ids) == 2 and edge.confidence == "probable"
     await keep_from(e3)
-    assert len(edge.reviewer_kept_entry_ids) == 3
+    # Three articles, one feed: not independent, so not confirmed.
+    assert len(edge.reviewer_kept_entry_ids) == 3 and edge.confidence == "probable"
+    await keep_from(e4)
     assert edge.confidence == "confirmed" and edge.adjudication_verdict == "corroborated"
 
 
@@ -2826,6 +2835,18 @@ async def test_merge_is_not_counted_by_the_breaker(db_session: AsyncSession, fee
     assert "merge" not in adj.DESTRUCTIVE
 
 
+async def _kept_elsewhere(db_session: AsyncSession, edge, n: int) -> None:
+    """Counted keeps from ``n`` articles on a feed of their own."""
+    from app.services import edge_settlement as es
+
+    other = Feed(title=f"Elsewhere {uuid.uuid4().hex[:6]}", url=f"https://adj.example/{uuid.uuid4()}", feed_type="rss")
+    db_session.add(other)
+    await db_session.flush()
+    for _ in range(n):
+        e = await _make_entry(db_session, other)
+        await es.record_review(db_session, edge.id, reviewer=es.ADJUDICATOR, verdict=es.KEEP, entry_id=e.id, counted=True)
+
+
 async def _run_task_with(db_session: AsyncSession, monkeypatch, entry, ai_result: dict) -> dict:
     """Run the adjudicate task on ``entry`` against this session, with the
     model answering ``ai_result``."""
@@ -3277,10 +3298,10 @@ async def test_edge_promotion_is_not_counted_as_an_applied_change(db_session: As
         confidence="probable",
         source="auto_extracted",
         evidence_entry_ids=[entry.id],
-        reviewer_kept_entry_ids=[uuid.uuid4(), uuid.uuid4()],
     )
     db_session.add(edge)
     await db_session.flush()
+    await _kept_elsewhere(db_session, edge, 2)
 
     _items, verdicts = await _verdicts_for(
         db_session,
@@ -4226,14 +4247,67 @@ async def test_a_malformed_review_still_marks_its_candidates_judged(db_session: 
     entry.observable_candidates = [_cand("beliefdesk.xyz")]
     await db_session.flush()
     keep = {"item_id": f"link:threat_actor:{storm.id}", "verdict": "keep", "confidence": "high", "reason": "named"}
-    detail = await _run_task_with(
-        db_session, monkeypatch, entry, {"_extraction_status": "success", "verdicts": [keep, keep]}
-    )
-    assert detail["skipped"] == "ai_bad_shape"
+    remove = {**keep, "verdict": "remove", "reason": "Storm is the weather here"}
+    capture = {"item_id": "ioc:domain:beliefdesk.xyz", "verdict": "capture", "confidence": "high", "reason": "C2"}
+    drop = {**capture, "verdict": "drop", "reason": "beliefdesk.xyz is the publisher"}
+    misaligned = {"_extraction_status": "success", "verdicts": [keep, remove, capture, drop]}
+    row.adjudication_retries = 1  # asked once more already (see the retry test)
+    await db_session.flush()
+    detail = await _run_task_with(db_session, monkeypatch, entry, misaligned)
+    assert detail["skipped"] == "ai_bad_shape" and "retry" not in detail
     assert all(c.get("reviewed") for c in entry.observable_candidates)
     row.adjudication_status = adj.COMPLETED
     await db_session.flush()
     assert await adj.queue_candidate_reviews(db_session) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_misaligned_review_is_asked_once_more(db_session: AsyncSession, feed, monkeypatch):
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    row = await _request(db_session, entry)
+    storm = await _link_actor(db_session, entry, "Storm")
+    clear = await _link_actor(db_session, entry, "Clear")
+    rows = []
+    for actor in (storm, clear):
+        item_id = f"link:threat_actor:{actor.id}"
+        rows += [
+            {"item_id": item_id, "verdict": "keep", "confidence": "high", "reason": actor.name},
+            {"item_id": item_id, "verdict": "remove", "confidence": "high", "reason": actor.name},
+        ]
+    detail = await _run_task_with(db_session, monkeypatch, entry, {"_extraction_status": "success", "verdicts": rows})
+    assert detail["skipped"] == "ai_bad_shape" and detail["retry"]
+    assert row.adjudication_status == adj.RECHECK and row.adjudication_retries == 1
+    assert row.adjudication_recheck_since is None  # a full review, not a recheck
+
+
+@pytest.mark.asyncio
+async def test_resweep_retries_a_failed_review_once(db_session: AsyncSession, feed, monkeypatch):
+    await _seed_settings(db_session, adjudication_mode="apply")
+    entry = await _make_entry(db_session, feed)
+    row = await _request(db_session, entry)
+    row.adjudication_status = adj.FAILED
+    await db_session.flush()
+    enqueued = []
+
+    async def fake_enqueue(db, entry_id, *a, **kw):
+        enqueued.append(entry_id)
+        return adj.SKIPPED_BUDGET
+
+    async def fake_analysis(db, entry_id):
+        return None, _payload()
+
+    monkeypatch.setattr(adj, "enqueue_adjudication", fake_enqueue)
+    monkeypatch.setattr(adj, "_current_analysis", fake_analysis)
+    monkeypatch.setattr(adj, "_ai_queue_depth", _zero_depth)
+    await adj.resweep_adjudications(db_session)
+    assert enqueued == [entry.id] and row.adjudication_retries == 1
+    await adj.resweep_adjudications(db_session)
+    assert enqueued == [entry.id]  # once
+
+
+async def _zero_depth():
+    return 0
 
 
 @pytest.mark.asyncio

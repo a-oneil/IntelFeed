@@ -63,6 +63,7 @@ MODES = ("off", "shadow", "apply")
 TRIGGERS = ("all", "created")
 CONFIDENCES = ("high", "medium", "low")
 _CONF_RANK = {"low": 0, "medium": 1, "high": 2}
+_EDGE_CONF_RANK = {"possible": 0, "probable": 1, "confirmed": 2}
 
 VERDICTS = {"keep", "remove", "reclassify", "veto", "merge", "demote", "drop", "link", "capture"}
 # Which verdicts each item kind accepts. veto/merge are additionally gated on
@@ -594,7 +595,9 @@ async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
     - rows waiting on budget or a paused provider (a new hour, a new try);
     - reviewed rows reopened for a recheck (``reopen_adjudication``);
     - ``pending`` rows queued longer than STALE_PENDING_HOURS with no run —
-      a lost task (dispatch failure, worker crash, retries exhausted).
+      a lost task (dispatch failure, worker crash, retries exhausted);
+    - ``failed`` reviews (the model's answer did not parse, the provider
+      errored), once.
 
     Newest first means live entries drain before backfilled history.
 
@@ -626,6 +629,8 @@ async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
                         AIAnalysisRequest.adjudication_status.in_([SKIPPED_BUDGET, SKIPPED_PAUSED, RECHECK]),
                         (AIAnalysisRequest.adjudication_status == PENDING)
                         & (AIAnalysisRequest.adjudication_queued_at < lost),
+                        (AIAnalysisRequest.adjudication_status == FAILED)
+                        & (AIAnalysisRequest.adjudication_retries < 1),
                     ),
                 )
                 .order_by(AIAnalysisRequest.completed_at.desc().nullslast())
@@ -637,6 +642,9 @@ async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
     )
     swept = 0
     for row in rows:
+        if row.adjudication_status == FAILED:
+            row.adjudication_retries = (row.adjudication_retries or 0) + 1
+            db.add(row)
         _result, parsed = await _current_analysis(db, row.entry_id)
         if parsed is None:
             # Nothing to review against: the analysis was superseded or removed.
@@ -2042,16 +2050,18 @@ def _bystander_reason(reason: str) -> bool:
 # as the edge's own word for that, so the guards below still judge the reason.
 _EDGE_REJECT_WORDS = {"remove", "drop", "veto"}
 # A response repeating item ids is misaligned, not merely repetitive, when this
-# many ids carry conflicting verdicts, or repeats cover this share of the manifest.
+# many ids carry conflicting verdicts, or when at least _DUPLICATE_MIN_VOID ids
+# repeat and they cover this share of the manifest.
 _DUPLICATE_CONFLICTS_VOID = 2
+_DUPLICATE_MIN_VOID = 3
 _DUPLICATE_SHARE_VOID = 0.25
 
 
 def _dedupe_verdict_rows(raw: list, stats: dict, n_items: int) -> list:
     """One row per item_id. A model that repeats an item with the same verdict
     only repeated itself: the first copy stands. Copies that disagree leave
-    that item unanswered. Many disagreements, or repeats on a quarter of the
-    manifest, mean it lost track of which line it was judging: the whole response is
+    that item unanswered. Several disagreements, or repeats on a quarter of
+    the manifest, mean it lost track of which line it was judging: the whole response is
     void (``stats["duplicate"]``)."""
     groups: dict[str, list[dict]] = {}
     order: list[str] = []
@@ -2070,7 +2080,8 @@ def _dedupe_verdict_rows(raw: list, stats: dict, n_items: int) -> list:
     stats["duplicate_agreeing"] = len(repeated) - len(conflicting)
     stats["duplicate_conflicting"] = len(conflicting)
     if repeated and (
-        len(conflicting) >= _DUPLICATE_CONFLICTS_VOID or len(repeated) / max(n_items, 1) > _DUPLICATE_SHARE_VOID
+        len(conflicting) >= _DUPLICATE_CONFLICTS_VOID
+        or (len(repeated) >= _DUPLICATE_MIN_VOID and len(repeated) / max(n_items, 1) > _DUPLICATE_SHARE_VOID)
     ):
         stats["duplicate"] = True
         return []
@@ -2572,65 +2583,84 @@ async def _recreate_entity(db: AsyncSession, entity_type: str, snap: dict):
     return obj
 
 
-async def _count_edge_keep(db: AsyncSession, edge_id: uuid.UUID, entry_id: uuid.UUID) -> bool:
-    """A keep on an edge from a new entry is corroboration. At
-    relationship_evidence_promote_count distinct entries the edge is promoted
-    to confirmed — the nightly adjudicator's promotion, as a counter. Returns
-    True when this call promoted the edge."""
-    from app.intelligence.correlation_cache import invalidate_entity_cache
+async def _count_edge_keep(
+    db: AsyncSession,
+    edge_id: uuid.UUID,
+    entry_id: uuid.UUID,
+    v: Verdict | None = None,
+    ai_result_id: uuid.UUID | None = None,
+) -> bool:
+    """A counted keep: this article states the claim. Recorded as a review;
+    the edge's verdict is re-derived from all of them (edge_settlement), so
+    articles from two or more feeds promote it to confirmed and one that
+    demoted it earlier makes it disputed. Returns True when this keep
+    promoted the edge."""
     from app.models.entity_relationship import EntityRelationship
-    from app.services.system_settings import get_setting
+    from app.services import edge_settlement as es
 
     edge = await db.get(EntityRelationship, edge_id)
-    if edge is None or edge.source in ("analyst_rejected", "analyst_confirmed", "analyst_created"):
+    if edge is None or edge.source not in REVIEWABLE_EDGE_SOURCES:
         return False
-    if edge.adjudication_verdict == "coincidental":
-        return False  # sticky, like the nightly job's demotion
     kept = list(edge.reviewer_kept_entry_ids or [])
-    if entry_id in kept:
-        return False
-    kept.append(entry_id)
-    edge.reviewer_kept_entry_ids = kept
-    threshold = max(1, int(await get_setting("relationship_evidence_promote_count", db) or 3))
-    promoted = False
-    if len(kept) >= threshold and edge.confidence != "confirmed":
-        edge.confidence = "confirmed"
-        edge.adjudication_verdict = "corroborated"
-        edge.adjudicated_at = datetime.now(UTC)
-        promoted = True
-        for etype, eid in ((edge.source_type, edge.source_id), (edge.target_type, edge.target_id)):
-            try:
-                await invalidate_entity_cache(etype, str(eid))
-            except Exception:
-                pass
+    if entry_id not in kept:
+        edge.reviewer_kept_entry_ids = [*kept, entry_id]
+    await es.record_review(
+        db,
+        edge.id,
+        reviewer=es.ADJUDICATOR,
+        verdict=es.KEEP,
+        entry_id=entry_id,
+        confidence=v.confidence if v else None,
+        reason=v.reason if v else None,
+        counted=True,
+        ai_result_id=ai_result_id,
+    )
     db.add(edge)
-    return promoted
+    return await es.settle_edge(db, edge) == es.CORROBORATED
 
 
-async def _demote_edge(db: AsyncSession, edge_id: uuid.UUID, reason: str) -> dict | None:
-    """The nightly adjudicator's demotion, inline: confidence → possible,
-    verdict → coincidental (sticky: later evidence never re-promotes)."""
-    from app.intelligence.correlation_cache import invalidate_entity_cache
+async def _demote_edge(
+    db: AsyncSession,
+    edge_id: uuid.UUID,
+    reason: str,
+    *,
+    entry_id: uuid.UUID | None = None,
+    reviewer: str = "adjudicator",
+    confidence: str | None = None,
+    ai_result_id: uuid.UUID | None = None,
+) -> dict | None:
+    """A counted demote: this article does not state the claim. The edge
+    goes coincidental (possible, hidden from display surfaces) only when no
+    other article's keep stands; otherwise it is disputed and stays in
+    Review. An analyst's demote settles it either way. Returns the edge's
+    state before, or None when the edge is not the reviewer's to demote."""
     from app.models.entity_relationship import EntityRelationship
+    from app.services import edge_settlement as es
 
     edge = await db.get(EntityRelationship, edge_id)
-    # Same door as the manifest: an analyst's edge, or one already
-    # corroborated by the required number of reviews, is not demoted by a
-    # single article that fails to assert it.
-    if edge is None or edge.source not in REVIEWABLE_EDGE_SOURCES or edge.adjudication_verdict == "corroborated":
+    # Same door as the manifest: an analyst's edge, or a confirmed one, is not
+    # demoted by a single article that fails to assert it — only by an analyst.
+    if edge is None or edge.source not in REVIEWABLE_EDGE_SOURCES:
+        return None
+    if reviewer != es.ANALYST and edge.adjudication_verdict == es.CORROBORATED:
         return None
     before = {"confidence": edge.confidence, "adjudication_verdict": edge.adjudication_verdict}
-    edge.confidence = "possible"
-    edge.adjudication_verdict = "coincidental"
-    edge.adjudicated_at = datetime.now(UTC)
+    await es.record_review(
+        db,
+        edge.id,
+        reviewer=reviewer,
+        verdict=es.DEMOTE,
+        entry_id=entry_id,
+        confidence=confidence,
+        reason=reason,
+        counted=True,
+        ai_result_id=ai_result_id,
+    )
+    await es.settle_edge(db, edge)
     if reason and not edge.description:
         edge.description = reason
     db.add(edge)
-    for etype, eid in ((edge.source_type, edge.source_id), (edge.target_type, edge.target_id)):
-        try:
-            await invalidate_entity_cache(etype, str(eid))
-        except Exception:
-            pass
+    before["verdict_after"] = edge.adjudication_verdict
     return before
 
 
@@ -3097,6 +3127,26 @@ async def owe_second_look(db: AsyncSession, request_row, entry) -> bool:
     return True
 
 
+async def _record_edge_review(
+    db: AsyncSession, item: ReviewItem, entry_id: uuid.UUID, v: Verdict, ai_result_id: uuid.UUID | None
+) -> None:
+    """An edge verdict that settles nothing: shadow mode, below the floor,
+    or the model never answered."""
+    from app.services import edge_settlement as es
+
+    verdict = v.verdict if v.explicit else es.UNANSWERED
+    await es.record_review(
+        db,
+        item.edge_id,  # type: ignore[arg-type]
+        reviewer=es.ADJUDICATOR,
+        verdict=verdict,
+        entry_id=entry_id,
+        confidence=v.confidence if v.explicit else None,
+        reason=v.reason or None,
+        ai_result_id=ai_result_id,
+    )
+
+
 async def apply_verdicts(
     db: AsyncSession,
     entry,
@@ -3226,15 +3276,14 @@ async def apply_verdicts(
             # an omission; counting those would promote an edge to `confirmed`
             # on three reviews that never weighed in. Edges are the one section
             # the prompt still demands an answer for.
-            if (
-                item.kind == "edge"
-                and run_mode == "apply"
-                and item.edge_id is not None
-                and v.explicit
-                and _CONF_RANK[v.confidence] >= floor
-            ):
-                if await _count_edge_keep(db, item.edge_id, entry.id):
-                    promoted_n += 1
+            if item.kind == "edge" and item.edge_id is not None:
+                if run_mode == "apply" and v.explicit and _CONF_RANK[v.confidence] >= floor:
+                    if await _count_edge_keep(db, item.edge_id, entry.id, v, ai_result_id):
+                        promoted_n += 1
+                else:
+                    # Asked, and either silent or not sure enough: a fact the
+                    # edge sweep acts on, never a vote.
+                    await _record_edge_review(db, item, entry.id, v, ai_result_id)
             continue
         if item.kind == "assessment" and v.verdict == "ok":
             continue
@@ -3434,8 +3483,17 @@ async def apply_verdicts(
             elif not await _proposal_pending(db, ACTION_HELD_LINK, item.entity_type or "", item.entity_id, entry.id):
                 _log(ACTION_HELD_LINK, item, before, after_base, applied=False)
         elif item.kind == "edge" and v.verdict == "demote":
+            if not do_apply:
+                await _record_edge_review(db, item, entry.id, v, ai_result_id)
             if do_apply:
-                before = await _demote_edge(db, item.edge_id, reason)  # type: ignore[arg-type]
+                before = await _demote_edge(
+                    db,
+                    item.edge_id,  # type: ignore[arg-type]
+                    reason,
+                    entry_id=entry.id,
+                    confidence=v.confidence,
+                    ai_result_id=ai_result_id,
+                )
                 if before is not None:
                     applied_n += 1
                     _log(
@@ -3665,7 +3723,9 @@ async def apply_adjudication_row(db: AsyncSession, row) -> dict:
         }
         after["outcome"] = await _merge_entity(db, row.entity_type, row.entity_id, target, reason)
     elif row.action == ACTION_EDGE_DEMOTE and row.entity_id:
-        prev = await _demote_edge(db, row.entity_id, reason)
+        prev = await _demote_edge(
+            db, row.entity_id, reason, entry_id=entry.id, reviewer="analyst", ai_result_id=row.ai_result_id
+        )
         if prev is None:
             return {"applied": False, "reason": "edge gone or analyst-rejected"}
         before.update(prev)
@@ -3714,7 +3774,6 @@ async def apply_adjudication_row(db: AsyncSession, row) -> dict:
 
 async def restore_adjudication_row(db: AsyncSession, row) -> dict:
     """Undo an applied adjudication row from its snapshots."""
-    from app.intelligence.correlation_cache import invalidate_entity_cache
     from app.intelligence.observables import record_sighting
     from app.models.entity_relationship import EntityRelationship
     from app.models.entry import Entry
@@ -3785,18 +3844,22 @@ async def restore_adjudication_row(db: AsyncSession, row) -> dict:
                 db.add(entry)
         outcome = {"restored": True, "deleted": deleted}
     elif row.action == ACTION_EDGE_DEMOTE and row.entity_id:
+        from app.services import edge_settlement as es
+
         edge = await db.get(EntityRelationship, row.entity_id)
         if edge is None:
             return {"restored": False, "reason": "edge gone"}
-        edge.confidence = before.get("confidence") or "probable"
-        edge.adjudication_verdict = before.get("adjudication_verdict")
-        edge.adjudicated_at = None
+        # An analyst looked at the claim and wants it back: that settles it
+        # as kept, rather than returning it to Review unjudged.
+        await es.record_review(
+            db, edge.id, reviewer=es.ANALYST, verdict=es.KEEP, entry_id=entry.id if entry else None, counted=True
+        )
+        await es.settle_edge(db, edge)
+        prior = before.get("confidence") or "probable"
+        if _EDGE_CONF_RANK.get(prior, 0) > _EDGE_CONF_RANK.get(edge.confidence or "possible", 0):
+            edge.confidence = prior
         db.add(edge)
-        for etype, eid in ((edge.source_type, edge.source_id), (edge.target_type, edge.target_id)):
-            try:
-                await invalidate_entity_cache(etype, str(eid))
-            except Exception:
-                pass
+        await es.invalidate_edge(edge)
         outcome = {"restored": True}
     elif row.action == ACTION_IOC_DROP:
         outcome = {"restored": True}

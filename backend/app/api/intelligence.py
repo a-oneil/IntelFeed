@@ -241,13 +241,14 @@ def _linked_count_subquery(model, entity_type: str):
     the /entity-relationships/signals endpoint so the ordering agrees with the
     displayed counts.
     """
+    from app.intelligence.relationship_matrix import shown_relationship_condition
     from app.models.entity_relationship import EntityRelationship
 
     return (
         select(func.count())
         .select_from(EntityRelationship)
         .where(
-            EntityRelationship.source != "analyst_rejected",
+            shown_relationship_condition(),
             or_(
                 (EntityRelationship.source_type == entity_type) & (EntityRelationship.source_id == model.id),
                 (EntityRelationship.target_type == entity_type) & (EntityRelationship.target_id == model.id),
