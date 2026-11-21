@@ -78,6 +78,7 @@ Where a user stopped in a podcast or video. Unique on `(user_id, entry_media_id)
 - Fetching: `fetch_interval_minutes` (default 30), `last_fetched_at`, `etag`, `last_modified`
 - Health: `error_count`, `last_error`, `error_since`, `auto_paused_at`. While errors continue, the poller waits longer between fetches.
 - Switches: `is_active` (indexed), `is_muted`, `visible_to_visitors` (shown in public read-only mode; default off)
+- `archived_at` (indexed) — set when the feed is deleted or loses its last subscriber. An archived feed is off every feed list and out of the reader and default search, and stops fetching; its entries stay (`backend/app/services/feed_archive.py`). Adding or subscribing to it again clears it.
 - Analyst ratings: `reliability_rating` (one letter, A–F), `timeliness_rating` (excellent / good / fair / poor), `relevance_rating` (high / medium / low), `analyst_notes`, `last_reviewed_at`
 - Pipeline switches:
   - `intel_extraction_mode` (default `selective`) — `full`, `selective`, `manual` or `none`. `none` turns off autolinking and extraction for the feed.

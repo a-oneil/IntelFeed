@@ -35,6 +35,7 @@ from app.schemas.automation import VALID_ACTION_TYPES, VALID_TRIGGER_TYPES
 from app.schemas.intelligence import RULE_TYPE_PATTERN
 from app.schemas.tlp import TLP_VALUES, normalize_tlp
 from app.services.entity_backlink import dispatch_backlink_for_added_aliases
+from app.services.feed_archive import revive_feed
 from app.tools import _tool
 
 # Endpoint types the relationship matrix actually allows — derived rather than
@@ -55,6 +56,9 @@ _REPORT_TEMPLATE_TYPES = sorted(REPORT_TEMPLATES)
 
 # Detection rule formats — derived from the API's validation pattern.
 _RULE_TYPES = sorted(RULE_TYPE_PATTERN.removeprefix("^(").removesuffix(")$").split("|"))
+
+# A feed deleted earlier and added again comes back with the articles it had.
+_READDED = "this feed was in IntelFeed before; its earlier articles are back on it"
 
 # Feed types — derived from the adapter registry (standard + extended adapters).
 _FEED_TYPES = sorted(set(adapters._ADAPTERS) | set(adapters._EXTENDED_ADAPTERS))
@@ -405,6 +409,9 @@ async def _create_feed(
 
     # Duplicate-URL check (mirrors the feeds API 409) — friendlier than an IntegrityError.
     existing = (await db.execute(select(Feed).where(Feed.url == url))).scalar_one_or_none()
+    if existing and await revive_feed(db, existing, user_id):
+        # It had been deleted; adding it again brings it back with its articles.
+        return {"id": str(existing.id), "created": True, "title": existing.title, "url": url, "note": _READDED}
     if existing:
         return {"error": "a feed with this URL already exists", "id": str(existing.id), "url": url}
 
@@ -596,8 +603,10 @@ async def _add_telegram_feed(
         url = f"https://t.me/{raw}"
         display = f"@{raw}"
 
-    existing = await db.execute(select(Feed).where(Feed.url == url))
-    if existing.scalar_one_or_none():
+    existing = (await db.execute(select(Feed).where(Feed.url == url))).scalar_one_or_none()
+    if existing and await revive_feed(db, existing, user_id):
+        return {"id": str(existing.id), "created": True, "title": existing.title, "url": url, "note": _READDED}
+    if existing:
         return {"error": "telegram feed already exists for this channel", "url": url}
 
     adapter_config: dict = {

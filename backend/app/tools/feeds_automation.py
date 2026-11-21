@@ -306,10 +306,11 @@ async def _update_feed(
 @_tool(
     name="delete_feed",
     description=(
-        "Delete a feed and ALL of its entries (cascade), removing them from the search index first. "
-        "REQUIRES user confirmation. First call returns a confirmation prompt with an entry count — "
-        "present it to the user. Only call again with the confirmation_token after the user explicitly "
-        "approves."
+        "Delete a feed for every reader: it leaves every feed list and stops fetching. Its entries stay as "
+        "the evidence behind entities, relationships, campaigns and threads, out of the reader and default "
+        "search; adding the feed again brings it back. REQUIRES user confirmation. First call returns a "
+        "confirmation prompt with an entry count — present it to the user. Only call again with the "
+        "confirmation_token after the user explicitly approves."
     ),
     input_schema={
         "properties": {
@@ -353,19 +354,20 @@ async def _delete_feed(
             "title": title,
             "entry_count": entry_count,
             "confirmation_token": _make_token("feed", feed_id, user_id),
-            "warning": f"This permanently deletes the feed and all {entry_count} of its entries.",
+            "warning": (
+                f"This removes the feed from everyone's list and stops fetching it. Its {entry_count} "
+                "entries stay linked to the entities, campaigns and threads they support."
+            ),
         }
 
     if not _verify_token(confirmation_token, "feed", feed_id, user_id):
         return {"error": "Invalid or expired confirmation token. Please request a new confirmation."}
 
-    # Mirror the API cleanup order: search docs are removed BEFORE the cascade
-    # delete so no orphaned documents survive (app/api/feeds.py delete_feed).
-    from app.services.meilisearch_client import delete_entries_by_feed
+    # Archived, as the feeds API does (services/feed_archive.py): its entries
+    # are intelligence, not the feed's to take with it.
+    from app.services.feed_archive import archive_feed
 
-    delete_entries_by_feed(fid)
-    await db.delete(feed)
-    await db.flush()
+    await archive_feed(db, feed)
 
     return {"status": "deleted", "feed_id": feed_id, "title": title, "message": f"Feed '{title}' has been deleted."}
 
@@ -418,7 +420,7 @@ async def _list_categories(db: AsyncSession, user_id: uuid.UUID) -> dict:
 
     count_result = await db.execute(
         select(Feed.category_id, func.count().label("cnt"))
-        .where(Feed.category_id.is_not(None))
+        .where(Feed.category_id.is_not(None), Feed.archived_at.is_(None))
         .group_by(Feed.category_id)
     )
     count_map = {row.category_id: row.cnt for row in count_result.all()}

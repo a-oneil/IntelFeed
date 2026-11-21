@@ -252,7 +252,7 @@ All paths below start with `/api` unless shown otherwise. `{id}`-style names are
 | POST | `/api/feeds/{feed_id}/refresh` | User | Fetch the feed now (queued) |
 | POST | `/api/feeds/{feed_id}/resume` | Admin | Turn back on a feed the health check paused, and clear its failure count |
 | POST | `/api/feeds/{feed_id}/pause` | Admin | Stop polling a feed for everyone (the PUT `is_active` toggle pauses only your own subscription) |
-| POST | `/api/feeds/{feed_id}/remove` | Admin | Unsubscribe every reader and stop polling; entries stay (DELETE without `purge` unsubscribes only you) |
+| POST | `/api/feeds/{feed_id}/remove` | Admin | Unsubscribe every reader and archive the feed; entries stay (DELETE without `purge` unsubscribes only you) |
 | GET | `/api/feeds/health` | User | Counts of healthy, stale, erroring and disabled feeds |
 | GET | `/api/feeds/health/failing` | User | Feeds failing `threshold` times in a row (default 5). High-value feeds (rated A/B) come first |
 | GET | `/api/feeds/{feed_id}/analytics` | User | Source reliability numbers for one feed |
@@ -268,7 +268,7 @@ All paths below start with `/api` unless shown otherwise. `{id}`-style names are
 
 **Editing a feed.** Anyone may change curation fields: `custom_title`, `category_id`, `is_muted`, the ratings and `analyst_notes`. Only an admin may change the shared settings: `url`, `feed_type`, `fetch_interval_minutes`, `retention_days`, `adapter_config`, `exclude_shorts`, `intel_extraction_mode`, `ai_analysis_enabled`, `auto_extract_on_ingest`, `extract_detection_rules`, `extract_tools`, `exclude_title_patterns` and `visible_to_visitors`. `is_active` is admin-only too, unless per-user subscriptions are on (then pausing is personal).
 
-**Deleting a feed.** With the `per_user_subscriptions_enabled` setting off, only an admin may delete, and the feed's articles go with it. With it on, `DELETE` unsubscribes the caller and leaves the feed for everyone else. A feed nobody subscribes to stops fetching. An admin passes `?purge=true` to really delete it.
+**Deleting a feed.** With the `per_user_subscriptions_enabled` setting off, only an admin may delete. With it on, `DELETE` unsubscribes the caller and leaves the feed for everyone else, and an admin passes `?purge=true` to delete it for everyone. A deleted feed, and one whose last subscriber leaves, is archived (`feeds.archived_at`, `backend/app/services/feed_archive.py`): it stops fetching and leaves every feed list, the reader and default search, and its articles and everything linked to them stay. They show on entity, country, sector and campaign article lists and in relationship evidence, and search reaches them with `is:archived`. Adding or subscribing to the feed again brings it back.
 
 **Exclude-title lists** are plain phrases, one per line, matched anywhere in the title, ignoring case. A line under 3 or over 200 characters, or more than 50 lines, returns 422 `invalid_title_filter`.
 

@@ -256,7 +256,9 @@ async def _search_unified(db: AsyncSession, user_id: uuid.UUID, query: str, limi
     input_schema={"properties": {}},
 )
 async def _get_search_facets(db: AsyncSession, user_id: uuid.UUID) -> dict:
-    type_q = await db.execute(select(Feed.feed_type, func.count(Feed.id)).group_by(Feed.feed_type))
+    type_q = await db.execute(
+        select(Feed.feed_type, func.count(Feed.id)).where(Feed.archived_at.is_(None)).group_by(Feed.feed_type)
+    )
     feed_types = {row[0]: row[1] for row in type_q}
 
     cat_q = await db.execute(

@@ -599,18 +599,12 @@ async def unified_search(
     # Build execution plan
     plan = build_execution_plan(ast, viewer_id=user.id)
 
-    # Resolve pending feed name filters to feed_id Meilisearch filters
-    if plan.pending_feed_filters:
-        from app.search.query_planner import resolve_feed_filters
+    # Resolve the Postgres-backed filters: feed names, category, signal, url,
+    # feed ratings, is:muted/archived/translated/image, and the default that
+    # keeps deleted feeds' articles out.
+    from app.search.query_planner import resolve_deferred_filters
 
-        await resolve_feed_filters(db, plan)
-
-    # Resolve the Postgres-backed entry filters (category, signal, url,
-    # feed ratings, is:muted/translated/image).
-    if plan.pending_entry_filters:
-        from app.search.query_planner import resolve_entry_filters
-
-        await resolve_entry_filters(db, plan)
+    await resolve_deferred_filters(db, plan)
 
     # `country:North Korea` splits into `country:North` plus a stray "Korea" term and
     # answers with a plausible wrong number. Offer the quoted form when the extended
