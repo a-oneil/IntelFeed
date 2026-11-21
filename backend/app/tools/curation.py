@@ -247,7 +247,7 @@ async def _bulk_unlink_entities(db: AsyncSession, user_id: uuid.UUID, items: lis
         "source_entry_id set, unlinks the entity from that entry. scope='entry' stops there. scope='alias' "
         "also drops entity_value from the entity's aliases and unlinks every entry that matched only via it "
         "(the entity survives and keeps matching under its other names). scope='global' instead blocks the "
-        "surface form from matching any entity type and rebuilds the vocabulary (existing links on other "
+        "surface form from matching any entity type and queues a vocabulary rebuild (existing links on other "
         "entries are not retroactively removed)."
     ),
     input_schema={
@@ -286,7 +286,7 @@ async def _report_false_positive(
     # Same helpers the /false-positives endpoint uses — the two must not drift.
     from app.api.false_positives import _block_surface_form, _drop_alias, _unlink_from_entry
     from app.core.exceptions import AppError
-    from app.intelligence.autolinker import refresh_vocabulary
+    from app.intelligence.autolinker import schedule_vocabulary_refresh
     from app.models.false_positive_record import FalsePositiveRecord
 
     if entity_type not in VALID_ENTITY_TYPES:
@@ -331,7 +331,7 @@ async def _report_false_positive(
     await db.flush()
 
     if added_to_fp_list or alias_removed:
-        await refresh_vocabulary(db)
+        await schedule_vocabulary_refresh(db)
 
     return {
         "id": str(record.id),

@@ -7,7 +7,7 @@ Three scopes, narrowest first:
   the entity's aliases and unlink every entry that matched *only* via that form.
   The entity itself survives and keeps matching under its other names.
 - "global": unlink from this article AND block the surface form from matching for
-  every entity type, then rebuild the vocabulary. Does not retroactively unlink
+  every entity type, then queue a vocabulary rebuild. Does not retroactively unlink
   other entries (use scope="alias" or the entity's unlink-all action for that).
 
 The "global" block is written to ``autolinker_blocked_surface_forms``, not the
@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.security import get_current_user
 from app.database import get_db
-from app.intelligence.autolinker import refresh_vocabulary
+from app.intelligence.autolinker import schedule_vocabulary_refresh
 from app.intelligence.correlation import ENTITY_CONFIG, VALID_ENTITY_TYPES
 from app.intelligence.correlation_cache import invalidate_entity_cache
 from app.models.false_positive_record import FalsePositiveRecord
@@ -150,7 +150,7 @@ async def report_false_positive(
     `entry` unlinks it from the source article only. `alias` additionally drops the
     reported surface form from the entity's aliases and unlinks every entry that
     matched only via it. `global` blocks the surface form from matching for any
-    entity type and rebuilds the autolinker vocabulary. Always writes a
+    entity type and queues an autolinker vocabulary rebuild. Always writes a
     FalsePositiveRecord audit row.
     """
     if body.entity_type not in VALID_ENTITY_TYPES:
@@ -184,10 +184,10 @@ async def report_false_positive(
     db.add(record)
     await db.commit()
 
-    # Rebuild after the commit so the automaton reflects durable state — an alias
-    # drop or a new block only takes effect once the vocabulary is regenerated.
+    # Queue the rebuild after the commit so the worker's build sees durable state —
+    # an alias drop or a new block only takes effect once the vocabulary is regenerated.
     if added_to_fp_list or alias_removed:
-        await refresh_vocabulary(db)
+        await schedule_vocabulary_refresh(db)
 
     return FalsePositiveReportResponse(
         id=record.id,

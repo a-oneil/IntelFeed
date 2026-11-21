@@ -497,6 +497,8 @@ class EntityVocabulary:
 # Module-level singleton vocabulary
 _vocabulary: EntityVocabulary | None = None
 _vocab_version: str = ""
+# Serializes rebuilds within one process (see _ensure_vocabulary).
+_rebuild_lock = asyncio.Lock()
 
 
 def _is_word_boundary(text: str, start: int, end: int) -> bool:
@@ -1711,21 +1713,88 @@ async def autolink_batch(
     return stats
 
 
+async def _is_vocabulary_current() -> bool | None:
+    """Whether this process's vocabulary matches the version published to Redis.
+
+    None when Redis cannot say: the caller keeps what it has rather than
+    rebuilding on every call while Redis is away.
+    """
+    if not (_vocabulary and _vocabulary.built):
+        return False
+    try:
+        r = await get_redis()
+        redis_version = await r.get(VOCAB_VERSION_KEY) or ""
+    except Exception:
+        return None
+    return redis_version == _vocab_version
+
+
 async def _ensure_vocabulary(db: AsyncSession) -> None:
-    """Ensure vocabulary is loaded and fresh."""
-    global _vocabulary, _vocab_version
+    """Ensure vocabulary is loaded and fresh.
 
-    if _vocabulary and _vocabulary.built:
-        # Check Redis version for cross-worker freshness
-        try:
-            r = await get_redis()
-            redis_version = await r.get(VOCAB_VERSION_KEY) or ""
-            if redis_version == _vocab_version:
-                return  # Already up to date
-        except Exception:
-            return  # Redis unavailable, use cached version
+    One build at a time per process: concurrent scans that all notice a stale
+    version wait for the first rebuild and re-check instead of each building
+    their own copy (a build costs ~10s of CPU on a 34k-form vocabulary).
+    """
+    current = await _is_vocabulary_current()
+    if current or (current is None and _vocabulary and _vocabulary.built):
+        return
 
-    await refresh_vocabulary(db)
+    async with _rebuild_lock:
+        current = await _is_vocabulary_current()
+        if current or (current is None and _vocabulary and _vocabulary.built):
+            return
+        await refresh_vocabulary(db)
+
+
+# Debounce key for API-side refresh requests (see schedule_vocabulary_refresh).
+VOCAB_REFRESH_PENDING_KEY = "intelfeed:autolinker:vocab_refresh_pending"
+# How long a burst of changes is folded into one rebuild. A bulk clean-up in the
+# Engine review queues deletes entities one request at a time, every second or
+# two; this turns a dozen such requests into a single build.
+VOCAB_REFRESH_DEBOUNCE_SECONDS = 10
+
+
+async def schedule_vocabulary_refresh(db: AsyncSession) -> str:
+    """Ask the worker to rebuild the vocabulary soon, folding bursts into one build.
+
+    Request handlers call this instead of ``refresh_vocabulary`` because a build
+    loads seven tables and compiles a 34k-form automaton: inline, that is ten
+    seconds in which the request hangs, and before the build moved off the
+    event loop it also froze every other request on the same gunicorn worker.
+    The rebuild runs on the Celery worker, which publishes the new version to
+    Redis; each API process then rebuilds its own copy (in a thread) the next
+    time it scans.
+
+    Returns "queued" when a task was sent, "pending" when one is already due,
+    and "inline" when neither Redis nor the broker could be reached and the
+    rebuild had to happen here after all.
+    """
+    try:
+        r = await get_redis()
+        if not await r.set(VOCAB_REFRESH_PENDING_KEY, "1", nx=True, ex=VOCAB_REFRESH_DEBOUNCE_SECONDS * 3):
+            return "pending"
+    except Exception:
+        logger.debug("Redis unavailable for the vocabulary refresh debounce; dispatching anyway")
+    try:
+        from app.workers.intel_feed_tasks import refresh_autolinker_vocabulary
+
+        refresh_autolinker_vocabulary.apply_async(countdown=VOCAB_REFRESH_DEBOUNCE_SECONDS)
+        return "queued"
+    except Exception:
+        logger.warning("Could not queue the vocabulary refresh; rebuilding inline", exc_info=True)
+        await _clear_vocabulary_refresh_pending()
+        await refresh_vocabulary(db)
+        return "inline"
+
+
+async def _clear_vocabulary_refresh_pending() -> None:
+    """Let the next change queue a new rebuild. Called when a rebuild starts."""
+    try:
+        r = await get_redis()
+        await r.delete(VOCAB_REFRESH_PENDING_KEY)
+    except Exception:
+        pass
 
 
 async def refresh_vocabulary(db: AsyncSession) -> int:
@@ -1786,7 +1855,13 @@ async def _rebuild_vocabulary(db: AsyncSession) -> tuple[int, list]:
     mitigations = mitigations_result.scalars().all()
 
     vocab = EntityVocabulary()
-    count = vocab.build_from_entities(actors, malware_families, countries, vendors, products, tools, mitigations)
+    # Pure CPU (Aho-Corasick over every name and alias) with nothing to await:
+    # inline, it froze the event loop — and every other request on this worker
+    # — for the whole build. The rows are fully loaded, so the thread only reads
+    # plain attributes and never touches the session.
+    count = await asyncio.to_thread(
+        vocab.build_from_entities, actors, malware_families, countries, vendors, products, tools, mitigations
+    )
     loaded = [*actors, *malware_families, *countries, *vendors, *products, *tools, *mitigations]
 
     _vocabulary = vocab
