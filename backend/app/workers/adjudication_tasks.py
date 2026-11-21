@@ -218,6 +218,9 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
                 "unnamed_reason",
                 "affirming_reason",
                 "bystander_reason",
+                "unnamed_keep",
+                "duplicate_agreeing",
+                "duplicate_conflicting",
                 "new_unanswered",
                 "candidates_unanswered",
             ):

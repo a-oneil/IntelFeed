@@ -2038,10 +2038,50 @@ def _bystander_reason(reason: str) -> bool:
     return bool(_NOT_AS_ADVERSARY_RE.search(reason)) and not _BOILERPLATE_RE.search(reason)
 
 
+# Edge verdicts a model reaches for when it means "this claim is wrong": read
+# as the edge's own word for that, so the guards below still judge the reason.
+_EDGE_REJECT_WORDS = {"remove", "drop", "veto"}
+# A response repeating item ids is misaligned, not merely repetitive, when this
+# many ids carry conflicting verdicts, or repeats cover this share of the manifest.
+_DUPLICATE_CONFLICTS_VOID = 2
+_DUPLICATE_SHARE_VOID = 0.25
+
+
+def _dedupe_verdict_rows(raw: list, stats: dict, n_items: int) -> list:
+    """One row per item_id. A model that repeats an item with the same verdict
+    only repeated itself: the first copy stands. Copies that disagree leave
+    that item unanswered. Many disagreements, or repeats on a quarter of the
+    manifest, mean it lost track of which line it was judging: the whole response is
+    void (``stats["duplicate"]``)."""
+    groups: dict[str, list[dict]] = {}
+    order: list[str] = []
+    rows: list = []
+    for row in raw:
+        if not isinstance(row, dict) or not str(row.get("item_id") or ""):
+            rows.append(row)
+            continue
+        item_id = str(row["item_id"])
+        if item_id not in groups:
+            groups[item_id] = []
+            order.append(item_id)
+        groups[item_id].append(row)
+    repeated = [i for i in order if len(groups[i]) > 1]
+    conflicting = [i for i in repeated if len({str(r.get("verdict") or "keep").lower() for r in groups[i]}) > 1]
+    stats["duplicate_agreeing"] = len(repeated) - len(conflicting)
+    stats["duplicate_conflicting"] = len(conflicting)
+    if repeated and (
+        len(conflicting) >= _DUPLICATE_CONFLICTS_VOID or len(repeated) / max(n_items, 1) > _DUPLICATE_SHARE_VOID
+    ):
+        stats["duplicate"] = True
+        return []
+    return rows + [groups[i][0] for i in order if i not in conflicting]
+
+
 def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verdict], dict]:
     """Per-item verdicts with the validity matrix applied. Anything missing,
-    malformed or out of place is a keep. A duplicate item_id voids the whole
-    response (all keep), the same rule the one-pass path uses."""
+    malformed or out of place is a keep. Repeated item_ids are settled by
+    ``_dedupe_verdict_rows``; a response it finds misaligned is void (all
+    keep), the same rule the one-pass path uses."""
     by_id = {it.item_id: it for it in items}
     raw = result.get("verdicts")
     # unknown: item ids not in the manifest; coerced: verdicts the item's kind
@@ -2057,10 +2097,11 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
         "unnamed_reason": 0,
         "affirming_reason": 0,
         "bystander_reason": 0,
+        "unnamed_keep": 0,
     }
     verdicts: dict[str, Verdict] = {}
     if isinstance(raw, list):
-        for entry in raw:
+        for entry in _dedupe_verdict_rows(raw, stats, len(items)):
             if not isinstance(entry, dict):
                 stats["unknown"] += 1
                 continue
@@ -2069,10 +2110,9 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
             if item is None:
                 stats["unknown"] += 1
                 continue
-            if item_id in verdicts:
-                stats["duplicate"] = True
-                break
             verdict = str(entry.get("verdict") or "keep").lower()
+            if item.kind == "edge" and verdict in _EDGE_REJECT_WORDS:
+                verdict = "demote"
             confidence = str(entry.get("confidence") or "low").lower()
             if confidence not in CONFIDENCES:
                 confidence = "low"
@@ -2104,11 +2144,13 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
                         break
                 if merge_target is None:
                     verdict = "keep"  # never merge into a name it was not shown
+            # A verdict the item does not accept is no answer at all: never an
+            # explicit keep, which on an edge is corroboration.
+            explicit = verdict == asked
             if verdict != asked and asked in VERDICTS:
                 stats["coerced"] += 1
             # Voided, not coerced: like a copied reason, these are not about
             # their own item (or not against it), so they are not explicit.
-            explicit = True
             if verdict in ("remove", "demote", "link") and not _reason_names_item(reason, item):
                 verdict, explicit = "keep", False
                 stats["unnamed_reason"] += 1
@@ -2118,6 +2160,11 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
             elif verdict == "remove" and item.kind == "link" and _bystander_reason(reason):
                 verdict, explicit = "keep", False
                 stats["bystander_reason"] += 1
+            elif verdict == "keep" and item.kind == "edge" and explicit and not _reason_names_item(reason, item):
+                # A keep on an edge is corroboration, so it is held to the
+                # demote's rule: its reason must be about this claim.
+                explicit = False
+                stats["unnamed_keep"] += 1
             bad_alias = None
             if verdict == "remove":
                 wanted = str(entry.get("bad_alias") or "").strip().lower()
@@ -2135,17 +2182,20 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
     # C2 domain, a payload host and a hash). None of those verdicts is about its
     # own item. Voided verdicts are not explicit: a voided edge demote must not
     # count as a keep, which is corroboration.
-    by_reason: dict[tuple[str, str], list[str]] = {}
+    by_reason: dict[tuple[str, bool, str], list[str]] = {}
     for item_id, v in verdicts.items():
         # Candidates are exempt: one reason fits many of them ("a version
         # number", "listed in the IoC table") without the model losing track.
+        # Keeps are, except on edges, where a keep is corroboration: one
+        # reason pasted onto several claims weighed none of them.
         if (
             v.item.kind in ("link", "held", "ioc", "edge")
             and not v.item.staged
-            and v.verdict != "keep"
+            and (v.verdict != "keep" or (v.item.kind == "edge" and v.explicit))
             and v.reason.strip()
         ):
-            by_reason.setdefault((v.item.kind, " ".join(v.reason.lower().split())), []).append(item_id)
+            key = (v.item.kind, v.verdict == "keep", " ".join(v.reason.lower().split()))
+            by_reason.setdefault(key, []).append(item_id)
     stats["copied_reason"] = 0
     for ids in by_reason.values():
         if len(ids) >= _COPIED_REASON_MIN:

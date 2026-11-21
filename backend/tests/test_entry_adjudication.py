@@ -493,7 +493,9 @@ def test_validate_matrix_and_defaults():
     by = {v.item.item_id: v for v in verdicts}
     assert by["link:threat_actor:a"].verdict == "keep"  # veto only on minted entities
     assert by["link:threat_actor:b"].verdict == "merge" and by["link:threat_actor:b"].merge_target["name"] == "Warlock"
-    assert by["edge:1"].verdict == "keep"  # remove is not an edge verdict
+    # remove on an edge reads as a demote, and a demote that names nothing is void:
+    # no demote, and no keep that would count as corroboration either.
+    assert by["edge:1"].verdict == "keep" and not by["edge:1"].explicit
     assert by["ioc:domain:x"].verdict == "drop"
     assert stats["unknown"] == 1
 
@@ -510,6 +512,134 @@ def test_validate_counts_new_entities_the_reviewer_skipped():
     verdicts, stats = _validate_verdicts(result, items)
     assert stats["new_unanswered"] == 1
     assert all(v.verdict == "keep" for v in verdicts)
+
+
+def _edge(item_id="edge:m", forms=("MANTLEMAZE", "Cairn")):
+    return ReviewItem(
+        item_id=item_id,
+        kind="edge",
+        line="",
+        name=f"{forms[0]} uses {forms[1]} (malware)",
+        edge_id=uuid.uuid4(),
+        forms=list(forms),
+    )
+
+
+def test_validate_edge_remove_is_a_demote_never_a_keep():
+    # The model wrote `remove` on an edge, meaning "this claim is wrong". It
+    # used to be coerced to an explicit keep: a rejection counted as one of
+    # the three keeps that promote the edge to confirmed.
+    edge = _edge()
+    reason = "The article lists MANTLEMAZE and Cairn in separate campaigns."
+    for word in ("remove", "drop", "veto"):
+        verdicts, _ = _validate_verdicts(
+            {"verdicts": [{"item_id": edge.item_id, "verdict": word, "confidence": "high", "reason": reason}]}, [edge]
+        )
+        assert verdicts[0].verdict == "demote" and verdicts[0].explicit
+    # Any other verdict the edge does not take is no answer at all.
+    for word in ("merge", "reclassify", "link", "capture"):
+        verdicts, _ = _validate_verdicts(
+            {"verdicts": [{"item_id": edge.item_id, "verdict": word, "confidence": "high", "reason": reason}]}, [edge]
+        )
+        assert verdicts[0].verdict == "keep" and not verdicts[0].explicit
+
+
+def test_validate_edge_keep_counts_only_when_its_reason_names_the_claim():
+    edge = _edge()
+    named, _ = _validate_verdicts(
+        {
+            "verdicts": [
+                {
+                    "item_id": edge.item_id,
+                    "verdict": "keep",
+                    "confidence": "high",
+                    "reason": "MANTLEMAZE loads Cairn as its second stage.",
+                }
+            ]
+        },
+        [edge],
+    )
+    assert named[0].explicit
+    unnamed, stats = _validate_verdicts(
+        {
+            "verdicts": [
+                {"item_id": edge.item_id, "verdict": "keep", "confidence": "high", "reason": "The article states it."}
+            ]
+        },
+        [edge],
+    )
+    assert unnamed[0].verdict == "keep" and not unnamed[0].explicit
+    assert stats["unnamed_keep"] == 1
+
+
+def test_validate_edge_keeps_sharing_one_reason_do_not_count():
+    edges = [_edge(f"edge:{n}", forms=("APT41", f"Tool{n}")) for n in "abc"]
+    pasted = "APT41 is described using these tools: Toola, Toolb and Toolc."
+    verdicts, _ = _validate_verdicts(
+        {
+            "verdicts": [
+                {"item_id": e.item_id, "verdict": "keep", "confidence": "high", "reason": pasted} for e in edges
+            ]
+        },
+        edges,
+    )
+    assert not any(v.explicit for v in verdicts)
+
+
+def test_validate_repeated_item_with_one_verdict_keeps_the_first_copy():
+    edge, link = _edge(), _item("link:threat_actor:c")
+    reason = "MANTLEMAZE and Cairn are only listed together in a roundup."
+    verdicts, stats = _validate_verdicts(
+        {
+            "verdicts": [
+                {"item_id": edge.item_id, "verdict": "demote", "confidence": "high", "reason": reason},
+                {"item_id": link.item_id, "verdict": "remove", "confidence": "high", "reason": "link:threat_actor:c"},
+                {"item_id": edge.item_id, "verdict": "demote", "confidence": "low", "reason": "again"},
+            ]
+        },
+        [edge, link, _item("link:tool:d"), _item("link:tool:e")],
+    )
+    by = {v.item.item_id: v for v in verdicts}
+    assert not stats["duplicate"] and stats["duplicate_agreeing"] == 1
+    assert by[edge.item_id].verdict == "demote" and by[edge.item_id].confidence == "high"
+    assert by[link.item_id].verdict == "remove"
+
+
+def test_validate_repeated_item_with_conflicting_verdicts_is_left_unanswered():
+    edge = _edge()
+    links = [_item(f"link:tool:{n}") for n in "defg"]
+    verdicts, stats = _validate_verdicts(
+        {
+            "verdicts": [
+                {"item_id": edge.item_id, "verdict": "keep", "confidence": "high", "reason": "MANTLEMAZE uses Cairn."},
+                {"item_id": edge.item_id, "verdict": "demote", "confidence": "high", "reason": "Cairn is elsewhere."},
+                {
+                    "item_id": "link:tool:d",
+                    "verdict": "remove",
+                    "confidence": "high",
+                    "reason": "link:tool:d is an ad.",
+                },
+            ]
+        },
+        [edge, *links],
+    )
+    by = {v.item.item_id: v for v in verdicts}
+    assert not stats["duplicate"] and stats["duplicate_conflicting"] == 1
+    assert by[edge.item_id].verdict == "keep" and not by[edge.item_id].explicit
+    assert by["link:tool:d"].verdict == "remove"
+
+
+def test_validate_misaligned_response_voids_everything():
+    items = [_edge(f"edge:{n}", forms=("A", n)) for n in "abcd"]
+    rows = [
+        {"item_id": "edge:a", "verdict": "keep", "reason": "A uses a"},
+        {"item_id": "edge:a", "verdict": "demote", "reason": "a no"},
+        {"item_id": "edge:b", "verdict": "keep", "reason": "A uses b"},
+        {"item_id": "edge:b", "verdict": "demote", "reason": "b no"},
+    ]
+    verdicts, stats = _validate_verdicts({"verdicts": rows}, items)
+    assert stats["duplicate"]
+    assert all(v.verdict == "keep" and not v.explicit for v in verdicts)
 
 
 def test_validate_merge_to_unlisted_name_is_keep_and_duplicates_void_all():
@@ -1877,7 +2007,17 @@ async def test_keep_counter_promotes_edge_after_three_distinct_entries(db_sessio
         await db_session.flush()
         items, _ = await build_manifest(db_session, entry, _payload())
         verdicts, _ = _validate_verdicts(
-            {"verdicts": [{"item_id": f"edge:{edge.id}", "verdict": "keep", "confidence": "high"}]}, items
+            {
+                "verdicts": [
+                    {
+                        "item_id": f"edge:{edge.id}",
+                        "verdict": "keep",
+                        "confidence": "high",
+                        "reason": "Warlock deploys Cobalt Strike.",
+                    }
+                ]
+            },
+            items,
         )
         cfg = await adj._settings(db_session)
         await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
@@ -1917,7 +2057,17 @@ async def test_keep_counter_never_touches_shadow_or_demoted_edges(db_session: As
     await db_session.flush()
     items, _ = await build_manifest(db_session, entry, _payload())
     verdicts, _ = _validate_verdicts(
-        {"verdicts": [{"item_id": f"edge:{edge.id}", "verdict": "keep", "confidence": "high"}]}, items
+        {
+            "verdicts": [
+                {
+                    "item_id": f"edge:{edge.id}",
+                    "verdict": "keep",
+                    "confidence": "high",
+                    "reason": "Warlock deploys Cobalt Strike.",
+                }
+            ]
+        },
+        items,
     )
     cfg = await adj._settings(db_session)
     await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
@@ -2006,7 +2156,17 @@ async def test_a_low_confidence_keep_does_not_corroborate_either(db_session: Asy
 
     items, _ = await build_manifest(db_session, entry, _payload())
     verdicts, _stats = _validate_verdicts(
-        {"verdicts": [{"item_id": f"edge:{edge.id}", "verdict": "keep", "confidence": "low"}]}, items
+        {
+            "verdicts": [
+                {
+                    "item_id": f"edge:{edge.id}",
+                    "verdict": "keep",
+                    "confidence": "low",
+                    "reason": "Warlock deploys Cobalt Strike.",
+                }
+            ]
+        },
+        items,
     )
     edge_verdict = next(v for v in verdicts if v.item.item_id == f"edge:{edge.id}")
     assert edge_verdict.explicit is True  # said, but not confidently
@@ -3126,7 +3286,7 @@ async def test_edge_promotion_is_not_counted_as_an_applied_change(db_session: As
         db_session,
         entry,
         [
-            {"item_id": f"edge:{edge.id}", "verdict": "keep", "confidence": "high", "reason": "asserted"},
+            {"item_id": f"edge:{edge.id}", "verdict": "keep", "confidence": "high", "reason": "Warlock uses it."},
             # Below the floor, so it files as a proposal rather than running.
             {
                 "item_id": f"link:threat_actor:{actor.id}",
