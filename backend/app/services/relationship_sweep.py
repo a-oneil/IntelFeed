@@ -514,6 +514,15 @@ async def judge(db: AsyncSession, case: EdgeCase, user_id: uuid.UUID) -> tuple[J
     return parse_answer(result, case), ai_result_id, "success"
 
 
+async def _record_unjudged(db: AsyncSession, edge: EntityRelationship, why: str) -> None:
+    """An uncounted sweep row for an edge the sweep could not judge (no
+    passages, a failed call), so it is not selected again until the retry
+    window has passed and the rest of the backlog gets its turn."""
+    from app.services import edge_settlement as es
+
+    await es.record_review(db, edge.id, reviewer=es.SWEEP, verdict=es.UNSURE, reason=f"not judged: {why}")
+
+
 async def sweep(db: AsyncSession, limit: int | None = None) -> dict:
     """One run: select, judge, apply, commit after each edge."""
     from app.services.entry_adjudication import RESWEEP_QUEUE_CEILING, _ai_queue_depth
@@ -532,6 +541,11 @@ async def sweep(db: AsyncSession, limit: int | None = None) -> dict:
     for edge in await select_edges(db, cfg, limit):
         case = await build_case(db, edge)
         if case is None or not case.passages:
+            # Recorded as asked, or select_edges hands back the same edges
+            # every run and the sweep never reaches the rest.
+            await _record_unjudged(db, edge, "no passages name both ends")
+            stats["no_passages"] = stats.get("no_passages", 0) + 1
+            await db.commit()
             continue
         try:
             j, ai_result_id, status = await judge(db, case, user_id)
@@ -546,7 +560,9 @@ async def sweep(db: AsyncSession, limit: int | None = None) -> dict:
             await db.commit()
             return {"status": "no_assignment", **stats}
         if j is None:
+            await _record_unjudged(db, edge, status)
             stats[status] = stats.get(status, 0) + 1
+            await db.commit()
             continue
         outcome = await apply_judgment(db, case, j, cfg, ai_result_id)
         stats[outcome] = stats.get(outcome, 0) + 1

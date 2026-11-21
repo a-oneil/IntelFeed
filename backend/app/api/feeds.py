@@ -262,17 +262,13 @@ async def create_feed(
             # Adding a feed that's already in the shared pool just subscribes you
             if await get_subscription(db, user.id, feed.id):
                 raise AppError(code="conflict", message="You are already subscribed to this feed", status_code=409)
-            # Whether this feed is inactive because its last subscriber left, or
-            # because an admin paused it, has to be settled BEFORE we subscribe.
-            had_subscribers = await _subscriber_count(db, feed.id) > 0
             await ensure_subscription(db, user.id, feed.id)
-            if not had_subscribers:
+            if feed.archived_at is not None:
                 # Archived when its last subscriber left (or deleted): it has a
-                # reader again. A feed an admin paused while others still read it
-                # keeps its paused state; is_active is admin-only on PUT
-                # /feeds/{id} and resubscribing must not be a side door around that.
+                # reader again. A feed an admin paused keeps its paused state;
+                # is_active is admin-only on PUT /feeds/{id} and resubscribing
+                # must not be a side door around that.
                 unarchive_feed(feed)
-                feed.is_active = True
                 db.add(feed)
             await db.flush()
             # The newly subscribed feed is missing from the cached unread map
@@ -815,6 +811,7 @@ async def resume_feed(
     feed = await db.get(Feed, feed_id)
     if not feed:
         raise AppError(code="not_found", message="Feed not found", status_code=404)
+    unarchive_feed(feed)  # a deleted feed resumed by id is back for everyone to add
     feed.is_active = True
     feed.auto_paused_at = None
     clear_pause(feed)
@@ -1012,7 +1009,9 @@ async def update_feed(
         else:
             feed.is_active = request.is_active
             if request.is_active:
-                # Turned back on by a person: the health check's pause is over.
+                # Turned back on by a person: the health check's pause is over,
+                # and so is the archive, which would otherwise fetch unseen.
+                unarchive_feed(feed)
                 feed.auto_paused_at = None
                 clear_pause(feed)
     if request.fetch_interval_minutes is not None:

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from functools import lru_cache
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +25,13 @@ SENTENCE_MAX = 300
 
 
 def _form_pattern(forms: list[str]) -> re.Pattern | None:
+    return _compile_forms(tuple(forms))
+
+
+@lru_cache(maxsize=4096)
+def _compile_forms(forms: tuple[str, ...]) -> re.Pattern | None:
+    # One edge's ends are asked for many times in a review (each passage,
+    # each quote check); the pattern is built once per set of forms.
     clean = sorted({f.strip() for f in forms if f and len(f.strip()) >= _MIN_FORM_LEN}, key=len, reverse=True)
     if not clean:
         return None
@@ -173,14 +181,14 @@ async def edge_forms(
     forms: list[str] = []
     if obj is not None:
         forms.append(_display_name(obj))
-        for attr in ("aliases", "name"):
+        for attr in ("aliases", "name", "technique_name"):
             val = getattr(obj, attr, None)
             if isinstance(val, list):
                 forms += [str(v) for v in val if v]
             elif isinstance(val, str) and val not in forms:
                 forms.append(val)
     if entry_id is not None:
-        junction = await _junction_for(db, entity_type, entry_id, entity_id)
+        junction, _jmodel, _emodel, _fk = await _junction_for(db, entity_type, entry_id, entity_id)
         if junction is not None:
             forms += [str(m) for m in (getattr(junction, "matched_names", None) or []) if m]
     seen: dict[str, str] = {}

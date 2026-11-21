@@ -365,9 +365,11 @@ async def _delete_feed(
 
     # Archived, as the feeds API does (services/feed_archive.py): its entries
     # are intelligence, not the feed's to take with it.
+    from app.api.feeds import _invalidate_unread_cache
     from app.services.feed_archive import archive_feed
 
-    await archive_feed(db, feed)
+    for reader in await archive_feed(db, feed):
+        await _invalidate_unread_cache(reader)
 
     return {"status": "deleted", "feed_id": feed_id, "title": title, "message": f"Feed '{title}' has been deleted."}
 

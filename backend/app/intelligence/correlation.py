@@ -2894,6 +2894,30 @@ async def _passes_theme_floor(db: AsyncSession, evidence_entry_ids: list[uuid.UU
     return verdict is not False
 
 
+async def _analysis_supersedes(
+    db: AsyncSession, entry_id: uuid.UUID, id_a: uuid.UUID, id_b: uuid.UUID, verb: str
+) -> bool:
+    """True when this article's analysis already states the pair with a verb
+    the guess defers to ("attributed_to" over "targets"). The analysis
+    retires such a guess when it lands second (retire_superseded_cooccurrence);
+    this is the same rule when it landed first, or the stage is re-run."""
+    from app.intelligence.enrichment import _SUPERSEDED_COOCCURRENCE_VERBS
+
+    verbs = (
+        await db.execute(
+            select(EntityRelationship.relationship_type).where(
+                EntityRelationship.source != "co_occurrence",
+                EntityRelationship.evidence_entry_ids.any(entry_id),
+                or_(
+                    (EntityRelationship.source_id == id_a) & (EntityRelationship.target_id == id_b),
+                    (EntityRelationship.source_id == id_b) & (EntityRelationship.target_id == id_a),
+                ),
+            )
+        )
+    ).scalars()
+    return any((verb, stated) in _SUPERSEDED_COOCCURRENCE_VERBS for stated in verbs)
+
+
 async def create_cooccurrence_relationships(
     db: AsyncSession,
     entry_id: uuid.UUID,
@@ -3024,6 +3048,8 @@ async def create_cooccurrence_relationships(
                 ):
                     rel.confidence = "probable"
         else:
+            if await _analysis_supersedes(db, entry_id, src_id, tgt_id, rel_type):
+                continue
             # New edges always start at "possible" — probable is earned by
             # corroboration, never granted on first sight.
             db.add(
