@@ -32,6 +32,10 @@ class Feed(Base):
     # dead feed as dead rather than merely disabled; cleared on resume.
     auto_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    # Set when the feed is deleted or loses its last reader: it stops fetching
+    # and leaves every feed list, but its articles stay as the evidence behind
+    # entities, relationships, campaigns and threads (services/feed_archive.py).
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     adapter_config: Mapped[dict] = mapped_column(JSONB, default=dict)
     # Source reliability
     reliability_rating: Mapped[str | None] = mapped_column(String(1))  # A-F

@@ -312,9 +312,12 @@ is:unread        # not marked read
 is:bookmarked    # bookmarked
 is:noted         # has notes
 is:muted         # from a muted feed
+is:archived      # from a deleted feed
 is:translated    # machine-translated
 is:image         # has a hero image
 ```
+
+A deleted feed's articles are kept as the evidence behind entities, relationships, campaigns and threads, and every search leaves them out unless it asks for `is:archived`.
 
 `NOT is:read` is the same as `is:unread`.
 
@@ -590,7 +593,7 @@ These work:
 - Filters on the same entity type: `threat_actor:APT28 OR threat_actor:APT29`.
 - Filters on different entity types: `cve:* OR threat_actor:*`.
 - Index filters: `tag:a OR tag:b`, `is:noted OR is:bookmarked`, `(tag:a type:rss) OR tag:b`.
-- Feed filters: `feed:"Red Canary" OR feed:"Reddit Digest"`, `category:`, `feed.*:` and `is:muted`, with each other and with index filters.
+- Feed filters: `feed:"Red Canary" OR feed:"Reddit Digest"`, `category:`, `feed.*:`, `is:muted` and `is:archived`, with each other and with index filters.
 - Database filters with each other: `signal:under_reported OR signal:kev_added`, `signal:kev_added OR url:github.com`.
 - Words with index or feed filters: `ransomware OR tag:a` runs two searches and merges them. The total count is then an upper bound (see [Result Limits](#result-limits--pagination)).
 
@@ -692,7 +695,7 @@ Search uses two back ends: Meilisearch for article text, PostgreSQL for intellig
 The query planner (`backend/app/search/query_planner.py`) sorts each part of the query into one of four groups:
 
 - **Index fields** go to Meilisearch: words, `title`, `content`, `author`, `tag`, `type`, `media`, `lang`, `words`, `date`, and `is:` starred / read / unread / bookmarked / noted.
-- **Feed filters** are looked up in PostgreSQL and turned into a list of feeds: `feed`, `category`, `feed.reliability`, `feed.timeliness`, `feed.relevance`, `is:muted`.
+- **Feed filters** are looked up in PostgreSQL and turned into a list of feeds: `feed`, `category`, `feed.reliability`, `feed.timeliness`, `feed.relevance`, `is:muted`, `is:archived`.
 - **Database article filters** are looked up in PostgreSQL and turned into a list of articles: `signal`, `url`, `is:translated`, `is:image`.
 - **Entity fields** query the intelligence tables in PostgreSQL.
 

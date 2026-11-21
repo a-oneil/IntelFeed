@@ -708,7 +708,9 @@ async def _get_campaign(db: AsyncSession, user_id: uuid.UUID, campaign_id: str) 
     input_schema={"properties": {"limit": {"type": "integer", "default": 50}}},
 )
 async def _get_feeds(db: AsyncSession, user_id: uuid.UUID, limit: int = 50) -> dict:
-    result = await db.execute(select(Feed).order_by(Feed.title).limit(min(limit, 100)))
+    result = await db.execute(
+        select(Feed).where(Feed.archived_at.is_(None)).order_by(Feed.title).limit(min(limit, 100))
+    )
     feeds = result.scalars().all()
     return {
         "feeds": [
@@ -759,7 +761,7 @@ async def _discover_telegram_channels(
     except RuntimeError as exc:
         return {"error": str(exc)}
 
-    feed_rows = await db.execute(select(Feed).where(Feed.feed_type == "telegram"))
+    feed_rows = await db.execute(select(Feed).where(Feed.feed_type == "telegram", Feed.archived_at.is_(None)))
     subscribed_ids: set[int] = set()
     subscribed_unames: set[str] = set()
     feed_by_channel: dict[int, str] = {}
@@ -808,7 +810,10 @@ async def _discover_telegram_channels(
 )
 async def _list_telegram_feeds(db: AsyncSession, user_id: uuid.UUID, limit: int = 50) -> dict:
     result = await db.execute(
-        select(Feed).where(Feed.feed_type == "telegram").order_by(Feed.title).limit(min(limit, 200))
+        select(Feed)
+        .where(Feed.feed_type == "telegram", Feed.archived_at.is_(None))
+        .order_by(Feed.title)
+        .limit(min(limit, 200))
     )
     feeds = result.scalars().all()
     return {
@@ -1692,7 +1697,7 @@ async def _get_feed_value(db: AsyncSession, user_id: uuid.UUID, days: int = 30) 
 async def _get_source_reliability(db: AsyncSession, user_id: uuid.UUID, limit: int = 20) -> dict:
     from collections import Counter
 
-    feeds_q = await db.execute(select(Feed).order_by(Feed.title).limit(100))
+    feeds_q = await db.execute(select(Feed).where(Feed.archived_at.is_(None)).order_by(Feed.title).limit(100))
     feeds = feeds_q.scalars().all()
 
     entry_counts: dict[uuid.UUID, int] = {}

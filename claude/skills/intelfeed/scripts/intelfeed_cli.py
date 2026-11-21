@@ -1168,10 +1168,12 @@ TOOLS: dict[str, dict] = {
     },
     "delete_feed": {
         "description": (
-            "Delete a feed and ALL of its entries (cascade), removing them from the search index "
-            "first. REQUIRES user confirmation. First call returns a confirmation prompt with an "
-            "entry count \u2014 present it to the user. Only call again with the confirmation_token after "
-            "the user explicitly approves."
+            "Delete a feed for every reader: it leaves every feed list and stops fetching. Its "
+            "entries stay as the evidence behind entities, relationships, campaigns and threads, out "
+            "of the reader and default search; adding the feed again brings it back. REQUIRES user "
+            "confirmation. First call returns a confirmation prompt with an entry count \u2014 present it "
+            "to the user. Only call again with the confirmation_token after the user explicitly "
+            "approves."
         ),
         "params": {
             "feed_id": {

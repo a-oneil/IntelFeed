@@ -31,6 +31,7 @@ from app.schemas.feed import (
     TitleFilterPreviewResponse,
     keep_stored_secrets,
 )
+from app.services.feed_archive import archive_feed, revive_feed, unarchive_feed
 from app.services.feed_defaults import (
     FEED_DEFAULT_FIELDS,
     category_for_feed_type,
@@ -265,11 +266,12 @@ async def create_feed(
             # because an admin paused it, has to be settled BEFORE we subscribe.
             had_subscribers = await _subscriber_count(db, feed.id) > 0
             await ensure_subscription(db, user.id, feed.id)
-            if not feed.is_active and not had_subscribers:
-                # Deactivated when its last subscriber left — it has a reader
-                # again. A feed an admin paused while others still read it keeps
-                # its paused state; is_active is admin-only on PUT /feeds/{id}
-                # and resubscribing must not be a side door around that.
+            if not had_subscribers:
+                # Archived when its last subscriber left (or deleted): it has a
+                # reader again. A feed an admin paused while others still read it
+                # keeps its paused state; is_active is admin-only on PUT
+                # /feeds/{id} and resubscribing must not be a side door around that.
+                unarchive_feed(feed)
                 feed.is_active = True
                 db.add(feed)
             await db.flush()
@@ -278,6 +280,9 @@ async def create_feed(
             resp = FeedResponse.model_validate(feed)
             resp.per_user = True
             return resp
+        if await revive_feed(db, feed, user.id):
+            # A deleted feed added again: it comes back with its old articles.
+            return FeedResponse.model_validate(feed)
         raise AppError(code="conflict", message="A feed with this URL already exists", status_code=409)
 
     async def placement(feed_type: str) -> tuple[uuid.UUID | None, dict]:
@@ -401,6 +406,7 @@ async def bulk_setup_github_repos(
         feed = result.scalar_one_or_none()
 
         if feed:
+            await revive_feed(db, feed, user.id)
             # Move to GitHub Repos category if uncategorized
             if feed.category_id is None:
                 feed.category_id = category.id
@@ -677,8 +683,8 @@ async def get_feed_health(
     now = datetime.now(UTC)
     stale_cutoff = now - timedelta(days=stale_days)
 
-    # Get all feeds
-    result = await db.execute(select(Feed))
+    # Every feed but the archived ones, which read as deleted
+    result = await db.execute(select(Feed).where(Feed.archived_at.is_(None)))
     feeds = result.scalars().all()
 
     healthy = []
@@ -852,21 +858,13 @@ async def remove_feed_for_everyone(
 
     With per-user subscriptions on, DELETE /feeds/{id} only unsubscribes the
     caller, so removing a dead feed from the Feeds view left it on everyone
-    else's list, still fetching. Entries stay: their entity links and threads
-    are intelligence. DELETE with purge=true is the one that deletes them.
+    else's list, still fetching. The feed is archived: entries stay, since their
+    entity links and threads are intelligence.
     """
-    from app.models.user_feed_subscription import UserFeedSubscription
-
     feed = await db.get(Feed, feed_id)
     if not feed:
         raise AppError(code="not_found", message="Feed not found", status_code=404)
-    subs = (await db.execute(select(UserFeedSubscription).where(UserFeedSubscription.feed_id == feed_id))).scalars()
-    readers = []
-    for sub in subs:
-        readers.append(sub.user_id)
-        await db.delete(sub)
-    feed.is_active = False
-    db.add(feed)
+    readers = await archive_feed(db, feed)
     await db.commit()
     for reader in readers:
         await _invalidate_unread_cache(reader)
@@ -1153,7 +1151,7 @@ async def list_feed_entries(
 @router.delete("/{feed_id}", status_code=204)
 async def delete_feed(
     feed_id: uuid.UUID = Path(..., description="UUID of the feed to delete"),
-    purge: bool = Query(False, description="Physically delete the feed and its entries (admin only)"),
+    purge: bool = Query(False, description="Delete the feed for everyone, not just the caller (admin only)"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1161,9 +1159,10 @@ async def delete_feed(
 
     With per-user subscriptions on, this unsubscribes the caller; the feed and
     its entries stay for other subscribers, and a feed nobody subscribes to
-    anymore stops fetching. Admins can pass purge=true to physically delete the
-    feed and its entries. With subscriptions off, deletion is the physical one
-    and admin-only.
+    anymore is archived. Admins can pass purge=true to delete it for everyone;
+    with subscriptions off, every delete is that one, and admin-only. A deleted
+    feed is archived, not dropped: it leaves every feed list and stops
+    fetching, and its articles stay as evidence (services/feed_archive.py).
     """
     feed = await db.get(Feed, feed_id)
     if not feed:
@@ -1173,12 +1172,8 @@ async def delete_feed(
     if not enabled or purge:
         if user.role != "admin":
             raise AppError(code="forbidden", message="Admin access required", status_code=403)
-        # Remove entries from search index before cascade delete
-        from app.services.meilisearch_client import delete_entries_by_feed
-
-        delete_entries_by_feed(feed_id)
-        await db.delete(feed)
-        await db.flush()
+        for reader in await archive_feed(db, feed):
+            await _invalidate_unread_cache(reader)
         return
 
     sub = await get_subscription(db, user.id, feed.id)
@@ -1189,11 +1184,9 @@ async def delete_feed(
         # count after an explicit unsubscribe reads as the action not working.
         await _invalidate_unread_cache(user.id)
 
-    if await _subscriber_count(db, feed.id) == 0 and feed.is_active:
-        # Nobody reads it anymore — stop fetching but keep the entries
-        feed.is_active = False
-        db.add(feed)
-        await db.flush()
+    if await _subscriber_count(db, feed.id) == 0:
+        # Nobody reads it anymore: archived, its entries kept
+        await archive_feed(db, feed)
 
 
 async def _subscriber_count(db: AsyncSession, feed_id: uuid.UUID) -> int:
@@ -1302,8 +1295,9 @@ async def push_feed_to_users(
             await ensure_subscription(db, uid, feed_id)
     await db.flush()
 
-    # A feed the last-unsubscribe rule paused has readers again
-    if not feed.is_active and before == 0:
+    # A feed the last-unsubscribe rule archived has readers again
+    if before == 0:
+        unarchive_feed(feed)
         feed.is_active = True
         db.add(feed)
         await db.flush()
@@ -1330,8 +1324,8 @@ async def remove_feed_subscriber(
 ):
     """Unsubscribe a user from a feed on their behalf. Admin only.
 
-    Mirrors what that user's own unsubscribe would do, including pausing a feed
-    whose last reader just left.
+    Mirrors what that user's own unsubscribe would do, including archiving a
+    feed whose last reader just left.
     """
     from app.models.user_feed_subscription import UserFeedSubscription
 
@@ -1354,10 +1348,8 @@ async def remove_feed_subscriber(
     await db.flush()
     await _invalidate_unread_cache(user_id)
 
-    if await _subscriber_count(db, feed_id) == 0 and feed.is_active:
-        feed.is_active = False
-        db.add(feed)
-        await db.flush()
+    if await _subscriber_count(db, feed_id) == 0:
+        await archive_feed(db, feed)
 
 
 @router.post("/discover")

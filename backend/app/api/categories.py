@@ -146,7 +146,9 @@ async def update_category(
     db.add(category)
     await db.flush()
 
-    count_result = await db.execute(select(func.count()).select_from(Feed).where(Feed.category_id == category.id))
+    count_result = await db.execute(
+        select(func.count()).select_from(Feed).where(Feed.category_id == category.id, Feed.archived_at.is_(None))
+    )
     feed_count = count_result.scalar() or 0
 
     return CategoryResponse(

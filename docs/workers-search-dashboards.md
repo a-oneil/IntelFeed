@@ -358,7 +358,7 @@ Searches use IntelFeed's own query language: free text, `"quoted phrases"`, fiel
 | Lane | Fields | Answered by |
 |------|--------|-------------|
 | Indexed entry | `title`, `content`, `author`, `tag`, `type`, `media`, `lang`, `words`, `date`, `is:starred/read/unread/bookmarked/noted` | Meilisearch filters |
-| PostgreSQL entry | `feed`, `category`, `feed.reliability`, `feed.timeliness`, `feed.relevance`, `is:muted` (feed-scoped); `signal`, `url`, `is:translated`, `is:image` (entry-scoped) | `resolve_feed_filters()` / `resolve_entry_filters()` |
+| PostgreSQL entry | `feed`, `category`, `feed.reliability`, `feed.timeliness`, `feed.relevance`, `is:muted`, `is:archived` (feed-scoped); `signal`, `url`, `is:translated`, `is:image` (entry-scoped) | `resolve_feed_filters()` / `resolve_entry_filters()` |
 | Entity | `cve`, `cwe`, `ttp`, `threat_actor`, `malware`, `country`, `sector`, `tool`, `vendor`, `product`, `mitigation`, `campaign`, `ransomware_victim`, `observable` (alias `ioc`), `rule`, `pir`, `intel_report`, `note`, plus their sub-fields | `entity_builder.py` |
 
 How PostgreSQL filters are folded in:

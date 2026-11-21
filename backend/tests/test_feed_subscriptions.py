@@ -161,7 +161,7 @@ async def test_flag_on_unsubscribe_keeps_feed_for_others(
 
 
 @pytest.mark.asyncio
-async def test_flag_on_last_unsubscribe_deactivates_feed(
+async def test_flag_on_last_unsubscribe_archives_feed(
     client: AsyncClient, auth_headers: dict, test_user: User, db_session: AsyncSession, subscriptions_on
 ):
     feed = await _make_feed(db_session, "https://a.example/feed", "A")
@@ -171,7 +171,7 @@ async def test_flag_on_last_unsubscribe_deactivates_feed(
     assert resp.status_code == 204
 
     await db_session.refresh(feed)
-    assert feed.is_active is False  # nobody reads it — stop fetching, keep entries
+    assert feed.is_active is False and feed.archived_at is not None  # nobody reads it: archived, entries kept
 
 
 @pytest.mark.asyncio
@@ -191,7 +191,8 @@ async def test_flag_on_purge_is_admin_only(
 
     resp = await client.delete(f"/api/feeds/{feed.id}?purge=true", headers=admin_headers)
     assert resp.status_code == 204
-    assert await db_session.get(Feed, feed.id) is None
+    await db_session.refresh(feed)
+    assert feed.archived_at is not None and feed.is_active is False  # archived, not dropped
 
 
 @pytest.mark.asyncio

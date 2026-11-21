@@ -11,7 +11,7 @@ flowchart TD
     PL -->|"bare text, title:, content:, author:"| MQ["Meilisearch query string"]
     PL -->|"tag:, type:, media:, lang:, words:, date:,<br/>is:starred/read/unread/bookmarked/noted"| MF["Meilisearch filter clauses"]
     PL -->|"feed:"| FR["resolve_deferred_filters()<br/>feed name → feed_id clauses"]
-    PL -->|"category:, signal:, url:, feed.reliability:,<br/>feed.timeliness:, feed.relevance:,<br/>is:muted / translated / image"| ER["resolve_deferred_filters()<br/>PostgreSQL"]
+    PL -->|"category:, signal:, url:, feed.reliability:,<br/>feed.timeliness:, feed.relevance:,<br/>is:muted / archived / translated / image"| ER["resolve_deferred_filters()<br/>PostgreSQL"]
     PL -->|"cve:, cwe:, threat_actor:, ttp:, malware:, country:,<br/>sector:, tool:, vendor:, product:, mitigation:,<br/>campaign:, ransomware_victim:, observable: (ioc:),<br/>rule:, intel_report:, pir:, note:<br/>(+ dotted sub-fields)"| EG["Entity filter groups"]
     PL -->|"sort:"| S["Sort (relevance / newest / oldest /<br/>title_asc / title_desc / shortest / longest / radar)"]
 
@@ -35,7 +35,7 @@ flowchart TD
 
 Three lanes, not two: indexed entry fields go to Meilisearch, entity fields go to the
 entity tables, and a middle group (`category:`, `signal:`, `url:`, feed grades,
-`is:muted/translated/image`) is answered from PostgreSQL, because those columns are not
+`is:muted/archived/translated/image`) is answered from PostgreSQL, because those columns are not
 in the search index and adding them would mean re-indexing every document.
 
 Feed-scoped PostgreSQL filters resolve to a few hundred feed IDs and become ordinary
