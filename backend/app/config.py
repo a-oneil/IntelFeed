@@ -325,7 +325,7 @@ class Settings(BaseSettings):
     relationship_sweep_min_age_hours: int = 24
     relationship_sweep_retry_days: int = 30
     relationship_sweep_min_confidence: str = "high"  # high | medium | low
-    relationship_sweep_actions: str = "keep"  # comma list of keep, correct, hide
+    relationship_sweep_actions: str = ""  # comma list of keep, correct, hide; empty = none
     adjudication_content_max_chars: int = 8000
     adjudication_scope: str = "links,entities,relationships,observables"
     # ICS/OT context keywords — ICS-matrix (T0xxx) ATT&CK techniques are only

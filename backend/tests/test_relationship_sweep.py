@@ -235,7 +235,7 @@ async def test_selection_takes_open_old_edges_not_recently_swept(db_session: Asy
 async def test_a_run_judges_and_commits_each_edge(db_session: AsyncSession, monkeypatch):
     from app.models.user import User
 
-    await _settings(db_session, relationship_sweep_mode="apply")
+    await _settings(db_session, relationship_sweep_mode="apply", relationship_sweep_actions="keep")
     db_session.add(User(username="system", password_hash="x", role="system"))
     edge = await _claim(db_session, [ARTICLE])
 

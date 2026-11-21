@@ -51,9 +51,11 @@ MODES = ("off", "shadow", "apply")
 # What apply mode may change, each switched on once the eval shows it is
 # right often enough (relationship_sweep_actions).
 ACTIONS = ("keep", "correct", "hide")
-# A keep of "X targets <country>" is never applied: origin read as target is
-# the commonest wrong claim, and the local model kept 5 of 19 such claims
-# wrongly in the 2026-11-21 eval (every other keep: 24 of 25 right).
+# None is on by default: on 790 labelled edges (2026-11-21, qwen3.5:9b) keeps
+# were right 80% of the time, hides 81%, corrections 36% — short of the 95%
+# a change made without a person needs. A keep of "X targets <country>" is
+# never applied: origin read as target is the commonest wrong claim (60 of
+# 80 co-occurrence country keeps right).
 _NO_AUTO_KEEP = {("threat_actor", "targets", "country"), ("malware", "targets", "country")}
 DECISIONS = ("asserted", "wrong_verb", "wrong_direction", "not_asserted", "wrong_entity", "unsure")
 _CONF_RANK = {"low": 0, "medium": 1, "high": 2}
@@ -78,7 +80,7 @@ async def sweep_settings(db: AsyncSession) -> dict:
         "min_conf": floor if floor in _CONF_RANK else "high",
         "actions": {
             a.strip().lower()
-            for a in str(await _get("relationship_sweep_actions", "keep")).split(",")
+            for a in str(await _get("relationship_sweep_actions", "") or "").split(",")
             if a.strip().lower() in ACTIONS
         },
     }
