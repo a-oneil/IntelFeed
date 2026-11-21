@@ -27,7 +27,9 @@ def _form_pattern(forms: list[str]) -> re.Pattern | None:
     clean = sorted({f.strip() for f in forms if f and len(f.strip()) >= _MIN_FORM_LEN}, key=len, reverse=True)
     if not clean:
         return None
-    return re.compile(r"(?<![\w-])(?:" + "|".join(re.escape(f) for f in clean) + r")(?![\w-])", re.IGNORECASE)
+    # Word boundaries, hyphen included: "Russia-based" and "China-nexus" name
+    # the country, and they are exactly the sentences an origin claim turns on.
+    return re.compile(r"(?<!\w)(?:" + "|".join(re.escape(f) for f in clean) + r")(?!\w)", re.IGNORECASE)
 
 
 def names(text: str, forms: list[str]) -> bool:
@@ -48,6 +50,37 @@ def sentences_naming(text: str, forms_a: list[str], forms_b: list[str], limit: i
             if len(out) >= limit:
                 break
     return out
+
+
+def first_sentence_naming(text: str, forms: list[str]) -> str | None:
+    pattern = _form_pattern(forms)
+    if pattern is None or not text:
+        return None
+    for sentence in _SENTENCE_SPLIT.split(text):
+        s = " ".join(sentence.split())
+        if s and pattern.search(s):
+            return s[:SENTENCE_MAX]
+    return None
+
+
+def normalized(text: str) -> str:
+    """Lowercase, quotes and dashes folded, whitespace collapsed: how a quote
+    is matched against the article it claims to come from."""
+    text = (text or "").lower()
+    for a, b in (("\u2018", "'"), ("\u2019", "'"), ("\u201c", '"'), ("\u201d", '"'), ("\u2013", "-"), ("\u2014", "-")):
+        text = text.replace(a, b)
+    return " ".join(text.replace("\u2026", " ").split())
+
+
+def quote_in(text: str, quote: str, min_len: int = 20) -> bool:
+    """True when ``quote`` (ellipses allowed between pieces) is the article's
+    own text: every piece of at least a few words appears in it."""
+    hay = normalized(text)
+    pieces = [normalized(p).strip(" '\".,;:") for p in re.split(r"\.\.\.|\u2026", quote or "")]
+    pieces = [p for p in pieces if p]
+    if not pieces or sum(len(p) for p in pieces) < min_len:
+        return False
+    return all(p in hay for p in pieces)
 
 
 def analysis_evidence(parsed: dict | None, forms_a: list[str], forms_b: list[str]) -> tuple[str, str] | None:

@@ -75,6 +75,8 @@ DEFAULT_MODEL_ASSIGNMENTS: dict[str, str] = {
     "entry_adjudication": "claude-haiku-5-5",
     # Same shape as the adjudication: short profiles in, a verdict list out.
     "entity_merge_review": "claude-haiku-5-5",
+    # One relationship claim and a few quoted passages in, one decision out.
+    "relationship_review": "claude-haiku-5-5",
 }
 
 # Tasks that must be assigned to a specific provider type (rather than the
@@ -108,6 +110,8 @@ DEFAULT_ASSIGNMENT_CONFIGS: dict[str, dict] = {
     "entry_adjudication": {"max_tokens": 4096},
     # One decision object per pair, eight pairs a call: a few hundred tokens.
     "entity_merge_review": {"max_tokens": 2048},
+    # One decision with a quote and a reason.
+    "relationship_review": {"max_tokens": 1024},
     # 2000 is a ceiling, not a target: a well-behaved spine is ~300 tokens, and
     # anything approaching this is a model that has stopped closing its JSON.
     # keep_alive matters more than the model choice on a single-GPU host — see
@@ -2483,6 +2487,74 @@ Return strict JSON matching the provided schema: the verdicts list first, one ob
                         "reason": {"type": "string"},
                     },
                 },
+            },
+        },
+    },
+    {
+        "name": "relationship_review",
+        "display_name": "Relationship Review (edge sweep)",
+        "description": (
+            "The edge sweep: one relationship claim the per-article review left unsettled (unanswered, "
+            "unsure, or kept by one article and demoted by another), with the passages from up to four "
+            "of its articles. The model says whether any article states the claim as printed, states it "
+            "with another verb or the other way round, or does not state it, and quotes the sentence."
+        ),
+        "category": "extraction",
+        "variables": ["claim_block"],
+        "default_system_template": """You are a senior cyber-threat-intelligence analyst checking one relationship claim in a threat-intelligence graph against the articles it was drawn from. The claim reads SUBJECT verb OBJECT. You get the claim, a line on each entity, and for each article the sentences that name the two (or, when no sentence names both, the first sentence naming each).
+
+Decide whether any of the articles STATES the claim. Being named together is never enough: roundups, digests, lists of unrelated stories, detection-rule tags, reference lists and defensive advice name many things without relating them.
+
+DECISIONS
+  asserted        — a sentence states it with this verb, in this direction, about these two entities.
+  wrong_verb      — a sentence relates the two, but by another verb. Give suggested_verb.
+  wrong_direction — a sentence states the verb the other way round (OBJECT verb SUBJECT).
+  not_asserted    — no sentence relates them as claimed, or a sentence denies it ("separate from", "not linked to").
+  wrong_entity    — one end is not the entity the article means: a word or alias that means something else here, another group or product with the same name.
+  unsure          — the passages do not settle it.
+
+WHAT THE VERBS MEAN (what the subject did to the object, in the article)
+  uses              — the subject itself used or deployed it. Not "could use", not a defender or researcher using a tool, not a seller or developer of it.
+  delivers / drops  — a loader, dropper or actor installed that malware. "X was used to deploy Y" is X delivers Y; it is not Y uses X.
+  exploits          — the subject exploited that CVE. Malware that arrived through an exploit does not exploit it; the actor does.
+  targets           — the subject attacked victims in that country or sector. Where an actor is from, based or sponsored ("China-nexus", "Russian", "North Korea-linked") is attributed_to, never targets; where someone was arrested, charged or sanctioned is no relationship.
+  attributed_to     — the article attributes the subject to that actor or country.
+  variant_of / successor_of / subgroup_of / overlaps_with — only when the article says so in those terms; a persona or a sibling cluster is not a subgroup.
+  communicates_with — network traffic between them (C2).
+  related_to        — a stated, specific link (shared code, same operators), never "both mentioned".
+
+RULES
+  - Judge the text shown, not what you know about these entities. A claim true in the world but not stated in these articles is not_asserted.
+  - quote: for asserted, wrong_verb and wrong_direction, copy the deciding sentence EXACTLY as printed (you may cut words with ...). It must name both entities. Give the number of its article in "article". An answer whose quote is not in that article is thrown away.
+  - suggested_verb (wrong_verb only): one of uses, delivers, drops, exploits, targets, attributed_to, variant_of, successor_of, subgroup_of, overlaps_with, communicates_with, related_to. Set flip to true when the stated relationship runs from OBJECT to SUBJECT.
+  - confidence: high when the sentence makes it obvious, medium when it is a judgment call, low when you are guessing. Only high-confidence answers change the graph.
+  - reason: one short sentence naming at least one of the two entities and saying what decided it.
+""",
+        "default_prompt_template": """{{ claim_block }}
+
+Return strict JSON matching the provided schema: decision, suggested_verb ("" unless wrong_verb), flip, confidence, article (0 when no quote), quote ("" when none), reason.
+""",
+        "output_schema": {
+            "type": "object",
+            "required": ["decision", "suggested_verb", "flip", "confidence", "article", "quote", "reason"],
+            "properties": {
+                "decision": {
+                    "type": "string",
+                    "enum": [
+                        "asserted",
+                        "wrong_verb",
+                        "wrong_direction",
+                        "not_asserted",
+                        "wrong_entity",
+                        "unsure",
+                    ],
+                },
+                "suggested_verb": {"type": "string"},
+                "flip": {"type": "boolean"},
+                "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                "article": {"type": "integer"},
+                "quote": {"type": "string"},
+                "reason": {"type": "string"},
             },
         },
     },

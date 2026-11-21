@@ -3242,7 +3242,8 @@ async def _apply_earlier(db: AsyncSession, rows: list[tuple[str, Any]]) -> bool:
             elif row.action == ACTION_ALIAS:
                 applied = not (await trim_alias_row(db, row))["skipped"]
             else:
-                outcome = await apply_adjudication_row(db, row)
+                # The reviewer repeating itself, not an analyst deciding.
+                outcome = await apply_adjudication_row(db, row, reviewer="adjudicator")
                 status = await settle_adjudication_outcome(db, row, outcome)
                 applied = status == "applied"
                 if status == "skipped":
@@ -3436,6 +3437,9 @@ async def apply_verdicts(
     rolling = await _rolling_breaker(ratio, cfg["breaker_pct"]) if mode == "apply" else False
     run_mode = "shadow" if (mode != "apply" or breaker or rolling) else "apply"
     floor = _CONF_RANK[cfg["min_conf"]]
+    # An edge verdict settles a claim the whole graph shows (a demote hides
+    # it), so it counts only when the reviewer was sure, whatever the floor.
+    edge_floor = max(floor, _CONF_RANK["high"])
     # Agreement is the second look's bar, so its repeats are exempt from the
     # per-article breaker; the breaker still judges its new verdicts alone.
     # While the rolling breaker is up nothing applies, so nothing is settled.
@@ -3482,7 +3486,7 @@ async def apply_verdicts(
             # on three reviews that never weighed in. Edges are the one section
             # the prompt still demands an answer for.
             if item.kind == "edge" and item.edge_id is not None:
-                if run_mode == "apply" and v.explicit and _CONF_RANK[v.confidence] >= floor:
+                if run_mode == "apply" and v.explicit and _CONF_RANK[v.confidence] >= edge_floor:
                     if await _count_edge_keep(db, item.edge_id, entry.id, v, ai_result_id):
                         promoted_n += 1
                 else:
@@ -3496,7 +3500,7 @@ async def apply_verdicts(
             dismissed_n += 1
             continue
         reason = v.reason
-        do_apply = run_mode == "apply" and _CONF_RANK[v.confidence] >= floor
+        do_apply = run_mode == "apply" and _CONF_RANK[v.confidence] >= (edge_floor if item.kind == "edge" else floor)
         # Never touched: a link an analyst restored recently is only ever
         # flagged again, whatever the mode and confidence.
         if item.kind == "link" and item.previously_restored:
@@ -3886,7 +3890,7 @@ async def _reclassify_entity(
     }
 
 
-async def apply_adjudication_row(db: AsyncSession, row) -> dict:
+async def apply_adjudication_row(db: AsyncSession, row, reviewer: str = "analyst") -> dict:
     """Apply one shadow proposal the stage filed (the queue's Apply button).
     Same primitives as apply mode; marks the row applied."""
     from app.models.entry import Entry
@@ -3942,7 +3946,13 @@ async def apply_adjudication_row(db: AsyncSession, row) -> dict:
         after["outcome"] = await _merge_entity(db, row.entity_type, row.entity_id, target, reason)
     elif row.action == ACTION_EDGE_DEMOTE and row.entity_id:
         prev = await _demote_edge(
-            db, row.entity_id, reason, entry_id=entry.id, reviewer="analyst", ai_result_id=row.ai_result_id
+            db,
+            row.entity_id,
+            reason,
+            entry_id=entry.id,
+            reviewer=reviewer,
+            confidence=after.get("confidence"),
+            ai_result_id=row.ai_result_id,
         )
         if prev is None:
             return {"applied": False, "reason": "edge gone or analyst-rejected"}
@@ -3955,7 +3965,7 @@ async def apply_adjudication_row(db: AsyncSession, row) -> dict:
                 bool(after["reverb"].get("flip")),
                 entry.id,
                 reason,
-                reviewer="analyst",
+                reviewer=reviewer,
                 ai_result_id=row.ai_result_id,
             )
             after["reverb"] = {**after["reverb"], **(fixed or {})}
