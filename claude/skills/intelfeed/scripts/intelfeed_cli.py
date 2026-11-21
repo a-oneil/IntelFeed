@@ -3780,7 +3780,8 @@ TOOLS: dict[str, dict] = {
             "there. scope='alias' also drops entity_value from the entity's aliases and unlinks every "
             "entry that matched only via it (the entity survives and keeps matching under its other "
             "names). scope='global' instead blocks the surface form from matching any entity type and "
-            "rebuilds the vocabulary (existing links on other entries are not retroactively removed)."
+            "queues a vocabulary rebuild (existing links on other entries are not retroactively "
+            "removed)."
         ),
         "params": {
             "entity_type": {

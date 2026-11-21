@@ -4620,7 +4620,7 @@
  },
  {
   "name": "report_false_positive",
-  "description": "Report a mislinked entity (autolinker noise). Always writes a FalsePositiveRecord audit row. With source_entry_id set, unlinks the entity from that entry. scope='entry' stops there. scope='alias' also drops entity_value from the entity's aliases and unlinks every entry that matched only via it (the entity survives and keeps matching under its other names). scope='global' instead blocks the surface form from matching any entity type and rebuilds the vocabulary (existing links on other entries are not retroactively removed).",
+  "description": "Report a mislinked entity (autolinker noise). Always writes a FalsePositiveRecord audit row. With source_entry_id set, unlinks the entity from that entry. scope='entry' stops there. scope='alias' also drops entity_value from the entity's aliases and unlinks every entry that matched only via it (the entity survives and keeps matching under its other names). scope='global' instead blocks the surface form from matching any entity type and queues a vocabulary rebuild (existing links on other entries are not retroactively removed).",
   "input_schema": {
    "type": "object",
    "properties": {
