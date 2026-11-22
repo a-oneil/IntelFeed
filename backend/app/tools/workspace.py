@@ -173,9 +173,9 @@ async def _snapshot_rule_version(
 @_tool(
     name="get_detection_rule",
     description=(
-        "Get a single detection rule with full rule content, provenance (source repo/author/license/"
-        "references), draft/published status, telemetry feasibility against the enabled Telemetry "
-        "Sources inventory, and a syntax-validation summary."
+        "Get one detection rule with its full content, provenance (source repo, author, license, "
+        "references), draft or published status, whether the enabled telemetry sources can support it, "
+        "and a syntax validation summary."
     ),
     input_schema={
         "properties": {
@@ -210,8 +210,8 @@ async def _get_detection_rule(db: AsyncSession, user_id: uuid.UUID, rule_id: str
         "Update fields of a detection rule. Updatable keys: title, description, rule_content, rule_type "
         f"({', '.join(_RULE_TYPES)}), severity, tags, is_draft, log_sources, mitre_tactics, data_sources, "
         "notes, source_ttps, source_entries, source_actors, source_campaigns, metadata, change_description. "
-        "Changing rule_content snapshots the previous content as a new version; content or type changes "
-        "re-extract rule metadata into unset fields (same as the API PUT)."
+        "Changing rule_content saves the previous content as a new version. A content or type change "
+        "re-extracts rule metadata into fields that are not set (same as the API PUT)."
     ),
     input_schema={
         "properties": {
@@ -289,9 +289,9 @@ async def _update_detection_rule(db: AsyncSession, user_id: uuid.UUID, rule_id: 
 @_tool(
     name="delete_detection_rule",
     description=(
-        "Delete a detection rule permanently; its version history is removed with it. REQUIRES user "
-        "confirmation: the first call returns a confirmation prompt and token — present it to the user "
-        "and only call again with confirmation_token after they explicitly approve."
+        "Delete a detection rule permanently, with its version history. REQUIRES user confirmation. The "
+        "first call returns a confirmation prompt and token: show it to the user, and only call again with "
+        "confirmation_token after they explicitly approve."
     ),
     input_schema={
         "properties": {
@@ -334,8 +334,8 @@ async def _delete_detection_rule(
 @_tool(
     name="set_detection_rule_status",
     description=(
-        "Set a detection rule's lifecycle status: 'draft' or 'published' (mirrors the API's is_draft "
-        "toggle — detection rules have no other states)."
+        "Set a detection rule's status to 'draft' or 'published'. This sets the API's is_draft flag. "
+        "Detection rules have no other states."
     ),
     input_schema={
         "properties": {
@@ -362,7 +362,7 @@ async def _set_detection_rule_status(db: AsyncSession, user_id: uuid.UUID, rule_
         "Convert a detection rule to a different rule language using the AI provider assigned to the "
         f"detection_rules task. Target formats: {', '.join(_RULE_TYPES)}. Returns the converted content "
         "without changing the source rule. With save=true, the conversion is stored on the rule's "
-        "metadata under rule_conversions (same place the UI keeps saved conversions)."
+        "metadata under rule_conversions, where the UI also keeps saved conversions."
     ),
     input_schema={
         "properties": {
@@ -371,7 +371,7 @@ async def _set_detection_rule_status(db: AsyncSession, user_id: uuid.UUID, rule_
             "save": {
                 "type": "boolean",
                 "default": False,
-                "description": "Persist the conversion on the rule's metadata (rule_conversions).",
+                "description": "Save the conversion in the rule's metadata (rule_conversions).",
             },
         },
         "required": ["rule_id", "target_format"],
@@ -500,8 +500,8 @@ Return ONLY the converted rule content — no explanation, no markdown fences, j
 @_tool(
     name="get_detection_rule_versions",
     description=(
-        "List a detection rule's saved versions, newest first. Versions are snapshots taken whenever "
-        "rule_content changed or a rollback occurred."
+        "List a detection rule's saved versions, newest first. A version is saved each time "
+        "rule_content changes and before each rollback."
     ),
     input_schema={
         "properties": {
@@ -541,8 +541,8 @@ async def _get_detection_rule_versions(db: AsyncSession, user_id: uuid.UUID, rul
     name="rollback_detection_rule",
     description=(
         "Restore a detection rule's content (and type) from a saved version, identified by its version "
-        "number (see get_detection_rule_versions). The current content is snapshotted as a new version "
-        "first, so a rollback is itself reversible."
+        "number (see get_detection_rule_versions). The current content is saved as a new version "
+        "first, so a rollback can itself be undone."
     ),
     input_schema={
         "properties": {
@@ -592,9 +592,9 @@ async def _rollback_detection_rule(db: AsyncSession, user_id: uuid.UUID, rule_id
 @_tool(
     name="list_intel_reports",
     description=(
-        "List intel reports, newest-updated first, optionally filtered by status "
-        f"({', '.join(_REPORT_STATUSES)}) or template_type slug. Rows are lightweight — section names "
-        "only, no section content (use get_intel_report for the full report)."
+        "List intel reports, most recently updated first, optionally filtered by status "
+        f"({', '.join(_REPORT_STATUSES)}) or template_type slug. Rows include section names but not section "
+        "content. Use get_intel_report for the full report."
     ),
     input_schema={
         "properties": {
@@ -659,8 +659,8 @@ async def _get_intel_report(db: AsyncSession, user_id: uuid.UUID, report_id: str
         "Update fields of an intel report. Updatable keys: title, tlp_marking (TLP 2.0; legacy TLP:WHITE "
         f"is normalized to TLP:CLEAR), status ({', '.join(_REPORT_STATUSES)}), content (full content dict "
         "including sections), summary, entry_ids, entity_ids, tags, change_description. Changing content "
-        "snapshots the previous content as a version and increments the version number; setting status "
-        "to published stamps published_at."
+        "saves the previous content as a version and increments the version number. Setting status "
+        "to published sets published_at."
     ),
     input_schema={
         "properties": {
@@ -729,9 +729,9 @@ async def _update_intel_report(db: AsyncSession, user_id: uuid.UUID, report_id: 
 @_tool(
     name="delete_intel_report",
     description=(
-        "Delete a draft intel report permanently (published or archived reports cannot be deleted — "
-        "archive instead). REQUIRES user confirmation: the first call returns a confirmation prompt and "
-        "token — present it to the user and only call again with confirmation_token after they "
+        "Delete a draft intel report permanently. Published or archived reports cannot be deleted: "
+        "archive them instead. REQUIRES user confirmation. The first call returns a confirmation prompt and "
+        "token: show it to the user, and only call again with confirmation_token after they "
         "explicitly approve."
     ),
     input_schema={
@@ -775,7 +775,7 @@ async def _delete_intel_report(
 
 @_tool(
     name="archive_intel_report",
-    description="Archive an intel report (status becomes 'archived'; the report is retained, not deleted).",
+    description="Archive an intel report. Its status becomes 'archived'. The report is kept, not deleted.",
     input_schema={
         "properties": {
             "report_id": {"type": "string", "description": "Intel report UUID"},
@@ -804,9 +804,9 @@ async def _archive_intel_report(db: AsyncSession, user_id: uuid.UUID, report_id:
 @_tool(
     name="delete_requirement",
     description=(
-        "Delete an intelligence requirement (PIR) permanently, along with its entry matches. REQUIRES "
-        "user confirmation: the first call returns a confirmation prompt and token — present it to the "
-        "user and only call again with confirmation_token after they explicitly approve."
+        "Delete an intelligence requirement (PIR) permanently, with its entry matches. REQUIRES user "
+        "confirmation. The first call returns a confirmation prompt and token: show it to the user, and "
+        "only call again with confirmation_token after they explicitly approve."
     ),
     input_schema={
         "properties": {
@@ -897,7 +897,7 @@ async def _fulfill_requirement(
     name="add_requirement_match",
     description=(
         "Manually match an entry to an intelligence requirement (match_type 'manual'). Increments the "
-        "requirement's match count and stamps last_matched_at. Errors if the entry is already matched. "
+        "requirement's match count and sets last_matched_at. Returns an error if the entry is already matched. "
         "Relevance: high, medium, or low."
     ),
     input_schema={
@@ -956,7 +956,7 @@ async def _add_requirement_match(
     name="remove_requirement_match",
     description=(
         "Remove a matched entry from an intelligence requirement and decrement its match count. "
-        "Reversible (the entry can be re-matched), so no confirmation is needed."
+        "The entry can be matched again, so no confirmation is needed."
     ),
     input_schema={
         "properties": {
@@ -1025,9 +1025,9 @@ async def _get_report(db: AsyncSession, report_id: str) -> tuple[IntelReport | N
     description=(
         "Create a public (unauthenticated) share link for an intel report, or return this user's existing "
         "active one. The public page shows the rendered report (sections, data tables, tags) with no author "
-        "or source ids. Only TLP:CLEAR and TLP:GREEN reports can be shared; AMBER and RED are refused, and a "
-        "link stops resolving while its report carries one of those markings. ttl_days optionally sets an "
-        "expiry on a newly created link (the API default is no expiry)."
+        "or source ids. Only TLP:CLEAR and TLP:GREEN reports can be shared. AMBER and RED are refused, and a "
+        "link stops working while its report has one of those markings. ttl_days sets an optional "
+        "expiry on a new link. By default the API sets no expiry."
     ),
     input_schema={
         "properties": {
@@ -1047,7 +1047,7 @@ async def _create_report_share_link(
     if err:
         return err
     if not _tlp_allows_sharing(report):
-        return {"error": f"{report.tlp_marking} reports can't be shared by public link (only TLP:CLEAR and TLP:GREEN)"}
+        return {"error": f"{report.tlp_marking} reports cannot be shared by public link (only TLP:CLEAR and TLP:GREEN)"}
 
     existing = await db.execute(
         select(SharedReport).where(
@@ -1099,9 +1099,9 @@ async def _get_report_share_link(db: AsyncSession, user_id: uuid.UUID, report_id
 @_tool(
     name="revoke_report_share_link",
     description=(
-        "Deactivate this user's active public share link for an intel report so its URL stops resolving. "
-        "Other analysts' links for the same report are left alone. create_report_share_link issues a fresh "
-        "link (new token) afterwards."
+        "Deactivate this user's active public share link for an intel report so its URL stops working. "
+        "Other analysts' links for the same report are not changed. After this, create_report_share_link "
+        "creates a new link with a new token."
     ),
     input_schema={
         "properties": {"report_id": {"type": "string", "description": "Intel report UUID whose link to revoke"}},

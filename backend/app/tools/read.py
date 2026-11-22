@@ -300,10 +300,11 @@ async def _observable_claims(db: AsyncSession, observable_id: uuid.UUID) -> list
 @_tool(
     name="get_observable",
     description=(
-        "Look up an observable (IOC ledger row) by UUID or by its value (IP, domain, URL, hash, cmdline, "
-        "registry key, ...). Returns kind, role, current/base confidence with decay state, sighting count, "
-        "capture provenance (which judgment door created it) with the evidence sentence, first/last seen, "
-        "and the most recent sighting articles. Defanged input (evil[.]com, hxxps://) is normalized."
+        "Look up an observable (a row in the observables list) by UUID or by its value (IP, domain, URL, hash, "
+        "cmdline, registry key, ...). Returns kind, role, current and base confidence with decay state, "
+        "sighting count, how it was added (AI analysis, the adjudicator, a curated IOC list feed, a "
+        "publisher's IOC table, a TTP observable, or an analyst) with the evidence sentence, first and last "
+        "seen, and the most recent articles it was seen in. Defanged input (evil[.]com, hxxps://) is normalized."
     ),
     input_schema={
         "properties": {
@@ -349,7 +350,12 @@ async def _get_observable(db: AsyncSession, user_id: uuid.UUID, observable: str,
                     )
                 ).scalar_one_or_none()
     if not obs:
-        return {"error": "Observable not found — the ledger only holds values a judgment door confirmed"}
+        return {
+            "error": (
+                "Observable not found. The observables list only holds values confirmed by AI analysis, the "
+                "adjudicator, a curated IOC list feed, a publisher's IOC table, a TTP observable, or an analyst."
+            )
+        }
 
     sightings = (
         await db.execute(
@@ -409,9 +415,9 @@ async def _get_observable(db: AsyncSession, user_id: uuid.UUID, observable: str,
 @_tool(
     name="search_observables",
     description=(
-        "Search the observables ledger (IOCs captured with judgment: AI-confirmed indicators, curated feed "
-        "entries, TTP host artifacts, analyst promotions). Filter by substring, kind, role, lifecycle "
-        "status, or capture door. Sorted by last sighting."
+        "Search the observables list (IOCs confirmed by AI analysis, the adjudicator, curated IOC list feeds, "
+        "publisher IOC tables, TTP host artifacts, or analyst promotion). Filter by substring, kind, role, "
+        "lifecycle status, or how the row was added (captured_by). Sorted by last sighting."
     ),
     input_schema={
         "properties": {
@@ -430,7 +436,8 @@ async def _get_observable(db: AsyncSession, user_id: uuid.UUID, observable: str,
             "captured_by": {
                 "type": "string",
                 "description": (
-                    "Capture door: ai_extraction, ttp_observable, ioc_list, publisher_ioc, adjudicator, manual"
+                    "How the row was added: ai_extraction (AI analysis), ttp_observable, ioc_list (curated IOC "
+                    "list feed), publisher_ioc (publisher's IOC table), adjudicator, manual (analyst)"
                 ),
             },
             "infra_tag": {
@@ -440,7 +447,10 @@ async def _get_observable(db: AsyncSession, user_id: uuid.UUID, observable: str,
             },
             "needs_review": {"type": "boolean", "description": "Only AI-created rows awaiting review"},
             "min_confidence": {"type": "number", "description": "Minimum current (decayed) confidence"},
-            "min_reports": {"type": "integer", "description": "Minimum report_count — articles that reported it"},
+            "min_reports": {
+                "type": "integer",
+                "description": "Minimum report_count (the number of articles that reported it)",
+            },
             "linked_entity_type": {
                 "type": "string",
                 "description": (
@@ -537,7 +547,7 @@ async def _search_observables(
 @_tool(
     name="get_cwe",
     description=(
-        "Get a MITRE CWE weakness by ID, including its position on the abstraction ladder "
+        "Get a MITRE CWE weakness by ID, including its abstraction level "
         "(Pillar/Class/Base/Variant), parent and lineage, MITRE mapping guidance, catalog mitigations "
         "and detection methods, how many CVEs carry it directly and across its whole subtree, how many "
         "of those are in CISA KEV, and linked article count."
@@ -731,9 +741,9 @@ async def _get_feeds(db: AsyncSession, user_id: uuid.UUID, limit: int = 50) -> d
 @_tool(
     name="discover_telegram_channels",
     description=(
-        "List every Telegram channel the IntelFeed bootstrap account is joined to, with "
-        "is_subscribed = whether IntelFeed already ingests it. Use this to see which channels "
-        "you've joined in your Telegram client app but haven't yet wired up as IntelFeed feeds."
+        "List every Telegram channel the IntelFeed bootstrap account has joined. is_subscribed "
+        "says whether IntelFeed already ingests the channel. Use this to find channels joined in "
+        "the Telegram client app that are not yet set up as IntelFeed feeds."
     ),
     input_schema={
         "properties": {
@@ -803,8 +813,8 @@ async def _discover_telegram_channels(
 @_tool(
     name="list_telegram_feeds",
     description=(
-        "List Telegram channel feeds with their adapter config — channel, last_seen_id, "
-        "attribution, session, error state."
+        "List Telegram channel feeds with their adapter config: channel, last_seen_id, "
+        "attribution, session, and error state."
     ),
     input_schema={"properties": {"limit": {"type": "integer", "default": 50}}},
 )
@@ -937,7 +947,7 @@ async def _get_requirements(db: AsyncSession, user_id: uuid.UUID, status: str | 
 @_tool(
     name="get_correlation_events",
     description=(
-        "Get recent correlation events — coverage gaps, trending entities, campaign and "
+        "Get recent correlation events: coverage gaps, trending entities, campaign and "
         "requirement matches, new TTPs/malware for known actors or malware, actor-malware "
         "co-occurrence, feed staleness/errors, exploit and CVE score changes, and KEV additions."
     ),
@@ -1162,8 +1172,8 @@ async def _get_enrichment_data(db: AsyncSession, user_id: uuid.UUID, entity_type
 @_tool(
     name="get_attack_layer",
     description=(
-        "Get MITRE ATT&CK Navigator layer JSON for a specific entry's TTPs, or (without "
-        "entry_id) for all observed techniques — those linked to at least one entry, "
+        "Get MITRE ATT&CK Navigator layer JSON for a specific entry's TTPs. Without entry_id, "
+        "the layer covers all observed techniques: those linked to at least one entry, "
         "excluding deprecated catalog techniques."
     ),
     input_schema={
@@ -1669,7 +1679,11 @@ async def _get_trending_entities(
 
 @_tool(
     name="get_feed_value",
-    description="Get feed value scores — composite 0-100 intelligence contribution metric per feed.",
+    description=(
+        "Get feed value scores: a composite 0-100 score per feed for how much intelligence its "
+        "entries contribute (entity yield, new entities, correlation events, detection rules, "
+        "requirement matches)."
+    ),
     input_schema={
         "properties": {
             "days": {"type": "integer", "default": 30},
@@ -1752,7 +1766,11 @@ async def _get_source_reliability(db: AsyncSession, user_id: uuid.UUID, limit: i
 
 @_tool(
     name="get_entry_insights",
-    description="Get actionable intelligence insights for a specific entry's entities.",
+    description=(
+        "Get follow-up findings for one entry's TTPs, CVEs and threat actors: detection gaps (no active "
+        "rule), campaign matches, intelligence requirement matches, and critical CVEs. Up to 10, "
+        "sorted by severity."
+    ),
     input_schema={
         "properties": {
             "entry_id": {"type": "string", "description": "Entry UUID"},
@@ -1769,9 +1787,9 @@ async def _get_entry_insights(db: AsyncSession, user_id: uuid.UUID, entry_id: st
 @_tool(
     name="get_triage_queue",
     description=(
-        "Get priority-scored entry queue for analyst review. Uses the signal-engine "
-        "ranking when signal_engine_surface is enabled, otherwise the legacy composite "
-        "heuristic — mirroring GET /api/entries/triage."
+        "Get the priority-scored entry queue for analyst review, as GET /api/entries/triage "
+        "returns it. Uses the signal-engine ranking when signal_engine_surface is enabled, "
+        "otherwise the legacy composite heuristic."
     ),
     input_schema={
         "properties": {
@@ -1794,17 +1812,17 @@ async def _get_triage_queue(db: AsyncSession, user_id: uuid.UUID, days: int = 7,
 @_tool(
     name="get_priority_queue",
     description=(
-        "The analyst's reading queue, exactly as the Priority Queue page shows it: unread entries "
-        "that clear the radar threshold, ranked by signal score, with story threads folded in as "
-        "single rows so a story eleven outlets covered is one item and not eleven. Ask this for "
-        "'what should I read next' / 'what's important right now'. Prefer it over get_triage_queue, "
-        "which is the older heuristic and does not fold stories."
+        "The analyst's reading queue, as the Priority Queue page shows it: unread entries that "
+        "meet the radar threshold, ranked by signal score. Articles in the same story thread are grouped "
+        "into one row, so a story covered by eleven outlets is one item, not eleven. Use this for "
+        "'what should I read next' or 'what is important right now'. Prefer it over get_triage_queue, "
+        "which uses the older heuristic and does not group stories."
     ),
     input_schema={
         "properties": {
             "limit": {"type": "integer", "description": "Entries per page (1-200, default 25); thread rows are extra"},
             "unread_only": {"type": "boolean", "description": "false also returns entries already read (default true)"},
-            "with_threads": {"type": "boolean", "description": "false skips story folding (default true)"},
+            "with_threads": {"type": "boolean", "description": "false turns off story thread grouping (default true)"},
             "cursor": {"type": "string", "description": "next_cursor from a previous call, for the next page"},
         },
     },
@@ -1882,7 +1900,10 @@ async def _get_priority_queue(
 
 @_tool(
     name="get_requirement_coverage",
-    description="Get intelligence requirements coverage summary — counts by status, priority, category, and staleness.",
+    description=(
+        "Get an intelligence requirements coverage summary: counts by status, priority and category, "
+        "plus stale (active requirements with no match in 30 days)."
+    ),
     input_schema={"properties": {}},
 )
 async def _get_requirement_coverage(db: AsyncSession, user_id: uuid.UUID) -> dict:

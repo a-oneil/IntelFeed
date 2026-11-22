@@ -15,17 +15,17 @@ from app.tools import _tool
 @_tool(
     name="get_story_threads",
     description=(
-        "List story threads — unfolding stories assembled from the articles that cover them, with "
-        "the re-reports folded underneath. Each row carries its outlets, article and echo counts, "
-        "key entities, how much is unread, and the priority score of its best unread beat. Use "
-        "this instead of searching for a story twenty-three times."
+        "List story threads. A story thread groups the articles that cover one developing story, "
+        "with near-duplicate re-reports (echoes) grouped under it. Each row has its outlet count, "
+        "article and echo counts, key entities, unread count, and the priority score of its "
+        "highest-scoring unread article. Use this instead of searching for the same story many times."
     ),
     input_schema={
         "properties": {
             "status": {
                 "type": "string",
                 "enum": ["open", "dormant", "closed", "any"],
-                "description": "open (still accepting articles), dormant, closed, or any. Default open",
+                "description": "open (still accepting articles), dormant, closed, or any. Default open.",
             },
             "limit": {"type": "integer", "description": "Maximum threads returned (1-200, default 40)"},
         },
@@ -72,10 +72,11 @@ async def _get_story_threads(
 @_tool(
     name="get_story_thread",
     description=(
-        "Read one story thread: its spine (one beat per wave of coverage — what broke, what each "
-        "wave added), every member article with its role (origin, beat, or folded echo), what the "
-        "story has yielded in techniques/CVEs/products/detection rules, and the threads it most "
-        "resembles. Open it in the UI at /priority-queue?thread=<slug>."
+        "Read one story thread. Returns its timeline (the spine field: one update per wave of "
+        "coverage, saying what was first reported and what each later wave added), every member "
+        "article with its role (origin, beat for an article that adds an update, or echo for a "
+        "re-report grouped under another), the techniques, CVEs, products and detection rules found "
+        "in the story, and the most similar threads. Open it in the UI at /priority-queue?thread=<slug>."
     ),
     input_schema={
         "properties": {

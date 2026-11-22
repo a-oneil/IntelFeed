@@ -1,6 +1,6 @@
 ---
 name: iocs
-description: look up indicators (IPs, domains, URLs, hashes) in the observables ledger
+description: look up indicators (IPs, domains, URLs, hashes) in the observables list
 tools: get_observable, search_observables, get_entity_infrastructure, export_observables, pivot_entity, search_entries
 ---
 - One indicator: get_observable(observable="<ip/domain/hash/url>") — role (c2, payload...), status, first/last seen, linked articles and entities.

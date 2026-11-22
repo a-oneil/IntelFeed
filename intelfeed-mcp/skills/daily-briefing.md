@@ -9,6 +9,6 @@ For "what's new / brief me / what should I read":
 3. get_story_threads(status="open", limit=8) — developing stories; get_story_thread(slug) for one story's timeline.
 4. get_correlation_events(unread_only=true, limit=10) — new TTPs for known actors, KEV additions, campaign/PIR matches.
 5. get_trending_entities(entity_type="threat_actor", days=7) — repeat for malware / cve if useful.
-For "what is happening / what should we work on": get_threat_board(window="14d", facet="all", limit=10) — threats and exploited CVEs ranked by distinct stories, each with its lead headline, brief and detection posture.
-Optional: get_temporal_clusters (articles sharing entities in a short window — possible new campaigns), get_triage_queue(days=1), get_dashboard_stats (volumes).
+For "what is happening / what should we work on": get_threat_board(window="14d", facet="all", limit=10) — threats and exploited CVEs ranked by distinct stories, each with its lead headline, brief and, for CVEs, detection state (blind, no_rule, defended).
+Optional: get_temporal_clusters (articles sharing entities in a short window, which can point to new campaigns), get_triage_queue(days=1), get_dashboard_stats (volumes).
 Don't call everything: 2–4 calls usually make a good briefing. Group by theme, most important first, with article dates.

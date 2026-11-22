@@ -44,7 +44,7 @@ intelfeed-help, and writes (only when writes are enabled). Adding one is adding 
   the registry says `mutating: false`; the tools that persist results anyway (`extract_*`,
   `run_ai_task`, `generate_detection_rules`) are excluded. A new or mis-flagged backend tool stays
   blocked until reviewed: `test_intelfeed_mcp.py` fails when the registry gains a read tool the
-  list doesn't have.
+  list does not have.
 - With `INTELFEED_MCP_ALLOW_WRITES=1` a separate `write_action` tool appears, limited to notes, tags,
   stars, bookmarks, read state, watches, campaigns and saved searches. `INTELFEED_MCP_WRITE_TOOLS`
   can narrow that list but never extend it. Merges, deletes, feed and automation changes are never
@@ -52,7 +52,7 @@ intelfeed-help, and writes (only when writes are enabled). Adding one is adding 
 - When IntelFeed's own Claude CLI runs this server for a copilot turn, it sets
   `INTELFEED_MCP_PROPOSE_WRITES=1` and passes a short-lived *propose* token. `write_action` then
   takes any registry write, but nothing runs: the API stages the call, and the user confirms or
-  cancels it in the copilot. You don't set this yourself; with your own login it does nothing extra.
+  cancels it in the copilot. You do not set this yourself; with your own login it does nothing extra.
 - Credentials only travel over `https://` (or `http://` to localhost; `INTELFEED_ALLOW_INSECURE_HTTP=1`
   for a trusted LAN), and redirects are never followed: urllib would otherwise re-send the
   `Authorization` header to whatever host a redirect names.
@@ -82,7 +82,7 @@ fails when it drifts.
    ```
    and enable `mcp/intelfeed` in the chat.
 
-   **Bionic** (LM Studio's agent app) doesn't read `mcp.json`: add the server under
+   **Bionic** (LM Studio's agent app) does not read `mcp.json`: add the server under
    Settings → MCP → Add custom MCP, connection type "On this computer", command `python3`,
    argument `/path/to/IntelFeed/intelfeed-mcp/intelfeed_mcp.py`. Raise the request timeout
    (advanced options, default 60 s) to ~150 s: some searches on a busy instance take a while.

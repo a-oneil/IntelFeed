@@ -1,17 +1,17 @@
 ---
 name: intelfeed-lite
-description: "Read-only access to the running IntelFeed platform via its lite CLI tool. Use this skill whenever the user wants to query, search, look up, browse, or analyze data in their IntelFeed instance — searching entries, looking up threat actors / malware / CVEs / CWEs / TTPs, viewing campaigns and intel reports, browsing detection rules, pivoting across entities, checking detection gaps, inspecting feeds and analytics, or reading the priority queue, story threads, observables/IOC ledger, ransomware leak-site victims and My Stack exposure. Also trigger on questions IntelFeed could answer — 'what's trending', 'show me recent entries about X', 'who is APT29', 'what's in my triage queue' — or on how IntelFeed itself works. Even if the user doesn't mention IntelFeed explicitly, use this skill when the question is about reading threat intelligence data, feed entries, detection rules, or security entities that live in the platform."
+description: "Read-only access to the running IntelFeed platform through its lite CLI tool. Use this skill whenever the user wants to query, search, look up, browse, or analyze data in their IntelFeed instance: searching entries, looking up threat actors / malware / CVEs / CWEs / TTPs, viewing campaigns and intel reports, browsing detection rules, pivoting across entities, checking detection gaps, inspecting feeds and analytics, or reading the priority queue, story threads, observables (IOCs), ransomware leak-site victims and My Stack exposure. Also trigger on questions IntelFeed could answer, such as 'what's trending', 'show me recent entries about X', 'who is APT29', 'what's in my triage queue', and on how IntelFeed itself works. Even if the user does not mention IntelFeed explicitly, use this skill when the question is about reading threat intelligence data, feed entries, detection rules, or security entities that live in the platform."
 ---
 
 # IntelFeed Lite Skill
 
-You have read-only access to a running IntelFeed instance via a CLI tool. The user is a security engineer who monitors the full threat landscape — not scoped to a single enterprise. They work across threat intelligence and detection engineering — tracking adversaries, analyzing attack techniques, and reviewing detection content. Your output must be technical, detailed, and precise. Never fabricate data points — if IntelFeed returns it, report it accurately. If you're unsure about something, search the web or ask the user rather than guessing.
+You have read-only access to a running IntelFeed instance via a CLI tool. The user is a security engineer who monitors the full threat landscape, not a single enterprise. They work in threat intelligence and detection engineering: tracking adversaries, analyzing attack techniques, and reviewing detection content. Your output must be technical, detailed, and precise. Never fabricate data points. Report what IntelFeed returns accurately. If you are unsure about something, search the web or ask the user rather than guessing.
 
-This skill is for retrieving data from IntelFeed — search, get, list, pivot, and read-only checks. It does not perform writes.
+This skill retrieves data from IntelFeed: search, get, list, pivot, and read-only checks. It does not perform writes.
 
 ## How to Use the CLI
 
-The CLI lives at `~/.claude/skills/intelfeed-lite/scripts/intelfeed_cli.py` (the skill is installed under your home directory at `~/.claude/skills/`). Always use the `~/` home-relative path so it resolves regardless of your current working directory — do not use a project-relative `.claude/...` path. Zero external dependencies — just Python 3.12+.
+The CLI lives at `~/.claude/skills/intelfeed-lite/scripts/intelfeed_cli.py` (the skill is installed under your home directory at `~/.claude/skills/`). Always use the `~/` home-relative path so it resolves from any working directory. Do not use a project-relative `.claude/...` path. It has no external dependencies and needs Python 3.12+.
 
 ```bash
 python3 ~/.claude/skills/intelfeed-lite/scripts/intelfeed_cli.py <tool_name> '<json_args>'
@@ -25,7 +25,7 @@ It requires three environment variables (already configured):
 
 ### Batching for Efficiency
 
-The CLI supports multiple tool calls in a single invocation. When you need data from independent tools, batch them into one command — this is faster and reduces round-trips.
+The CLI supports multiple tool calls in a single invocation. When you need data from independent tools, batch them into one command. This is faster and needs fewer round-trips.
 
 ```bash
 # BAD: Two separate invocations
@@ -36,7 +36,7 @@ python3 ~/.claude/skills/intelfeed-lite/scripts/intelfeed_cli.py search_entities
 python3 ~/.claude/skills/intelfeed-lite/scripts/intelfeed_cli.py search_entries '{"query": "APT29"}' search_entities '{"query": "APT29"}'
 ```
 
-Batch when the calls are independent (don't need each other's output). Run sequentially when a later call depends on an earlier result (e.g., you need an entity ID from search before you can pivot).
+Batch when the calls are independent (neither needs the other's output). Run sequentially when a later call depends on an earlier result (e.g., you need an entity ID from search before you can pivot).
 
 ### Tool with no arguments
 
@@ -46,9 +46,9 @@ python3 ~/.claude/skills/intelfeed-lite/scripts/intelfeed_cli.py get_dashboard_s
 
 ## Search Query Language
 
-`search_entries` and `search_unified` run the **full** query language — every filter below is executed, not just the text terms. 18 article fields and 122 intelligence fields.
+`search_entries` and `search_unified` run the **full** query language: every filter below is executed, not only the text terms. The language has 18 article fields and 122 intelligence fields.
 
-`search_entities` is the exception: it is plain text over entity names, aliases, catalogued IDs and prose. A `field:value` string handed to it is matched literally and finds nothing — put filters through `search_unified` (or `search_entries` when you only want the articles).
+`search_entities` is the exception: it is plain text over entity names, aliases, catalogued IDs and prose. A `field:value` string sent to it is matched literally and finds nothing. Send filters through `search_unified` (or `search_entries` when you only want the articles).
 
 Prefer a precise filter over free text. `cve.kev:true` is a fact; "known exploited" is a guess about what an article happened to say.
 
@@ -71,17 +71,17 @@ Prefer a precise filter over free text. `cve.kev:true` is a fact; "known exploit
 
 ### Signal & Source Filters
 
-- `signal:` — Why the signal engine ranked an entry. All 16 values, by family — coverage: `under_reported`, `source_convergence`, `feed_echo`; severity: `kev_added`, `epss_high`, `epss_jump`, `weaponized_poc`, `critical_cvss`; novelty: `novel_entity`, `entity_resurgence`, `new_pairing`, `scoop`; interest: `pir_match`, `correlation_event`; content: `detection_content`, `research_depth`
+- `signal:` — Why the signal engine ranked an entry. All 16 values, grouped by family. Coverage: `under_reported`, `source_convergence`, `feed_echo`; severity: `kev_added`, `epss_high`, `epss_jump`, `weaponized_poc`, `critical_cvss`; novelty: `novel_entity`, `entity_resurgence`, `new_pairing`, `scoop`; interest: `pir_match`, `correlation_event`; content: `detection_content`, `research_depth`
 - `sector:` — Sector mentioned in the article (`sector:healthcare`)
 - `feed.reliability:` / `feed.timeliness:` / `feed.relevance:` — Source Admiralty grade, exact letter (`feed.reliability:B`; ranges are not supported)
 
-**`sort:radar`** orders by the signal engine's priority score — the same ranking as the Priority Queue. It reads from PostgreSQL, so it drops unscored entries and ignores free-text terms. Use it to read a *filtered queue*, not to rank a text search.
+**`sort:radar`** orders by the signal engine's priority score, the same ranking as the Priority Queue. It reads from PostgreSQL, so it drops unscored entries and ignores free-text terms. Use it to read a *filtered queue*, not to rank a text search.
 
 ### Intelligence Filters
 
 - `cve:` — CVE identifier (`cve:CVE-2025-5777`), plus `cve.severity:`, `cve.cvss:>9.0`, `cve.kev:true`, `cve.epss:>0.5`, `cve.epss_percentile:>0.9`, `cve.poc:>0`, `cve.exploit:kev`, `cve.product:fortios`
 - `cwe:` — Weakness by ID or name (`cwe:CWE-416`, `cwe:"use after free"`), plus `cwe.abstraction:Base` (Pillar/Class/Base/Variant), `cwe.kind:weakness|category`, `cwe.usage:Allowed` (Allowed, Allowed-with-Review, Discouraged, Prohibited), `cwe.parent:CWE-664`, `cwe.deprecated:false`
-- `observable:` (alias `ioc:`) — IOC ledger value or label (`observable:185.174.100.5`), plus `observable.kind:` (`ipv4`, `ipv6`, `domain`, `url`, `uri_path`, `email`, `ja3`, `ja4`, `cert_fingerprint`, `md5`, `sha1`, `sha256`, `cmdline`, `registry`, `path`, `mutex`, `named_pipe`, `service_name`, `user_agent`, `script`), `observable.role:` (`c2`, `delivery`, `payload`, `phishing`, `exfil`, `exploit`, `scanning`), `observable.status:active|aging|expired`, `observable.infra:`
+- `observable:` (alias `ioc:`) — Observable (IOC) value or label (`observable:185.174.100.5`), plus `observable.kind:` (`ipv4`, `ipv6`, `domain`, `url`, `uri_path`, `email`, `ja3`, `ja4`, `cert_fingerprint`, `md5`, `sha1`, `sha256`, `cmdline`, `registry`, `path`, `mutex`, `named_pipe`, `service_name`, `user_agent`, `script`), `observable.role:` (`c2`, `delivery`, `payload`, `phishing`, `exfil`, `exploit`, `scanning`), `observable.status:active|aging|expired`, `observable.infra:`
 - `ttp:` — MITRE technique (`ttp:T1059*`), plus `ttp.tactic:`, `ttp.platform:Windows`, `ttp.data_source:process`, `ttp.domain:enterprise|mobile|ics`, `ttp.subtechnique:true`, `ttp.deprecated:false`
 - `threat_actor:` — Threat actor (`threat_actor:APT29`), plus `threat_actor.country:`, `threat_actor.motivation:espionage`, `threat_actor.sector:`, `threat_actor.type:`, `threat_actor.mitre:G0016`
 - `malware:` — Malware family, plus `malware.type:`, `malware.sector:`, `malware.mitre:S0367`
@@ -95,10 +95,10 @@ Prefer a precise filter over free text. `cve.kev:true` is a fact; "known exploit
 - `ransomware_victim:` — Victim organization, plus `ransomware_victim.sector:`, `ransomware_victim.domain:`, `ransomware_victim.group:lockbit`
 - `pir:` — Priority Intelligence Requirement title, plus `pir.priority:`, `pir.category:`
 
-**Catalogue suffixes** work across entity types — useful for curation and triage work:
+**Catalogue suffixes** work across entity types and help with curation and triage:
 
 - `<entity>.articles:>100` — how much has been written about it (`ttp`, `threat_actor`, `malware`, `country`, `tool`, `vendor`, `product`, `mitigation`, `cwe`, `observable`/`ioc`)
-- `<entity>.seen:>2026-01-01` / `<entity>.first_seen:>2026-06` — recency, same ten types (note: **not** `cve.*` — CVEs carry `.review` and `.via` only)
+- `<entity>.seen:>2026-01-01` / `<entity>.first_seen:>2026-06` — recency, for the same types (**not** `cve.*`: CVEs carry only `.review` and `.via`)
 - `<entity>.review:true` / `<entity>.via:ai_extraction` — extraction provenance (`threat_actor`, `malware`, `cve`, `ttp`, `tool`)
 
 ### Operators
@@ -107,7 +107,7 @@ Prefer a precise filter over free text. `cve.kev:true` is a fact; "known exploit
 - `OR` — Either condition
 - `NOT` — Exclude (`NOT type:youtube`)
 - `*` — Wildcard (`ttp:T1566*`, `threat_actor:APT*`)
-- `"..."` — Exact phrase (`"device code phishing"`). On entity values, quotes force an exact, case-sensitive match and skip alias resolution — use unquoted values unless you mean that.
+- `"..."` — Exact phrase (`"device code phishing"`). On entity values, quotes force an exact, case-sensitive match and skip alias resolution. Use unquoted values unless you want that.
 - `()` — Grouping (`(ransomware OR malware) AND type:rss`)
 - `>`, `>=`, `<`, `<=`, `..` — Comparison and inclusive range (`cve.cvss:>9.0`, `date:2026-01..2026-03`)
 
@@ -149,15 +149,15 @@ threat_actor.via:ai_extraction threat_actor.articles:>10
 
 ### Gotchas
 
-- **`search_entities` does not parse filters.** It is a text search. `cve.kev:true` sent to it returns nothing at all, not an error — use `search_unified` for anything with a colon in it.
-- **Field names are lowercase.** `Actor:APT29` is not a filter — it becomes free text. The actor field is `threat_actor:`, not `actor:`.
+- **`search_entities` does not parse filters.** It is a text search. `cve.kev:true` sent to it returns nothing, not an error. Use `search_unified` for anything with a colon in it.
+- **Field names are lowercase.** `Actor:APT29` is not a filter; it becomes free text. The actor field is `threat_actor:`, not `actor:`.
 - **Multi-word values need quotes.** `threat_actor:Cozy Bear` parses as `threat_actor:Cozy AND Bear`.
 - **Free text cannot be negated.** Meilisearch has no term exclusion, so `ransomware NOT phishing` behaves like `ransomware`. `NOT` works on field filters only.
-- **`OR` between two entry-scoped PostgreSQL filters silently means AND.** `signal:kev_added OR signal:scoop` returns entries with *both* signals, not either — a plausible small number rather than an error. Affects `signal:`, `sector:`, `url:` and `is:translated`/`is:image`. `is:muted` does not participate in OR at all — neither the union nor a reliable intersection. `feed:`, `category:` and the source grades OR correctly. Issue the two queries separately and merge them yourself.
-- **A negated PostgreSQL filter only subtracts from an entry-ID set.** `NOT signal:feed_echo` removes its matches from a set that an *entity* filter or another *entry-scoped PostgreSQL* filter established. A bare text term or an index filter (`tag:`, `type:`, `date:`…) builds no such set, so the negation is silently dropped — `ransomware NOT signal:kev_added` returns all 9,221 ransomware entries unchanged. Alone, it matches everything.
+- **`OR` between two entry-scoped PostgreSQL filters silently means AND.** `signal:kev_added OR signal:scoop` returns entries with *both* signals, not either. The result is a plausible small number, not an error. Affects `signal:`, `sector:`, `url:` and `is:translated`/`is:image`. `is:muted` does not work with OR at all: it gives neither the union nor a reliable intersection. `feed:`, `category:` and the source grades OR correctly. Issue the two queries separately and merge them yourself.
+- **A negated PostgreSQL filter only subtracts from an entry-ID set.** `NOT signal:feed_echo` removes its matches from a set that an *entity* filter or another *entry-scoped PostgreSQL* filter established. A bare text term or an index filter (`tag:`, `type:`, `date:`…) builds no such set, so the negation is silently dropped: `ransomware NOT signal:kev_added` returns all 9,221 ransomware entries unchanged. Alone, it matches everything.
 - **An entity AND-group inside an OR returns nothing.** `(threat_actor:APT29 AND threat_actor.country:Russia) OR threat_actor:APT28` yields 0 even though each side matches on its own.
 - **Feed grades are exact.** `feed.reliability:B` matches grade B only; `>B` is not supported and ungraded feeds match nothing.
-- **No stemming and no regex.** `run` does not match `running`; only `*` wildcards, no character classes. Wildcards work in field *values* only — including entry fields (`tag:apt*`, `type:you*`, `feed:NVD*`, `signal:kev*`) — but not in bare text: a trailing `*` is dropped and one in the middle splits the word.
+- **No stemming and no regex.** `run` does not match `running`; only `*` wildcards, no character classes. Wildcards work only in field *values*, including entry fields (`tag:apt*`, `type:you*`, `feed:NVD*`, `signal:kev*`). They do not work in bare text: a trailing `*` is dropped and one in the middle splits the word.
 
 ### Reading Search Results
 
@@ -175,7 +175,7 @@ Searching "lockbit" returns the LockBit group as `direct` alongside dozens of ac
 - **`note`** — a note on an article (`entry_id` + `entry_title` set) or a standalone one (both null). Also carries `is_pinned`.
 - **`entity_note`** — a note on an actor, malware, CVE, TTP, campaign, vendor or product. Carries `entity_type`, `entity_id`, `entity_name` (the resolved subject) and `note_type`. Its title is optional and falls back to `"Note on {subject}"`.
 
-`description` is a ~190-character window **centred on the match**, not the note's opening — so quote from it directly rather than assuming it is a summary.
+`description` is a ~190-character window **centred on the match**, not the note's opening. Quote from it directly; do not treat it as a summary.
 
 Notes have their own filters, which reach both tables at once (they are entity filters, so run them through `search_unified` / `search_entries`, not `search_entities`):
 
@@ -191,29 +191,29 @@ note.pinned:true         # Pinned notes
 
 `note.type:` and an entity value for `note.about:` only apply to entity notes; `note.pinned:` and `note.about:entry`/`:standalone` only to the other table. Each excludes the other rather than matching all of it, so some combinations are empty by design (`note.pinned:true note.about:cve` can never match). A `note.about:entry` query also returns the articles the notes hang off.
 
-**Treat notes as the user's own prior work, and say so when you use one.** If a note already answers the question, lead with it and attribute it ("your note on CVE-2026-20262 says…") rather than re-deriving the answer from articles. Notes are instance-wide, not per-user, so a note may have been written by a colleague — don't assert the user wrote it unless the result says so.
+**Treat notes as the user's own prior work, and say so when you use one.** If a note already answers the question, lead with it and attribute it ("your note on CVE-2026-20262 says…") rather than re-deriving the answer from articles. Notes are instance-wide, not per-user, so a colleague may have written it. Do not say the user wrote it unless the result says so.
 
-Article counts come back as `total`. On queries that read from PostgreSQL — `sort:radar`, entity-only queries, or a very large linked-entry set — that number is exact; otherwise it is a Meilisearch estimate. Don't present an estimate as a precise figure.
+Article counts come back as `total`. On queries that read from PostgreSQL (`sort:radar`, entity-only queries, or a very large linked-entry set), that number is exact; otherwise it is a Meilisearch estimate. Do not present an estimate as a precise figure.
 
 ## Chaining Tool Calls
 
-The real power of IntelFeed is chaining multiple queries together to build a complete picture.
+Chain several queries to build a complete picture.
 
 **Example: "What should I read right now?"**
 
-1. `get_priority_queue '{"limit": 20}'` — the Priority Queue itself: unread, signal-ranked, threads folded into one row each
-2. `get_story_thread '{"slug": "<slug>", "include_members": true}'` — for any thread row, read the spine before the articles
+1. `get_priority_queue '{"limit": 20}'` — the Priority Queue: unread, signal-ranked, with each story thread grouped into one row
+2. `get_story_thread '{"slug": "<slug>", "include_members": true}'` — for any thread row, read its timeline before the articles
 3. `get_daily_summary` — the day's cached briefing, if one has been generated
 4. `get_correlation_events '{"unread_only": true}'` — what the engine noticed while the user was away
 
-Lead with the thread spines, not a flat list of headlines — a thread row stands for a whole story, not one article.
+Lead with the thread timelines, not a flat list of headlines. A thread row stands for a whole story, not one article.
 
 **Example: "What do we know about APT29?"**
 
 1. `search_entities '{"query": "APT29"}'` — find the threat actor entity (plain text; `match_kind: direct` is the actor itself)
 2. `get_threat_actor '{"actor_id": "<id>"}'` — full profile
 3. `pivot_entity '{"entity_type": "threat_actor", "entity_id": "<id>", "min_tier": "moderate"}'` — co-occurring TTPs, malware, CVEs, ranked by strength
-4. `get_entity_graph '{"entity_type": "threat_actor", "entity_id": "<id>"}'` — the asserted relationships, which are claims rather than co-occurrence
+4. `get_entity_graph '{"entity_type": "threat_actor", "entity_id": "<id>"}'` — the reported relationships, which are claims rather than co-occurrence
 5. `search_entries '{"query": "threat_actor:APT29 sort:newest", "limit": 5}'` — recent coverage
 
 Then synthesize everything into a coherent briefing. Say which parts are claims and which are co-occurrence.
@@ -221,19 +221,19 @@ Then synthesize everything into a coherent briefing. Say which parts are claims 
 **Example: "Pull the intelligence we already have on this article"**
 
 1. `get_entry '{"entry_id": "<id>"}'` — the article plus everything extracted at ingest
-2. `get_entry_insights '{"entry_id": "<id>"}'` — actionable insights for its entities
+2. `get_entry_insights '{"entry_id": "<id>"}'` — detection gaps, campaign and requirement matches, and critical CVEs among its entities
 3. `get_entry_graph '{"entry_id": "<id>"}'` — relationship graph across those entities
 4. `get_entry_story '{"entry_id": "<id>"}'` — what preceded it and what followed
 5. `check_requirement_match '{"entry_id": "<id>"}'` — which PIRs it answers
 
-If the entry has no extracted intelligence, say it hasn't been processed — this skill cannot run extraction.
+If the entry has no extracted intelligence, say it has not been processed. This skill cannot run extraction.
 
 **Example: "Where are our detection coverage gaps?"**
 
 1. `check_detection_gaps` — uncovered techniques, per tactic
 2. `get_analytics '{"metric": "detection_coverage"}'` — coverage stats
-3. `get_telemetry_sources` — what the user can actually see
-4. `check_telemetry_feasibility '{"rule_id": "<id>"}'` — whether an existing rule would even run
+3. `get_telemetry_sources` — what telemetry the user collects
+4. `check_telemetry_feasibility '{"rule_id": "<id>"}'` — whether an existing rule would run
 5. For each gap, `get_ttp '{"ttp_id": "<id>"}'` to understand the technique
 
 **Example: "What's my exposure?"**
@@ -245,20 +245,20 @@ If the entry has no extracted intelligence, say it hasn't been processed — thi
 
 **Example: "Did this indicator show up before?"**
 
-1. `get_observable '{"observable": "185.174.100.5"}'` — kind, role, confidence with decay, sighting count, how it got into the ledger
+1. `get_observable '{"observable": "185.174.100.5"}'` — kind, role, confidence with decay, sighting count, how it got into the observables list
 2. `search_entries '{"query": "observable:185.174.100.5 sort:newest"}'` — the articles it was seen in
 3. `search_observables '{"kind": "domain", "role": "c2", "status": "active"}'` — neighbouring infrastructure of the same role
 
-Regex never creates a ledger row — everything in there arrived through a judgment door, so absence means "not judged", not "not mentioned".
+Regex never adds a value to the observables list. Every value comes from AI analysis, the adjudicator, a curated IOC list feed, a publisher's IOC table, a TTP observable, or an analyst promoting it. Absence means "not judged", not "not mentioned".
 
 **Example: "Walk me through this campaign"**
 
 1. `get_campaigns` — list campaigns to find the right one
 2. `get_campaign '{"campaign_id": "<id>"}'` — full profile
 3. `get_campaign_timeline '{"campaign_id": "<id>"}'` — chronological entries
-4. `get_campaign_detection_gaps '{"campaign_id": "<id>"}'` — covered vs library_only (rule exists, telemetry doesn't) vs real gaps
+4. `get_campaign_detection_gaps '{"campaign_id": "<id>"}'` — covered vs library_only (rule exists, telemetry does not) vs real gaps
 5. `get_campaign_attack_layer '{"campaign_id": "<id>"}'` — Navigator layer
-6. `suggest_campaign_entries '{"campaign_id": "<id>"}'` — entries that belong but aren't linked yet
+6. `suggest_campaign_entries '{"campaign_id": "<id>"}'` — entries that belong but are not linked yet
 
 **Example: "What should I triage first today?"**
 
@@ -271,11 +271,11 @@ Regex never creates a ledger row — everything in there arrived through a judgm
 
 1. `get_feeds` — every configured feed, with health and Admiralty grades
 2. `get_feed_value` — composite 0–100 contribution scores
-3. `get_source_reliability` — feeds ranked by what they actually contribute
+3. `get_source_reliability` — feeds ranked by extractions and rules generated
 4. `get_entity_link_stats` / `get_extraction_stats` — whether what they contribute is clean
 5. `get_dashboard_stats` — system-wide totals for context
 
-**Example: "How does IntelFeed actually do X?"**
+**Example: "How does IntelFeed do X?"**
 
 1. `list_documentation_pages` — see what the deployment ships
 2. `search_documentation '{"query": "story threads"}'` — find the page
@@ -285,29 +285,29 @@ Answer platform questions from the docs, not from memory.
 
 ## Available Tools
 
-98 tools, all read-only. The lite CLI does not carry a single tool that creates, changes or deletes anything — no writes, no AI extraction, no report or document generation (`export_observables` only reads a ledger slice back as EDL/CSV/JSON; it saves nothing). If the user asks for one of those, say the lite skill cannot do it rather than improvising a workaround. `⚠` marks a tool that needs an **admin** account; for anyone else the API answers 403.
+98 tools, all read-only. The lite CLI has no tool that creates, changes or deletes anything: no writes, no AI extraction, no report or document generation (`export_observables` only reads observables back as EDL/CSV/JSON; it saves nothing). If the user asks for one of those, say the lite skill cannot do it. Do not improvise a workaround. `⚠` marks a tool that needs an **admin** account; for anyone else the API answers 403.
 
 ### Search & Discovery (4 tools)
 
 - **search_entries** — Articles, running the full query language (query, limit, offset, sort). `offset` pages through large result sets; `sort` accepts any `sort:` value including `radar`
 - **search_entities** — Plain-text search across all intelligence entity types **and the user's analyst notes** (query, limit). Each result carries `match_kind`; `field:value` filters do not work here
 - **search_unified** — Articles and entities in one call, with entity filters constraining the articles (query, limit). Use this for anything with a colon in it
-- **get_search_facets** — Feed types, categories, and top tags — what's in the system, before you search it
+- **get_search_facets** — Feed types, categories, and top tags. Use it to see what the system holds before you search
 
 ### The Reading Queue (7 tools)
 
-- **get_priority_queue** — The Priority Queue page as data: unread entries over the radar threshold, signal-ranked, with story threads folded into single rows (limit, unread_only, with_threads, cursor)
+- **get_priority_queue** — The Priority Queue page as data: unread entries over the radar threshold, signal-ranked, with each story thread grouped into one row (limit, unread_only, with_threads, cursor)
 - **get_triage_queue** — Priority-scored entries for review over a window (days, limit)
-- **get_story_threads** — Unfolding stories assembled from the articles covering them, re-reports folded underneath (status, limit)
-- **get_story_thread** — One thread: its spine (a beat per wave of coverage), members with roles (origin/beat/echo), entities and outlets (slug, include_members)
+- **get_story_threads** — Developing stories built from the articles that cover them, with re-reports grouped under each story (status, limit)
+- **get_story_thread** — One thread: its timeline (one update per wave of coverage), members with roles (`origin`/`beat`/`echo`), entities and outlets (slug, include_members)
 - **get_daily_summary** — The cached AI daily briefing for a day, or null (date). Never generates one
 - **get_entry_story** — Follow-ups and precursors to an entry, chained through shared strong entities in a ±30 day window (entry_id)
-- **get_similar_entries** — Nearest neighbours from the embedding index, falling back to shared-entity overlap when the entry isn't embedded (entry_id, limit)
+- **get_similar_entries** — Nearest neighbours from the embedding index, falling back to shared-entity overlap when the entry is not embedded (entry_id, limit)
 
 ### Workbench Boards (7 tools)
 
-- **get_threat_board** — The Threats board: actors/malware and exploited CVEs ranked by distinct stories over a window, each with lead headline, cached brief, sources, handled state and (CVEs) exposure lift + detection posture (window: 7d/14d/30d, facet: threats/vulns/all, limit, min_attention, include_handled)
-- **get_coverage_workspace** — One threat's recent articles and extracted behaviours, each with its quote, the telemetry it needs and whether enabled telemetry sees it; `below_line` = a sourcing gap (entity_type: threat_actor/malware/cve/ttp, entity_key, window)
+- **get_threat_board** — The Threats board: actors/malware and exploited CVEs ranked by distinct stories over a window, each with lead headline, cached brief, sources, handled state and, for CVEs, exposure lift and detection state (`blind`, `no_rule`, `defended`) (window: 7d/14d/30d, facet: threats/vulns/all, limit, min_attention, include_handled)
+- **get_coverage_workspace** — One threat's recent articles and extracted behaviours, each with its quote, the telemetry it needs and whether enabled telemetry sees it; `below_line` marks a sourcing gap (entity_type: threat_actor/malware/cve/ttp, entity_key, window)
 - **get_entity_whats_new** — An entity's latest developments: novelty and severity signals on its recent articles (entity_type, entity_id, days, scoped)
 - **list_intel_profiles** — The instance's intel profiles: named scopes (a customer, a portfolio) of regions, sectors and technology (limit, offset)
 - **get_intel_profile** — One intel profile with resolved country names and sector labels (profile_id)
@@ -327,26 +327,26 @@ Answer platform questions from the docs, not from memory.
 - **get_threat_actor** — Actor profile: aliases, type, motivation, origin country, targeted sectors, TTPs, article_count (actor_id)
 - **get_malware** — Malware family profile with aliases, type, sectors, associated actors (malware_id)
 - **list_sectors** — The 21-sector victim-industry vocabulary with article, targeting-actor/malware and 90-day victim counts (search, sort_by, limit)
-- **get_sector** — Sector victimology profile: who targets it (reported vs asserted), campaigns, leak-site victims, country cross-tab, intel profiles, recent articles (sector — UUID or slug, window_days)
+- **get_sector** — Sector victimology profile: who targets it (reported vs asserted), campaigns, leak-site victims, country cross-tab, intel profiles, recent articles (sector: UUID or slug, window_days)
 - **who_targets_sector** — Actors and malware ranked by articles describing them hitting the sector, plus asserted targets-sector claims with source (sector, limit)
 - **sector_victims** — Leak-site victims in a sector: totals, 12-month series, top groups, victim countries, recent disclosures (sector, window_days, limit)
-- **get_cve** — CVSS/EPSS, KEV status, PoC and Metasploit availability, NVD affected vendor/product links, CWE assignments (cve_id — UUID or CVE-YYYY-NNNNN)
+- **get_cve** — CVSS/EPSS, KEV status, PoC and Metasploit availability, NVD affected vendor/product links, CWE assignments (cve_id: UUID or CVE-YYYY-NNNNN)
 - **get_cwe** — A MITRE CWE weakness: abstraction level, parent and lineage, mapping guidance, catalog mitigations, linked CVEs (cwe_id)
-- **get_ttp** — ATT&CK technique with tactic, platforms, data sources, linked articles (ttp_id — UUID or T1059.001)
-- **get_observable** — One IOC ledger row by UUID or value: kind, role, confidence with decay state, sightings, provenance (observable, kind)
-- **search_observables** — Search the observables ledger by substring, kind, role and lifecycle status (query, kind, role, status, limit)
+- **get_ttp** — ATT&CK technique with tactic, platforms, data sources, linked articles (ttp_id: UUID or T1059.001)
+- **get_observable** — One observable by UUID or value: kind, role, confidence with decay state, sightings, provenance (observable, kind)
+- **search_observables** — Search observables by substring, kind, role and lifecycle status (query, kind, role, status, limit)
 - **get_entity_infrastructure** — An actor's / family's / campaign's / tool's observables in two tiers: claimed (attribution edges with evidence and trust tier) and reported alongside (co-reported in the same articles, newsletters and list files excluded) (entity_type, entity_id, limit)
-- **export_observables** — A filtered ledger slice as EDL lines, CSV rows or JSON, refanged, dual-use infra excluded unless asked (format, kind, role, status, min_confidence, min_reports, include_infra_tagged, query, limit)
+- **export_observables** — A filtered set of observables as EDL lines, CSV rows or JSON, refanged, dual-use infra excluded unless asked (format, kind, role, status, min_confidence, min_reports, include_infra_tagged, query, limit)
 - **get_enrichment_data** — Stored enrichment for a CVE, malware, actor or TTP (entity_type, entity_id)
-- **get_entry_insights** — Actionable insights across an entry's entities (entry_id)
+- **get_entry_insights** — Detection gaps, campaign and requirement matches, and critical CVEs among an entry's entities (entry_id)
 
 ### Correlation & Graphs (6 tools)
 
 - **pivot_entity** — One-hop co-occurrence pivot with strength tiers, ranking and a time window (entity_type, entity_id, limit_per_type, window_days, offset, sort, min_tier)
-- **get_entity_graph** — Claims-only relationship graph around an entity — typed edges at confirmed/reported confidence, not raw co-occurrence (entity_type, entity_id, depth, window_days)
+- **get_entity_graph** — Claims-only relationship graph around an entity: typed edges at confirmed or reported confidence, not raw co-occurrence (entity_type, entity_id, depth, window_days)
 - **get_entity_timeline** — When an entity appeared in articles, chronologically (entity_type, entity_id)
 - **get_entry_graph** — Relationship graph for every entity linked to one entry (entry_id)
-- **get_temporal_clusters** — Entries sharing entities inside time windows — emerging campaigns (days, window_hours, min_shared, limit)
+- **get_temporal_clusters** — Entries sharing entities inside time windows, which can indicate emerging campaigns (days, window_hours, min_shared, limit)
 - **get_correlation_events** — Recent correlation events: coverage gaps, trending entities, campaign/requirement matches, feed staleness (limit, unread_only)
 
 ### Watchlist & My Stack (2 tools)
@@ -382,7 +382,7 @@ Rule formats in the library: `sigma`, `splunk_spl`, `crowdstrike_ql`, `elastic_q
 - **get_detection_rules** — List rules, optionally by type (rule_type, limit)
 - **get_detection_rule** — One rule with full content, provenance (repo/author/license/references), draft state and telemetry feasibility (rule_id)
 - **get_detection_rule_versions** — Saved version snapshots, newest first (rule_id)
-- **check_detection_gaps** — Observed TTPs vs non-draft rules, per-tactic, with the uncovered list. TTP-only — CVEs are not part of it
+- **check_detection_gaps** — Observed TTPs vs non-draft rules, per-tactic, with the uncovered list. TTPs only; CVEs are not included
 - **check_telemetry_feasibility** — Whether rules are runnable given configured telemetry (rule_id)
 - **get_telemetry_sources** — Configured log/telemetry sources and their coverage
 - **get_attack_layer** — Navigator layer for one entry's TTPs, or for all observed techniques without entry_id (entry_id, title)
@@ -422,7 +422,7 @@ Rule formats in the library: `sigma`, `splunk_spl`, `crowdstrike_ql`, `elastic_q
 
 ### Curation & Hygiene (9 tools)
 
-Read-only visibility into the link and claim layers — inspect and report, but the fixes themselves live in the full skill.
+Read-only views of the link and relationship layers. Use them to inspect and report; the tools that make fixes are in the full skill.
 
 - **get_entity_link_stats** — Autolink health: links by entity type and provenance, held-match queue depth
 - **list_entity_links** — Autolink junction rows across all seven tables, newest first (entity_type, entity_id, entry_id, source, confidence, search, days, limit, offset)
@@ -448,21 +448,21 @@ Read-only visibility into the link and claim layers — inspect and report, but 
 
 ## Error Recovery
 
-When things go wrong, don't just report the error — try to work around it.
+When a call fails, do not only report the error. Try to work around it.
 
-**API connection failures:** The Docker stack may not be running. Tell the user: "The IntelFeed API isn't responding — is the Docker stack running?" Do not retry the same call in a loop.
+**API connection failures:** The Docker stack may not be running. Tell the user: "The IntelFeed API is not responding. Is the Docker stack running?" Do not retry the same call in a loop.
 
-**Entity not found:** If `search_entities` returns no results, try `search_entries` with the same query — the entity may exist in article text but hasn't been extracted yet. Also try alternative names/aliases (APT29 = Cozy Bear = Midnight Blizzard = The Dukes = NOBELIUM).
+**Entity not found:** If `search_entities` returns no results, try `search_entries` with the same query. The entity may appear in article text without having been extracted yet. Also try alternative names/aliases (APT29 = Cozy Bear = Midnight Blizzard = The Dukes = NOBELIUM).
 
-**Empty entry intelligence:** If `get_entry` returns an entry with no extracted TTPs / CVEs / actors / malware, report that the entry hasn't been processed yet.
+**Empty entry intelligence:** If `get_entry` returns an entry with no extracted TTPs / CVEs / actors / malware, report that the entry has not been processed yet.
 
 **Authentication errors (401):** The CLI handles token refresh automatically. If 401s persist, ask the user to check their `INTELFEED_USERNAME` and `INTELFEED_PASSWORD` environment variables.
 
-**A write was requested:** The lite CLI carries no write tools at all — a mutating tool name is simply unknown to it. Say the lite skill is read-only and name the tool the full skill would use, rather than hunting for a workaround.
+**A write was requested:** The lite CLI has no write tools, so it does not recognize a write tool's name. Say the lite skill is read-only and name the tool the full skill would use. Do not look for a workaround.
 
 ## Filling Gaps with Web Search
 
-IntelFeed data is only as complete as what's been ingested and extracted. When you notice gaps — missing context on a threat actor, a CVE with no enrichment, a technique with sparse coverage — supplement with web searches to give the user a complete picture.
+IntelFeed data is only as complete as what's been ingested and extracted. When you notice gaps, such as missing context on a threat actor, a CVE with no enrichment, or a technique with sparse coverage, search the web to fill them.
 
 - After querying IntelFeed, assess whether the results fully answer the question
 - If an entity has sparse data (few articles, missing aliases), search the web for additional context
@@ -470,13 +470,13 @@ IntelFeed data is only as complete as what's been ingested and extracted. When y
 - For CVEs: check for PoC availability, active exploitation status, and patch guidance
 - For TTPs: find real-world examples, detection strategies, and atomic test cases
 - Always clearly distinguish what came from IntelFeed data vs. what came from web research
-- IntelFeed is the primary source of truth for what the user has tracked — web search fills in what hasn't been ingested yet
+- IntelFeed is the primary source for what the user has tracked. Web search fills in what has not been ingested yet
 
 ## How to Present Results
 
 - **Accuracy is non-negotiable.** Every data point (CVSS scores, technique IDs, dates, attribution) must come directly from IntelFeed results or verified web sources. Never approximate or fabricate. If a field is missing, say so.
 - **Focus on TTPs.** Adversaries rotate infrastructure constantly. TTPs are the durable intelligence. Always prioritize ATT&CK techniques, attack patterns, and behavioral detections.
-- **Be technical.** Use proper terminology — MITRE ATT&CK IDs (T1059.001, not "PowerShell execution"), full CVE identifiers, CVSS vectors, TLP markings.
+- **Be technical.** Use proper terminology: MITRE ATT&CK IDs (T1059.001, not "PowerShell execution"), full CVE identifiers, CVSS vectors, TLP markings.
 - **Structure for scannability.** Tables for entity comparisons. Headers to separate sections. Technique IDs inline with names.
 - **Show your sources.** Note whether data came from IntelFeed (which feed/article) or web research. This matters for confidence assessment.
-- **Link to IntelFeed.** When referencing entries or entities, include a clickable deep link using the `INTELFEED_API_URL` env var (the app and API share one address). Articles: `{API_URL}/?entry={entry_id}`. Entity profiles: `{API_URL}/workbench/{type}/{id}` — `threat_actor`, `malware`, `cve`, `cwe`, `ttp`, `tool`, `vendor`, `product`, `country`, `mitigation`, `observable`, `campaign`. Detection rules: `{API_URL}/workbench/rule/{id}`. Reports: `{API_URL}/workbench/report/{id}`.
+- **Link to IntelFeed.** When referencing entries or entities, include a clickable deep link using the `INTELFEED_API_URL` env var (the app and API share one address). Articles: `{API_URL}/?entry={entry_id}`. Entity profiles: `{API_URL}/workbench/{type}/{id}`, where `{type}` is one of `threat_actor`, `malware`, `cve`, `cwe`, `ttp`, `tool`, `vendor`, `product`, `country`, `mitigation`, `observable`, `campaign`. Detection rules: `{API_URL}/workbench/rule/{id}`. Reports: `{API_URL}/workbench/report/{id}`.

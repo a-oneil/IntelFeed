@@ -50,11 +50,11 @@ def _parse_uuid(value: str, label: str) -> uuid.UUID | dict:
 @_tool(
     name="list_entity_links",
     description=(
-        "List entry→entity autolinks (junction rows) unioned across all seven junction tables, newest first. "
-        "Filter by entity_type, entity_id, entry_id, source provenance (auto_link, ai, ai_reconcile, "
-        "auto_extracted, manual — TTP/CVE junctions record no source and are excluded when set), confidence "
-        "(high, medium, low — the CVE junction has none and is excluded when set), a substring search on "
-        "entity name / entry title, or a recency window in days."
+        "List entry→entity autolinks (junction rows) from all seven junction tables, newest first. Filters: "
+        "entity_type, entity_id, entry_id, source (auto_link, ai, ai_reconcile, auto_extracted, manual), "
+        "confidence (high, medium, low), a substring search on entity name or entry title, and a window in days. "
+        "TTP and CVE links record no source, so they are excluded when source is set. CVE links have no "
+        "confidence, so they are excluded when confidence is set."
     ),
     input_schema={
         "properties": {
@@ -67,7 +67,7 @@ def _parse_uuid(value: str, label: str) -> uuid.UUID | dict:
             "entry_id": {"type": "string", "description": "Only links on this entry UUID"},
             "source": {
                 "type": "string",
-                "description": "Provenance filter: auto_link, ai, ai_reconcile, auto_extracted, or manual",
+                "description": "Source filter: auto_link, ai, ai_reconcile, auto_extracted, or manual",
             },
             "confidence": {"type": "string", "description": "Link confidence filter: high, medium, or low"},
             "search": {"type": "string", "description": "Case-insensitive substring on entity name or entry title"},
@@ -127,9 +127,9 @@ async def _list_entity_links(
 @_tool(
     name="get_entity_link_stats",
     description=(
-        "Autolinking health signals: total entry→entity links by entity type and provenance source, how "
-        "many held matches (pending autolinks) are waiting for their article's analysis, plus the count of "
-        "non-rejected entity↔entity relationships."
+        "Autolinking counts: entry→entity links by entity type and by source, the number of held matches "
+        "(pending autolinks) waiting for their article's AI analysis, and the number of entity↔entity "
+        "relationships that are not rejected."
     ),
     input_schema={"properties": {}},
     mutating=False,
@@ -151,9 +151,9 @@ async def _username(db: AsyncSession, user_id: uuid.UUID) -> str:
 @_tool(
     name="unlink_entity_from_entry",
     description=(
-        "Remove a single entry→entity autolink (junction row) and invalidate the entity's cached "
-        "pivots/graphs. Reversible (the autolinker or an analyst can re-create it), so no confirmation is "
-        "required. Does not touch the entity or the entry themselves."
+        "Remove one entry→entity autolink (junction row) and clear the entity's cached pivots and graphs. "
+        "The autolinker or an analyst can create the link again, so no confirmation is required. Does not "
+        "change the entity or the entry."
     ),
     input_schema={
         "properties": {
@@ -192,8 +192,8 @@ async def _unlink_entity_from_entry(
     name="bulk_unlink_entities",
     description=(
         "Remove up to 500 entry→entity autolinks in one call. Each item is "
-        "{entity_type, entity_id, entry_id}; items whose junction row no longer exists are skipped. "
-        "Invalidates each affected entity's cached pivots/graphs. Returns the number actually deleted."
+        "{entity_type, entity_id, entry_id}. Items whose junction row no longer exists are skipped. "
+        "Clears the cached pivots and graphs of each affected entity. Returns the number deleted."
     ),
     input_schema={
         "properties": {
@@ -253,12 +253,12 @@ async def _bulk_unlink_entities(db: AsyncSession, user_id: uuid.UUID, items: lis
 @_tool(
     name="report_false_positive",
     description=(
-        "Report a mislinked entity (autolinker noise). Always writes a FalsePositiveRecord audit row. With "
-        "source_entry_id set, unlinks the entity from that entry. scope='entry' stops there. scope='alias' "
-        "also drops entity_value from the entity's aliases and unlinks every entry that matched only via it "
-        "(the entity survives and keeps matching under its other names). scope='global' instead blocks the "
-        "surface form from matching any entity type and queues a vocabulary rebuild (existing links on other "
-        "entries are not retroactively removed)."
+        "Report an entity the autolinker linked by mistake. Always writes a FalsePositiveRecord audit row. With "
+        "source_entry_id set, unlinks the entity from that entry. scope='entry' does only that. scope='alias' "
+        "also removes entity_value from the entity's aliases and unlinks every entry that matched only on it. "
+        "The entity is kept and still matches on its other names. scope='global' instead blocks the matched "
+        "name from matching any entity type and queues a vocabulary rebuild. Existing links on other entries "
+        "are not removed."
     ),
     input_schema={
         "properties": {
@@ -266,14 +266,14 @@ async def _bulk_unlink_entities(db: AsyncSession, user_id: uuid.UUID, items: lis
             "entity_id": {"type": "string", "description": "UUID of the mislinked entity"},
             "entity_value": {
                 "type": "string",
-                "description": "The surface form that was wrongly matched (1-500 chars), e.g. 'Prometheus'",
+                "description": "The matched name that was wrong (1-500 chars), e.g. 'Prometheus'",
             },
             "scope": {
                 "type": "string",
                 "enum": ["entry", "alias", "global"],
                 "description": (
-                    "'entry' = unlink from one article only; 'alias' = also drop the name from this entity "
-                    "and unlink articles matched only by it; 'global' = block the name platform-wide"
+                    "'entry' = unlink from one article only; 'alias' = also remove the name from this entity "
+                    "and unlink articles matched only on it; 'global' = block the name for every entity type"
                 ),
             },
             "source_entry_id": {"type": "string", "description": "Entry UUID to unlink the entity from (optional)"},
@@ -360,10 +360,10 @@ async def _report_false_positive(
 @_tool(
     name="list_entity_relationships",
     description=(
-        "All entity↔entity relationships where the given entity is source or target, newest first, with "
-        "endpoint display names resolved. Each row carries verb (relationship_type), confidence "
-        "(possible/probable/confirmed), provenance source and evidence_entry_ids. Analyst-rejected edges and "
-        "edges below the configured min-confidence display setting are hidden unless include_rejected is set."
+        "All entity↔entity relationships where the given entity is the source or target, newest first, with "
+        "the names of both entities. Each row has a verb (relationship_type), confidence (possible, probable "
+        "or confirmed), source and evidence_entry_ids. Relationships an analyst rejected, and those below the "
+        "configured minimum display confidence, are hidden unless include_rejected is set."
     ),
     input_schema={
         "properties": {
@@ -411,9 +411,8 @@ async def _list_entity_relationships(
 @_tool(
     name="confirm_relationship",
     description=(
-        "Trust-ladder confirm: upgrade a relationship to source='analyst_confirmed' and "
-        "confidence='confirmed', then invalidate cached pivots/graphs for both endpoints. Returns the "
-        "updated relationship."
+        "Confirm a relationship as an analyst: sets source='analyst_confirmed' and confidence='confirmed', "
+        "then clears the cached pivots and graphs of both entities. Returns the updated relationship."
     ),
     input_schema={
         "properties": {"relationship_id": {"type": "string", "description": "Relationship UUID"}},
@@ -436,9 +435,9 @@ async def _confirm_relationship(db: AsyncSession, user_id: uuid.UUID, relationsh
 @_tool(
     name="reject_relationship",
     description=(
-        "Trust-ladder reject: mark a relationship source='analyst_rejected'. The row is kept (not deleted) so "
-        "re-ingestion and the co-occurrence engine cannot resurrect or accumulate evidence on it; it is hidden "
-        "from pivot/graph/list surfaces. Invalidates cached pivots/graphs for both endpoints."
+        "Reject a relationship as an analyst: sets source='analyst_rejected'. The row is kept, not deleted, so "
+        "re-ingestion and the co-occurrence engine cannot create it again or add evidence to it. It is hidden "
+        "from pivots, graphs and relationship lists. Clears the cached pivots and graphs of both entities."
     ),
     input_schema={
         "properties": {"relationship_id": {"type": "string", "description": "Relationship UUID"}},
@@ -461,9 +460,9 @@ async def _reject_relationship(db: AsyncSession, user_id: uuid.UUID, relationshi
 @_tool(
     name="delete_relationship",
     description=(
-        "Hard-delete an entity↔entity relationship and invalidate cached pivots/graphs for both endpoints. "
-        "Reversible via re-create, so no confirmation is required — but prefer reject_relationship for "
-        "auto-extracted edges: a deleted row can be recreated by re-ingestion, a rejected one cannot."
+        "Permanently delete an entity↔entity relationship and clear the cached pivots and graphs of both "
+        "entities. It can be created again, so no confirmation is required. For auto-extracted relationships, "
+        "use reject_relationship instead: re-ingestion can create a deleted row again, but not a rejected one."
     ),
     input_schema={
         "properties": {"relationship_id": {"type": "string", "description": "Relationship UUID"}},
@@ -492,9 +491,9 @@ async def _delete_relationship(db: AsyncSession, user_id: uuid.UUID, relationshi
 @_tool(
     name="get_extraction_stats",
     description=(
-        "Aggregate stats over AI-created entities (created_via='ai_extraction' across threat actors, malware, "
-        "tools, CVEs, TTPs): totals by type, needs-review / orphaned / likely-duplicate / auto-confirmed "
-        "counts, and how many were created in the requested window vs the preceding one."
+        "Counts for AI-created entities (created_via='ai_extraction': threat actors, malware, tools, CVEs, "
+        "TTPs): totals by type, the number that need review, are orphaned, are likely duplicates or were "
+        "auto-confirmed, and how many were created in the requested window and in the window before it."
     ),
     input_schema={
         "properties": {
@@ -519,11 +518,11 @@ async def _get_extraction_stats(db: AsyncSession, user_id: uuid.UUID, window: st
 @_tool(
     name="list_extraction_entities",
     description=(
-        "List AI-created entities (created_via='ai_extraction') with a computed lifecycle status: linked "
-        "(in use), review (needs analyst sign-off), orphan (every article link removed, its source article "
-        "still there), or dupe (near-duplicate sibling exists, with duplicate_of naming it). Filterable by "
-        "type, status, creation window, text search and source entry; sorted and paginated. Includes "
-        "provenance: created_confidence, needs_review, created_from_entry_id and the source entry title."
+        "List AI-created entities (created_via='ai_extraction') with a computed status: linked (in use), "
+        "review (needs analyst approval), orphan (every article link removed, but its source article still "
+        "exists), or dupe (a near-duplicate entity exists; duplicate_of names it). Filter by type, status, "
+        "creation window, text search and source entry. Sorted and paginated. Each row includes "
+        "created_confidence, needs_review, created_from_entry_id and the source entry title."
     ),
     input_schema={
         "properties": {
@@ -535,7 +534,7 @@ async def _get_extraction_stats(db: AsyncSession, user_id: uuid.UUID, window: st
                 "type": "string",
                 "enum": _EXTRACTION_STATUSES,
                 "default": "all",
-                "description": "Filter by computed lifecycle status",
+                "description": "Filter by computed status",
             },
             "window": {
                 "type": "string",
@@ -606,8 +605,8 @@ async def _list_extraction_entities(
 @_tool(
     name="confirm_extraction_entities",
     description=(
-        "Analyst sign-off on AI-created entities: clears the needs_review flag on the given entities of one "
-        "type so they no longer show in the extraction review queue. Returns how many rows were updated."
+        "Approve AI-created entities as an analyst: clears the needs_review flag on the given entities of one "
+        "type, so they are no longer listed in the extraction review queue. Returns how many rows were updated."
     ),
     input_schema={
         "properties": {
@@ -650,10 +649,9 @@ async def _confirm_extraction_entities(db: AsyncSession, user_id: uuid.UUID, ent
 @_tool(
     name="get_hygiene_stats",
     description=(
-        "Combined entity-hygiene counters across both proposal logs: the adjudicate stage's mode and how many "
-        "verdicts it has filed that nobody has applied yet, pending reclassify advisories and "
-        "name/alias/vendor/id proposals, orphan entity count, last run times, and how many actions were applied "
-        "in the last 24h / 7d."
+        "Entity cleanup counts from both proposal logs: the adjudicate stage's mode and how many of its "
+        "verdicts are not applied yet, pending reclassify suggestions and name, alias, vendor and id proposals, "
+        "the orphan entity count, last run times, and how many actions were applied in the last 24h and 7d."
     ),
     input_schema={"properties": {}},
     mutating=False,
@@ -667,17 +665,17 @@ async def _get_hygiene_stats(db: AsyncSession, user_id: uuid.UUID) -> dict:
 @_tool(
     name="get_hygiene_feed",
     description=(
-        "Chronological hygiene feed: a merge of the entity-link log and the entity-maintenance log, normalized "
-        "(action, mode, applied, subject, reason, affected-entity links, origin). Filter by action code "
-        "(comma-separate for several), log source, mode, origin (adjudicator = filed by the adjudicate stage, "
-        "merge_review = the duplicate review, scan = the on-demand scans), pending-only, or a since "
-        "timestamp. Read-only — applying or dismissing proposals happens in the Proposals queue."
+        "Entity cleanup log in time order: the entity-link log and the entity-maintenance log merged into one "
+        "shape (action, mode, applied, subject, reason, affected-entity links, origin). Filter by action code "
+        "(comma-separated for several), log source, mode, origin (adjudicator = filed by the adjudicate stage, "
+        "merge_review = the duplicate review, scan = the on-demand scans), pending only, or a since "
+        "timestamp. Read-only. Proposals are applied or dismissed in the Proposals queue."
     ),
     input_schema={
         "properties": {
             "action": {
                 "type": "string",
-                "description": "Filter by action code(s), comma-separated — e.g. 'needs_reclassification' or "
+                "description": "Filter by action code(s), comma-separated, e.g. 'needs_reclassification' or "
                 "'ttp_malformed_id,cve_malformed_id'",
             },
             "source": {
@@ -763,12 +761,13 @@ _REVIEW_ORIGINS = ["adjudicator", "merge_review", "scan"]
 @_tool(
     name="list_review_groups",
     description=(
-        "The Engine › Review queue: every pending hygiene proposal (both logs) folded one row per entity, newest "
-        "first unless `sort` says otherwise. Each group gives the entity, its proposal count, per-kind counts "
+        "The Engine › Review queue: every pending cleanup proposal from both logs, grouped into one row per "
+        "entity, newest first unless `sort` says otherwise. Each group gives the entity, its proposal count, "
+        "counts per kind "
         "(e.g. shadow_remove, adjudication_reclassify), proposed target types, merge targets, origin, the highest "
         "verdict confidence, the newest row's subject and reason, matched forms and a sample entry; `facets` "
-        "counts proposals per domain and per origin. Read a group's rows with get_review_rows; decide them with "
-        "decide_proposals. `total`/`proposals` are the queue size. Admin only."
+        "counts proposals per domain and per origin. Read a group's rows with get_review_rows. Decide them with "
+        "decide_proposals. `total` and `proposals` are the queue size. Admin only."
     ),
     input_schema={
         "properties": {
@@ -826,7 +825,7 @@ async def _list_review_groups(
     description=(
         "The pending proposals behind one Review group (or every pending row matching the filters), newest "
         "first. Each row has its id ('<source>:<log_id>', what decide_proposals takes), action, subject, reason, "
-        "payload, and `context`: the article text around the match, so the article needn't be fetched. "
+        "payload, and `context`: the article text around the match, so the article does not need to be fetched. "
         "Admin only."
     ),
     input_schema={
@@ -888,11 +887,11 @@ async def _get_review_rows(
     description=(
         "Apply a reviewed batch of Review-queue decisions in one call (POST /admin/hygiene/decisions). Each "
         "decision is {id: '<source>:<log_id>', decision: 'apply' | 'dismiss' | 'reclassify:<entity_type>'}. "
-        "apply runs the row's own applier; dismiss removes it and the dismissal sticks (a reclassify covers the "
-        "entity, an adjudicator verdict is not filed again for its article); reclassify converts the entity and "
-        "closes every proposal about it. Duplicates "
-        "settle server-side: a row an earlier decision closed comes back 'settled'; an apply whose outcome is "
-        "already reached comes back 'resolved'. Returns one result per decision plus counts. Admin only."
+        "apply runs the row's own action. dismiss removes the row and the dismissal is kept: a dismissed "
+        "reclassify covers the entity, and an adjudicator verdict is not filed again for its article. "
+        "reclassify converts the entity and closes every proposal about it. The server handles duplicates: a row "
+        "an earlier decision already closed returns 'settled', and an apply whose result already exists returns "
+        "'resolved'. Returns one result per decision plus counts. Admin only."
     ),
     input_schema={
         "properties": {

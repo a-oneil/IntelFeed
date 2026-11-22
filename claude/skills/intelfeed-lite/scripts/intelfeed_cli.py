@@ -75,18 +75,17 @@ def insecure_url_problem(url: str) -> str | None:
 TOOLS: dict[str, dict] = {
     "check_detection_gaps": {
         "description": (
-            "ATT&CK coverage analysis: observed TTPs vs non-draft detection rules, with per-tactic "
-            "summary and the list of uncovered techniques. TTP-only \u2014 CVEs are not part of this "
-            "analysis."
+            "ATT&CK coverage analysis: observed TTPs compared with non-draft detection rules, with a "
+            "summary per tactic and the list of uncovered techniques. Covers TTPs only, not CVEs."
         ),
         "params": {},
     },
     "check_requirement_match": {
         "description": (
-            "Check an entry against all active intelligence requirements using the real matching "
-            "engine (linked-entity hits, then title/body keyword hits, gated by each requirement's "
-            "min_relevance and feed filter). Read-only: persists nothing; also returns matches the "
-            "automated pipeline already persisted for this entry."
+            "Check an entry against all active intelligence requirements with the matching code the "
+            "pipeline uses: linked-entity matches first, then keyword matches in the title and body, "
+            "filtered by each requirement's min_relevance and feed filter. Read-only: stores nothing. "
+            "Also returns the matches the pipeline already stored for this entry."
         ),
         "params": {
             "entry_id": {
@@ -97,8 +96,8 @@ TOOLS: dict[str, dict] = {
     },
     "check_telemetry_feasibility": {
         "description": (
-            "Check if detection rules are feasible given configured telemetry sources. Identifies "
-            "what log sources are needed vs available."
+            "Check whether detection rules can run on the configured telemetry sources. Lists the log "
+            "sources a rule needs and which of them are available."
         ),
         "params": {
             "rule_id": {
@@ -111,7 +110,7 @@ TOOLS: dict[str, dict] = {
         "description": (
             "Detect which glossary terms appear in an entry's text (word-boundary matching over each "
             "term's name and search-term aliases). Returns matched terms with per-term match counts, "
-            "highest first. Note: takes an entry UUID, not raw text \u2014 that is what the API supports."
+            "highest first. Takes an entry UUID, not raw text, because the API only accepts an entry."
         ),
         "params": {
             "entry_id": {
@@ -122,9 +121,9 @@ TOOLS: dict[str, dict] = {
     },
     "discover_telegram_channels": {
         "description": (
-            "List every Telegram channel the IntelFeed bootstrap account is joined to, with "
-            "is_subscribed = whether IntelFeed already ingests it. Use this to see which channels "
-            "you've joined in your Telegram client app but haven't yet wired up as IntelFeed feeds."
+            "List every Telegram channel the IntelFeed bootstrap account has joined. is_subscribed "
+            "says whether IntelFeed already ingests the channel. Use this to find channels joined in "
+            "the Telegram client app that are not yet set up as IntelFeed feeds."
         ),
         "params": {
             "session_name": {
@@ -139,10 +138,10 @@ TOOLS: dict[str, dict] = {
     },
     "export_observables": {
         "description": (
-            "Export a filtered slice of the ledger as lines (EDL), CSV rows, or JSON \u2014 the same "
-            "filters as search_observables plus a minimum report count and an 'exclude dual-use "
-            "infrastructure' switch. Values are returned refanged (operational form). Denied rows "
-            "and, by default, infra-tagged rows are excluded."
+            "Export a filtered set of observables as lines (EDL), CSV rows or JSON. Takes the same "
+            "filters as search_observables, plus a minimum report count and a switch to include "
+            "dual-use infrastructure. Values are returned refanged (usable form). Denied rows are "
+            "always excluded, and infra-tagged rows are excluded by default."
         ),
         "params": {
             "format": {
@@ -207,9 +206,9 @@ TOOLS: dict[str, dict] = {
     },
     "get_attack_layer": {
         "description": (
-            "Get MITRE ATT&CK Navigator layer JSON for a specific entry's TTPs, or (without entry_id) "
-            "for all observed techniques \u2014 those linked to at least one entry, excluding deprecated "
-            "catalog techniques."
+            "Get MITRE ATT&CK Navigator layer JSON for a specific entry's TTPs. Without entry_id, the "
+            "layer covers all observed techniques: those linked to at least one entry, excluding "
+            "deprecated catalog techniques."
         ),
         "params": {
             "entry_id": {
@@ -307,7 +306,7 @@ TOOLS: dict[str, dict] = {
     },
     "get_correlation_events": {
         "description": (
-            "Get recent correlation events \u2014 coverage gaps, trending entities, campaign and "
+            "Get recent correlation events: coverage gaps, trending entities, campaign and "
             "requirement matches, new TTPs/malware for known actors or malware, actor-malware "
             "co-occurrence, feed staleness/errors, exploit and CVE score changes, and KEV additions."
         ),
@@ -362,7 +361,7 @@ TOOLS: dict[str, dict] = {
     },
     "get_cwe": {
         "description": (
-            "Get a MITRE CWE weakness by ID, including its position on the abstraction ladder "
+            "Get a MITRE CWE weakness by ID, including its abstraction level "
             "(Pillar/Class/Base/Variant), parent and lineage, MITRE mapping guidance, catalog "
             "mitigations and detection methods, how many CVEs carry it directly and across its whole "
             "subtree, how many of those are in CISA KEV, and linked article count."
@@ -378,7 +377,8 @@ TOOLS: dict[str, dict] = {
         "description": (
             "Return the cached AI daily summary (briefing) for a day, or null if none has been "
             "generated. date is YYYY-MM-DD, defaulting to today (UTC). Read-only: this never "
-            "generates a summary \u2014 generation runs via the daily_summary AI task/automation."
+            "generates a summary. Summaries are generated by the daily_summary AI task or an "
+            "automation."
         ),
         "params": {
             "date": {
@@ -397,9 +397,9 @@ TOOLS: dict[str, dict] = {
     },
     "get_detection_rule": {
         "description": (
-            "Get a single detection rule with full rule content, provenance (source "
-            "repo/author/license/references), draft/published status, telemetry feasibility against "
-            "the enabled Telemetry Sources inventory, and a syntax-validation summary."
+            "Get one detection rule with its full content, provenance (source repo, author, license, "
+            "references), draft or published status, whether the enabled telemetry sources can "
+            "support it, and a syntax validation summary."
         ),
         "params": {
             "rule_id": {
@@ -410,8 +410,8 @@ TOOLS: dict[str, dict] = {
     },
     "get_detection_rule_versions": {
         "description": (
-            "List a detection rule's saved versions, newest first. Versions are snapshots taken "
-            "whenever rule_content changed or a rollback occurred."
+            "List a detection rule's saved versions, newest first. A version is saved each time "
+            "rule_content changes and before each rollback."
         ),
         "params": {
             "rule_id": {
@@ -483,10 +483,10 @@ TOOLS: dict[str, dict] = {
     },
     "get_entity_graph": {
         "description": (
-            "Build a relationship graph centered on an entity. Claims-only: edges are typed "
-            "relationship records (verb, direction, confidence, provenance) at confirmed/reported "
-            "confidence \u2014 pure co-occurrence pairs are excluded; co-occurrence data only enriches "
-            "edges with proximity and evidence articles."
+            "Build a relationship graph centered on an entity. Edges are typed relationship records "
+            "(verb, direction, confidence, provenance) at confirmed or reported confidence. Entities "
+            "that only appear in the same articles are not connected. Co-occurrence data only adds "
+            "proximity and evidence articles to edges."
         ),
         "params": {
             "entity_type": {
@@ -524,10 +524,10 @@ TOOLS: dict[str, dict] = {
     "get_entity_infrastructure": {
         "description": (
             "Pivot from a threat actor, malware family, campaign or tool to its observables, in two "
-            "tiers: 'claimed' (attribution edges with evidence \u2014 uses / communicates_with / controls, "
-            "with trust tier) and 'reported_alongside' (observables a reporting article that names "
-            "the entity also carried; indicator-list files and newsletters excluded). Answers 'what "
-            "infrastructure does X use?'."
+            "tiers. 'claimed': attribution edges with evidence (uses, communicates_with, controls), "
+            "each with a trust tier. 'reported_alongside': observables in articles that name the "
+            "entity, excluding indicator-list files and newsletters. Answers 'what infrastructure "
+            "does X use?'."
         ),
         "params": {
             "entity_type": {
@@ -547,14 +547,14 @@ TOOLS: dict[str, dict] = {
     },
     "get_entity_link_stats": {
         "description": (
-            "Autolinking health signals: total entry\u2192entity links by entity type and provenance "
-            "source, how many held matches (pending autolinks) are waiting for their article's "
-            "analysis, plus the count of non-rejected entity\u2194entity relationships."
+            "Autolinking counts: entry\u2192entity links by entity type and by source, the number of held "
+            "matches (pending autolinks) waiting for their article's AI analysis, and the number of "
+            "entity\u2194entity relationships that are not rejected."
         ),
         "params": {},
     },
     "get_entity_timeline": {
-        "description": 'Get chronological timeline of when an entity appeared in articles.',
+        "description": 'Get a chronological timeline of the articles an entity appeared in.',
         "params": {
             "entity_type": {
                 "type": 'str',
@@ -583,7 +583,7 @@ TOOLS: dict[str, dict] = {
     "get_entity_whats_new": {
         "description": (
             "Latest developments for one entity: recent novelty and severity signals (first mention, "
-            "new technique, new victim sector, exploitation news...) on articles linked to it. "
+            "new technique, new victim sector, exploitation news, ...) on articles linked to it. "
             "scoped=true keeps only signals whose subject is this entity, as the profile page does."
         ),
         "params": {
@@ -619,7 +619,7 @@ TOOLS: dict[str, dict] = {
         },
     },
     "get_entry_graph": {
-        "description": 'Get relationship graph for all entities linked to a single entry.',
+        "description": 'Get the relationship graph for all entities linked to one entry.',
         "params": {
             "entry_id": {
                 "type": 'str',
@@ -628,7 +628,11 @@ TOOLS: dict[str, dict] = {
         },
     },
     "get_entry_insights": {
-        "description": "Get actionable intelligence insights for a specific entry's entities.",
+        "description": (
+            "Get follow-up findings for one entry's TTPs, CVEs and threat actors: detection gaps (no "
+            "active rule), campaign matches, intelligence requirement matches, and critical CVEs. Up "
+            "to 10, sorted by severity."
+        ),
         "params": {
             "entry_id": {
                 "type": 'str',
@@ -638,10 +642,10 @@ TOOLS: dict[str, dict] = {
     },
     "get_entry_story": {
         "description": (
-            "Chain follow-up/precursor articles to an entry via shared entities: within a \u00b130 day "
-            "window, entries sharing at least one strong entity (CVE, threat actor, malware) or two "
-            "entities of any type join the story. Ordered chronologically (a timeline, not a "
-            "relevance ranking \u2014 use get_similar_entries for that)."
+            "List earlier and follow-up articles linked to an entry by shared entities. Within 30 "
+            "days before or after the entry, an entry is included if it shares at least one CVE, "
+            "threat actor or malware, or any two entities of any type. Results are in date order, not "
+            "ranked by relevance. For relevance ranking use get_similar_entries."
         ),
         "params": {
             "entry_id": {
@@ -652,10 +656,10 @@ TOOLS: dict[str, dict] = {
     },
     "get_extraction_stats": {
         "description": (
-            "Aggregate stats over AI-created entities (created_via='ai_extraction' across threat "
-            "actors, malware, tools, CVEs, TTPs): totals by type, needs-review / orphaned / "
-            "likely-duplicate / auto-confirmed counts, and how many were created in the requested "
-            "window vs the preceding one."
+            "Counts for AI-created entities (created_via='ai_extraction': threat actors, malware, "
+            "tools, CVEs, TTPs): totals by type, the number that need review, are orphaned, are "
+            "likely duplicates or were auto-confirmed, and how many were created in the requested "
+            "window and in the window before it."
         ),
         "params": {
             "window": {
@@ -679,7 +683,11 @@ TOOLS: dict[str, dict] = {
         },
     },
     "get_feed_value": {
-        "description": 'Get feed value scores — composite 0-100 intelligence contribution metric per feed.',
+        "description": (
+            "Get feed value scores: a composite 0-100 score per feed for how much intelligence its "
+            "entries contribute (entity yield, new entities, correlation events, detection rules, "
+            "requirement matches)."
+        ),
         "params": {
             "days": {
                 "type": 'int',
@@ -702,12 +710,12 @@ TOOLS: dict[str, dict] = {
     },
     "get_hygiene_feed": {
         "description": (
-            "Chronological hygiene feed: a merge of the entity-link log and the entity-maintenance "
-            "log, normalized (action, mode, applied, subject, reason, affected-entity links, origin). "
-            "Filter by action code (comma-separate for several), log source, mode, origin "
+            "Entity cleanup log in time order: the entity-link log and the entity-maintenance log "
+            "merged into one shape (action, mode, applied, subject, reason, affected-entity links, "
+            "origin). Filter by action code (comma-separated for several), log source, mode, origin "
             "(adjudicator = filed by the adjudicate stage, merge_review = the duplicate review, scan "
-            "= the on-demand scans), pending-only, or a since timestamp. Read-only \u2014 applying or "
-            "dismissing proposals happens in the Proposals queue."
+            "= the on-demand scans), pending only, or a since timestamp. Read-only. Proposals are "
+            "applied or dismissed in the Proposals queue."
         ),
         "params": {
             "action": {
@@ -749,10 +757,10 @@ TOOLS: dict[str, dict] = {
     },
     "get_hygiene_stats": {
         "description": (
-            "Combined entity-hygiene counters across both proposal logs: the adjudicate stage's mode "
-            "and how many verdicts it has filed that nobody has applied yet, pending reclassify "
-            "advisories and name/alias/vendor/id proposals, orphan entity count, last run times, and "
-            "how many actions were applied in the last 24h / 7d."
+            "Entity cleanup counts from both proposal logs: the adjudicate stage's mode and how many "
+            "of its verdicts are not applied yet, pending reclassify suggestions and name, alias, "
+            "vendor and id proposals, the orphan entity count, last run times, and how many actions "
+            "were applied in the last 24h and 7d."
         ),
         "params": {},
     },
@@ -760,8 +768,9 @@ TOOLS: dict[str, dict] = {
         "description": (
             "Status of one ingest batch: per-item status (queued / parsing / created / expanded / "
             "duplicate / no_text / unsupported / too_large / failed), the entry id each item "
-            "produced, and a summary. Poll until summary.status is 'complete'. Created entries still "
-            "go on to the pipeline and the one-pass AI analysis afterwards, like any polled entry."
+            "produced, and a summary. Poll until summary.status is 'complete'. Created entries then "
+            "go through the pipeline and the one-pass AI analysis, like any entry fetched from a "
+            "feed."
         ),
         "params": {
             "batch_id": {
@@ -805,11 +814,12 @@ TOOLS: dict[str, dict] = {
     },
     "get_observable": {
         "description": (
-            "Look up an observable (IOC ledger row) by UUID or by its value (IP, domain, URL, hash, "
-            "cmdline, registry key, ...). Returns kind, role, current/base confidence with decay "
-            "state, sighting count, capture provenance (which judgment door created it) with the "
-            "evidence sentence, first/last seen, and the most recent sighting articles. Defanged "
-            "input (evil[.]com, hxxps://) is normalized."
+            "Look up an observable (a row in the observables list) by UUID or by its value (IP, "
+            "domain, URL, hash, cmdline, registry key, ...). Returns kind, role, current and base "
+            "confidence with decay state, sighting count, how it was added (AI analysis, the "
+            "adjudicator, a curated IOC list feed, a publisher's IOC table, a TTP observable, or an "
+            "analyst) with the evidence sentence, first and last seen, and the most recent articles "
+            "it was seen in. Defanged input (evil[.]com, hxxps://) is normalized."
         ),
         "params": {
             "observable": {
@@ -824,11 +834,11 @@ TOOLS: dict[str, dict] = {
     },
     "get_priority_queue": {
         "description": (
-            "The analyst's reading queue, exactly as the Priority Queue page shows it: unread entries "
-            "that clear the radar threshold, ranked by signal score, with story threads folded in as "
-            "single rows so a story eleven outlets covered is one item and not eleven. Ask this for "
-            "'what should I read next' / 'what's important right now'. Prefer it over "
-            "get_triage_queue, which is the older heuristic and does not fold stories."
+            "The analyst's reading queue, as the Priority Queue page shows it: unread entries that "
+            "meet the radar threshold, ranked by signal score. Articles in the same story thread are "
+            "grouped into one row, so a story covered by eleven outlets is one item, not eleven. Use "
+            "this for 'what should I read next' or 'what is important right now'. Prefer it over "
+            "get_triage_queue, which uses the older heuristic and does not group stories."
         ),
         "params": {
             "limit": {
@@ -851,8 +861,9 @@ TOOLS: dict[str, dict] = {
     },
     "get_profile_threat_surface": {
         "description": (
-            "The threat surface for one intel profile: actors and malware active against its regions "
-            "x verticals, each with why-matched evidence (which region/sector, how many articles)."
+            "The threats to one intel profile: actors and malware active against its regions and "
+            "verticals. Each has the evidence for the match (which region or sector, how many "
+            "articles)."
         ),
         "params": {
             "profile_id": {
@@ -867,11 +878,11 @@ TOOLS: dict[str, dict] = {
     },
     "get_ransomware_disclosures": {
         "description": (
-            "Reverse-chronological feed of ransomware leak-site victim disclosures (Leak Watch), with "
-            "filters for group name, canonical sector slug, country (ISO code or name), posting "
-            "recency, substring search, and the user's watched victims/groups. sort is 'recent', "
-            "'group', or 'sector' (newest-first tiebreak). Returns a paginated list; empty when the "
-            "ransomware tracker has not synced yet."
+            "Ransomware leak-site victim disclosures (Leak Watch), newest first. Filters: group name, "
+            "canonical sector slug, country (ISO code or name), posting age, substring search, and "
+            "the user's watched victims and groups. sort is 'recent', 'group' or 'sector' (ties "
+            "sorted newest first). Returns a paginated list. Empty when the ransomware tracker has "
+            "not synced yet."
         ),
         "params": {
             "group": {
@@ -935,10 +946,10 @@ TOOLS: dict[str, dict] = {
     },
     "get_ransomware_stats": {
         "description": (
-            "Ransomware Landscape aggregates over a trailing window: victim totals with "
-            "week-over-week change, weekly timeseries, top groups (with WoW trend), top sectors, top "
-            "countries, and the user's watchlist exposure (watched groups/orgs/sectors vs new "
-            "disclosures). All-zero when the ransomware tracker has not synced yet."
+            "Ransomware Landscape totals for the last N days: victim totals with week-over-week "
+            "change, a weekly time series, top groups (with week-over-week trend), top sectors, top "
+            "countries, and new disclosures that involve the user's watched groups, organizations and "
+            "sectors. All zero when the ransomware tracker has not synced yet."
         ),
         "params": {
             "days": {
@@ -949,9 +960,9 @@ TOOLS: dict[str, dict] = {
     },
     "get_ransomware_victim": {
         "description": (
-            "Fetch one ransomware victim organization by UUID: name/domain/aliases, sector, country, "
-            "first/last seen, whether the user watches it, the groups that listed it, and every "
-            "leak-site disclosure."
+            "Fetch one ransomware victim organization by UUID: name, domain, aliases, sector, "
+            "country, first and last seen, whether the user watches it, the groups that listed it, "
+            "and every leak-site disclosure."
         ),
         "params": {
             "victim_id": {
@@ -975,8 +986,8 @@ TOOLS: dict[str, dict] = {
     },
     "get_requirement_coverage": {
         "description": (
-            "Get intelligence requirements coverage summary \u2014 counts by status, priority, category, "
-            "and staleness."
+            "Get an intelligence requirements coverage summary: counts by status, priority and "
+            "category, plus stale (active requirements with no match in 30 days)."
         ),
         "params": {},
     },
@@ -995,7 +1006,7 @@ TOOLS: dict[str, dict] = {
             "The pending proposals behind one Review group (or every pending row matching the "
             "filters), newest first. Each row has its id ('<source>:<log_id>', what decide_proposals "
             "takes), action, subject, reason, payload, and `context`: the article text around the "
-            "match, so the article needn't be fetched. Admin only."
+            "match, so the article does not need to be fetched. Admin only."
         ),
         "params": {
             "entity_type": {
@@ -1033,17 +1044,17 @@ TOOLS: dict[str, dict] = {
     "get_search_facets": {
         "description": (
             "Get available search facets: feed types (feed count per type), categories (feed count "
-            "per category), and top tags (by entry usage). Useful for understanding what's in the "
-            "system before searching."
+            "per category), and top tags (by entry usage). Use it to see what the system holds before "
+            "searching."
         ),
         "params": {},
     },
     "get_sector": {
         "description": (
-            "Get a sector's victimology profile: description and aliases, who targets it (reported "
-            "from articles vs asserted claims), campaigns scoped to it, leak-site victim totals and "
-            "top ransomware groups, the country cross-tab, the intel profiles that include it, and "
-            "recent articles."
+            "Get a sector's victimology profile: description and aliases, who targets it (found in "
+            "articles, and explicit targets-sector claims), campaigns scoped to it, leak-site victim "
+            "totals and top ransomware groups, victims by country, the intel profiles that include "
+            "it, and recent articles."
         ),
         "params": {
             "sector": {
@@ -1071,10 +1082,10 @@ TOOLS: dict[str, dict] = {
     },
     "get_similar_entries": {
         "description": (
-            "Find entries similar to the given entry. Answers from the embedding index when the entry "
-            "has been embedded \u2014 nearest neighbours find the article telling the same story in "
-            "different words \u2014 and falls back to keyword search over the search index otherwise. "
-            "Excludes the entry itself and its exact duplicates (same content hash)."
+            "Find entries similar to the given entry. When the entry has an embedding, uses the "
+            "embedding index, which finds articles about the same story written in different words. "
+            "Otherwise falls back to keyword search over the search index. Excludes the entry itself "
+            "and its exact duplicates (same content hash)."
         ),
         "params": {
             "entry_id": {
@@ -1101,20 +1112,23 @@ TOOLS: dict[str, dict] = {
     },
     "get_stack_exposure": {
         "description": (
-            "My Stack exposure board: every CVE affecting the vendors/products the user has declared "
-            "as their stack (watchlist mode='stack'), ranked by exposure lift (KEV/EPSS/weaponization "
-            "multipliers), each with a detection posture (defended / blind / no_rule) from the org's "
-            "telemetry inventory, plus per-asset CVE tallies and the urgency x posture matrix counts. "
-            "Empty if the user has no stack entities declared."
+            "My Stack exposure board: every CVE that affects the vendors and products in the user's "
+            "stack (watchlist mode='stack'). CVEs are ranked by exposure lift (KEV, EPSS and "
+            "weaponization multipliers). Each has a detection state (defended, blind or no_rule) "
+            "based on the configured telemetry sources. Also returns CVE counts per asset and counts "
+            "for each urgency and detection state pair. Empty if the user has no vendors or products "
+            "in their stack."
         ),
         "params": {},
     },
     "get_story_thread": {
         "description": (
-            "Read one story thread: its spine (one beat per wave of coverage \u2014 what broke, what each "
-            "wave added), every member article with its role (origin, beat, or folded echo), what the "
-            "story has yielded in techniques/CVEs/products/detection rules, and the threads it most "
-            "resembles. Open it in the UI at /priority-queue?thread=<slug>."
+            "Read one story thread. Returns its timeline (the spine field: one update per wave of "
+            "coverage, saying what was first reported and what each later wave added), every member "
+            "article with its role (origin, beat for an article that adds an update, or echo for a "
+            "re-report grouped under another), the techniques, CVEs, products and detection rules "
+            "found in the story, and the most similar threads. Open it in the UI at "
+            "/priority-queue?thread=<slug>."
         ),
         "params": {
             "slug": {
@@ -1129,10 +1143,11 @@ TOOLS: dict[str, dict] = {
     },
     "get_story_threads": {
         "description": (
-            "List story threads \u2014 unfolding stories assembled from the articles that cover them, with "
-            "the re-reports folded underneath. Each row carries its outlets, article and echo counts, "
-            "key entities, how much is unread, and the priority score of its best unread beat. Use "
-            "this instead of searching for a story twenty-three times."
+            "List story threads. A story thread groups the articles that cover one developing story, "
+            "with near-duplicate re-reports (echoes) grouped under it. Each row has its outlet count, "
+            "article and echo counts, key entities, unread count, and the priority score of its "
+            "highest-scoring unread article. Use this instead of searching for the same story many "
+            "times."
         ),
         "params": {
             "status": {
@@ -1154,7 +1169,10 @@ TOOLS: dict[str, dict] = {
         "params": {},
     },
     "get_temporal_clusters": {
-        "description": 'Find entries sharing entities within time windows — useful for detecting emerging campaigns.',
+        "description": (
+            "Find entries that share entities within a time window. Useful for spotting emerging "
+            "campaigns."
+        ),
         "params": {
             "days": {
                 "type": 'int',
@@ -1188,13 +1206,14 @@ TOOLS: dict[str, dict] = {
     },
     "get_threat_board": {
         "description": (
-            "The Threats board: actors/malware and exploited CVEs ranked over a recency window by how "
-            "many distinct stories carried them (not raw article or outlet counts). Each row leads "
-            "with its lead headline, the cached AI brief when present, source hosts, story/echo "
-            "counts, the analyst's handled state, prior-rule inventory and, for CVEs, exposure lift "
-            "(KEV/EPSS/weaponized) and detection posture. Rows with is_story are story threads that "
-            "resolved to no entity. Use it for 'what is happening right now' and to choose what to "
-            "research next."
+            "The Threats board: actors, malware and exploited CVEs over a recency window, ranked by "
+            "how many distinct stories mentioned them (not by raw article or outlet counts). Each row "
+            "has its lead headline, the cached AI brief when present, source hosts, story and echo "
+            "counts, the analyst's handled state, and the count of existing library rules "
+            "(prior_rules). CVE rows also rank by an exposure multiplier (KEV, EPSS, weaponized) and "
+            "carry their detection status (posture). Rows with is_story are story threads not linked "
+            "to any entity. Use it for 'what is happening right now' and to choose what to research "
+            "next."
         ),
         "params": {
             "window": {
@@ -1241,9 +1260,9 @@ TOOLS: dict[str, dict] = {
     },
     "get_triage_queue": {
         "description": (
-            "Get priority-scored entry queue for analyst review. Uses the signal-engine ranking when "
-            "signal_engine_surface is enabled, otherwise the legacy composite heuristic \u2014 mirroring "
-            "GET /api/entries/triage."
+            "Get the priority-scored entry queue for analyst review, as GET /api/entries/triage "
+            "returns it. Uses the signal-engine ranking when signal_engine_surface is enabled, "
+            "otherwise the legacy composite heuristic."
         ),
         "params": {
             "days": {
@@ -1285,12 +1304,12 @@ TOOLS: dict[str, dict] = {
     },
     "list_entity_links": {
         "description": (
-            "List entry\u2192entity autolinks (junction rows) unioned across all seven junction tables, "
-            "newest first. Filter by entity_type, entity_id, entry_id, source provenance (auto_link, "
-            "ai, ai_reconcile, auto_extracted, manual \u2014 TTP/CVE junctions record no source and are "
-            "excluded when set), confidence (high, medium, low \u2014 the CVE junction has none and is "
-            "excluded when set), a substring search on entity name / entry title, or a recency window "
-            "in days."
+            "List entry\u2192entity autolinks (junction rows) from all seven junction tables, newest "
+            "first. Filters: entity_type, entity_id, entry_id, source (auto_link, ai, ai_reconcile, "
+            "auto_extracted, manual), confidence (high, medium, low), a substring search on entity "
+            "name or entry title, and a window in days. TTP and CVE links record no source, so they "
+            "are excluded when source is set. CVE links have no confidence, so they are excluded when "
+            "confidence is set."
         ),
         "params": {
             "entity_type": {
@@ -1370,11 +1389,11 @@ TOOLS: dict[str, dict] = {
     },
     "list_entity_relationships": {
         "description": (
-            "All entity\u2194entity relationships where the given entity is source or target, newest "
-            "first, with endpoint display names resolved. Each row carries verb (relationship_type), "
-            "confidence (possible/probable/confirmed), provenance source and evidence_entry_ids. "
-            "Analyst-rejected edges and edges below the configured min-confidence display setting are "
-            "hidden unless include_rejected is set."
+            "All entity\u2194entity relationships where the given entity is the source or target, newest "
+            "first, with the names of both entities. Each row has a verb (relationship_type), "
+            "confidence (possible, probable or confirmed), source and evidence_entry_ids. "
+            "Relationships an analyst rejected, and those below the configured minimum display "
+            "confidence, are hidden unless include_rejected is set."
         ),
         "params": {
             "entity_type": {
@@ -1427,12 +1446,12 @@ TOOLS: dict[str, dict] = {
     },
     "list_extraction_entities": {
         "description": (
-            "List AI-created entities (created_via='ai_extraction') with a computed lifecycle status: "
-            "linked (in use), review (needs analyst sign-off), orphan (every article link removed, "
-            "its source article still there), or dupe (near-duplicate sibling exists, with "
-            "duplicate_of naming it). Filterable by type, status, creation window, text search and "
-            "source entry; sorted and paginated. Includes provenance: created_confidence, "
-            "needs_review, created_from_entry_id and the source entry title."
+            "List AI-created entities (created_via='ai_extraction') with a computed status: linked "
+            "(in use), review (needs analyst approval), orphan (every article link removed, but its "
+            "source article still exists), or dupe (a near-duplicate entity exists; duplicate_of "
+            "names it). Filter by type, status, creation window, text search and source entry. Sorted "
+            "and paginated. Each row includes created_confidence, needs_review, created_from_entry_id "
+            "and the source entry title."
         ),
         "params": {
             "types": {
@@ -1481,7 +1500,7 @@ TOOLS: dict[str, dict] = {
         "description": (
             "List security glossary terms alphabetically with optional filters: exact category (e.g. "
             "a NIST CSF function like 'detect'), case-insensitive name substring search, and built-in "
-            "vs user-created (is_system). Each term carries maturity, descriptions, technologies, and "
+            "vs user-created (is_system). Each term has a maturity, descriptions, technologies, and "
             "search-term aliases."
         ),
         "params": {
@@ -1522,9 +1541,9 @@ TOOLS: dict[str, dict] = {
     },
     "list_intel_reports": {
         "description": (
-            "List intel reports, newest-updated first, optionally filtered by status (draft, "
-            "published, archived) or template_type slug. Rows are lightweight \u2014 section names only, "
-            "no section content (use get_intel_report for the full report)."
+            "List intel reports, most recently updated first, optionally filtered by status (draft, "
+            "published, archived) or template_type slug. Rows include section names but not section "
+            "content. Use get_intel_report for the full report."
         ),
         "params": {
             "status": {
@@ -1569,13 +1588,14 @@ TOOLS: dict[str, dict] = {
     },
     "list_review_groups": {
         "description": (
-            "The Engine \u203a Review queue: every pending hygiene proposal (both logs) folded one row per "
-            "entity, newest first unless `sort` says otherwise. Each group gives the entity, its "
-            "proposal count, per-kind counts (e.g. shadow_remove, adjudication_reclassify), proposed "
-            "target types, merge targets, origin, the highest verdict confidence, the newest row's "
-            "subject and reason, matched forms and a sample entry; `facets` counts proposals per "
-            "domain and per origin. Read a group's rows with get_review_rows; decide them with "
-            "decide_proposals. `total`/`proposals` are the queue size. Admin only."
+            "The Engine \u203a Review queue: every pending cleanup proposal from both logs, grouped into "
+            "one row per entity, newest first unless `sort` says otherwise. Each group gives the "
+            "entity, its proposal count, counts per kind (e.g. shadow_remove, "
+            "adjudication_reclassify), proposed target types, merge targets, origin, the highest "
+            "verdict confidence, the newest row's subject and reason, matched forms and a sample "
+            "entry; `facets` counts proposals per domain and per origin. Read a group's rows with "
+            "get_review_rows. Decide them with decide_proposals. `total` and `proposals` are the "
+            "queue size. Admin only."
         ),
         "params": {
             "q": {
@@ -1624,10 +1644,10 @@ TOOLS: dict[str, dict] = {
     },
     "list_sectors": {
         "description": (
-            "List the victim-sector vocabulary (21 closed, seeded industries) with per-sector counts: "
-            "linked articles, actors and malware asserted to target it, and leak-site victims in the "
-            "last 90 days. Use the slug from here with get_sector / who_targets_sector / "
-            "sector_victims / pivot_entity."
+            "List the victim sectors (a fixed, seeded list of 21 industries) with counts per sector: "
+            "linked articles, actors and malware with a claim that they target it, and leak-site "
+            "victims in the last 90 days. Pass a slug from this list to get_sector, "
+            "who_targets_sector, sector_victims or pivot_entity."
         ),
         "params": {
             "search": {
@@ -1654,8 +1674,8 @@ TOOLS: dict[str, dict] = {
     },
     "list_telegram_feeds": {
         "description": (
-            "List Telegram channel feeds with their adapter config \u2014 channel, last_seen_id, "
-            "attribution, session, error state."
+            "List Telegram channel feeds with their adapter config: channel, last_seen_id, "
+            "attribution, session, and error state."
         ),
         "params": {
             "limit": {
@@ -1667,8 +1687,8 @@ TOOLS: dict[str, dict] = {
     "list_watches": {
         "description": (
             "List the current user's entity watchlist rows with resolved display names. Each row has "
-            "mode 'watch' (priority boost), 'mute' (suppressed), or 'stack' ('I run this' \u2014 "
-            "vendors/products feeding My Stack exposure scoring)."
+            "mode 'watch' (priority boost), 'mute' (hidden), or 'stack' (the user runs this vendor or "
+            "product; used for My Stack exposure scoring)."
         ),
         "params": {
             "mode": {
@@ -1680,9 +1700,9 @@ TOOLS: dict[str, dict] = {
     },
     "list_webhook_presets": {
         "description": (
-            "List saved webhook presets (reusable URL + payload + header combinations for automation "
-            "actions), ordered by name. Webhook URLs and header values are redacted \u2014 inspect them in "
-            "the web UI if needed."
+            "List saved webhook presets (reusable URL, payload and header sets for automation "
+            "actions), ordered by name. Webhook URLs and header values are redacted. View them in the "
+            "web UI if needed."
         ),
         "params": {
             "preset_type": {
@@ -1697,10 +1717,10 @@ TOOLS: dict[str, dict] = {
     },
     "pivot_entity": {
         "description": (
-            "Find all entities related to a given entity via co-occurrence in entries. One-hop pivot. "
-            "Related lists carry strength tiers (weak/moderate/strong) and are ranked, "
-            "tier-filterable, window-filterable and paginated; related_counts reports pre-slice "
-            "totals."
+            "Find the entities related to a given entity because they appear in the same entries (one "
+            "hop). Each related entity has a strength tier (weak, moderate or strong). Lists are "
+            "ranked and paginated, and can be filtered by tier and by time window. related_counts "
+            "gives the totals before pagination."
         ),
         "params": {
             "entity_type": {
@@ -1768,12 +1788,12 @@ TOOLS: dict[str, dict] = {
     },
     "search_entities": {
         "description": (
-            "Search across all 13 intelligence entity types \u2014 TTPs, CVEs, CWEs (weaknesses), threat "
-            "actors, malware, detection rules, tools, vendors, products, countries, mitigations, "
-            "campaigns, intel reports \u2014 plus the analyst notes stored on the instance. Returns "
+            "Search all 13 intelligence entity types and the analyst notes stored on the instance. "
+            "The types are TTPs, CVEs, CWEs (weaknesses), threat actors, malware, detection rules, "
+            "tools, vendors, products, countries, mitigations, campaigns and intel reports. Returns "
             "matching entities with type and key details. Note results use type 'note' and carry "
-            "note_source ('note' for a note on an article or a standalone one, 'entity_note' for one "
-            "attached to an entity), with a description snippet centred on the match rather than the "
+            "note_source: 'note' for a note on an article or a standalone note, 'entity_note' for a "
+            "note attached to an entity. Their description snippet is centred on the match, not the "
             "note's opening line."
         ),
         "params": {
@@ -1792,8 +1812,8 @@ TOOLS: dict[str, dict] = {
             "Full-text search across RSS entries. Returns titles, summaries, dates, and feed names. "
             "Supports the full query language: AND/OR/NOT, quoted phrases, entry fields (feed:, tag:, "
             "type:, date:, is:, media:, lang:, title:, author:), entity filters (threat_actor:APT29, "
-            "malware:, cve:, ttp:, tool:, vendor:, product:, country:, campaign:, rule:), and sort: \u2014 "
-            "all filters are executed, not just the text terms. Supports pagination via offset for "
+            "malware:, cve:, ttp:, tool:, vendor:, product:, country:, campaign:, rule:), and sort:. "
+            "Every filter is applied, not only the text terms. Supports pagination via offset for "
             "pulling large result sets."
         ),
         "params": {
@@ -1827,9 +1847,10 @@ TOOLS: dict[str, dict] = {
     },
     "search_observables": {
         "description": (
-            "Search the observables ledger (IOCs captured with judgment: AI-confirmed indicators, "
-            "curated feed entries, TTP host artifacts, analyst promotions). Filter by substring, "
-            "kind, role, lifecycle status, or capture door. Sorted by last sighting."
+            "Search the observables list (IOCs confirmed by AI analysis, the adjudicator, curated IOC "
+            "list feeds, publisher IOC tables, TTP host artifacts, or analyst promotion). Filter by "
+            "substring, kind, role, lifecycle status, or how the row was added (captured_by). Sorted "
+            "by last sighting."
         ),
         "params": {
             "query": {
@@ -1902,9 +1923,9 @@ TOOLS: dict[str, dict] = {
     },
     "sector_victims": {
         "description": (
-            "Leak-site ransomware victims in a sector: totals (all time and in the window), a "
-            "12-month monthly series, the top ransomware groups posting victims in that sector, the "
-            "victim-country breakdown and the most recent disclosures."
+            "Leak-site ransomware victims in a sector: totals (all time and in the window), monthly "
+            "counts for 12 months, the ransomware groups posting the most victims in that sector, "
+            "victims by country and the most recent disclosures."
         ),
         "params": {
             "sector": {
@@ -1936,9 +1957,9 @@ TOOLS: dict[str, dict] = {
     },
     "who_targets_sector": {
         "description": (
-            "Rank the threat actors and malware families targeting a sector. 'reported' rows are "
-            "ranked by how many articles describe both the actor/family and the sector being hit; "
-            "'asserted' rows carry an explicit targets-sector claim with its source (rollup, "
+            "Rank the threat actors and malware families that target a sector. 'reported' rows are "
+            "ranked by how many articles describe both the actor or family and an attack on the "
+            "sector. 'asserted' rows have an explicit targets-sector claim, with its source (rollup, "
             "enrichment, seed, analyst) and evidence count."
         ),
         "params": {

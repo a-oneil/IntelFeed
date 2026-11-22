@@ -79,12 +79,12 @@ def _parse_date(value: str, label: str) -> tuple[date | None, dict | None]:
 @_tool(
     name="update_feed",
     description=(
-        "Partially update a feed — only the provided fields change (mirrors PUT /api/feeds/{id}). "
+        "Partially update a feed. Only the provided fields change (same as PUT /api/feeds/{id}). "
         "Changing the URL resets fetch state (etag, error counters) and rejects duplicates. "
         "category is resolved by name and must already exist. exclude_shorts only applies to YouTube "
         "feeds. adapter_config is merged into the existing config (Telegram channel URLs are "
-        "normalized, Bluesky app passwords encrypted at rest). Setting any reliability/timeliness/"
-        "relevance rating or analyst notes stamps last_reviewed_at."
+        "normalized, Bluesky app passwords encrypted at rest). Setting any reliability, timeliness or "
+        "relevance rating, or analyst notes, sets last_reviewed_at to now."
     ),
     input_schema={
         "properties": {
@@ -92,9 +92,9 @@ def _parse_date(value: str, label: str) -> tuple[date | None, dict | None]:
             "url": {"type": "string", "description": "New feed URL (resets fetch state; duplicates rejected)"},
             "title": {"type": "string", "description": "Custom display title"},
             "category": {"type": "string", "description": "Category name to move the feed into (must exist)"},
-            "is_muted": {"type": "boolean", "description": "Mute the feed (hidden from main timeline)"},
-            "is_active": {"type": "boolean", "description": "Enable/disable fetching"},
-            "fetch_interval_minutes": {"type": "integer", "description": "Polling cadence in minutes"},
+            "is_muted": {"type": "boolean", "description": "Mute the feed (hides its entries from the main list)"},
+            "is_active": {"type": "boolean", "description": "Enable or disable fetching"},
+            "fetch_interval_minutes": {"type": "integer", "description": "Minutes between fetches"},
             "exclude_shorts": {"type": "boolean", "description": "YouTube feeds only: skip Shorts"},
             "feed_type": {"type": "string", "enum": _UPDATE_FEED_TYPES},
             "retention_days": {
@@ -178,7 +178,7 @@ async def _update_feed(
     if category is not None:
         cat = (await db.execute(select(Category).where(Category.name == category))).scalar_one_or_none()
         if not cat:
-            return {"error": f"category '{category}' does not exist — create it first with create_category"}
+            return {"error": f"category '{category}' does not exist. Create it first with create_category"}
         feed.category_id = cat.id
         updated.append("category")
 
@@ -199,7 +199,7 @@ async def _update_feed(
             feed.adapter_config = config
             updated.append("exclude_shorts")
         else:
-            warnings.append("exclude_shorts ignored — feed is not a YouTube feed")
+            warnings.append("exclude_shorts ignored: the feed is not a YouTube feed")
 
     if adapter_config is not None:
         from app.api.feeds import _normalize_telegram_config, _validate_bluesky_author_entity
@@ -285,7 +285,7 @@ async def _update_feed(
         updated.append("visible_to_visitors")
 
     if not updated:
-        return {"id": str(feed.id), "updated": [], "message": "no fields provided — nothing changed"}
+        return {"id": str(feed.id), "updated": [], "message": "no fields provided, nothing changed"}
 
     db.add(feed)
     await db.flush()
@@ -306,11 +306,11 @@ async def _update_feed(
 @_tool(
     name="delete_feed",
     description=(
-        "Delete a feed for every reader: it leaves every feed list and stops fetching. Its entries stay as "
-        "the evidence behind entities, relationships, campaigns and threads, out of the reader and default "
-        "search; adding the feed again brings it back. REQUIRES user confirmation. First call returns a "
-        "confirmation prompt with an entry count — present it to the user. Only call again with the "
-        "confirmation_token after the user explicitly approves."
+        "Delete a feed for every user: it is removed from every feed list and is no longer fetched. Its entries "
+        "are kept as the evidence behind entities, relationships, campaigns and story threads, but are hidden "
+        "from the reader and default search. Adding the feed again restores it. REQUIRES user confirmation. "
+        "The first call returns a confirmation prompt with an entry count. Show it to the user. "
+        "Only call again with the confirmation_token after the user explicitly approves."
     ),
     input_schema={
         "properties": {
@@ -377,8 +377,8 @@ async def _delete_feed(
 @_tool(
     name="refresh_feed",
     description=(
-        "Queue an immediate background fetch of a feed via Celery (same as the UI's refresh button). "
-        "Returns as soon as the fetch task is queued; new entries appear once the worker completes."
+        "Queue an immediate background fetch of a feed on a Celery worker (same as the refresh button in the UI). "
+        "Returns as soon as the fetch task is queued. New entries appear when the worker finishes."
     ),
     input_schema={
         "properties": {
@@ -477,12 +477,12 @@ async def _create_category(db: AsyncSession, user_id: uuid.UUID, name: str) -> d
 @_tool(
     name="update_automation_rule",
     description=(
-        "Partially update an automation rule — only the provided fields change (mirrors "
+        "Partially update an automation rule. Only the provided fields change (same as "
         "PUT /api/automation/rules/{id}). Trigger types: "
         + ", ".join(sorted(VALID_TRIGGER_TYPES))
         + ". Each action is {type, config}; valid action types: "
         + ", ".join(sorted(VALID_ACTION_TYPES))
-        + " (branch sub-actions are validated recursively). Note: actions replaces the whole list."
+        + " (actions inside a branch are validated too). actions replaces the whole action list."
     ),
     input_schema={
         "properties": {
@@ -498,7 +498,7 @@ async def _create_category(db: AsyncSession, user_id: uuid.UUID, name: str) -> d
             "actions": {
                 "type": "array",
                 "items": {"type": "object"},
-                "description": "Full replacement action list, each {type: <action type>, config: {...}}",
+                "description": "The complete new action list. Each item is {type: <action type>, config: {...}}",
             },
             "labels": {"type": "array", "items": {"type": "string"}},
             "is_enabled": {"type": "boolean"},
@@ -559,7 +559,7 @@ async def _update_automation_rule(
             updated.append(field)
 
     if not updated:
-        return {"id": str(rule.id), "updated": [], "message": "no fields provided — nothing changed"}
+        return {"id": str(rule.id), "updated": [], "message": "no fields provided, nothing changed"}
 
     db.add(rule)
     await db.flush()
@@ -568,7 +568,7 @@ async def _update_automation_rule(
 
 @_tool(
     name="toggle_automation_rule",
-    description="Flip an automation rule's enabled state and return the new state.",
+    description="Switch an automation rule between enabled and disabled, and return the new state.",
     input_schema={
         "properties": {
             "rule_id": {"type": "string", "description": "UUID of the automation rule to toggle"},
@@ -593,10 +593,10 @@ async def _toggle_automation_rule(db: AsyncSession, user_id: uuid.UUID, rule_id:
 @_tool(
     name="delete_automation_rule",
     description=(
-        "Delete an automation rule permanently. REQUIRES user confirmation. First call returns a "
-        "confirmation prompt with a token — present it to the user. Only call again with the "
-        "confirmation_token after the user explicitly approves. To just stop a rule from running, "
-        "use toggle_automation_rule instead."
+        "Delete an automation rule permanently. REQUIRES user confirmation. The first call returns a "
+        "confirmation prompt with a token. Show it to the user. Only call again with the "
+        "confirmation_token after the user explicitly approves. To stop a rule from running without "
+        "deleting it, use toggle_automation_rule instead."
     ),
     input_schema={
         "properties": {
@@ -631,7 +631,7 @@ async def _delete_automation_rule(
             "name": rule.name,
             "is_enabled": rule.is_enabled,
             "confirmation_token": _make_token("automation_rule", rule_id, user_id),
-            "warning": "This permanently deletes the rule and cannot be undone (its execution logs are removed too).",
+            "warning": "This permanently deletes the rule and its execution logs. It cannot be undone.",
         }
 
     if not _verify_token(confirmation_token, "automation_rule", rule_id, user_id):
@@ -651,8 +651,8 @@ async def _delete_automation_rule(
 @_tool(
     name="list_webhook_presets",
     description=(
-        "List saved webhook presets (reusable URL + payload + header combinations for automation "
-        "actions), ordered by name. Webhook URLs and header values are redacted — inspect them in "
+        "List saved webhook presets (reusable URL, payload and header sets for automation "
+        "actions), ordered by name. Webhook URLs and header values are redacted. View them in "
         "the web UI if needed."
     ),
     input_schema={
@@ -696,8 +696,8 @@ async def _list_webhook_presets(
 @_tool(
     name="create_webhook_preset",
     description=(
-        "Create a webhook preset — a reusable URL + payload + headers combination that automation "
-        "rule actions can reference by preset id instead of repeating the URL."
+        "Create a webhook preset: a reusable URL, payload and header set. Automation rule actions "
+        "can reference it by preset id instead of repeating the URL."
     ),
     input_schema={
         "properties": {
@@ -746,8 +746,8 @@ async def _create_webhook_preset(
 @_tool(
     name="delete_webhook_preset",
     description=(
-        "Delete a webhook preset. Automation actions referencing it by id will stop resolving — "
-        "check rules that use it first."
+        "Delete a webhook preset. Automation actions that reference it by id will no longer find it. "
+        "Check which rules use it first."
     ),
     input_schema={
         "properties": {
@@ -1053,9 +1053,9 @@ async def _delete_entity_note(db: AsyncSession, user_id: uuid.UUID, note_id: str
 @_tool(
     name="update_campaign",
     description=(
-        "Partially update a campaign — only the provided fields change (mirrors "
+        "Partially update a campaign. Only the provided fields change (same as "
         "PUT /api/campaigns/{id}). Statuses: active, monitoring, closed, historical. TLP markings "
-        "use TLP 2.0; the legacy TLP:WHITE is accepted and normalized to TLP:CLEAR. Note: tags "
+        "use TLP 2.0. The legacy TLP:WHITE is accepted and stored as TLP:CLEAR. tags "
         "replaces the whole tag list."
     ),
     input_schema={
@@ -1067,7 +1067,7 @@ async def _delete_entity_note(db: AsyncSession, user_id: uuid.UUID, note_id: str
             "tlp_marking": {"type": "string", "enum": _TLP_ENUM},
             "start_date": {"type": "string", "description": "Campaign start date (YYYY-MM-DD)"},
             "end_date": {"type": "string", "description": "Campaign end date (YYYY-MM-DD)"},
-            "tags": {"type": "array", "items": {"type": "string"}, "description": "Full replacement tag list"},
+            "tags": {"type": "array", "items": {"type": "string"}, "description": "The complete new tag list"},
         },
         "required": ["campaign_id"],
     },
@@ -1124,7 +1124,7 @@ async def _update_campaign(
             updated.append(field)
 
     if not updated:
-        return {"id": str(campaign.id), "updated": [], "message": "no fields provided — nothing changed"}
+        return {"id": str(campaign.id), "updated": [], "message": "no fields provided, nothing changed"}
 
     db.add(campaign)
     await db.flush()
@@ -1140,9 +1140,9 @@ async def _update_campaign(
 @_tool(
     name="delete_campaign",
     description=(
-        "Delete a campaign and its entry/entity/saved-search links. Linked entries and entities "
-        "themselves are NOT deleted. REQUIRES user confirmation. First call returns a confirmation "
-        "prompt with link counts — present it to the user. Only call again with the "
+        "Delete a campaign and its links to entries, entities and saved searches. The linked entries and "
+        "entities are NOT deleted. REQUIRES user confirmation. The first call returns a confirmation "
+        "prompt with link counts. Show it to the user. Only call again with the "
         "confirmation_token after the user explicitly approves."
     ),
     input_schema={
@@ -1189,7 +1189,7 @@ async def _delete_campaign(
             "confirmation_token": _make_token("campaign", campaign_id, user_id),
             "warning": (
                 "This permanently deletes the campaign and its links "
-                f"({entry_count} entries, {entity_count} entities). Linked entries/entities are kept."
+                f"({entry_count} entries, {entity_count} entities). The linked entries and entities are kept."
             ),
         }
 
@@ -1206,8 +1206,8 @@ async def _delete_campaign(
     name="remove_from_campaign",
     description=(
         "Unlink an entry or entity from a campaign (the reverse of add_to_campaign). Provide either "
-        "entry_id, or entity_type + entity_id. The entry/entity itself is not deleted, only the "
-        "campaign link — no confirmation needed."
+        "entry_id, or entity_type and entity_id. Only the campaign link is deleted, not the entry or "
+        "entity, so no confirmation is needed."
     ),
     input_schema={
         "properties": {

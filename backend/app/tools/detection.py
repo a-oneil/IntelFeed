@@ -92,9 +92,9 @@ async def _validate_detection_rule(db: AsyncSession, user_id: uuid.UUID, rule_ty
 @_tool(
     name="build_detection_summary",
     description=(
-        "Full detection engineering analysis: gathers all intelligence context for entries and produces "
-        "comprehensive attack chain analysis and detection gaps. Optional focus steers the analysis angle; "
-        "include_existing controls whether existing detection rules are folded into the context."
+        "Detection engineering analysis of one or more entries. Gathers the intelligence linked to the entries "
+        "and returns an attack chain analysis and the detection gaps. focus sets the angle of the analysis. "
+        "include_existing controls whether existing detection rules are added to the context."
     ),
     input_schema={
         "properties": {
