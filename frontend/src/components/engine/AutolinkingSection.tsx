@@ -115,7 +115,7 @@ function confidenceBars(level: string | null) {
           <i key={i} className={i < filled ? cls : undefined} />
         ))}
       </span>
-      {level ?? "—"}
+      {level ?? "none"}
     </span>
   );
 }
@@ -126,7 +126,7 @@ function sourcePill(source: string | null) {
   if (s === "auto_link") cls = styles.srcAuto;
   else if (s === "ai" || s === "ai_reconcile") cls = styles.srcAi;
   else if (s === "manual" || s.startsWith("analyst")) cls = styles.srcAnalyst;
-  return <span className={`${styles.pill} ${cls}`}>{SOURCE_LABELS[s] ?? s ?? "—"}</span>;
+  return <span className={`${styles.pill} ${cls}`}>{SOURCE_LABELS[s] ?? s ?? "Unattributed"}</span>;
 }
 
 /** Clickable entity chip that navigates to the specific entity's profile. */
@@ -288,7 +288,7 @@ export function AutolinkingSection({
       message:
         action === "confirm"
           ? `Confirm ${what}? Each is kept as an analyst-confirmed edge.`
-          : `Reject ${what}? Each is hidden from profiles and graphs and won't be drawn again.`,
+          : `Reject ${what}? Each is hidden from profiles and graphs and will not be created again.`,
       confirmLabel: action === "confirm" ? "Confirm all" : "Reject all",
       destructive: action === "reject",
     });
@@ -337,14 +337,14 @@ export function AutolinkingSection({
                 className={view === "links" ? styles.segOn : ""}
                 onClick={() => setView("links")}
               >
-                Entity links <span className={styles.segCnt}>{stats ? stats.total.toLocaleString() : "—"}</span>
+                Entity links <span className={styles.segCnt}>{stats ? stats.total.toLocaleString() : "…"}</span>
               </button>
               <button
                 className={view === "relationships" ? styles.segOn : ""}
                 onClick={() => setView("relationships")}
               >
                 Relationships{" "}
-                <span className={styles.segCnt}>{stats ? stats.relationships_total.toLocaleString() : "—"}</span>
+                <span className={styles.segCnt}>{stats ? stats.relationships_total.toLocaleString() : "…"}</span>
               </button>
             </div>
             <span className={styles.rangeNote}>
@@ -504,7 +504,7 @@ export function AutolinkingSection({
                             ))}
                           </span>
                         ) : (
-                          <span className={styles.muted}>—</span>
+                          <span className={styles.muted}>none</span>
                         )}
                       </td>
                       <td>
@@ -514,7 +514,7 @@ export function AutolinkingSection({
                       </td>
                       <td>{sourcePill(l.source)}</td>
                       <td>{confidenceBars(l.confidence)}</td>
-                      <td className={styles.para}>{l.paragraph_indices?.join(", ") || "—"}</td>
+                      <td className={styles.para}>{l.paragraph_indices?.join(", ") || "n/a"}</td>
                       <td className={styles.muted}>{new Date(l.extracted_at).toLocaleDateString()}</td>
                       <td>
                         <div className={styles.rowActs}>
@@ -570,7 +570,7 @@ export function AutolinkingSection({
                       ? `“${r.description}”`
                       : r.description
                     : r.source === "co_occurrence"
-                      ? `Named in the same paragraph in ${articles}; no sentence states one ${verbLabel(r.relationship_type)} the other.`
+                      ? `Named in the same paragraph in ${articles}. No sentence states that one ${verbLabel(r.relationship_type)} the other.`
                       : "No sentence recorded.";
                   const a = r.source_name ?? "(unknown)";
                   const b = r.target_name ?? "(unknown)";
@@ -618,7 +618,7 @@ export function AutolinkingSection({
                             <button
                               className={styles.evToggle}
                               onClick={() => toggleRel(r.id)}
-                              title="Show the articles, the sentence behind the claim, and its reviews"
+                              title="Show the articles, the sentence that supports the relationship, and its reviews"
                             >
                               {openRel.has(r.id) ? "▾ hide evidence" : n > 0 ? "▸ evidence and the articles" : "▸ evidence"}
                             </button>
@@ -642,7 +642,7 @@ export function AutolinkingSection({
                             </button>
                             <button
                               className={styles.act}
-                              title="Hide it from profiles and graphs; it won't be drawn again"
+                              title="Hide it from profiles and graphs. It will not be created again."
                               onClick={async () => {
                                 await rejectRel.mutateAsync(r.id);
                                 toast.success("Relationship rejected");
@@ -697,7 +697,7 @@ function Kpi({ cap, val, sub, color }: { cap: string; val?: number; sub: string;
     <div className={styles.kpi}>
       <span className={styles.strip} style={{ background: color }} />
       <div className={styles.kpiCap}>{cap}</div>
-      <div className={styles.kpiVal}>{val === undefined ? "—" : val.toLocaleString()}</div>
+      <div className={styles.kpiVal}>{val === undefined ? "…" : val.toLocaleString()}</div>
       <div className={styles.kpiSub}>{sub}</div>
     </div>
   );

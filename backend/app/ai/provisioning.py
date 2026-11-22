@@ -83,9 +83,9 @@ def model_choice_problem(provider: AIProvider) -> str | None:
         return None
     model = configured_model(provider)
     if model is None:
-        return "Choose a model for this provider first — its model list is too varied to pick one automatically"
+        return "Choose a model for this provider first. Its model list is too varied to pick one automatically."
     if provider.models and model not in provider.models:
-        return f"The server doesn't list a model named {model!r}"
+        return f"The server does not list a model named {model!r}. Choose one from its model list."
     return None
 
 

@@ -1,6 +1,6 @@
 # Entity Relationship Lifecycle
 
-For analysts and developers working with typed relationships (`/api/entity-relationships`). It shows how an edge's `source` (who asserted it) changes over its life. Confidence (`confirmed` > `probable` > `possible`) moves separately, except that confirming an edge also sets its confidence to `confirmed`.
+For analysts and developers working with typed relationships (`/api/entity-relationships`). It shows how an edge's `source` (which path reported it) changes over its life. Confidence (`confirmed` > `probable` > `possible`) moves separately, except that confirming an edge also sets its confidence to `confirmed`.
 
 ```mermaid
 stateDiagram-v2
@@ -41,6 +41,6 @@ stateDiagram-v2
     end note
 ```
 
-Every write path (co-occurrence, AI extraction, copilot tools, the REST API) checks the `(source_type, verb, target_type)` triple against the allowlist in `backend/app/intelligence/relationship_matrix.py`. An assertion written the wrong way round is flipped to the allowed direction.
+Every write path (co-occurrence, AI extraction, copilot tools, the REST API) checks the `(source_type, verb, target_type)` triple against the allowlist in `backend/app/intelligence/relationship_matrix.py`. A relationship written in the wrong direction is flipped to the allowed direction.
 
 Referenced from [`docs/api-reference.md`](../api-reference.md) (Entity Relationships section).

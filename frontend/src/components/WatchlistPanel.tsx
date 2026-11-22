@@ -48,7 +48,7 @@ export function WatchlistPanel() {
       await deleteWatch.mutateAsync({ entity_type: w.entity_type, entity_id: w.entity_id });
       toast.success(`Removed ${w.entity_name ?? w.entity_id} from ${w.mode === "watch" ? "watchlist" : "mute list"}`);
     } catch {
-      toast.error("Failed to remove");
+      toast.error("Could not remove the entity.");
     }
   };
 
@@ -141,7 +141,7 @@ export function WatchlistPanel() {
       <PageHeader
         title="Watchlist"
         count={`${watchedCount} watched · ${mutedCount} muted`}
-        subtitle="Watched entities get a priority boost in Triage; muted entities are suppressed. Use the eye icon on any entity profile to add one."
+        subtitle="Watched entities rank higher in the Priority Queue. Muted entities are hidden from it. Use the eye icon on an entity profile to add one."
       />
       <DataTable<EntityWatch>
         tableId="watchlist"
@@ -152,7 +152,7 @@ export function WatchlistPanel() {
         isLoading={isLoading}
         noun="entity"
         nounPlural="entities"
-        emptyMessage="Nothing watched or muted yet — use the eye icon on an entity profile to add one."
+        emptyMessage="Nothing watched or muted yet. Use the eye icon on an entity profile to add one."
       />
     </>
   );

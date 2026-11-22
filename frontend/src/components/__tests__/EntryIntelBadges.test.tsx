@@ -21,7 +21,7 @@ describe("EntryIntelBadges detection opportunity tiers", () => {
       <EntryIntelBadges counts={{ ...baseCounts, detection_opportunity: "actionable_gap" }} />
     );
     expect(screen.getByText("detection opportunity")).toBeInTheDocument();
-    expect(screen.getByText("detection opportunity").getAttribute("title")).toMatch(/No detection rule exists/);
+    expect(screen.getByText("detection opportunity").getAttribute("title")).toMatch(/No detection rule covers/);
   });
 
   it("shows the telemetry gap badge when library rules are blocked", () => {
@@ -122,8 +122,8 @@ describe("EntryIntelBadges named subject", () => {
 });
 
 describe("EntryIntelBadges CVE severity", () => {
-  it("annotates the CVE chip with the worst severity", () => {
+  it("annotates the CVE chip with the highest severity", () => {
     render(<EntryIntelBadges counts={{ ...baseCounts, cves: 6, cve_max_severity: "critical" }} />);
-    expect(screen.getByTitle(/worst severity critical/)).toBeInTheDocument();
+    expect(screen.getByTitle(/Highest severity: critical/)).toBeInTheDocument();
   });
 });

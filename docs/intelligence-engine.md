@@ -40,7 +40,7 @@ Terms used throughout:
 | Entity | A tracked thing: threat actor, malware family, CVE, technique, vendor, product, tool, mitigation, country, CWE, sector, observable, ransomware victim |
 | TTP | An ATT&CK technique ID such as `T1059.001` (tactics, techniques and procedures) |
 | CVE / CWE | A vulnerability ID (`CVE-2024-3400`) / a weakness class ID (`CWE-79`) |
-| IOC / observable | Indicator of compromise: an IP, domain, hash, command line and so on. IntelFeed keeps these in the observables ledger |
+| IOC / observable | Indicator of compromise: an IP, domain, hash, command line and so on. IntelFeed keeps these in the `observables` table |
 | Autolink | Matching an entry's text against the names of entities already in the database |
 | Junction row | The link between one entry and one entity (`entry_threat_actors`, `entry_cves`, …) |
 | Correlation event | A notice that something interesting co-occurred, such as a new technique seen with a known actor |
@@ -126,7 +126,7 @@ How each ID type is handled:
 
 Other stages add more intelligence after (or beside) the autolinker:
 
-- **Observables stage** — stages IOC candidates and records sightings of known ledger values. See [observables.md](observables.md).
+- **Observables stage** — stages IOC candidates and records sightings of known observable values. See [observables.md](observables.md).
 - **Extract stage** (`_extract_entry_intel`, `backend/app/workers/intel_feed_tasks.py:483`) — a standalone regex pass for CVEs (new ones are queued for NVD lookups), TTPs and mitigation IDs, plus detection-rule extraction and GitHub rule import.
 - **One-pass AI analysis** (`entry_analysis` task) — reads the article once and returns entities, relationships, IOCs and a summary. It confirms or rejects held autolinks.
 - **Adjudicate stage** — a second AI call that reviews what the analysis wrote. See [Entity Hygiene Console](#entity-hygiene-console).
@@ -154,7 +154,7 @@ The capital-letter rule cannot tell "Royal" the ransomware from "Royal Navy", or
 - **Which words.** `is_provisional_form()` (`backend/app/intelligence/autolinker.py:194`) marks a single alphabetic word that appears in the bundled list of about 31,000 common English words (`backend/app/intelligence/data/common_english_words.txt`). Examples: "royal", "inc", "hive", "medusa". Coined names such as "Emotet" or "LockBit" link at once. This applies to actors, malware, tools and countries. Countries use a short list of their own instead (`AMBIGUOUS_COUNTRY_WORDS`: Chad, China, Georgia, Guinea, Jersey, Jordan, Niger, Panama, Turkey, Chile, Cuba). Vendors and products always link at once.
 - **Other held matches.** The context rules hold a few more kinds of match the same way (step 6 of the scan): one-word names inside a longer capitalised name, names made only of digits, actor names with initials, and actor or malware names a vendor or product also uses.
 - **Holding.** If every occurrence of an entity in the article is held, the match goes to `pending_autolink_matches` instead of a junction table. Held matches are invisible to correlation, scoring, counts and the UI. One non-dictionary name (the alias "Royal Ransomware", say) turns the whole match into a normal link.
-- **The analysis decides.** When the one-pass AI analysis lands, `reconcile_pending_autolinks()` (`backend/app/intelligence/autolink_reconcile.py:79`) links held entities whose name or alias the AI also extracted, through the normal store path. The rest are rejected with a `FalsePositiveRecord` (`extraction_source = "ai_reconcile"`).
+- **The analysis decides.** When the one-pass AI analysis completes, `reconcile_pending_autolinks()` (`backend/app/intelligence/autolink_reconcile.py:79`) links held entities whose name or alias the AI also extracted, through the normal store path. The rest are rejected with a `FalsePositiveRecord` (`extraction_source = "ai_reconcile"`).
 - **Held after the analysis.** A re-scan (a new entity or alias, a backfill) can hold a match on an article analysed long ago. Every 30 minutes `settle_held_on_analysed_entries()` (inside `submit_analysis_batches`) runs those against the stored analysis the same way and queues a recheck (`adjudication_status = recheck`): a review of just those matches, not the whole article again. A held match that was linked before and is found again by a re-scan is linked again straight away.
 - **The adjudicator checks.** A linked match is an ordinary link to the [adjudicate stage](engine-settings.md#adjudicate-stage-post-analysis-ai-review): it can propose removing it. A rejected match is a `held:` item it can propose linking (`adjudication_held_link`). Each reject is judged once (`pending_autolink_matches.reviewed_at`). Its proposals show in Engine → Review → Proposals with the rest, under the Links domain.
 - **Feeds without AI.** `entry_will_get_ai_analysis()` (`backend/app/services/ai_eligibility.py:41`) checks the instance switch `ai_one_pass_enabled`, the feed's `ai_analysis_enabled`, and that the feed's mode is not `none`. If the entry will never be analysed, nothing could confirm a held match, so these matches are dropped. They are counted in daily Redis keys (`autolink:pending_dropped_ai_off:<YYYYMMDD>`), and the Engine's Autolinking view shows the 30-day total.
@@ -173,12 +173,12 @@ AI extraction and the Cybergeist sync pass new aliases through `gate_aliases()` 
 
 ### Cross-Type Resurrection Guard
 
-A same-type merge survives re-import because the loser's name becomes an alias of the survivor (`backend/app/intelligence/entity_dedup.py`). A cross-type fold (the "Akira" malware folded into the "Akira" actor) needs more, because each importer only searches its own table and would recreate the loser within hours.
+A same-type merge survives re-import because the loser's name becomes an alias of the survivor (`backend/app/intelligence/entity_dedup.py`). A cross-type merge (the "Akira" malware merged into the "Akira" actor) needs more, because each importer only searches its own table and would recreate the loser within hours.
 
 All automated creation goes through `resolve_entity_creation()` (`backend/app/intelligence/entity_resolution.py:1712`). Manual creation in the UI goes through it too, and may override a refusal with `force=true`. In order, it:
 
 1. **Matches an existing entity** by exact name or alias, then a normalized match through `entity_alias_index`, then known actor synonyms.
-2. **Checks reclassify tombstones.** A cross-type reclassify (`perform_reclassify()` in `backend/app/api/entity_merge.py`) writes one `EntityReclassifyTombstone` row per folded name: `(source_type, normalized_name) → (target_type, target_id)`. On a hit, nothing is created and the entry links to the survivor through `link_entry_to_entity()`. Set `active = False` on a tombstone row in the database to allow a split again; there is no UI for this.
+2. **Checks reclassify tombstones.** A cross-type reclassify (`perform_reclassify()` in `backend/app/api/entity_merge.py`) writes one `EntityReclassifyTombstone` row per merged name: `(source_type, normalized_name) → (target_type, target_id)`. On a hit, nothing is created and the entry links to the survivor through `link_entry_to_entity()`. Set `active = False` on a tombstone row in the database to allow a split again; there is no UI for this.
 3. **Applies always-on blocks.** For automated sources creating an actor or malware family, `is_fp_entity_name()` (`backend/app/intelligence/autolinker.py:101`) rejects the false-positive list and bare file names such as `svchost.exe`, `*.dll` or `*.sys`. The do-not-recreate list (`entity_name_denylist`) also applies here.
 4. **Applies the switchable gates** (`entity_creation_gates`: `off`, `shadow` or `on`, default `on`). `shadow` logs what it would block and still creates. Besides generic phrases, regions and countries, the gates refuse names that are not things at all (`non_entity_reason()`): protocols (WebRTC, MQTT), cipher names (RSA, Ed25519), install commands (`npm install`, `git clone`), code tokens (`trust_remote_code=True`, `CAP_NET_ADMIN`, AutoConfig), OS APIs and kernel features (BitBlt, ptrace, inotify), product categories (SIEM, ZTNA, "OpenAI models"), technique names (BYOVD, HVNC, DNS tunneling) and hex literals. These apply to actors, malware, tools and products; protocols may still be products, and vendors are not checked. For actors, descriptions ("China-nexus", "North Korea-linked group", "Russian submarine operation", "Chinese spies") and number-only names ("888") are refused too. The same checks drop matching aliases.
 
@@ -224,7 +224,7 @@ The API is `backend/app/api/hygiene.py`, under `/api/admin/hygiene/*` and admin-
 | `GET /stats` | Counters (applied 24h/7d, pending, orphans) plus `adjudication_mode`, `adjudication_pending`, `adjudication_breaker_until` |
 | `POST /adjudication/{log_id}/apply`, `/restore` | Act on, or undo, one adjudicator proposal |
 | `POST /link-log/{log_id}/restore`, `/apply-removal` | Undo or apply one link-log row. A restore re-creates the link and counts as an analyst restore |
-| `GET /review-groups`, `POST /review-groups/apply`, `/review-groups/dismiss` | The Review tab's one queue: every pending proposal folded per entity, and Apply / Dismiss over what its filters show |
+| `GET /review-groups`, `POST /review-groups/apply`, `/review-groups/dismiss` | The Review tab's one queue: every pending proposal grouped per entity, and Apply / Dismiss over what its filters show |
 | `POST /bulk-apply`, `GET /bulk-apply/{job_id}` | Apply all, in the background |
 | `POST /decisions` | Apply a reviewed batch of decisions (`apply`, `dismiss` or `reclassify:<type>`), one result per row |
 | `POST /reclassify-groups/apply` | Convert an entity to a proposed type (the row's type chips) |
@@ -233,15 +233,15 @@ The API is `backend/app/api/hygiene.py`, under `/api/admin/hygiene/*` and admin-
 | `/enrichment-gaps/enrich`, `/run-name-normalization`, `/scan-alias-hygiene`, `/scan-vendor-autolink`, `/scan-id-hygiene` | On-demand scanners with shadow/apply flows |
 | `GET /api/entities/{type}/{id}/cascade-preview` | What deleting an entity would remove. Any signed-in user |
 
-**The adjudicate stage** (`backend/app/services/entry_adjudication.py`). After an entry's one-pass analysis lands, `adjudicate_entry_task` (on the `ai` queue) sends the article plus a list of everything the analysis wrote: links, entities it created (with their nearest existing names), relationship claims and IOCs. The reviewer answers only for items it would change: remove, reclassify, veto, merge, demote or drop. Anything it leaves out is kept.
+**The adjudicate stage** (`backend/app/services/entry_adjudication.py`). After an entry's one-pass analysis completes, `adjudicate_entry_task` (on the `ai` queue) sends the article plus a list of everything the analysis wrote: links, entities it created (with their nearest existing names), relationship claims and IOCs. The reviewer answers only for items it would change: remove, reclassify, veto, merge, demote or drop. Anything it leaves out is kept.
 
 - Each item line says where the item sits in the article. An IOC gets its table row or list line and the heading above it, found in its defanged form too, so a value from the article's own IoC table is judged there and not by an earlier passing mention. A `script` IOC carries its code, since its value is a hash of that code. An AI-linked TTP gets its row in the report's ATT&CK table when it has one.
 - Verdicts are checked before they count. A remove, demote or reclassify whose reason does not name its item (the entity, a form it matched as, a TTP's id, either end of an edge) is dropped, as is any destructive verdict whose reason argues the record is right ("validating the edge"), and one reason pasted onto three or more items. A dropped edge verdict is not counted as a keep.
 - `adjudication_mode` (default `apply`): `shadow` files every verdict as a proposal; `apply` acts on high-confidence verdicts and files the rest, which a second, independent review of the article then applies (if it agrees) or closes (if it doesn't). See [Second look](engine-settings.md#adjudicate-stage-post-analysis-ai-review). Every applied change writes an audit row that doubles as its undo.
-- `reclassify` is a catalogue-wide change, so in apply mode it needs agreement: each article's verdict is a vote (filed as a proposal), and the review that brings the count to `adjudication_reclassify_consensus` (default 2) converts the entity and clears the other proposals about it. A name that was folded out of a type (a reclassify tombstone) is never proposed back into it, so types do not ping-pong.
+- `reclassify` is a catalogue-wide change, so in apply mode it needs agreement: each article's verdict is a vote (filed as a proposal), and the review that brings the count to `adjudication_reclassify_consensus` (default 2) converts the entity and clears the other proposals about it. A name that was moved out of a type (a reclassify tombstone) is never proposed back into it, so a type does not flip back and forth.
 - Circuit breakers hold a destructive run's verdicts for the second look; the per-article one only judges runs of at least `adjudication_circuit_breaker_min_items` items. The rolling breaker also pauses dispatch for an hour (`adjudication_breaker_until`).
 - Never touched: relationship edges an analyst confirmed, created or rejected, and external-feed edges (only `auto_extracted` and `co_occurrence` edges are reviewed). A link an analyst restored in the last 90 days is shown to the reviewer flagged, and never changed.
-- Each relationship claim is printed with the sentence to judge it by: the analysis's evidence for the pair, else the article's sentence naming both ends (`backend/app/intelligence/edge_evidence.py`). The reviewer answers every edge: keep, demote, or reverb (`suggested_verb`, `flip`) when the article states the pair with another verb or the other way round. A keep's reason must name an end of the claim. Edge verdicts count only at high confidence, whatever `adjudication_apply_min_confidence` says, and each article's answer, counted or not, is a row in `relationship_reviews` (see [edge verdicts](entity-profiles.md)). Edges past the ten-per-article cap, and the ones the model left out, are the edge sweep's.
+- Each relationship claim is printed with the sentence to judge it by: the analysis's evidence for the pair, else the article's sentence naming both ends (`backend/app/intelligence/edge_evidence.py`). The reviewer answers every edge: keep, demote, or reverb (`suggested_verb`, `flip`) when the article states the pair with another verb or the other way round. A keep's reason must name an end of the claim. Edge verdicts count only at high confidence, whatever `adjudication_apply_min_confidence` says, and each article's answer, counted or not, is a row in `relationship_reviews` (see [edge verdicts](entity-profiles.md)). Edges past the ten-per-article cap, and the ones the model left out, are left to the edge sweep.
 - A review whose answer repeats item ids keeps the first copy where the copies agree and leaves an item unanswered where they don't; only a misaligned answer (two or more conflicts, or repeats across a quarter of the list) is void, and a void or failed review is run once more.
 - `merge` can only target a name the reviewer was shown. `veto` deletes an entity only when this entry created it and nothing else uses it. Two entities that both already exist are never compared here; that is the daily duplicate review (`backend/app/services/entity_merge_review.py`, job `review-duplicate-entities`), which scores same-type pairs by name similarity and a shared alias (shared articles only break ties), asks the `entity_merge_review` task (each side shows its three most recent article titles, so a count built on false matches of a common word is visible), and files each `same` verdict as a Merge proposal on the Review tab. The next run asks about that pair again, and a second `same` applies the merge.
 - `backfill_entry_adjudications` walks older entries through the same review, using at most half of each hour's budget. Run it by hand:
@@ -260,9 +260,9 @@ Settings: [engine-settings.md](engine-settings.md#adjudicate-stage-post-analysis
 
 ## Observables — the IOC ledger
 
-The ledger stores indicators (IPs, domains, hashes, command lines, registry keys and more) with `(kind, value)` as their identity. The rule that shapes it: **regex never creates a row.** Pattern scanning only nominates *candidates* that stay on the entry. A ledger row exists only when something with judgment created it:
+The `observables` table stores indicators (IPs, domains, hashes, command lines, registry keys and more) with `(kind, value)` as their identity. Its one rule: **regex never creates a row.** Pattern scanning only nominates *candidates* that stay on the entry. A row exists only when one of these paths created it:
 
-| Door (`created_via`) | Base confidence | Source |
+| Path (`created_via`) | Base confidence | Source |
 |---|---|---|
 | `manual` | 1.0 | An analyst promotes a value with the `promote_observable` tool |
 | `publisher_ioc` | 0.9 | The indicator file an article links to, from allow-listed repositories |
@@ -273,7 +273,7 @@ The ledger stores indicators (IPs, domains, hashes, command lines, registry keys
 
 Author-defanged values (`evil[.]com`) get +0.1. Once a row exists, later entries that contain the exact value add a sighting. Network values lose confidence over time; hashes and host artifacts do not.
 
-The full story (kinds, validators, what the AI sees, attribution, publishing and jobs) is in [observables.md](observables.md). Columns: [data-model.md](data-model.md#observable--the-ioc-ledger). Settings: [engine-settings.md](engine-settings.md#observables-stage).
+The full description (kinds, validators, what the AI sees, attribution, publishing and jobs) is in [observables.md](observables.md). Columns: [data-model.md](data-model.md#observable--the-ioc-ledger). Settings: [engine-settings.md](engine-settings.md#observables-stage).
 
 ---
 
@@ -293,7 +293,7 @@ The type names come from `backend/app/entity_types.py`; import its constants rat
 | Country | `name` | Seeded; aliases |
 | CWE | `cwe_id` | Seeded from the MITRE catalog; `parent_cwe_id` links to the broader weakness |
 | Sector | slug | Canonical sector vocabulary |
-| Observable | `(kind, value)` | Created only by a judgment door |
+| Observable | `(kind, value)` | Created only by AI analysis, the adjudicator, a curated IOC list feed, a TTP observable or an analyst; never by regex |
 | Ransomware victim | `normalized_name` and `domain` (not unique) | Leak-site victims from ransomware.live |
 
 **Enrichment** fills in profiles from outside sources: MITRE ATT&CK (techniques, groups, mitigations), Malpedia (malware), Wikipedia, NVD (CVSS, description, affected products, references), FIRST EPSS (exploit probability), CISA KEV (known exploited), GitHub PoC search and Metasploit modules. See [automation-ai-enrichment.md](automation-ai-enrichment.md) for the enrichment pipeline.
@@ -340,7 +340,7 @@ Each related entity carries a **strength** score from 0 to 1, made of three part
 Adjustments:
 
 - **Feed reliability.** Evidence from A/B-rated feeds counts ×1.15 and from D/E feeds ×0.85 (`relationship_reliability_high_multiplier` / `_low_multiplier`).
-- **Specificity.** An entity mentioned across most of the corpus (Linux, a big security vendor) says little. The score is damped by an IDF-style specificity term, blended in by `relationship_specificity_weight` (0.5). Vendors and products with specificity below `relationship_reporting_source_specificity` (0.45) are marked `reporting_source`, and the UI folds them into a collapsed group.
+- **Specificity.** An entity mentioned across most of the corpus (Linux, a big security vendor) says little. The score is damped by an IDF-style specificity term, blended in by `relationship_specificity_weight` (0.5). Vendors and products with specificity below `relationship_reporting_source_specificity` (0.45) are marked `reporting_source`, and the UI shows them in a collapsed group.
 - **Tier.** `strong` at or above `proximity_strong_threshold` (0.7), `moderate` at or above `proximity_moderate_threshold` (0.3), else `weak`.
 
 ### Timeline Construction
@@ -351,11 +351,11 @@ Adjustments:
 
 Co-occurrence also writes `entity_relationships` rows (actor *uses* malware, and so on) with a trust level, but only for a pair named in the same paragraph, where that paragraph is not boilerplate and names fewer than five entities (see [architecture.md](architecture.md#7-correlation-engine)). The verb comes from the two types alone, so it is a guess: an edge is drawn only from an article the adjudicate stage will review (`entry_gets_edge_review`), which reads the sentence. The weekly `relationship-confidence-decay` job moves stale co-occurrence rows from `probable` back to `possible`; rows an analyst touched are never demoted. Entry-to-entity link confidence does not decay. See [entity-profiles.md](entity-profiles.md) for how relationships appear on profiles.
 
-The one-pass analysis asserts relationships too, each with its evidence sentence (stored as the edge's `description`). When it states another verb for a pair a co-occurrence edge drew from that article alone (`attributed_to` where the guess was `targets`, or anything where the guess was `related_to`), the guess is deleted (`retire_superseded_cooccurrence` in `backend/app/intelligence/enrichment.py`).
+The one-pass analysis reports relationships too, each with its evidence sentence (stored as the edge's `description`). When it states another verb for a pair a co-occurrence edge drew from that article alone (`attributed_to` where the guess was `targets`, or anything where the guess was `related_to`), the guess is deleted (`retire_superseded_cooccurrence` in `backend/app/intelligence/enrichment.py`).
 
 ### The edge sweep
 
-`backend/app/services/relationship_sweep.py`, job `review-relationships` (every 30 minutes, on the `ai` queue, deferred while the queue is deeper than 200). It takes up to `relationship_sweep_batch_size` machine edges that are still open — no verdict, or `disputed` — at least `relationship_sweep_min_age_hours` old and not asked within `relationship_sweep_retry_days`, disputed ones first, then oldest. Each is one `relationship_review` call: the claim, a line on each entity, and for up to four of its articles (one per feed first, reposts last) the title and the paragraphs naming both ends, or each end's first paragraph when none names both. A claim is often stated across a paragraph's sentences ("UAC-0099 gained access … the attackers deployed MythicRatatoskr"), so the judge reads paragraphs, not sentences.
+`backend/app/services/relationship_sweep.py`, job `review-relationships` (every 30 minutes, on the `ai` queue, deferred while the queue is deeper than 200). It takes up to `relationship_sweep_batch_size` machine edges that are still open (no verdict, or `disputed`), at least `relationship_sweep_min_age_hours` old and not asked within `relationship_sweep_retry_days`, disputed ones first, then oldest. Each is one `relationship_review` call: the claim, a line on each entity, and for up to four of its articles (one per feed first, reposts last) the title and the paragraphs naming both ends, or each end's first paragraph when none names both. A claim is often stated across a paragraph's sentences ("UAC-0099 gained access … the attackers deployed MythicRatatoskr"), so the judge reads paragraphs, not sentences.
 
 The answer is one of asserted, wrong_verb (with the verb), wrong_direction, not_asserted, wrong_entity or unsure, with a quote and the number of its article. A keep or correction is not accepted (it reads as unsure) when its quote is not in that article's text, or names neither end, or names one end in a paragraph that never names the other (the title counts). A correction is turned the way the relationship matrix allows: "Romulus distributes CNCMachineRMS" filed as malware related_to tool becomes Romulus delivers CNCMachineRMS.
 
@@ -481,7 +481,7 @@ The reader highlights glossary terms in an article in the browser (`frontend/src
 | Threat Exposure Report (`exposure_report`) | Exposure for a saved scope | executive_summary, scope, threat_surface, ttps, iocs, outlook, references |
 | Detection Engineering Report (`detection_report`) | Detection work | executive_summary, attack_chain, ttps, detection_opportunities, coverage_gaps, iocs, log_source_requirements, recommended_actions, references |
 
-The `iocs` section is filled from the observables ledger: judged rows sighted in the report's source entries, defanged, with their attribution.
+The `iocs` section is filled from the `observables` table: judged rows sighted in the report's source entries, defanged, with their attribution.
 
 Each template has its own AI prompt for writing sections (`REPORT_SECTION_TASKS`, `backend/app/intelligence/reporting.py:110`): `report_section_flash_alert`, `report_section_actor_profile`, `report_section_campaign_tracker`, `report_section_landscape`, `report_section_exposure`, `report_section_detection`. They are seeded from `backend/app/ai/prompts/defaults.py` and editable at Settings → AI Configuration → Prompts.
 
@@ -503,7 +503,7 @@ Endpoints: `GET/POST /api/intel-profiles`, `GET/PUT/DELETE /api/intel-profiles/{
 
 ### Report Generation
 
-A report's sources are a single entry, a list of entries, a search or a saved search (`resolve_report_sources()`). The entities linked to those entries are collected automatically. `generate_report_content()` (`backend/app/intelligence/reporting.py:320`) builds the data sections; the AI writes the narrative ones. In the report builder a data section's rows open in its editor as the Markdown the exporter would write; editing them saves the text as the section body with `items: []` and `items_edited: true`, and attaching more evidence leaves such a section alone instead of refilling its rows. Reports render to Markdown (`render_markdown()`) or HTML (`render_html()`).
+A report's sources are a single entry, a list of entries, a search or a saved search (`resolve_report_sources()`). The entities linked to those entries are collected automatically. `generate_report_content()` (`backend/app/intelligence/reporting.py:320`) builds the data sections; the AI writes the prose sections. In the report builder a data section's rows open in its editor as the Markdown the exporter would write; editing them saves the text as the section body with `items: []` and `items_edited: true`, and attaching more evidence leaves such a section alone instead of refilling its rows. Reports render to Markdown (`render_markdown()`) or HTML (`render_html()`).
 
 ### Export Formats
 
@@ -620,7 +620,7 @@ The filter is a cheap keyword scorer (no AI, no database). Keywords match at the
 | Threat actor | 0.35 | APT, nation-state, espionage, hacktivist, financially motivated |
 | Detection | 0.20 | Sigma, YARA, IOC, MITRE ATT&CK, Splunk, SIEM, threat hunting |
 
-One hit in a category earns 80% of its weight; two or more earn all of it. Bonuses: a CVE ID +0.4, a technique ID +0.3, an IOC-like value (IPv4, hash, defanged URL) +0.2, a security keyword in the title +0.15. The score is capped at 1.0. At the default threshold one keyword is enough, so only articles with no security words at all are dropped.
+One hit in a category scores 80% of its weight; two or more score all of it. Bonuses: a CVE ID +0.4, a technique ID +0.3, an IOC-like value (IPv4, hash, defanged URL) +0.2, a security keyword in the title +0.15. The score is capped at 1.0. At the default threshold one keyword is enough, so only articles with no security words at all are dropped.
 
 Use for general security news, mixed social sources and vendor blogs: the safe default. The keywords are English, so for foreign-language feeds turn on `auto_translate` or use `full`.
 

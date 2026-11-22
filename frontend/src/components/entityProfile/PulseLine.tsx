@@ -74,7 +74,7 @@ export function PulseLine({
     if (echoShare != null && echoShare >= 0.6 && total >= 4)
       return {
         tone: "warn" as const,
-        label: `echo-heavy · one outlet is ${Math.round(echoShare * 100)}%`,
+        label: `one outlet carries ${Math.round(echoShare * 100)}% of mentions`,
       };
     if (feeds >= 10) return { tone: "good" as const, label: `broad coverage · ${feeds} independent feeds` };
     return { tone: "flat" as const, label: `${feeds} feed${feeds === 1 ? "" : "s"}` };
@@ -133,7 +133,7 @@ export function PulseLine({
       {quality && (
         <span
           className={styles.pulseQuality}
-          title="Coverage quality: independent feeds carrying this vs one outlet echoing"
+          title="Coverage quality: how many independent feeds mention this, or whether one outlet dominates"
         >
           <span
             className={styles.pulseQualityDot}

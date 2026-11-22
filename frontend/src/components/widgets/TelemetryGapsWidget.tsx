@@ -20,7 +20,7 @@ export default function TelemetryGapsWidget({ config }: Props) {
 
   if (isLoading) return <WidgetListSkeleton />;
   if (!data || data.most_needed_sources.length === 0) {
-    return <div className={styles.noData}>No telemetry gaps — every rule&apos;s log sources are covered</div>;
+    return <div className={styles.noData}>No telemetry gaps. Every rule&apos;s log sources are covered.</div>;
   }
 
   const sources = data.most_needed_sources.slice(0, limit);
@@ -42,7 +42,7 @@ export default function TelemetryGapsWidget({ config }: Props) {
                 <span className={styles.meterFill} style={{ width: `${(count / maxCount) * 100}%` }} />
               </span>
               <span className={styles.boardNum} style={{ color: "var(--text-secondary)" }}>
-                blocks {count}
+                {count} rule{count === 1 ? "" : "s"}
               </span>
             </span>
           </span>

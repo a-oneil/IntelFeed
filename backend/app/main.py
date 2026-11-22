@@ -377,8 +377,8 @@ _OPENAPI_TAG_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
             ("tts", "Server-side text-to-speech audio for entries."),
             (
                 "threads",
-                "Story threads: an unfolding story as one narrative object — its spine, its "
-                "member articles, and the re-reports folded underneath them.",
+                "Story threads: one row per unfolding story, with its timeline, its "
+                "member articles, and the re-reports grouped under them.",
             ),
             ("telegram-media", "Media files mirrored from Telegram channels."),
             ("proxy", "Authenticated image proxy for entry content."),

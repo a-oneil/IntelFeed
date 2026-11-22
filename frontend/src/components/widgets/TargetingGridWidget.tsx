@@ -49,7 +49,7 @@ export default function TargetingGridWidget({ config }: Props) {
         ))}
         {data.rows.map((row) => (
           <div key={row.sector} style={{ display: "contents" }}>
-            <div className={styles.heatRowLabel} title={`${row.label} — ${row.total} victims`}>
+            <div className={styles.heatRowLabel} title={`${row.label}: ${row.total} victims`}>
               {row.label}
             </div>
             {row.cells.map((value, i) => (
@@ -57,7 +57,7 @@ export default function TargetingGridWidget({ config }: Props) {
                 key={`${row.sector}-${data.regions[i]}`}
                 className={styles.heatCellBtn}
                 style={cellStyle(value, data.max_cell)}
-                title={`${row.label} · ${data.regions[i]} — ${value} victim${value === 1 ? "" : "s"}`}
+                title={`${row.label}, ${data.regions[i]}: ${value} victim${value === 1 ? "" : "s"}`}
                 onClick={openTracker}
               >
                 {value > 0 ? value : "·"}

@@ -158,13 +158,13 @@ export function CampaignIntakeComposer({
           });
           onClose();
         },
-        onError: (err) => toast.error(appErrorMessage(err) || "Failed to follow"),
+        onError: (err) => toast.error(appErrorMessage(err) || "Could not follow"),
       },
     );
   };
 
   const tabs: SegmentedOption<Tab>[] = [
-    { value: "query", label: "Query", title: "Take everything matching a query, from now on" },
+    { value: "query", label: "Query", title: "Add every article that matches a query, now and later" },
     { value: "entity", label: "Entity", title: "Follow an actor, malware family, CVE or other entity" },
     { value: "story", label: "Story", title: "Follow a story thread by name" },
   ];
@@ -205,8 +205,8 @@ export function CampaignIntakeComposer({
             </button>
           </div>
           <p className={styles.intakeComposerNote}>
-            The campaign owns this query, not you — anyone on it can read, pause or rewrite it. It re-runs every
-            15 minutes and takes whatever is new.
+            This query belongs to the campaign. Anyone on the campaign can read, pause or rewrite it. It runs
+            every 15 minutes and adds new matches.
           </p>
           {showSyntax && (
             <SearchSyntaxHelp
@@ -251,7 +251,7 @@ export function CampaignIntakeComposer({
             <HitList
               empty={
                 settledEntityTerm.length === 0
-                  ? "Type a name. Any entity works here, not only the ones this campaign already lists."
+                  ? "Type a name. Any entity can be followed, not only the ones this campaign already lists."
                   : entitySearching
                     ? "Searching…"
                     : `No ${getEntityLabel(entityType as EntityType).toLowerCase()} matched.`
@@ -290,7 +290,7 @@ export function CampaignIntakeComposer({
             <HitList
               empty={
                 settledStoryTerm.length === 0
-                  ? "Type part of a story's title. Dormant stories count — following one picks up its next wave."
+                  ? "Type part of a story title. Inactive stories can be followed too. New articles are added when the story resumes."
                   : storySearching
                     ? "Searching…"
                     : "No story matched that title."
@@ -323,7 +323,7 @@ export function CampaignIntakeComposer({
                       toast.success(`Linked "${s.display_name || s.name}"`);
                       onClose();
                     },
-                    onError: () => toast.error("Failed to link search"),
+                    onError: () => toast.error("Could not link the search"),
                   },
                 )
               }
@@ -347,7 +347,7 @@ export function CampaignIntakeComposer({
             </div>
           )}
 
-          {!target && <div className={styles.intakePreviewNote}>Nothing aimed at yet.</div>}
+          {!target && <div className={styles.intakePreviewNote}>No target chosen yet.</div>}
 
           {target && preview?.error && (
             <div className={styles.intakeDryRunError}>{preview.error}</div>
@@ -360,17 +360,17 @@ export function CampaignIntakeComposer({
                   {previewing || !preview
                     ? "Checking…"
                     : preview.would_add === 0
-                      ? "Adds nothing right now"
+                      ? "Would add no articles right now"
                       : `Adds ${preview.would_add} article${preview.would_add === 1 ? "" : "s"}`}
                 </span>
                 {preview && preview.already_held > 0 && (
-                  <span className={styles.intakeMeta}>{preview.already_held} already here</span>
+                  <span className={styles.intakeMeta}>{preview.already_held} already in the campaign</span>
                 )}
                 <button
                   type="button"
                   className={styles.intakePrimary}
                   disabled={blocked}
-                  title="Take these and every later one, without being asked again"
+                  title="Add these articles and every later match automatically"
                   onClick={follow}
                 >
                   {addSource.isPending ? "Following…" : "Follow"}
@@ -380,8 +380,8 @@ export function CampaignIntakeComposer({
               {preview && preview.unknown_fields.length > 0 && (
                 <div className={styles.intakeDryRunWarn}>
                   {preview.unknown_fields.map((f) => `${f}:`).join(", ")}{" "}
-                  {preview.unknown_fields.length === 1 ? "is not a field" : "are not fields"} — matched as plain
-                  text. Check the reference before following this.
+                  {preview.unknown_fields.length === 1 ? "is not a field and is" : "are not fields and are"} matched
+                  as plain text. Check the reference before following this.
                 </div>
               )}
 
@@ -408,8 +408,8 @@ export function CampaignIntakeComposer({
               {preview && preview.would_add === 0 && !previewing && (
                 <div className={styles.intakePreviewNote}>
                   {preview.already_held > 0
-                    ? "Everything it matches is already in this campaign. Following it still catches what comes next."
-                    : "Following it anyway is fine — it will take whatever starts matching."}
+                    ? "Every match is already in this campaign. Following it adds future matches."
+                    : "Following it adds articles once they start matching."}
                 </div>
               )}
             </>

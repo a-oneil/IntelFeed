@@ -156,7 +156,7 @@ export function AskAgentPanel({ onClose, askFn, remaining: remainingProp, onRema
         </button>
       </div>
       <div className={styles.footerNote}>
-        Answers on this page come from the IntelFeed instance's AI, not the person who shared it.
+        Answers come from the IntelFeed instance's AI, not from the person who shared this link.
       </div>
     </div>
   );

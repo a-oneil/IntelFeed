@@ -6,15 +6,15 @@ See diagram: [Entity profile assembly](diagrams/entity-profiles-assembly.md)
 
 ## One page, many entity types
 
-Every profile — actors, malware, CVEs, CWEs, TTPs, countries, sectors, tools, observables, mitigations, vendors, products, campaigns — renders through `frontend/src/pages/EntityProfilePage.tsx`. A per-type entry in `frontend/src/components/entityProfile/entityProfileConfig.tsx` sets the tabs, header badges and identity fields, extra Overview panels, external lookup links, and whether the name is editable (`nameEditable`). Header, tabs and panels sit beside it in `components/entityProfile/`.
+Every profile (actors, malware, CVEs, CWEs, TTPs, countries, sectors, tools, observables, mitigations, vendors, products, campaigns) renders through `frontend/src/pages/EntityProfilePage.tsx`. A per-type entry in `frontend/src/components/entityProfile/entityProfileConfig.tsx` sets the tabs, header badges and identity fields, extra Overview panels, external lookup links, and whether the name is editable (`nameEditable`). The header, tabs and panels are in `components/entityProfile/`.
 
 ## Page anatomy
 
-- **Header.** Breadcrumb, type badge and name (click to rename where `nameEditable`). **SignalBadges** are click-to-edit chips (motivation, malware type, tactic, severity, CVSS, EPSS, KEV, region); the country badge links to its profile (a vendor's country comes from Wikidata). Badges the enrichment sources raise sit beside them: a product's support status (`EOL` in red; amber for "security fixes only" or an end of life under 90 days away), and **no patch coming** on a CVE that affects a product past end of life, or a release past end of life of a product that is still maintained (the affected rows' `eol_releases`). Also:
+- **Header.** Breadcrumb, type badge and name (click to rename where `nameEditable`). **SignalBadges** are click-to-edit chips (motivation, malware type, tactic, severity, CVSS, EPSS, KEV, region); the country badge links to its profile (a vendor's country comes from Wikidata). Badges from enrichment sources appear next to them: a product's support status (`EOL` in red; amber for "security fixes only" or an end of life under 90 days away), and **no patch coming** on a CVE that affects a product past end of life, or a release past end of life of a product that is still maintained (the affected rows' `eol_releases`). Also:
   - **Ask Copilot**, a **Watch** toggle, enrichment status
   - an actions menu: markdown export, merge into, add to campaign, convert to another type. Merge and convert are admin-only; convert writes a tombstone so the old name isn't recreated.
 - **Strip under the header.** Mentions timeline and pulse line. CVEs add a lifecycle strip; observables add `ObservableLifecycleStrip`.
-- **Overview tab.** One column, from the brief down to the workspace. The **brief** is the assessment (`AssessmentBlock`: description via `EntityLinkedMarkdown`, so names become links, with recent developments from `GET /api/engine/entities/{type}/{id}/whats-new`; long text folds past 900 characters) with the **next-action chips** under it. The **facts strip** (`SnapshotCard`) is a row of tiles: identity fields and the type's numbers (a CVE's CVSS, EPSS, KEV, affected products, weaknesses). Everything else is a **section row** (`OverviewSection`): one line with a caret, the section name, a count and a one-line digest (how many, the top items, how fresh), which opens in place. Each type lists which rows it has under `overviewSections` in the config and which are open by default under `overviewOpen`; a row with nothing to show is left out. The order is the same on every type (`OVERVIEW_SECTION_ORDER`): Context first, then the rows that are the entity's own record, then Stories & reading, Activity and Workspace. The rows, in that order, are:
+- **Overview tab.** One column, from the brief down to the workspace. The **brief** is the assessment (`AssessmentBlock`: description via `EntityLinkedMarkdown`, so names become links, with recent developments from `GET /api/engine/entities/{type}/{id}/whats-new`; text longer than 900 characters is collapsed) with the **next-action chips** under it. The **facts strip** (`SnapshotCard`) is a row of tiles: identity fields and the type's numbers (a CVE's CVSS, EPSS, KEV, affected products, weaknesses). Everything else is a **section row** (`OverviewSection`): one line with a caret, the section name, a count and a one-line summary (count, top items, how recent), which opens in place. Each type lists its rows under `overviewSections` in the config and the rows open by default under `overviewOpen`. A row with nothing to show is left out. The order is the same on every type (`OVERVIEW_SECTION_ORDER`): Context first, then the rows that are the entity's own record, then Stories & reading, Activity and Workspace. The rows, in that order, are:
   - **Context** (`ContextPanel`): what each enrichment source says about the entity, one collapsible row per source (the first open) with when it last answered and whether that answer is still fresh or stale. Refresh re-runs every source; ↻ re-runs one. A source without its key shows "needs key" and, for admins, links to that source in the Enrichment console. A CVE also gets **CVSS by source**: each source's score (NVD, the CVE record's CNA and CISA-ADP scores) with its vector, and which one the profile shows. Visitors see the section without its buttons. The `SourcesCard` of outbound links (external pivots, Malpedia, GitHub, Wikipedia, a CVE's NVD references) sits in the same row; attaching a Wikipedia article starts from it. See [Source Context](automation-ai-enrichment.md#source-context).
   - **Recent victims** (ransomware actors): leak-site victims from the tracker.
   - **Catalog**: a TTP's MITRE details, related techniques and mitigations; a CWE's family, catalog data, mitigations and affected vendors.
@@ -25,10 +25,10 @@ Every profile — actors, malware, CVEs, CWEs, TTPs, countries, sectors, tools, 
   - **Activity**: the activity feed; a campaign's intake panel (searches and suggestions) sits above it.
   - **Workspace**: entity-scoped AI analysis (`AIAnalysisModule`, for prompts with `show_in_entity_actions`) and analyst notes (`EntityNotesSection`); `?tab=notes` opens this row. Visitors do not get it.
 
-  Which rows are open is remembered per entity type (`profileOpenSections` in `uiStore`). The **Brief / Everything** switch at the right of the tab bar opens every row at once; closing one row drops back to Brief.
+  Which rows are open is remembered per entity type (`profileOpenSections` in `uiStore`). The **Brief / Everything** switch at the right of the tab bar opens every row at once; closing one row switches back to Brief.
 - **Relationships tab** (all types). A typed graph that draws claims only, plus a list in two parts:
-  - **Claims** — typed verbs graded by trust (confidence from analyst action or AI adjudication).
-  - **Co-mentions** — entities in the same articles, marked not claims.
+  - **Claims**: typed verbs with a trust level (confidence from analyst action or AI adjudication).
+  - **Co-mentions**: entities named in the same articles, marked as not claims.
 
   Rows show verb, evidence count, sparkline, confirm / reject; filterable and sortable. A connection an enrichment source claims carries that source's name. Signed-in users also get a **via** chip per source ("via Malpedia"), which narrows the claims to that source's, and an **unresolved · N** toggle listing the names a source gave that match no entity, or more than one (`GET /api/entity-relationships/claims/{type}/{id}`).
 - **Detection tab** (actor, malware, campaign, CVE, CWE, TTP). Linked rules and coverage; **Detection Gaps** (uncovered techniques) opens from the "Review gaps" next-action chip. Public read-only visitors see neither.
@@ -59,13 +59,13 @@ Rows in `entity_relationships` (`backend/app/models/entity_relationship.py`) hav
 - a **source**: `co_occurrence`, `auto_extracted`, `analyst_confirmed`, `analyst_created`, `analyst_rejected`, `external_feed` (the MITRE ATT&CK import writes `external_feed` with `confirmed`) or `enrichment` (an enrichment source's relation claim, `probable`, so it reads as reported)
 - **`evidence_entry_ids`**: the supporting articles
 
-An `enrichment` row exists while some source's claim in `entity_relation_claims` holds it; the claim keeps the source, the name it gave and its evidence, and the row goes when the last claim is withdrawn. See [Relations](automation-ai-enrichment.md#relations).
+An `enrichment` row exists while some source's claim in `entity_relation_claims` holds it; the claim keeps the source, the name it gave and its evidence, and the row is deleted when the last claim is withdrawn. See [Relations](automation-ai-enrichment.md#relations).
 
-Writes check (source type, verb, target type) against the allowlist in `backend/app/intelligence/relationship_matrix.py`; a disallowed combination is flipped to its allowed direction or dropped.
+Writes check (source type, verb, target type) against the allowlist in `backend/app/intelligence/relationship_matrix.py`; a disallowed combination is reversed to its allowed direction or dropped.
 
 Machine links (`auto_extracted`, `co_occurrence`) are judged by two reviewers, and each judgment is a row in `relationship_reviews`; `backend/app/services/edge_settlement.py` derives the link's verdict from them:
 - The adjudicate stage judges a link against one article at a time, by the sentence that would state it. **Keep** is that article's vote for it; **demote** its vote against; **reverb** says the article states the pair with another verb or the other way round, which demotes the claim for that article and credits the corrected link. Only high-confidence answers count.
-- Keeps from articles in two or more feeds (reposts excluded), at `relationship_evidence_promote_count` articles, make it `confirmed` / `corroborated`. A demote with no keep standing makes it `coincidental`: confidence `possible`, hidden from profiles, pivots and graphs. A keep and a demote from different articles make it `disputed`, which stays in Review.
+- Keeps from articles in two or more feeds (reposts excluded), at `relationship_evidence_promote_count` articles, make it `confirmed` / `corroborated`. A demote with no counted keep makes it `coincidental`: confidence `possible`, hidden from profiles, pivots and graphs. A keep and a demote from different articles make it `disputed`, which stays in Review.
 - The edge sweep takes the links still open after a day and judges each against passages from up to four of its articles. In apply mode a stated claim becomes `kept`; see [the edge sweep](intelligence-engine.md#the-edge-sweep).
 - Restore on a demote settles the link as `kept`.
 
@@ -79,7 +79,7 @@ Two tombstones stop rejected data returning:
 
 The observable profile is the simplest: the heading is the value in monospace, nothing is editable inline, and badges are lifecycle facts (kind, role, confidence, status, capture method). It has two tabs (`overview`, `relationships`) and two Overview panels:
 
-- **`observable_provenance`** — capture method, shared-infrastructure tag, role, evidence sentence; base and current confidence, decay and projected expiry; the **Sources** row (`N reports · M feeds`, plus raw sighting count), with a "Reporting" row flagging feed-only values. Buttons: copy (plain or defanged), export sightings CSV, pin confidence, tombstone (admins).
+- **`observable_provenance`** — capture method, shared-infrastructure tag, role, evidence sentence; base and current confidence, decay and projected expiry; the **Sources** row (`N reports · M feeds`, plus raw sighting count), with a "Reporting" row that marks feed-only values. Buttons: copy (plain or defanged), export sightings CSV, pin confidence, tombstone (admins).
 - **`observable_backlinks`** — **Attribution**: who claims the value (verb and trust level), and which actors, malware, campaigns and tools the reporting articles name ("reported with").
 
 `ObservableLifecycleStrip`, mounted by the page rather than the config, draws first seen → latest report → projected expiry. For feed-only values the middle point reads "Listed on N indicator feed(s)".
@@ -109,7 +109,7 @@ Rules:
 
 Fields with a value but no claim return in `unsourced_fields`, marked unsourced.
 
-Claims merge on `claim_key` (entity + field + value + source + article): a nightly sync repeating a value only updates its timestamp, while different sources or articles stay separate rows — that is the agreement count shown.
+Claims merge on `claim_key` (entity + field + value + source + article). A nightly sync that repeats a value only updates its timestamp. Different sources or articles stay separate rows, and their count is the agreement count the profile shows.
 
 ## Backend endpoints
 

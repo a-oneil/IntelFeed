@@ -495,7 +495,7 @@ async def enrich_gap(
             supported=False,
             async_mode=True,
             batch_size=0,
-            message=f"AI enrichment isn't wired up for {body.entity_type} · {body.field}.",
+            message=f"AI enrichment is not available for the {body.field} field of {body.entity_type}.",
         )
 
     model = spec["model"]
@@ -519,7 +519,7 @@ async def enrich_gap(
             supported=True,
             async_mode=True,
             batch_size=0,
-            message="Nothing to enrich.",
+            message="Nothing to enrich: no entity is missing this field.",
         )
 
     from app.workers.entity_maintenance_tasks import ai_enrich_gap_batch
@@ -538,7 +538,7 @@ async def enrich_gap(
             supported=True,
             async_mode=True,
             batch_size=0,
-            message=f"Failed to dispatch AI task: {e}",
+            message=f"Could not start the AI enrichment task: {e}",
         )
 
     return EnrichGapResponse(
@@ -1601,7 +1601,7 @@ async def hygiene_feed(
         description="What applying the proposal changes: 'links' | 'entities' | 'relationships'; null for every "
         "domain. Spans both logs (a link-log reclassify advisory is 'entities'; observables are entities).",
     ),
-    mode: str | None = Query(None, description="'shadow' | 'apply' — applies to entity_maintenance rows."),
+    mode: str | None = Query(None, description="'shadow' | 'apply'. Applies to entity_maintenance rows."),
     pending: bool = Query(
         False,
         description="Only unapplied proposals (skips applied history). Required for the review queue, "
@@ -2127,15 +2127,15 @@ async def apply_normalize_name(
     """
     row = (await db.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.id == log_id))).scalar_one_or_none()
     if not row:
-        raise AppError(code="not_found", message="log row not found", status_code=404)
+        raise AppError(code="not_found", message="Proposal not found.", status_code=404)
     if row.action != "normalize_name":
         raise AppError(
             code="invalid",
-            message=f"can only apply normalize_name rows (got {row.action})",
+            message=f"This endpoint applies normalize_name proposals, not {row.action}.",
             status_code=400,
         )
     if row.applied:
-        raise AppError(code="invalid", message="already applied", status_code=400)
+        raise AppError(code="invalid", message="This proposal was already applied.", status_code=400)
 
     after = row.after or {}
     kind = after.get("kind")
@@ -2146,7 +2146,9 @@ async def apply_normalize_name(
         try:
             merge_target_id = uuid.UUID(str(merge_target_raw))
         except (ValueError, TypeError):
-            raise AppError(code="invalid", message="bad merge_target_id in proposal", status_code=400) from None
+            raise AppError(
+                code="invalid", message="The proposal's merge target id is not a valid UUID.", status_code=400
+            ) from None
 
     spec = ENTITY_TYPE_REGISTRY.get(row.entity_type)
     if not spec:
@@ -2177,7 +2179,7 @@ async def apply_normalize_name(
 
     if kind == "merge_into_canonical":
         if merge_target_id is None:
-            raise AppError(code="invalid", message="merge proposal missing merge_target_id", status_code=400)
+            raise AppError(code="invalid", message="This merge proposal names no target entity.", status_code=400)
         # If canonical target is gone, the merge is moot — mark applied.
         target_exists = (await db.execute(select(model.id).where(model.id == merge_target_id))).scalar_one_or_none()
         if target_exists is None:
@@ -2206,7 +2208,7 @@ async def apply_normalize_name(
         await settle_gone_entity(db, row.entity_type, source_id, successor=(row.entity_type, merge_target_id))
     elif kind == "rename":
         if not proposed_name or not proposed_name.strip():
-            raise AppError(code="invalid", message="rename proposal has empty proposed_name", status_code=400)
+            raise AppError(code="invalid", message="This rename proposal has no proposed name.", status_code=400)
         before_name = entity.name
         entity.name = proposed_name
         await db.flush()
@@ -2358,7 +2360,8 @@ async def scan_alias_hygiene(
                     "case_duplicate": (f"Alias '{a}' differs from canonical '{rname}' only in casing."),
                     "matches_other_entity": (
                         f"Alias '{a}' matches canonical name of another {etype} "
-                        f"({matches_other[1] if matches_other else '?'}) — likely missed merge."
+                        f"({matches_other[1] if matches_other else '?'}). "
+                        "The two are probably duplicates that were never merged."
                     ),
                 }[kind]
 
@@ -2411,19 +2414,19 @@ async def apply_alias_collision(
     """
     row = (await db.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.id == log_id))).scalar_one_or_none()
     if not row:
-        raise AppError(code="not_found", message="proposal not found", status_code=404)
+        raise AppError(code="not_found", message="Proposal not found.", status_code=404)
     if row.action != "alias_collision":
         raise AppError(
             code="invalid",
-            message=f"can only apply alias_collision rows (got {row.action})",
+            message=f"This endpoint applies alias_collision proposals, not {row.action}.",
             status_code=400,
         )
     if row.applied:
-        raise AppError(code="invalid", message="already applied", status_code=400)
+        raise AppError(code="invalid", message="This proposal was already applied.", status_code=400)
 
     bad_alias = (row.after or {}).get("bad_alias")
     if not bad_alias:
-        raise AppError(code="invalid", message="missing bad_alias in proposal", status_code=400)
+        raise AppError(code="invalid", message="This proposal names no alias to trim.", status_code=400)
 
     if row.entity_type not in CASCADE_SPECS:
         raise AppError(
@@ -2557,24 +2560,26 @@ async def apply_vendor_autolink(
     """
     row = (await db.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.id == log_id))).scalar_one_or_none()
     if not row:
-        raise AppError(code="not_found", message="proposal not found", status_code=404)
+        raise AppError(code="not_found", message="Proposal not found.", status_code=404)
     if row.action != "vendor_autolink":
         raise AppError(
             code="invalid",
-            message=f"can only apply vendor_autolink rows (got {row.action})",
+            message=f"This endpoint applies vendor_autolink proposals, not {row.action}.",
             status_code=400,
         )
     if row.applied:
-        raise AppError(code="invalid", message="already applied", status_code=400)
+        raise AppError(code="invalid", message="This proposal was already applied.", status_code=400)
 
     after = row.after or {}
     raw_vid = after.get("proposed_vendor_id")
     if not raw_vid:
-        raise AppError(code="invalid", message="proposal missing proposed_vendor_id", status_code=400)
+        raise AppError(code="invalid", message="This proposal names no vendor.", status_code=400)
     try:
         proposed_vid = uuid.UUID(str(raw_vid))
     except (ValueError, TypeError):
-        raise AppError(code="invalid", message="bad proposed_vendor_id", status_code=400) from None
+        raise AppError(
+            code="invalid", message="The proposal's vendor id is not a valid UUID.", status_code=400
+        ) from None
 
     product = (await db.execute(select(Product).where(Product.id == row.entity_id))).scalar_one_or_none()
     if product is None:
@@ -2805,7 +2810,7 @@ async def scan_id_hygiene(
                     "kind": kind,
                 },
                 reasoning=(
-                    f"Technique id '{raw_id}' doesn't match T{{4}}[.{{3}}] form."
+                    f"Technique id '{raw_id}' is not in the form T1234 or T1234.001."
                     + (f" Canonical: {proposed}." if proposed else " No safe canonical form.")
                 )[:2000],
                 applied=False,
@@ -2853,9 +2858,9 @@ async def scan_id_hygiene(
                 },
                 reasoning=(
                     (
-                        f"CVE id '{raw_cve}' can't be a real id (sequence too long or zero-padded)."
+                        f"CVE id '{raw_cve}' cannot be a real id: the sequence is too long or zero-padded."
                         if raw_cve and _CVE_ID_RE.match(raw_cve)
-                        else f"CVE id '{raw_cve}' doesn't match CVE-YYYY-NNNN+ form."
+                        else f"CVE id '{raw_cve}' is not in the form CVE-YYYY-NNNN."
                     )
                     + (f" Canonical: {proposed}." if proposed else " No safe canonical form.")
                 )[:2000],
@@ -2963,15 +2968,15 @@ async def apply_id_hygiene(
     """
     row = (await db.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.id == log_id))).scalar_one_or_none()
     if not row:
-        raise AppError(code="not_found", message="proposal not found", status_code=404)
+        raise AppError(code="not_found", message="Proposal not found.", status_code=404)
     if row.action not in ("ttp_malformed_id", "cve_malformed_id", "cve_withdrawn"):
         raise AppError(
             code="invalid",
-            message=f"can only apply id-hygiene rows (got {row.action})",
+            message=f"This endpoint applies malformed-id proposals, not {row.action}.",
             status_code=400,
         )
     if row.applied:
-        raise AppError(code="invalid", message="already applied", status_code=400)
+        raise AppError(code="invalid", message="This proposal was already applied.", status_code=400)
 
     after = row.after or {}
 
@@ -2980,7 +2985,7 @@ async def apply_id_hygiene(
         if not proposed:
             raise AppError(
                 code="invalid",
-                message="no canonical form available; dismiss and edit manually",
+                message="No canonical technique id could be derived. Dismiss this proposal and edit the TTP by hand.",
                 status_code=400,
             )
         ttp = (await db.execute(select(TTP).where(TTP.id == row.entity_id))).scalar_one_or_none()
@@ -3002,7 +3007,7 @@ async def apply_id_hygiene(
         if collision is not None:
             raise AppError(
                 code="conflict",
-                message=f"another TTP already uses {proposed} — merge required",
+                message=f"Another TTP already uses {proposed}. Merge the two TTPs instead of renaming this one.",
                 status_code=409,
             )
         before_id = ttp.technique_id
@@ -3036,7 +3041,7 @@ async def apply_id_hygiene(
         if not proposed:
             raise AppError(
                 code="invalid",
-                message="no canonical form available; dismiss and edit manually",
+                message="No canonical CVE id could be derived. Dismiss this proposal and edit the CVE by hand.",
                 status_code=400,
             )
         cve = (await db.execute(select(CVE).where(CVE.id == row.entity_id))).scalar_one_or_none()
@@ -3058,7 +3063,7 @@ async def apply_id_hygiene(
         if collision is not None:
             raise AppError(
                 code="conflict",
-                message=f"another CVE already uses {proposed} — merge required",
+                message=f"Another CVE already uses {proposed}. Merge the two CVEs instead of renaming this one.",
                 status_code=409,
             )
         before_id = cve.cve_id
@@ -3242,7 +3247,7 @@ async def apply_proposed_link_removal(
         await db.execute(select(EntityLinkValidationLog).where(EntityLinkValidationLog.id == log_id))
     ).scalar_one_or_none()
     if not row:
-        raise AppError(code="not_found", message="proposal not found", status_code=404)
+        raise AppError(code="not_found", message="Proposal not found.", status_code=404)
     already_removed = await apply_link_removal_row(db, row)
     return LinkLogResult(log_id=log_id, applied=True, already_removed=already_removed)
 
@@ -3267,7 +3272,7 @@ async def feed_row_evidence(
         log = await db.get(EntityMaintenanceLog, row_id)
         row = _maint_feed_row(log) if log else None
     else:
-        raise AppError(code="invalid", message="unknown source", status_code=400)
+        raise AppError(code="invalid", message="Unknown proposal source.", status_code=400)
     if row is None:
         raise AppError(code="not_found", message="Proposal not found", status_code=404)
     relationship = None
@@ -3304,12 +3309,12 @@ async def dismiss_feed_row(
     the entity, a duplicate review's merge marks the pair as two things, and
     an adjudicator verdict is not filed or applied again for that article."""
     if source not in (LINK_SOURCE, MAINT_SOURCE):
-        raise AppError(code="invalid", message=f"unknown source: {source}", status_code=400)
+        raise AppError(code="invalid", message=f"Unknown proposal source: {source}", status_code=400)
     row = await _load_log_row(db, source, row_id)
     if row is None:
-        raise AppError(code="not_found", message="proposal not found", status_code=404)
+        raise AppError(code="not_found", message="Proposal not found.", status_code=404)
     if not _is_pending(source, row):
-        raise AppError(code="invalid", message="only a pending proposal can be dismissed", status_code=400)
+        raise AppError(code="invalid", message="Only a pending proposal can be dismissed.", status_code=400)
     await dismiss_review_rows(db, [(source, row)], user.id)
 
 
@@ -3391,7 +3396,9 @@ async def get_bulk_apply(
     """Progress of a background Apply all. Records expire two hours after the job finishes."""
     progress = await read_progress(job_id)
     if progress is None:
-        raise AppError(code="not_found", message="No such bulk apply job (or it expired)", status_code=404)
+        raise AppError(
+            code="not_found", message="Bulk apply job not found. Its progress record may have expired.", status_code=404
+        )
     return BulkApplyProgress(**progress)
 
 
@@ -4421,7 +4428,9 @@ async def _decide_apply_maint(db: AsyncSession, row: EntityMaintenanceLog, user:
         if resp.pruned:
             return "applied", None, {"pruned": resp.pruned}
         return "skipped", "no longer an orphan (or already gone)", {}
-    raise AppError(code="invalid", message=f"no apply path for {row.action}", status_code=400)
+    raise AppError(
+        code="invalid", message=f"Proposals of type {row.action} cannot be applied from here.", status_code=400
+    )
 
 
 async def _decide_one(
@@ -4440,11 +4449,15 @@ async def _decide_one(
     if p.verb == "reclassify" or (p.verb == "apply" and link_reclassify):
         target = p.target_type or row.suggested_entity_type
         if row.entity_id is None or not target:
-            raise AppError(code="invalid", message="row has no entity or no proposed type", status_code=400)
+            raise AppError(code="invalid", message="This proposal names no entity or no target type.", status_code=400)
         if key in reclassified:
             if reclassified[key] == target:
                 return "settled", "already reclassified in this call", {}
-            raise AppError(code="conflict", message=f"already reclassified to {reclassified[key]}", status_code=409)
+            raise AppError(
+                code="conflict",
+                message=f"This entity was already reclassified to {reclassified[key]}.",
+                status_code=409,
+            )
         out = await _decide_reclassify(db, row.entity_type, row.entity_id, target, row.reason if is_link else "")
         reclassified[key] = target
         return out
@@ -4492,9 +4505,9 @@ async def decide_proposals(
     (`resolved`). Each row is its own savepoint, so one failure doesn't stop
     the rest."""
     if not body:
-        raise AppError(code="invalid", message="no decisions", status_code=400)
+        raise AppError(code="invalid", message="No decisions were sent.", status_code=400)
     if len(body) > DECISIONS_MAX:
-        raise AppError(code="invalid", message=f"at most {DECISIONS_MAX} decisions per call", status_code=400)
+        raise AppError(code="invalid", message=f"Send at most {DECISIONS_MAX} decisions per call.", status_code=400)
 
     results: list[ProposalDecisionResult | None] = [None] * len(body)
     parsed: list[_Parsed] = []
@@ -4578,7 +4591,11 @@ async def scan_duplicates(user: User = Depends(get_admin_user)) -> ScanDuplicate
     from app.workers.entity_maintenance_tasks import review_duplicate_entities
 
     if max(0, int(app_settings.get("merge_review_batch_size"))) == 0:
-        raise AppError(code="disabled", message="Duplicate review is off: set Pairs Per Run above 0", status_code=400)
+        raise AppError(
+            code="disabled",
+            message="Duplicate review is turned off. Set Pairs Per Run above 0 to enable it.",
+            status_code=400,
+        )
     if await _merge_review_running():
         return ScanDuplicatesResponse(dispatched=False, already_running=True)
     review_duplicate_entities.apply_async(queue="ai")

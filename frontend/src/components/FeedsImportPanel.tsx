@@ -174,8 +174,8 @@ function PublicRssCard() {
       <h3 className={styles.cardTitle}>Public RSS URLs</h3>
       <p className={styles.hint}>
         Share these URLs with any RSS reader. The token in the URL is the only
-        access control — treat it like a password. Re-publishing is gated by the{" "}
-        <strong>Enable Public RSS</strong> setting above.
+        access control. Treat it like a password. The URLs work only while the{" "}
+        <strong>Enable Public RSS</strong> setting above is on.
       </p>
 
       {isLoading || !token ? (
@@ -236,7 +236,7 @@ function PublicRssCard() {
               {regenerate.isPending
                 ? "Regenerating…"
                 : confirming
-                  ? "Click again to confirm — old URLs will break"
+                  ? "Click again to confirm. Old URLs will stop working."
                   : "Regenerate token"}
             </button>
           </div>

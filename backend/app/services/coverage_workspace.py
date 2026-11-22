@@ -1049,7 +1049,7 @@ async def render_set_markdown(db: AsyncSession, summary: DetectionSummary) -> st
         lines += ["## Behaviours", ""]
         for b in ws.behaviours:
             flag = " *(new this window)*" if b.is_new else ""
-            gap = " — **below the line: no matching telemetry source**" if b.below_line else ""
+            gap = " **(no matching telemetry source in the inventory)**" if b.below_line else ""
             lines.append(f"### {b.technique_id} {b.technique_name}{flag}{gap}")
             for q in b.quotes:
                 cite = f"{q.entry_title}" + (f" ¶{q.paragraph_indices[0]}" if q.paragraph_indices else "")
@@ -1085,7 +1085,7 @@ async def render_set_markdown(db: AsyncSession, summary: DetectionSummary) -> st
             lines.append(f"- **{i.get('title', 'rule')}** — {reason}")
         lines += [
             "",
-            "_A skip is a judgement, recorded so the next person doesn't re-litigate it._",
+            "_Skips are recorded with their reason so the next reader does not have to re-check them._",
             "",
         ]
 

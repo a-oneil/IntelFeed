@@ -75,7 +75,7 @@ function menuItems(item: ThreatBoardItem): { label: string; hint: string; state:
       return [
         { label: "Mark handled", hint: "Done for now. Returns when new techniques are reported.", state: "handled" },
         { label: "Dismiss", hint: "Hide it until you reopen it.", state: "muted" },
-        { label: "Untrack", hint: "Unpin it. The ranking decides again.", state: "open" },
+        { label: "Untrack", hint: "Unpin it. The row returns to its ranked position.", state: "open" },
       ];
     default:
       return [
@@ -145,7 +145,7 @@ function actionTitle(item: ThreatBoardItem): string {
     case "audit":
       return "Coverage looks current. Audit it against every technique on record.";
     case "adopt":
-      return "Matching rules can run on telemetry you collect. Adopt them.";
+      return "Matching rules exist and can run on telemetry you already collect. Review and adopt them.";
     case "collect":
       return item.is_story
         ? "No actor, malware or CVE has been identified yet. Read the story and name it."
@@ -305,7 +305,7 @@ function StoryDrawer({
       <div className={styles.dcol}>
         <div className={styles.dhead}>Why this rank · score {item.score}</div>
         <div className={styles.drow}>
-          updates <b>{item.beats || 1}</b> <i>· counted like new techniques, × 2.5</i>
+          updates <b>{item.beats || 1}</b> <i>· × 2.5, the same weight as new techniques</i>
         </div>
         <div className={styles.drow}>
           outlets <b>{item.attention}</b>
@@ -495,7 +495,7 @@ function ThreatDrawer({
       <div className={styles.dcol}>
         <div
           className={styles.dhead}
-          title={item.echoes_folded > 0 ? `${item.echoes_folded} repeat report${item.echoes_folded === 1 ? "" : "s"} of the same stories folded` : undefined}
+          title={item.echoes_folded > 0 ? `${item.echoes_folded} repeat report${item.echoes_folded === 1 ? "" : "s"} of the same stories grouped into these` : undefined}
         >
           {foldsCoverage(item)
             ? `Coverage · ${item.stories} stor${item.stories === 1 ? "y" : "ies"}, ${item.attention} outlets`
@@ -710,7 +710,7 @@ export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
       return;
     }
     if (item.is_generic) {
-      toast.info(`"${item.label}" is flagged as an extraction artefact. Resolve it in Engine review.`);
+      toast.info(`"${item.label}" is flagged as a generic word, not a threat. Resolve it in Engine review.`);
       return;
     }
     // CVE rows land on the CVE face of the Detection tab — the same view the
@@ -873,7 +873,7 @@ export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
                       {item.is_story ? (
                         <>
                           <b>
-                            {item.beats || 1} beat{(item.beats || 1) === 1 ? "" : "s"}
+                            {item.beats || 1} update{(item.beats || 1) === 1 ? "" : "s"}
                           </b>
                           <b>no entity identified</b>
                         </>
@@ -890,7 +890,7 @@ export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
                           <b title="Techniques reported for this threat for the first time in the window">
                             {item.new_techniques} new TTP{item.new_techniques === 1 ? "" : "s"}
                           </b>
-                          <b title="Techniques ever recorded for this threat">
+                          <b title="All techniques recorded for this threat">
                             {item.on_record} on record
                           </b>
                         </>

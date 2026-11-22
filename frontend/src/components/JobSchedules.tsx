@@ -169,7 +169,7 @@ function SourceJobRow({
           <span>{job.human_schedule}</span>
           <span
             className={failed ? styles.runsBad : styles.runs}
-            title="Successful runs of all runs in the last 30 days"
+            title="Successful runs out of all runs in the last 30 days"
           >
             {runs === 0 ? "no runs in 30 days" : `${ok}/${runs} ok in 30 days`}
           </span>
@@ -214,7 +214,7 @@ function JobRow({
       { name: job.name, enabled },
       {
         onSuccess: onChanged,
-        onError: (e) => toast.error(`Couldn't ${enabled ? "enable" : "disable"} ${job.name}: ${(e as Error).message}`),
+        onError: (e) => toast.error(`Could not ${enabled ? "enable" : "disable"} ${job.name}: ${(e as Error).message}`),
       },
     );
 
@@ -225,7 +225,7 @@ function JobRow({
       setRunMsg(`Queued (${res.task_id.slice(0, 8)}...)`);
       setTimeout(() => setRunMsg(null), 4000);
     } catch {
-      setRunMsg("Failed");
+      setRunMsg("Could not queue the job");
       setTimeout(() => setRunMsg(null), 3000);
     }
   };
@@ -236,7 +236,7 @@ function JobRow({
         onChanged();
         onCancelEdit();
       },
-      onError: (e) => toast.error(`Couldn't reset ${job.name}: ${(e as Error).message}`),
+      onError: (e) => toast.error(`Could not reset ${job.name}: ${(e as Error).message}`),
     });
 
   return (
@@ -319,7 +319,7 @@ function JobRow({
                     onChanged();
                     onCancelEdit();
                   },
-                  onError: (e) => toast.error(`Couldn't save the schedule: ${(e as Error).message}`),
+                  onError: (e) => toast.error(`Could not save the schedule: ${(e as Error).message}`),
                 }
               );
             }}

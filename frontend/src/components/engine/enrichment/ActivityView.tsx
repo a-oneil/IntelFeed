@@ -20,12 +20,12 @@ export function ActivityView() {
   const actQ = useEnrichmentActivity();
   const retry = useRetryFailedLookups();
   const a = actQ.data;
-  if (!a) return <p className={s.note}>{actQ.isError ? "Couldn't load activity." : "Loading activity…"}</p>;
+  if (!a) return <p className={s.note}>{actQ.isError ? "Could not load activity." : "Loading activity…"}</p>;
 
   const doRetry = (source?: string) =>
     retry.mutate(source, {
       onSuccess: (r) => toast.success(`Queued ${num(r.queued)} lookups again`),
-      onError: (e) => toast.error(`Couldn't retry: ${(e as Error).message}`),
+      onError: (e) => toast.error(`Could not retry: ${(e as Error).message}`),
     });
   const max = Math.max(1, ...(a.requests ?? []).map((r) => r.requests));
   const gaveUp = a.failed.reduce((n, f) => n + f.count, 0);
@@ -39,7 +39,7 @@ export function ActivityView() {
             <tr>
               <th>Lane</th>
               <th className={s.r}>Waiting</th>
-              <th className={s.r}>Put off</th>
+              <th className={s.r}>Deferred</th>
               <th>Runs</th>
             </tr>
           </thead>
@@ -85,7 +85,7 @@ export function ActivityView() {
       <div className={s.stack}>
         <h4 className={s.h4}>Requests by source · 24h</h4>
         {a.requests == null ? (
-          <p className={s.note}>Redis is unreachable, so request counts aren't available.</p>
+          <p className={s.note}>Redis is unreachable, so request counts are not available.</p>
         ) : a.requests.length === 0 ? (
           <p className={s.note}>No requests in the last 24 hours.</p>
         ) : (

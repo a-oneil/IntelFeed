@@ -261,7 +261,7 @@ Table `tools`: any named software. That includes attack tools, defensive tools, 
 The leak-site victim tracker, filled by the `sync-ransomware-victims` job from ransomware.live. A victim is the organization. A disclosure is one posting: one organization, one group, one time, one leak site. If a group re-lists a victim, or a second group claims it, there is still one victim with several disclosures.
 
 **`ransomware_victims`:**
-- `name` (indexed, **not** unique — dedup uses `normalized_name` and `domain`), `aliases`, `normalized_name`
+- `name` (indexed, **not** unique; dedup uses `normalized_name` and `domain`), `aliases`, `normalized_name`
 - `domain` (indexed) — the strongest dedup signal when present
 - `country_id` (FK, SET NULL), `sector` (a sector slug)
 - `description`, `disclosure_count` (kept up to date by the resolver), `metadata_`
@@ -319,8 +319,8 @@ Table `entity_merge_suggestion_dismissals`: pairs an analyst dismissed in Find D
 Unique on all four pair columns.
 
 #### EntityReclassifyTombstone
-Table `entity_reclassify_tombstones`: stops an entity that was folded into another type from being created again. For example, a malware family merged into a threat actor of the same name. Automatic creation paths (AI extraction, external feed syncs) check `(source_type, normalized_name)` first and link to the surviving entity instead.
-- `normalized_name`, `source_type` (the type the name was folded out of)
+Table `entity_reclassify_tombstones`: stops an entity that was merged into another type from being created again. For example, a malware family merged into a threat actor of the same name. Automatic creation paths (AI extraction, external feed syncs) check `(source_type, normalized_name)` first and link to the surviving entity instead.
+- `normalized_name`, `source_type` (the type the name was moved out of)
 - `target_type`, `target_id` — the surviving entity
 - `active` (default true) — set false to allow the split again
 
@@ -328,9 +328,9 @@ Unique on `(source_type, normalized_name)`.
 
 #### Observable — the IOC ledger
 
-Table `observables`: the indicator ledger. An IOC (indicator of compromise) is a value such as an IP address, domain, file hash or command line that points to attacker activity. Identity is `(kind, value)`. See [intelligence-engine.md](intelligence-engine.md) and [observables.md](observables.md) for how rows get here.
+Table `observables`: one row per indicator. An IOC (indicator of compromise) is a value such as an IP address, domain, file hash or command line that points to attacker activity. Identity is `(kind, value)`. See [intelligence-engine.md](intelligence-engine.md) and [observables.md](observables.md) for how rows get here.
 
-**The rule the schema is built around: regex never creates a row.** Pattern scanning only stages candidates on `entries.observable_candidates`. Rows come from judgment steps ("capture doors"), and once a value is known, later articles containing it are recorded as sightings by exact match.
+**The rule the schema is built around: regex never creates a row.** Pattern scanning only stages candidates on `entries.observable_candidates`. Rows come from AI analysis, the adjudicator, a curated IOC list feed, a TTP observable or an analyst promoting a value. Once a value is known, later articles containing it are recorded as sightings by exact match.
 
 - `kind` (indexed) — one of `ALL_KINDS` (`backend/app/models/observable.py:67`), in four families:
   - **network** — `ipv4`, `ipv6`, `domain`, `url`, `uri_path`, `ja3`, `ja4`, `cert_fingerprint`, `email`
@@ -343,7 +343,7 @@ Table `observables`: the indicator ledger. An IOC (indicator of compromise) is a
   - network roles: `c2`, `delivery`, `payload`, `phishing`, `exfil`, `exploit`, `scanning`
   - host roles: `persistence`, `execution`, `defense_evasion`, `credential_access`, `discovery`, `lateral_movement`, `collection`
 - `description`, `evidence` — the sentence the capture step quoted
-- `base_confidence`, `current_confidence` (Float, default 0.8) — base is what capture asserted; current is after decay
+- `base_confidence`, `current_confidence` (Float, default 0.8) — base is the confidence set at creation; current is after decay
 - `confidence_pinned` — exempt from decay
 - `status` (indexed, default `active`) — set from current confidence: `active` at 0.5 or above, `aging` below 0.5, `expired` below 0.15
 - `is_denied` — analyst denial, separate from status
@@ -474,7 +474,7 @@ Table `threat_board_state`: one analyst decision per row on the Threats board. I
 - `state` (default `open`) — `open`, `handled` or `muted`
 - `new_count_at_decision`, `decided_by` (SET NULL), `decided_at`, `note`
 
-A handled threat comes back by itself once its count of newly seen techniques goes above `new_count_at_decision`. New attacker behavior reopens it; a quiet fortnight does not.
+A handled threat comes back by itself once its count of newly seen techniques goes above `new_count_at_decision`. New attacker behavior reopens it; two quiet weeks do not.
 
 #### LogTypeAlias
 Table `log_type_alias`: maps the many spellings of a log source ("Microsoft-Windows-Sysmon/Operational", "sysmon") to one name, so telemetry checks compare like with like.
@@ -587,7 +587,7 @@ Bookkeeping for the one-pass `entry_analysis` (one AI call that reads an article
 - `batch_id` (indexed), `custom_id`, `attempts`, `reused_from_entry_id`, `error`
 - `adjudication_status` (indexed) — the adjudicate stage's state:
   - `pending`, `completed` or `failed`
-  - `recheck` — a review is owed only for held matches settled after `adjudication_recheck_since`, so the review judges just those, not the whole article again
+  - `recheck` — a review is needed only for held matches settled after `adjudication_recheck_since`, so the review judges only those, not the whole article again
   - or why it was skipped: `skipped_off`, `skipped_plan`, `skipped_echo`, `skipped_nothing_new`, `skipped_score`, `skipped_budget`, `skipped_paused`
 
   An hourly resweep queues budget, paused and recheck rows again.
@@ -646,7 +646,7 @@ Table `entity_context`: what one enrichment source says about one entity, for th
 
 #### EntityRelationClaim
 Table `entity_relation_claims`: one enrichment source's claim that an entity is connected to another, one row per target name a declared `Relation` output lists. See [automation-ai-enrichment.md](automation-ai-enrichment.md#relations).
-- Primary key (`entity_type`, `entity_id`, `source_type`, `output`, `target_key`); `target_key` is the name folded for case and spacing
+- Primary key (`entity_type`, `entity_id`, `source_type`, `output`, `target_key`); `target_key` is the name normalized for case and spacing
 - `relation`, `target_name`, `evidence`, `first_seen_at`, `last_seen_at`
 - `target_type`, `target_id` — the existing entity the name resolved to; both null while the claim is held, with `held_reason` `unknown` or `ambiguous`
 - Indexed on (`target_type`, `target_id`) and (`source_type`, `output`); claims whose entity is gone are pruned nightly
@@ -680,11 +680,11 @@ Table `entity_relationships`: a typed link between two entities, for example "AP
 - `description` — for an AI-asserted link, the sentence that first stated it
 - `evidence_entry_ids` (UUID[]) — articles that support the link (GIN-indexed)
 - `adjudication_verdict`, `adjudicated_at` — what the reviewers settled, derived from `relationship_reviews` by `app/services/edge_settlement.py`:
-  - `kept` — the edge sweep (or an analyst's Restore) found the claim stated; out of the Review lens
+  - `kept` — the edge sweep (or an analyst's Restore) found the claim stated; out of the Review view
   - `corroborated` — kept by articles from two or more feeds (reposts excluded), at `relationship_evidence_promote_count` articles; confidence `confirmed`
-  - `disputed` — one article kept it and another demoted it; stays in the Review lens
+  - `disputed` — one article kept it and another demoted it; stays in the Review view
   - `coincidental` — no reviewed article states it; confidence `possible`, hidden from profiles, pivots, graphs and reports, never promoted again by co-occurrence
-  - `unsure` — the retired nightly job's "could not tell"
+  - `unsure` — the reviewer could not tell
 - `reviewer_kept_entry_ids` (UUID[]) — articles whose review counted a keep
 - `created_by` (FK, CASCADE)
 
@@ -811,7 +811,7 @@ Table `report_templates`.
 **Tables:** `tags`, `entry_tags`, `comments`, `comment_mentions`, `notes`
 
 #### Tag
-Table `tags`. The tag list is shared: one row per name, with a color, a chip flag and a tooltip, managed in Tag Manager. Who sees a tag on an entry is per user (see EntryTag), unless the tag is global. A tag shown as a chip (`display_as_chip`) appears in the entry's badge row instead of the quiet meta line, with `description` as its tooltip.
+Table `tags`. The tag list is shared: one row per name, with a color, a chip flag and a tooltip, managed in Tag Manager. Who sees a tag on an entry is per user (see EntryTag), unless the tag is global. A tag shown as a chip (`display_as_chip`) appears in the entry's badge row instead of the meta line, with `description` as its tooltip.
 - `name` (String 100, unique), `color` (default `#6B7280`)
 - `display_as_chip` (default false), `description` (String 255)
 - `is_global` (default false):
@@ -828,7 +828,7 @@ Table `entry_tags`: one tag on one entry.
 
 Unique on `(entry_id, tag_id, user_id)` with NULLs not distinct.
 
-Read tags through `app.services.entry_tags.visible_to` and write them through `ensure_assignment`, which picks the owner from the tag's scope. In Meilisearch, global tag names are in `tags`. Personal tags are in the filter-only field `user_tags` as `"<user_id>:<name>"`; the server strips that field from results and folds it into the viewer's own `tags` facet.
+Read tags through `app.services.entry_tags.visible_to` and write them through `ensure_assignment`, which picks the owner from the tag's scope. In Meilisearch, global tag names are in `tags`. Personal tags are in the filter-only field `user_tags` as `"<user_id>:<name>"`; the server strips that field from results and merges it into the viewer's own `tags` facet.
 
 #### Comment
 Table `comments`: a comment on any object, with replies.
@@ -842,7 +842,7 @@ Table `comment_mentions`: primary key `(comment_id, mentioned_user_id)`, both CA
 
 #### Note
 Table `notes`: a free-form note, optionally on an entry.
-- `created_by` (SET NULL), `entry_id` (FK, SET NULL — the note survives the entry)
+- `created_by` (SET NULL), `entry_id` (FK, SET NULL; the note survives the entry)
 - `title`, `content_markdown`, `content_html`, `tags` (Text[]), `is_pinned`
 
 ---
@@ -1012,7 +1012,7 @@ Unique on `(scope_type, scope_id)` with NULLs not distinct, so there is only one
 
 **Tables:** `entry_embeddings`, `story_threads`, `story_thread_entries`, `story_thread_beats`, `user_thread_states`
 
-A story thread groups every article about one unfolding story, so a story reported twenty-three times is one row rather than twenty-three. Only `app.intelligence.story_threads` (grouping) and `app.services.thread_narrative` (the written summary, called the spine) write these tables. See [story-threads.md](story-threads.md).
+A story thread groups every article about one unfolding story, so a story reported twenty-three times is one row rather than twenty-three. Only `app.intelligence.story_threads` (grouping) and `app.services.thread_narrative` (the written timeline) write these tables. See [story-threads.md](story-threads.md).
 
 These tables need the `vector` extension. The db image is built from `db/Dockerfile` (`postgres:16-alpine` plus pgvector 0.8.1).
 
@@ -1034,19 +1034,19 @@ Table `story_threads`.
 - `entry_count`, `source_count` (distinct outlets, not feed rows), `echo_count`
 - `first_seen`, `last_seen`, `peak_at`
 - `key_entities` (JSONB) — `[{entity_type, entity_id, label, count}]`
-- `narrative_hash` (the member set the current spine was written from), `narrated_at`
+- `narrative_hash` (the member set the current timeline was written from), `narrated_at`
 
 Indexed on `(status, last_seen)`.
 
 #### StoryThreadEntry
 Table `story_thread_entries`: one article in a thread.
-- `thread_id` (FK, CASCADE), `entry_id` (FK, CASCADE, **unique** — an article belongs to at most one story)
+- `thread_id` (FK, CASCADE), `entry_id` (FK, CASCADE, **unique**; an article belongs to at most one story)
 - `role` (default `beat`) — `origin`, `beat` or `echo`
-- `similarity`, `duplicate_of_entry_id` (FK, SET NULL — for an echo, the article it repeats)
+- `similarity`, `duplicate_of_entry_id` (FK, SET NULL; for an echo, the article it repeats)
 - `source_key` (the outlet's host, not the feed id), `added_at`
 
 #### StoryThreadBeat
-Table `story_thread_beats`: one wave of coverage. All beats are rewritten whenever the spine is rewritten.
+Table `story_thread_beats`: one update in the story. All rows are rewritten whenever the thread's timeline is rewritten.
 - `thread_id` (FK, CASCADE), `position`, `occurred_at`
 - `kind` (default `update`) — `first_disclosure`, `new_tradecraft`, `peak` or `update`
 - `headline`, `body`, `lead_entry_id` (FK, SET NULL), `entry_ids` (JSONB), `collapsed_count`
@@ -1065,13 +1065,13 @@ Table `user_thread_states`: unique on `(user_id, thread_id)`, both CASCADE.
 The daily briefing sorts a day's articles into `### Theme` sections and links each article it cites. These tables save that grouping by parsing the briefing's markdown, which costs no extra AI call. See `backend/app/intelligence/narrative_themes.py`. Controlled by `narrative_themes_enabled` and `narrative_theme_gating` ([engine-settings.md](engine-settings.md#narrative-themes-and-actor-refresh-mode)).
 
 #### NarrativeBriefing
-Table `narrative_briefings`: one parsed daily briefing. Its existence tells "this entry has no theme" apart from "this day was never parsed".
+Table `narrative_briefings`: one parsed daily briefing. Its existence distinguishes "this entry has no theme" from "this day was never parsed".
 - `day_key` (String 10, unique), `theme_count`, `cited_entry_count`, `parsed_at`
 
 #### NarrativeThemeMember
 Table `narrative_theme_members`: which articles the briefing put under which heading. Unique on `(day_key, entry_id, theme)`; also indexed on `(day_key, theme)`.
 - `day_key`, `entry_id` (FK, CASCADE), `theme` (String 200)
-- `section` (default `theme`) — `theme`, `notable`, `closer` or `tldr`. Only `theme` rows have a heading. An article the briefing couldn't place under a theme backs up nothing.
+- `section` (default `theme`) — `theme`, `notable`, `closer` or `tldr`. Only `theme` rows have a heading. An article cited outside a themed section has an empty `theme`.
 
 ---
 
@@ -1141,7 +1141,7 @@ Each table's section lists its unique keys. These are the ones that prevent dupl
 - **`feeds(url)`** — one feed per URL
 - **Entity names** — `threat_actors(name)`, `malware_families(name)`, `tools(name)`, `vendors(name)`, `products(name)`, `countries(name)`, `sectors(slug)`, `sectors(name)`
 - **Catalog ids** — `cves(cve_id)`, `ttps(technique_id)`, `cwes(cwe_id)`, `mitigations(mitre_id)`
-- **`observables(kind, value)`** — one ledger row per indicator
+- **`observables(kind, value)`** — one row per indicator
 - **`victim_disclosures(source, guid)`** — one leak-site posting per source id
 - **`cve_affected(cve_id, cpe_vendor, cpe_product)`**, **`cve_weaknesses(cve_id, cwe_ref)`**
 - **`entity_relationships(source_type, source_id, target_type, target_id, relationship_type)`** — one link per direction and verb
@@ -1157,7 +1157,7 @@ Ransomware victims are the one name-keyed entity without a unique name; the reso
 
 ## Indexing Strategy
 
-Every foreign key and most filter columns have a plain btree index, declared in the models with `index=True` or `__table_args__`. These indexes are worth knowing about:
+Every foreign key and most filter columns have a plain btree index, declared in the models with `index=True` or `__table_args__`. The indexes that matter most for performance:
 
 | Index | Why it exists |
 |---|---|

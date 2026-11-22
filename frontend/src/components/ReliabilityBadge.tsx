@@ -6,12 +6,12 @@ interface Props {
 }
 
 const RATING_CONFIG: Record<string, { label: string; className: string }> = {
-  A: { label: "A — Reliable source", className: "high" },
-  B: { label: "B — Usually reliable source", className: "high" },
-  C: { label: "C — Fairly reliable source", className: "mid" },
-  D: { label: "D — Not usually reliable source", className: "low" },
-  E: { label: "E — Unreliable source", className: "low" },
-  F: { label: "F — Reliability cannot be judged", className: "unjudged" },
+  A: { label: "A: Reliable source", className: "high" },
+  B: { label: "B: Usually reliable source", className: "high" },
+  C: { label: "C: Fairly reliable source", className: "mid" },
+  D: { label: "D: Not usually reliable source", className: "low" },
+  E: { label: "E: Unreliable source", className: "low" },
+  F: { label: "F: Reliability cannot be judged", className: "unjudged" },
 };
 
 /** Admiralty source-reliability rating badge (A–F). Renders nothing when unrated. */

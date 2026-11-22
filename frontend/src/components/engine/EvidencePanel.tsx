@@ -77,7 +77,7 @@ function Article({
       />
       {article.paragraphs.length === 0 && (
         <p className={styles.muted}>
-          The name isn't found in the article text.
+          The name is not found in the article text.
         </p>
       )}
       {article.paragraphs.map((p, i) => (
@@ -91,7 +91,7 @@ function Article({
 
 const VERDICT_LABEL: Record<string, string> = {
   keep: "Kept",
-  demote: "Hid",
+  demote: "Hidden",
   reverb: "Corrected",
   unsure: "Unsure",
   unanswered: "No answer",
@@ -120,7 +120,7 @@ function RelationshipBody({
           )
         </div>
         {data.articles.length === 0 && (
-          <p className={styles.muted}>No evidence article is left.</p>
+          <p className={styles.muted}>No evidence articles remain.</p>
         )}
         {data.articles.map((a) => (
           <div key={a.entry_id} className={styles.article}>
@@ -146,7 +146,7 @@ function RelationshipBody({
             ))}
             {a.passages.length === 0 && !a.analysis_sentence && (
               <>
-                <p className={styles.muted}>No passage names both.</p>
+                <p className={styles.muted}>No passage names both entities.</p>
                 {a.source_only && (
                   <p className={styles.para}>
                     {highlight(a.source_only, names)}
@@ -230,7 +230,7 @@ export function RowEvidencePanel({
   const q = useRowEvidence(id);
   if (q.isLoading) return <div className={styles.panel}>Loading evidence…</div>;
   if (q.isError || !q.data)
-    return <div className={styles.panel}>Couldn't load the evidence.</div>;
+    return <div className={styles.panel}>Could not load the evidence.</div>;
   const d = q.data;
   const profiles = d.profiles ?? [];
   const quote = d.quote && (
@@ -334,7 +334,7 @@ export function RelationshipEvidencePanel({
   const q = useRelationshipEvidence(id);
   if (q.isLoading) return <div className={styles.panel}>Loading evidence…</div>;
   if (q.isError || !q.data)
-    return <div className={styles.panel}>Couldn't load the evidence.</div>;
+    return <div className={styles.panel}>Could not load the evidence.</div>;
   return (
     <div className={styles.panel}>
       <RelationshipBody data={q.data} names={names} />
@@ -346,7 +346,7 @@ export function RelationshipEvidencePanel({
 export function EntityEvidencePanel({ entityType, entityId }: { entityType: string; entityId: string }) {
   const q = useEntityEvidence(entityType, entityId);
   if (q.isLoading) return <div className={styles.panel}>Loading evidence…</div>;
-  if (q.isError || !q.data) return <div className={styles.panel}>Couldn't load the evidence.</div>;
+  if (q.isError || !q.data) return <div className={styles.panel}>Could not load the evidence.</div>;
   return (
     <div className={styles.panel}>
       {q.data.length === 0 && <p className={styles.muted}>No article is linked to it.</p>}

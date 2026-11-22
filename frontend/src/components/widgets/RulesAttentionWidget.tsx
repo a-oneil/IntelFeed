@@ -16,7 +16,7 @@ export default function RulesAttentionWidget({ config }: Props) {
 
   if (isLoading) return <WidgetListSkeleton />;
   if (!data || data.items.length === 0) {
-    return <div className={styles.noData}>No rules with fresh intel since last review</div>;
+    return <div className={styles.noData}>No rules with new intel since their last update</div>;
   }
 
   return (
@@ -39,7 +39,7 @@ export default function RulesAttentionWidget({ config }: Props) {
         </button>
       ))}
       <div className={styles.boardFootNote}>
-        {data.stale_count} of {data.total_rules} published rules have fresh intel
+        {data.stale_count} of {data.total_rules} published rules have new intel
       </div>
     </div>
   );

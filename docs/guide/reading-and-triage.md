@@ -1,7 +1,7 @@
 # Reading and triage
 
-This page covers the three panes, the reader, the keyboard, and how to get
-through a big pile of unread articles quickly.
+This page covers the three panes, the reader, the keyboard, and how to clear
+a large unread list quickly.
 
 ![The reader with an article open: entity links underlined in the body, CVE chips under the title, and the entry list beside it](../assets/screenshots/reader-article.png)
 
@@ -71,7 +71,8 @@ intel panel, the AI panel, notes, tag, ask the copilot, text size, and **More**
 
 **Linked entities.** Hover or click a highlighted name for a card with a
 summary and **Profile** (open its page),
-**Search**, **Copy**, **Enrich** and **Wrong?**. This is the main way to move around.
+**Search**, **Copy**, **Enrich** and **Wrong?**. This is the main way to move
+between articles and profiles.
 
 **Panels.** `w` opens the intel panel: everything linked to this article, with
 **Extract All**, **Gen Rules** (draft detection rules) and **+ Campaign**. `a`
@@ -93,15 +94,15 @@ managers. Open the entity's card and click
 - **Wrong for this article**: removes this one link.
 - **Not a name for …**: the matched alias isn't a real alias for this entity.
   Shown only for alias matches.
-- **Wrong type — convert**, **Duplicate — merge into…** and
+- **Wrong type: convert**, **Duplicate: merge into…** and
   **Unlink from every article**: admins only.
 - **Never match "…" anywhere**: this word is never linked again, to any entity.
 
 Pick the narrowest option that's true. These choices change future linking.
 
 For an observable (an IOC such as an IP, domain or file hash), the menu offers
-**Wrong for this article — remove sighting**, and for admins
-**Never capture "…" — tombstone**.
+**Wrong for this article: remove sighting**, and for admins
+**Never capture "…"**.
 
 ## Keyboard
 
@@ -125,13 +126,13 @@ For an observable (an IOC such as an IP, domain or file hash), the menu offers
 | `Escape` | Close the reader, search or panel |
 | `?` | Show the shortcuts in the app |
 
-Learn `Shift+M`: skim with `j`, stop at the first article you care about, press
-`Shift+M`, and everything you skipped is marked read.
+`Shift+M` is the fastest way to clear a list: skim with `j`, stop at the first
+article you need, press `Shift+M`, and everything you skipped is marked read.
 
 ## Starred vs bookmarked vs tagged
 
-- **Star**: "I'm coming back to this today."
-- **Bookmark**: "This is a reference I'll want in a year."
+- **Star**: an article to come back to today.
+- **Bookmark**: reference material to keep long term.
 - **Tag**: a searchable label, such as `to-rule` or `false-positive`. Saved
   searches are often built on tags.
 
@@ -140,15 +141,15 @@ and `to_rule`.
 
 ## Clearing a big inbox
 
-Two hundred unread and twenty minutes:
+When there are many unread articles and little time:
 
-1. Start in the **Priority Queue**, ranked by what's likely to matter. See [Priority Queue and watching](priority-queue.md).
-2. Work down with `j`. Star anything worth a proper look.
+1. Start in the **Priority Queue**, ranked by what is likely to matter. See [Priority Queue and watching](priority-queue.md).
+2. Work down with `j`. Star anything that needs a closer read.
 3. Switch to **Last 24h** and read the day summaries and divider chips instead
    of the articles.
 4. Go to the bottom and press `Shift+M` to clear the rest (or use the divider's
    mark-day-read button).
-5. Open **Starred** and do the real work there.
+5. Open **Starred** and read those in full.
 
 ## On a phone
 
@@ -157,6 +158,6 @@ an article to open it full-screen; swipe right from the left edge to go back.
 Swipe left on a row for star, bookmark and mark-read buttons. Pull down to
 refresh.
 
-Use a phone for sorting: star what deserves a look and mark the rest read.
+Use a phone for sorting: star what needs a closer read and mark the rest read.
 
 Next: [Searching](searching.md)

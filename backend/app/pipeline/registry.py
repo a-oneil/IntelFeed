@@ -40,19 +40,19 @@ PIPELINE_STAGES: dict[str, StageDef] = {
         name="sanitize",
         kind="inline",
         task_path=None,
-        description="HTML sanitization (nh3 allowlist) + text extraction during fetch",
+        description="HTML sanitization (nh3 allowlist) and text extraction during fetch",
     ),
     "dedup": StageDef(
         name="dedup",
         kind="inline",
         task_path=None,
-        description="GUID + cross-feed content-hash deduplication during fetch",
+        description="GUID and cross-feed content-hash deduplication during fetch",
     ),
     "relevance": StageDef(
         name="relevance",
         kind="inline",
         task_path=None,
-        description="Keyword/pattern relevance score — gates autolink (selective mode) and the AI junk filter",
+        description="Keyword and pattern relevance score. Gates autolink (selective mode) and the AI junk filter",
         config_schema={"threshold": {"type": "number", "setting": "ai_analysis_relevance_threshold"}},
     ),
     "index": StageDef(
@@ -66,8 +66,8 @@ PIPELINE_STAGES: dict[str, StageDef] = {
         kind="pre",
         task_path="app.workers.translation_tasks.translate_entry_task",
         description=(
-            "Auto-translation for feeds with translation enabled — runs before "
-            "autolink/extract so all later stages see the translated text"
+            "Auto-translation for feeds with translation enabled. Runs before "
+            "autolink and extract so all later stages see the translated text"
         ),
     ),
     "autolink": StageDef(
@@ -75,8 +75,8 @@ PIPELINE_STAGES: dict[str, StageDef] = {
         kind="parallel",
         task_path="app.workers.intel_feed_tasks.autolink_entry_task",
         description=(
-            "Aho-Corasick entity linking (actors, malware, CVEs, TTPs, vendors, products, tools); "
-            "dictionary-word matches held pending AI confirmation"
+            "Aho-Corasick entity linking (actors, malware, CVEs, TTPs, vendors, products, tools). "
+            "Matches on common English words are held until the AI analysis confirms them"
         ),
     ),
     "observables": StageDef(
@@ -84,22 +84,23 @@ PIPELINE_STAGES: dict[str, StageDef] = {
         kind="parallel",
         task_path="app.workers.intel_feed_tasks.observables_entry_task",
         description=(
-            "Observable candidates (refang + precision regex) staged on the entry, sightings of "
-            "known ledger values, and curated ioc_list body parsing — regex never creates a ledger row"
+            "Stage observable candidates (refang and precision regex) on the entry, record sightings of "
+            "known observables, and parse curated ioc_list bodies. Regex never creates an observable"
         ),
     ),
     "telegram_links": StageDef(
         name="telegram_links",
         kind="parallel",
         task_path="app.workers.telegram_link_tasks.scan_telegram_links_task",
-        description="Telegram URL/mention extraction",
+        description="Telegram URL and mention extraction",
     ),
     "extract": StageDef(
         name="extract",
         kind="parallel",
         task_path="app.workers.intel_feed_tasks.extract_entry_intel_task",
         description=(
-            "Regex intel extraction (TTP/CVE/mitigation IDs, detection rules); AI analysis runs via the batch queue"
+            "Regex intel extraction (TTP, CVE and mitigation IDs, detection rules). "
+            "AI analysis runs from the batch queue"
         ),
         default_enabled=False,  # historical default: only when feed.auto_extract_on_ingest
         config_schema={
@@ -129,16 +130,16 @@ PIPELINE_STAGES: dict[str, StageDef] = {
         name="score",
         kind="final",
         task_path="app.workers.signal_tasks.score_entry_task",
-        description="Signal engine scoring + one-pass AI analysis enqueue",
+        description="Signal engine scoring, then queue the entry for one-pass AI analysis",
     ),
     "adjudicate": StageDef(
         name="adjudicate",
         kind="post_analysis",
         task_path="app.workers.adjudication_tasks.adjudicate_entry_task",
         description=(
-            "AI review of everything the one-pass analysis wrote to the entry — links, minted entities, "
-            "asserted edges, observables — with the article in hand; verdicts are filed as proposals "
-            "(shadow) or applied inline. Replaces the nightly hygiene jobs"
+            "AI review of everything the one-pass analysis wrote to the entry (links, new entities, "
+            "relationships, observables) against the article text. Verdicts are filed as proposals "
+            "(shadow) or applied directly. Replaces the nightly hygiene jobs"
         ),
         # Enabled in the registry so that, with pipeline plans off (the default),
         # the adjudication_mode setting alone decides; plans only subtract feeds.
@@ -158,7 +159,7 @@ PIPELINE_STAGES: dict[str, StageDef] = {
         name="automate",
         kind="side",
         task_path="app.workers.automation_tasks.run_entry_automations",
-        description="Automation rule evaluation (on_new_entry / keyword / CVE triggers)",
+        description="Automation rule evaluation (on_new_entry, keyword and CVE triggers)",
     ),
 }
 

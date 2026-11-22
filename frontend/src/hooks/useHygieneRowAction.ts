@@ -49,8 +49,8 @@ export function useHygieneRowAction() {
           `/admin/hygiene/adjudication/${extractLogId(row)}/${action}`,
         );
         if (action === "apply") {
-          if (res.data.applied) toast.success(res.data.detail?.deleted ? "Applied — entity deleted" : "Applied");
-          else if (res.data.resolved) toast.message(`Already done (${res.data.reason ?? "nothing left to change"}) — proposal closed`);
+          if (res.data.applied) toast.success(res.data.detail?.deleted ? "Applied: entity deleted" : "Applied");
+          else if (res.data.resolved) toast.message(`Already done (${res.data.reason ?? "nothing left to change"}). Proposal closed.`);
           else toast.message(res.data.reason ?? "Nothing to apply");
         } else if (res.data.restored) toast.success("Restored");
         else toast.message(res.data.reason ?? "Nothing to restore");
@@ -66,7 +66,7 @@ export function useHygieneRowAction() {
         await dismissRow.mutateAsync({ source: row.source, id: extractLogId(row) });
         const reclassify = row.action === "needs_reclassification" || row.action === "adjudication_reclassify";
         // The backend settles a reclassify per entity: every article's copy goes, and it won't be re-proposed.
-        toast.success(reclassify ? `Dismissed — ${row.entity_name ?? "this entity"} won't be proposed again` : "Dismissed");
+        toast.success(reclassify ? `Dismissed. ${row.entity_name ?? "This entity"} will not be proposed again.` : "Dismissed");
       } catch (e) {
         toast.error(`Dismiss failed: ${(e as Error).message}`);
       }
@@ -86,7 +86,7 @@ export function useHygieneRowAction() {
       if (row.action === "normalize_name") {
         try {
           const result = await applyNormalizeName.mutateAsync(extractLogId(row));
-          if (result.skipped) toast.message("Already gone — proposal marked applied");
+          if (result.skipped) toast.message("Already gone. Proposal marked applied.");
           else if (result.kind === "merge_into_canonical")
             toast.success(`Merged into ${result.new_name ?? "canonical entity"}`);
           else toast.success(`Renamed to ${result.new_name ?? "new name"}`);
@@ -98,7 +98,7 @@ export function useHygieneRowAction() {
       if (row.action === "alias_collision") {
         try {
           const r = await applyAliasCollision.mutateAsync(extractLogId(row));
-          if (r.skipped) toast.message("Alias was already gone — marked applied.");
+          if (r.skipped) toast.message("The alias was already removed. Proposal marked applied.");
           else toast.success(`Removed alias '${r.removed_alias ?? "?"}'`);
         } catch (e) {
           toast.error(`Apply failed: ${(e as Error).message}`);
@@ -108,7 +108,7 @@ export function useHygieneRowAction() {
       if (row.action === "vendor_autolink") {
         try {
           const r = await applyVendorAutolink.mutateAsync(extractLogId(row));
-          if (r.skipped) toast.message("Product or vendor missing — marked applied.");
+          if (r.skipped) toast.message("The product or vendor no longer exists. Proposal marked applied.");
           else toast.success("Vendor linked");
         } catch (e) {
           toast.error(`Apply failed: ${(e as Error).message}`);
@@ -118,7 +118,7 @@ export function useHygieneRowAction() {
       if (row.action === "ttp_malformed_id" || row.action === "cve_malformed_id" || row.action === "cve_withdrawn") {
         try {
           const r = await applyIdHygiene.mutateAsync(extractLogId(row));
-          if (r.skipped) toast.message("Entity already gone — marked applied.");
+          if (r.skipped) toast.message("The entity no longer exists. Proposal marked applied.");
           else if (r.action_taken === "renamed") toast.success(`Renamed to ${r.new_id ?? "canonical id"}`);
           else if (r.action_taken === "deleted") toast.success("Withdrawn CVE deleted");
           else toast.success("Applied");

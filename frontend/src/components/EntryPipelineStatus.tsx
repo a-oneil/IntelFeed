@@ -124,7 +124,7 @@ export function EntryPipelineStatus({
   const retry = async (stage: string) => {
     try {
       await api.post(`/engine/entries/${entryId}/stages/${stage}/retry`);
-      toast.success(`${stage} re-dispatched`);
+      toast.success(`${stage} queued to run again`);
       setTimeout(() => qc.invalidateQueries({ queryKey: ["engine", "entry-runs", entryId] }), 3000);
     } catch (err) {
       const body = (err as { response?: { data?: { error?: { message?: string }; detail?: string } } })
@@ -150,9 +150,8 @@ export function EntryPipelineStatus({
           {!data && <div className={styles.empty}>Loading…</div>}
           {data && !data.runs.length && (
             <div className={styles.empty}>
-              No stage runs recorded — this entry was ingested before pipeline
-              logging was enabled. Stages are recorded for every entry ingested
-              from then on.
+              No stage runs recorded. This entry was ingested before pipeline
+              logging was enabled.
             </div>
           )}
           {data?.runs.map((run) => {

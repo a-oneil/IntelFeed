@@ -50,7 +50,7 @@ page**, **Default sort order** and **Date format**.
 
 - **Open links in new tab**
 - **Mark read on scroll**: on if you skim, off if you triage one article at a
-  time. Try both.
+  time.
 - **Show entry previews**: the short snippet under each title.
 - **Compact view**: more rows per screen.
 
@@ -62,13 +62,13 @@ links**, or **Off**. Links inside IntelFeed never ask.
 The dialog lets you copy the link, or copy it defanged (unclickable, for
 reports). It warns in red when the link text names one site but the link goes
 to another, and notes shorteners, raw IP addresses, unusual characters,
-HTTPS-to-HTTP downgrades and `user@host` links, all common phishing tricks.
+HTTPS-to-HTTP downgrades and `user@host` links, all common phishing techniques.
 
 MITRE, NIST (NVD), CVE.org and CISA, and their subdomains, never ask. Tick
 **Don't ask again for …** to trust a site yourself; remove it later under
-**Trusted sites**. Trust is per exact site name, so `example.com` doesn't cover
-`blog.example.com`. A trusted site still asks if the link looks like one of the
-tricks above.
+**Trusted sites**. Trust is per exact site name, so `example.com` does not
+cover `blog.example.com`. A trusted site still asks if the link looks like one
+of the techniques above.
 
 **Reader Typography**: **Font size**, **Line spacing** and **Content width**,
 plus **Read-aloud voice**: **Natural voice (server)** sounds the same everywhere
@@ -88,8 +88,8 @@ it, and **View** opens them.
   **Everyone** when you create them.
 - **Tooltip** adds a short description shown on the chip.
 
-Use **Merge** to fold `to-rule`, `to_rule` and `torule` into one without losing
-anything.
+Use **Merge** to combine `to-rule`, `to_rule` and `torule` into one tag
+without losing any assignments.
 
 For when to use a tag instead of a star or bookmark, see
 [Reading and triage](reading-and-triage.md).
@@ -97,7 +97,7 @@ For when to use a tag instead of a star or bookmark, see
 ## Claude Code Skill
 
 Setup for using IntelFeed from Claude Code in a terminal: install the skill,
-set the environment variables, reload your shell, and start asking.
+set the environment variables, and reload your shell.
 
 There are two skills: the full one, and a lite one that can only search and
 read. Use the lite one unless you want an agent that can make changes.

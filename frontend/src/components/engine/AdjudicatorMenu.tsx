@@ -48,8 +48,8 @@ export function AdjudicatorMenu({
       await api.patch("/system-settings", { settings: { [MODE_KEY]: next } });
       toast.success(
         next === "apply"
-          ? "Applied mode — the adjudicator now applies high-confidence verdicts at ingest"
-          : "Proposed mode — verdicts are filed as suggestions for review",
+          ? "Applied mode: high-confidence verdicts are now applied at ingest."
+          : "Proposed mode: verdicts are filed as suggestions for review.",
       );
     } catch (e) {
       patch(mode);
@@ -66,20 +66,20 @@ export function AdjudicatorMenu({
       triggerClassName={styles.trigger}
       title={
         mode === "off"
-          ? "The adjudicate stage is off — pick a mode here, or turn it on from its settings"
-          : "Proposed: the review files suggestions for this queue · Applied: high-confidence verdicts applied at ingest"
+          ? "The adjudicate stage is off. Pick a mode here, or turn it on from its settings."
+          : "Proposed: verdicts are filed as suggestions in this queue. Applied: high-confidence verdicts are applied at ingest."
       }
     >
       <DropdownItem
         label="Proposed"
-        title="Verdicts are filed here as suggestions; nothing changes until a person applies it"
+        title="Verdicts are filed here as suggestions. Nothing changes until a person applies one."
         active={mode === "shadow"}
         disabled={pending}
         onClick={() => void setMode("shadow")}
       />
       <DropdownItem
         label="Applied"
-        title="High-confidence verdicts are applied at ingest; the rest still land here"
+        title="High-confidence verdicts are applied at ingest. The rest are filed here for review."
         active={mode === "apply"}
         disabled={pending}
         onClick={() => void setMode("apply")}

@@ -139,7 +139,7 @@ function DocsLanding({ index }: { index: { pages: DocumentationPageSummary[] } |
         <h1 className={styles.landingTitle}>IntelFeed documentation</h1>
         <p className={styles.landingLede}>
           How to use the app, how to run it, and how it
-          works underneath. Pick a page from the contents, or just ask.
+          works underneath. Pick a page from the contents, or ask the copilot a question.
         </p>
       </header>
 
@@ -154,7 +154,7 @@ function DocsLanding({ index }: { index: { pages: DocumentationPageSummary[] } |
           </svg>
           <span className={styles.apiText}>
             <strong>API reference</strong>
-            <em>Swagger UI — every endpoint, callable in the browser</em>
+            <em>Swagger UI: every endpoint, callable in the browser</em>
           </span>
           <ExternalIcon />
         </a>

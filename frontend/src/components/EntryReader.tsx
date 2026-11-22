@@ -555,7 +555,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
             </>)}
             <Hint
               title="Extracted intel"
-              body="Every entity, technique, CVE and indicator this article mentions. Click one to open its dossier."
+              body="Every entity, technique, CVE and indicator this article mentions. Click one to open its profile."
               aside={<><kbd>w</kbd></>}
             >
               <button
@@ -816,7 +816,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
             >
               <span className={styles.echoOfIcon} aria-hidden="true">↩</span>
               <span className={styles.echoOfText}>
-                Echoes earlier coverage: <strong>{entry.echo_of.title}</strong>
+                Echo of an earlier article: <strong>{entry.echo_of.title}</strong>
                 {entry.echo_of.feed_title ? ` · ${entry.echo_of.feed_title}` : ""}
                 {entry.echo_of.shared != null && entry.echo_of.total != null && (
                   <span className={styles.echoOfMeta}>

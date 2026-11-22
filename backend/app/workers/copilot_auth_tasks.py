@@ -221,7 +221,7 @@ def _diagnose_failure(cleaned: str, returncode: int | None) -> str:
         if ln.strip() and not set(ln.strip()) <= {"*"} and not set(ln.strip()) <= spinner
     ]
     last = lines[-1][:200] if lines else ""
-    return f"Sign-in didn't complete (CLI exit {returncode}). {last}".strip()
+    return f"Sign-in did not complete (CLI exit {returncode}). {last}".strip()
 
 
 @celery_app.task(

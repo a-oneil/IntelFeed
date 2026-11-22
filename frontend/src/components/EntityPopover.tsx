@@ -50,16 +50,16 @@ function lookupNote(status: string, sourceType: string, label: string): LookupNo
       return null;
     case "budget_exhausted":
     case "backfill_share":
-      return say("is at its daily cap · fills in tomorrow");
+      return say("is at its daily cap. It will be retried tomorrow.");
     case "rate_limited":
     case "breaker_open":
-      return say("asked to slow down · fills in shortly");
+      return say("is rate limited. It will be retried shortly.");
     case "paused":
-      return say("is paused with the rest of enrichment");
+      return say("is paused because enrichment is paused.");
     case "auth_failed":
-      return say("refused its key");
+      return say("rejected its API key.");
     default:
-      return say("didn't answer", true);
+      return say("did not answer.", true);
   }
 }
 
@@ -214,7 +214,7 @@ export function EntityPopover({
         title: "Stop matching this name",
         message:
           `Stop matching "${entity.value}" for every entity, everywhere?\n\n` +
-          "Existing links stay — use \u201cUnlink from every article\u201d to clear those.",
+          "Existing links stay. Use \u201cUnlink from every article\u201d to clear those.",
         confirmLabel: "Stop matching",
         destructive: true,
       });
@@ -231,17 +231,17 @@ export function EntityPopover({
       {
         onSuccess: (result) => {
           if (scope === "global") {
-            toast.success(`Won't match "${entity.value}" again — autolinker vocabulary updated`);
+            toast.success(`"${entity.value}" will not be matched again. Autolinker vocabulary updated.`);
           } else if (scope === "alias") {
             const also = result.links_removed
-              ? ` — unlinked ${result.links_removed} article${result.links_removed === 1 ? "" : "s"} that matched only that name`
+              ? ` Unlinked ${result.links_removed} article${result.links_removed === 1 ? "" : "s"} that matched only that name.`
               : "";
-            toast.success(`"${entity.value}" is no longer a name for ${canonicalName}${also}`);
+            toast.success(`"${entity.value}" is no longer a name for ${canonicalName}.${also}`);
           } else {
             toast.success(`Unlinked "${entity.value}" from this article`);
           }
           if (scope !== "global" && !result.unlinked_from_entry && entryId) {
-            toast.message("Note: no link existed for this article — recorded for review only.");
+            toast.message("No link existed for this article. Recorded for review only.");
           }
         },
         onError: (err: unknown) => {
@@ -279,14 +279,14 @@ export function EntityPopover({
       title: "Never capture this value",
       message:
         `Never capture "${entity.value}" again?\n\n` +
-        "Tombstones the ledger row everywhere: every capture door refuses the value and it leaves the outbound feeds. Sightings are kept as history.",
+        "The value is denied everywhere: no source can capture it again and it is removed from outbound feeds. Sightings are kept as history.",
       confirmLabel: "Never capture",
       destructive: true,
     });
     if (!ok) return;
     denyObservable.mutate(entity.id, {
-      onSuccess: () => toast.success(`"${entity.value}" is tombstoned — no door will capture it again`),
-      onError: () => toast.error("Failed to tombstone"),
+      onSuccess: () => toast.success(`"${entity.value}" will not be captured again.`),
+      onError: () => toast.error(`Could not deny "${entity.value}"`),
     });
     onClose();
   };
@@ -680,7 +680,7 @@ export function EntityPopover({
               onClick={handleObservableWrongHere}
               disabled={unlinkObservableSighting.isPending}
             >
-              Wrong for this article — remove sighting
+              Wrong for this article: remove sighting
             </button>
           )}
           {isAdmin ? (
@@ -689,11 +689,11 @@ export function EntityPopover({
               onClick={handleObservableNeverCapture}
               disabled={denyObservable.isPending}
             >
-              Never capture "{truncate(entity.value, 40)}" — tombstone
+              Never capture "{truncate(entity.value, 40)}"
             </button>
           ) : (
             <div className={styles.enrichMenuItem} style={{ opacity: 0.6, cursor: "default" }}>
-              Global tombstone needs an admin
+              Only an admin can deny this value
             </div>
           )}
           <div className={styles.menuDivider} />
@@ -723,7 +723,7 @@ export function EntityPopover({
           )}
           {isAdmin && (
             <button className={styles.enrichMenuItem} onClick={() => setShowConvertMenu((o) => !o)}>
-              Wrong type — convert <span className="caret-glyph">{showConvertMenu ? "▾" : "▸"}</span>
+              Wrong type: convert <span className="caret-glyph">{showConvertMenu ? "▾" : "▸"}</span>
             </button>
           )}
           {isAdmin && showConvertMenu && (
@@ -751,7 +751,7 @@ export function EntityPopover({
           )}
           {isAdmin && isAliasable && (
             <button className={styles.enrichMenuItem} onClick={() => setMergeOpen(true)}>
-              Duplicate — merge into…
+              Duplicate: merge into…
             </button>
           )}
           <div className={styles.menuDivider} />

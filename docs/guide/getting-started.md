@@ -1,8 +1,7 @@
 # Getting started
 
 What to do in your first hour, in order: sign in, take the setup tour, add a
-few feeds, and change the handful of settings that make daily reading
-comfortable.
+few feeds, and change a few reading settings.
 
 ![The IntelFeed dashboard with overview stat tiles, a morning briefing, a triage flow chart, and an under-the-radar list](../assets/screenshots/dashboard.png)
 
@@ -18,14 +17,14 @@ code filled in.
 There are two roles. Everyone can read everything, add feeds, write notes,
 build campaigns and reports, save searches and write detection rules. Admins
 can also manage and delete feeds, and they control AI configuration, users,
-the Engine and system settings. When this guide says "admin only", that's why.
-Running an instance for a team is covered in [Users and access](users-and-access.md).
+the Engine and system settings. Running an instance for a team is covered in
+[Users and access](users-and-access.md).
 
 ## The onboarding tour
 
 The first time you sign in, a tour opens. It starts with a **Welcome** step and
 then has three chapters. You can skip any step. Closing the tour
-(**Close — resumes here**) saves your place. To come back to it, go to
+(**Close (resumes here)**) saves your place. To come back to it, go to
 **Settings → Account → Getting started** and choose **Resume the tour** (back
 to the step you left) or **Replay from the start**.
 
@@ -34,10 +33,10 @@ to the step you left) or **Replay from the start**.
 1. **Reference data**: checks that the country, ATT&CK, CWE and vendor/product
    lists are loaded, and shows the command to run if they aren't. Without them,
    articles still come in but most entity types never get linked. This is the
-   most common reason IntelFeed "looks broken".
+   most common reason a new instance shows no entity links.
 2. **Add feeds**: starter packs, an OPML file, or a single URL.
 3. **AI provider**: Ollama, Claude, an OpenAI-compatible endpoint, or
-   **Skip — run without AI** (the step lists what you lose). Connecting a
+   **Skip: run without AI** (the step lists what you lose). Connecting a
    provider tests it and then points the AI tasks at it, because a provider
    that no task uses does nothing. The step shows how many tasks now use it and
    which model.
@@ -61,12 +60,11 @@ Click the **+** button (**Add feed**) in the sidebar. Paste an RSS or Atom
 feed URL, or a website address, and IntelFeed finds the feed. Other tabs cover
 GitHub repositories, web scraping, Bluesky, Telegram and OPML files.
 
-Start with a few good sources. You don't need a hundred feeds on day one, and
-pointing IntelFeed at everything buries the articles that matter.
+Start with a few good sources. Too many feeds hide the articles that matter.
 
-Put each feed in a category. Categories are the folders you'll filter by from
-then on, so group feeds by what you'd want to read together, for example
-"Vendor research", "CVE feeds" or "Government advisories".
+Put each feed in a category. You filter by category later, so group feeds by
+what you want to read together, for example "Vendor research", "CVE feeds" or
+"Government advisories".
 
 [Adding and managing feeds](feeds.md) covers the rest: every source type, bulk
 import, per-feed settings, spotting a dead feed, and the one-time setup
@@ -76,8 +74,7 @@ Telegram needs.
 
 **Settings → Reading** (everyone)
 
-- **Reader Typography**: font size, line spacing and content width. You'll
-  spend hours in the reader, so make it comfortable.
+- **Reader Typography**: font size, line spacing and content width.
 - **Default view** and **Default sort order**: all entries or unread only, and
   newest or oldest first.
 - **Compact view** and **Show entry previews**: how much of each article the
@@ -90,16 +87,16 @@ at once.
 
 **Settings → Engine** (admins): in the **Feeds** view, **Image Proxy Enabled**
 loads article images through your server. Article sites never see your
-analysts' IP addresses, and images load faster. The catch is that a saved copy
-doesn't change if the original image does.
+analysts' IP addresses, and images load faster. A saved copy does not update
+if the original image changes.
 
 **Settings → AI Configuration** (admins): on the **Providers** tab, check the
 provider you set up during the tour.
 
 **Settings → Engine → Enrichment** (admins): turn on the enrichment sources
-you want. NVD, EPSS and CISA KEV make a CVE page worth opening. They add the
-severity score, how likely the flaw is to be exploited, and whether it's known
-to be exploited. See [Entities and profiles](entities.md).
+you want. NVD, EPSS and CISA KEV add the most to a CVE page: the severity
+score, how likely the flaw is to be exploited, and whether it is known to be
+exploited. See [Entities and profiles](entities.md).
 
 ## What happens next
 
@@ -107,7 +104,7 @@ Feeds are checked on a schedule. As articles arrive, IntelFeed finds known
 entities in each one and links them. If AI is set up, it also summarises each
 article and pulls out more detail.
 
-Give it a few days before you judge the intelligence side. Entity pages grow
-over time: they're thin on day one and useful by the end of the month.
+Entity pages fill in over time. Expect little on day one and more after a few
+weeks.
 
 Next: [Adding and managing feeds](feeds.md)

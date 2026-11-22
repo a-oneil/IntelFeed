@@ -45,11 +45,11 @@ export const TAB_LABELS: Record<TabKey, string> = {
 export const TAB_HINTS: Partial<Record<TabKey, { title: string; body: string; aside?: string }>> = {
   relationships: {
     title: "Relationships",
-    body: "Who this is tied to and how strongly, built only from articles that named both.",
+    body: "Entities linked to this one and how strongly, built only from articles that name both.",
   },
   victimology: {
     title: "Victimology",
-    body: "Who targets this industry — reported in articles vs asserted as a claim — and the leak-site victims posted in it.",
+    body: "Who targets this industry, reported in articles or recorded as a claim, and the leak-site victims posted in it.",
     aside: "Leak-site claims are the gang's claims, not confirmed breaches.",
   },
   detection_gaps: {
@@ -487,7 +487,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
         out.push({
           label: "KEV",
           tone: "critical",
-          title: `CISA Known Exploited Vulnerability${e.kev_date_added ? ` — added ${e.kev_date_added}` : ""}${e.kev_due_date ? `, remediation due ${e.kev_due_date}` : ""}`,
+          title: `CISA Known Exploited Vulnerability${e.kev_date_added ? `. Added ${e.kev_date_added}` : ""}${e.kev_due_date ? `. Remediation due ${e.kev_due_date}` : ""}`,
         });
       }
       // Qualitative headline only — the numbers (CVSS score, EPSS, PoC count)
@@ -502,7 +502,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
         placeholder: "set severity",
       });
       const ex = exploitBadge(e.exploit_availability);
-      const manual = e.exploit_status_source === "manual" ? " — set manually, enrichment won't overwrite" : "";
+      const manual = e.exploit_status_source === "manual" ? ". Set manually, so enrichment does not overwrite it." : "";
       out.push({
         ...(ex ?? { label: "", tone: "neutral" as BadgeTone }),
         title: (ex?.title ?? "Exploit availability") + manual,
@@ -540,14 +540,14 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
         out.push({
           label: e.abstraction,
           tone: "neutral",
-          title: "Abstraction level — Pillar is broadest, Variant most specific",
+          title: "Abstraction level: Pillar is broadest, Variant is most specific",
         });
       }
       if (e.kind === "category") {
         out.push({
           label: "Category",
           tone: "neutral",
-          title: "A MITRE grouping, not a weakness — never a valid CVE mapping target",
+          title: "A MITRE grouping, not a weakness. Not a valid CVE mapping target.",
         });
       }
       if (e.likelihood_of_exploit) {
@@ -567,7 +567,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
         out.push({
           label: e.mapping_usage,
           tone: e.mapping_usage === "Prohibited" ? "danger" : "medium",
-          title: `MITRE mapping guidance: ${e.mapping_usage} — NVD tagging a CVE with this id is imprecise`,
+          title: `MITRE mapping guidance: ${e.mapping_usage}. Tagging a CVE with this id is imprecise.`,
         });
       }
       if (e.is_deprecated) {
@@ -575,7 +575,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
           label: e.superseded_by ? `Retired → ${e.superseded_by}` : "Retired",
           tone: "danger",
           title: e.superseded_by
-            ? `Retired from the CWE catalog — replaced by ${e.superseded_by}`
+            ? `Retired from the CWE catalog. Replaced by ${e.superseded_by}.`
             : "Retired from the CWE catalog",
         });
       }
@@ -623,8 +623,8 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
           label: e.superseded_by ? `Revoked → ${e.superseded_by}` : "Deprecated",
           tone: "danger",
           title: e.superseded_by
-            ? `Revoked by MITRE — replaced by ${e.superseded_by}`
-            : "Deprecated by MITRE — no longer part of ATT&CK",
+            ? `Revoked by MITRE. Replaced by ${e.superseded_by}.`
+            : "Deprecated by MITRE. No longer part of ATT&CK.",
         });
       }
       return out;
@@ -667,7 +667,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
   sector: {
     tabs: ["overview", "victimology", "relationships"],
     signalBadges: (e) =>
-      e.slug ? [{ label: e.slug, tone: "neutral", title: "Canonical slug — what sector.slug: searches" }] : [],
+      e.slug ? [{ label: e.slug, tone: "neutral", title: "Canonical slug. Used in sector.slug: searches." }] : [],
     identityFields: [],
     hasAliases: true,
     hasDescription: true,
@@ -706,12 +706,12 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     tabs: ["overview", "relationships"],
     signalBadges: (e) => [
       ...(e.kind ? [{ label: e.kind, tone: "info" as BadgeTone, title: "Observable kind" }] : []),
-      ...(e.role ? [{ label: `role · ${e.role}`, tone: "neutral" as BadgeTone, title: "What this value was doing, per the capturing door" }] : []),
+      ...(e.role ? [{ label: `role · ${e.role}`, tone: "neutral" as BadgeTone, title: "The role this value played, as recorded when it was captured" }] : []),
       ...(typeof e.current_confidence === "number"
         ? [{
             label: `confidence ${Math.round(e.current_confidence * 100)}%`,
             tone: (e.current_confidence >= 0.5 ? "success" : e.current_confidence >= 0.15 ? "warning" : "neutral") as BadgeTone,
-            title: "Current confidence — decays with age for network kinds, resets on a new sighting",
+            title: "Current confidence. Decays with age for network kinds and resets on a new sighting.",
           }]
         : []),
       ...(e.status && e.status !== "active"

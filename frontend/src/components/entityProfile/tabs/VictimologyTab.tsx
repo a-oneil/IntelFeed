@@ -151,10 +151,10 @@ export function VictimologyTab({
       </div>
 
       <div className={styles.relGroups}>
-        {renderRows("Threat Actors — reported", reportedActorRows, "No articles describe an actor hitting this sector yet.")}
-        {renderRows("Malware — reported", reportedMalwareRows, "No articles describe a family hitting this sector yet.")}
-        {renderRows("Threat Actors — asserted", assertedActorRows, "No targets-sector claims on actors.")}
-        {renderRows("Malware — asserted", assertedMalwareRows, "No targets-sector claims on malware.")}
+        {renderRows("Threat Actors: reported", reportedActorRows, "No articles describe an actor hitting this sector yet.")}
+        {renderRows("Malware: reported", reportedMalwareRows, "No articles describe a family hitting this sector yet.")}
+        {renderRows("Threat Actors: claimed", assertedActorRows, "No targets-sector claims on actors.")}
+        {renderRows("Malware: claimed", assertedMalwareRows, "No targets-sector claims on malware.")}
       </div>
 
       <MonthBars series={victims.monthly} label="Leak-site victims by month" />
@@ -203,7 +203,7 @@ export function VictimologyTab({
       {countries.length > 0 && (
         <div className={styles.section}>
           <div className={styles.sectionHeader}>
-            Where it is hit <span className={styles.sectionCount}>{countries.length}</span>
+            Countries hit <span className={styles.sectionCount}>{countries.length}</span>
           </div>
           <div className={styles.entityList}>
             {countries.map((c) => (
@@ -241,7 +241,7 @@ export function VictimologyTab({
       {intel_profiles.length > 0 && (
         <div className={styles.section}>
           <div className={styles.sectionHeader}>
-            Intel profiles scoping this vertical <span className={styles.sectionCount}>{intel_profiles.length}</span>
+            Intel profiles that include this sector <span className={styles.sectionCount}>{intel_profiles.length}</span>
           </div>
           <div className={styles.statGrid}>
             {intel_profiles.map((p) => (

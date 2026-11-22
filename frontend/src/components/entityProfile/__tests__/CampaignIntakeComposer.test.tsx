@@ -83,7 +83,7 @@ describe("CampaignIntakeComposer", () => {
     });
 
     await waitFor(() => expect(screen.getByText("Adds 4 articles")).toBeInTheDocument());
-    expect(screen.getByText("1 already here")).toBeInTheDocument();
+    expect(screen.getByText("1 already in the campaign")).toBeInTheDocument();
     expect(screen.getByText("Akira claims a clinic")).toBeInTheDocument();
     // Nothing committed by typing.
     expect(addSource).not.toHaveBeenCalled();
@@ -175,7 +175,7 @@ describe("CampaignIntakeComposer", () => {
 
   it("says nothing is aimed at yet rather than previewing an empty query", () => {
     renderComposer();
-    expect(screen.getByText("Nothing aimed at yet.")).toBeInTheDocument();
+    expect(screen.getByText("No target chosen yet.")).toBeInTheDocument();
     expect(previewTarget).toBeNull();
   });
 });

@@ -131,7 +131,7 @@ export function useTriageView(convergenceDefaults: ConvergenceDefaults = { windo
           failureCountRef.current += 1;
           console.warn("[useTriageView] auto-save failed", err);
           if (failureCountRef.current === 1) {
-            toast.error("Failed to save triage view — will retry");
+            toast.error("Could not save the dashboard layout. It will retry.");
           }
         },
       });

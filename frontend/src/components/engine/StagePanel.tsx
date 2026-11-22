@@ -38,7 +38,7 @@ export function StagePanel({
       <div className={styles.head}>
         <h3 className={styles.name}>{stage.replace(/_/g, " ")}</h3>
         {info && <span className={styles.kind}>{KIND_LABELS[info.kind] ?? info.kind}</span>}
-        <span className={styles.live}>LIVE — affects ingestion</span>
+        <span className={styles.live}>LIVE: affects ingestion</span>
         {info && <span className={styles.desc}>{info.description}</span>}
         {info && info.kind !== "inline" && (
           <button type="button" className={styles.errLink} onClick={() => onViewErrored(stage)}>
@@ -53,9 +53,9 @@ export function StagePanel({
         {stage === "extract" && (
           <>
             <p className={styles.note}>
-              Pattern matching, no AI: pulls CVE, ATT&amp;CK technique and mitigation IDs (and detection
-              rules, where the feed asks for them) straight out of the text at ingest. The AI reads the
-              article later — its switch, model, budget and gates live on the{" "}
+              The extract stage uses pattern matching, not AI. It pulls CVE, ATT&amp;CK technique and
+              mitigation IDs (and detection rules, where the feed asks for them) out of the text at ingest.
+              The AI reads the article later. Its switch, model, budget and gates are on the{" "}
               <strong>AI analysis</strong> column.
             </p>
             <SystemSettings
@@ -69,8 +69,9 @@ export function StagePanel({
         {stage === "autolink" && (
           <>
             <p className={styles.note}>
-              Entity &amp; link cleanup lives in the table: the <strong>Review</strong> tab holds every
-              proposal (links, entities, relationships) with Apply and Dismiss, or open{" "}
+              The autolink stage matches known entity names in each article and links the entry to them.
+              Cleanup of entities and links is on the <strong>Review</strong> tab, which lists every
+              proposal (links, entities, relationships) with Apply and Dismiss. Open{" "}
               <strong>Maintenance</strong> (top-right) for global sweeps.
             </p>
             <SystemSettings
@@ -87,11 +88,10 @@ export function StagePanel({
         {stage === "observables" && (
           <>
             <p className={styles.note}>
-              The ledger's safety posture. <strong>AI capture mode</strong> is the big one:{" "}
-              <strong>shadow</strong> stages every AI-confirmed indicator as an entry candidate for
-              review; <strong>capture</strong> (default) lets AI confirmations create ledger rows
-              directly. Outbound blocklists/TAXII live under <strong>Publishing</strong>{" "}
-              (top-right).
+              <strong>AI capture mode</strong> controls how AI-confirmed indicators enter the observables
+              list. In <strong>shadow</strong> mode they are held as candidates for review. In{" "}
+              <strong>capture</strong> mode (the default) they are added directly. Outbound blocklists
+              and TAXII are under <strong>Publishing</strong> (top-right).
             </p>
             <SystemSettings
               filterGroups={["observables"]}
@@ -108,18 +108,18 @@ export function StagePanel({
         {stage === "adjudicate" && (
           <>
             <p className={styles.note}>
-              After the one-pass analysis lands, a second AI call re-reads the article next to everything
-              the analysis wrote to the entry and judges each item. <strong>Mode</strong> is the master
-              switch: <strong>off</strong> never runs, <strong>shadow</strong> files every verdict as a
-              proposal on the <strong>Review</strong> tab, <strong>apply</strong> fixes high-confidence
-              verdicts at ingest. Per-feed on/off is a chip in{" "}
-              <strong>Plans</strong> and only bites when Pipeline Plans is on.
+              After the one-pass analysis finishes, a second AI call re-reads the article alongside
+              everything the analysis wrote to the entry and judges each item. <strong>Mode</strong> is
+              the master switch: <strong>off</strong> never runs, <strong>shadow</strong> files every
+              verdict as a proposal on the <strong>Review</strong> tab, <strong>apply</strong> applies
+              high-confidence verdicts at ingest. Per-feed on/off is set in <strong>Plans</strong> and
+              applies only when Pipeline Plans is enabled.
             </p>
             <p className={styles.note}>
               In <strong>apply</strong> mode a verdict still lands on the Review tab instead of being applied when it is
               under the confidence floor, when it is a type change that has not reached consensus yet, when the article
               tripped the circuit breaker (too many destructive verdicts in one review), or when it is an assessment
-              (those are only ever notes). The duplicate review always files its merges there.
+              (those are notes only). The duplicate review always files its merges there.
             </p>
             <SystemSettings filterGroups={["adjudication"]} flat hideGroupTitle />
           </>
@@ -127,8 +127,8 @@ export function StagePanel({
         {stage === "analyze" && (
           <>
             <p className={styles.note}>
-              The one-pass AI read of each article, requested when scoring finishes and run on the AI
-              worker. An article skips it when the switch below is off, when its feed's{" "}
+              The analyze stage is the one-pass AI read of each article. It is requested when scoring
+              finishes and runs on the AI worker. An article skips it when the switch below is off, when its feed's{" "}
               <strong>AI analysis</strong> toggle is off or its extraction mode is <strong>none</strong>{" "}
               (feed settings), or when it scores under the junk gate. A near-duplicate of an article
               already analyzed copies that analysis instead. The <strong>AI review</strong> column runs
@@ -140,7 +140,7 @@ export function StagePanel({
         {(stage === "cooccurrence" || stage === "correlation") && <CorrelationTuningPanel />}
         {stage === "automate" && (
           <p className={styles.note}>
-            Automation rules run as the pipeline's side channel — manage them on the{" "}
+            Automation rules run as the pipeline's side channel. Manage them on the{" "}
             <a href="/automation">Automation page</a>.
           </p>
         )}

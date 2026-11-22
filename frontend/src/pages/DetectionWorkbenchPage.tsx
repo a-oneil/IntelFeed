@@ -279,7 +279,7 @@ export function DetectionWorkbenchPage() {
       <div className={styles.header}>
         <h1>Detection Engineering Workbench</h1>
         <p className={styles.headerSubtitle}>
-          Analyze entries to generate attack chains, indicators, and detection rules
+          Analyze entries to extract attack chains, indicators and detection rules.
         </p>
       </div>
 
@@ -769,7 +769,7 @@ function RelatedIntelligenceSection({
             {cves.map((c, i) => (
               <li key={i} className={styles.relatedListItem}>
                 <strong>{c.cve_id}</strong>
-                {c.description && <span> — {c.description}</span>}
+                {c.description && <span>: {c.description}</span>}
               </li>
             ))}
           </ul>

@@ -137,7 +137,7 @@ export const FIELD_GROUPS: QueryFieldGroup[] = [
     label: "Observables",
     accent: "var(--entity-ioc)",
     fields: [
-      { token: "ioc:", hint: "Observable value or label — ioc:45.155.204.119, ioc:amsi bypass" },
+      { token: "ioc:", hint: "Observable value or label, e.g. ioc:45.155.204.119" },
       { token: "ioc.kind:", hint: "ipv4, domain, url, sha256, cmdline, registry, script, …" },
       { token: "ioc.role:", hint: "c2, delivery, payload, phishing, exfil, exploit, scanning" },
       { token: "ioc.status:", hint: "active, aging, expired" },
@@ -147,9 +147,9 @@ export const FIELD_GROUPS: QueryFieldGroup[] = [
     label: "Weaknesses",
     accent: "var(--entity-cwe)",
     fields: [
-      { token: "cwe:", hint: "CWE id or name — cwe:CWE-416, cwe:use after free" },
+      { token: "cwe:", hint: "CWE id or name, e.g. cwe:CWE-416" },
       { token: "cwe.abstraction:", hint: "Pillar, Class, Base, Variant, Compound" },
-      { token: "cwe.usage:", hint: "MITRE mapping guidance — Allowed, Discouraged, Prohibited" },
+      { token: "cwe.usage:", hint: "MITRE mapping guidance: Allowed, Discouraged, Prohibited" },
       { token: "cwe.parent:", hint: "Parent weakness id" },
       { token: "cwe.deprecated:", hint: "true / false" },
     ],

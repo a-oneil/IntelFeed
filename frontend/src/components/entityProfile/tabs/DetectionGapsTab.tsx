@@ -67,7 +67,7 @@ export function DetectionGapsTab({
           </span>
         </div>
         <div className={styles.emptySection}>
-          No gaps — every technique either has a satisfiable rule or is library-only (see Detection tab).
+          No gaps. Every technique has a rule or is library-only. See the Detection tab.
         </div>
       </div>
     );

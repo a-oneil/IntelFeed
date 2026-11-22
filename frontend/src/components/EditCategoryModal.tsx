@@ -41,25 +41,25 @@ const PROCESSING = [
 ];
 
 const RELIABILITY = [
-  { value: "A", label: "A — Reliable" },
-  { value: "B", label: "B — Usually reliable" },
-  { value: "C", label: "C — Fairly reliable" },
-  { value: "D", label: "D — Not usually reliable" },
-  { value: "E", label: "E — Unreliable" },
-  { value: "F", label: "F — Cannot be judged" },
+  { value: "A", label: "A: Reliable" },
+  { value: "B", label: "B: Usually reliable" },
+  { value: "C", label: "C: Fairly reliable" },
+  { value: "D", label: "D: Not usually reliable" },
+  { value: "E", label: "E: Unreliable" },
+  { value: "F", label: "F: Cannot be judged" },
 ];
 
 const TIMELINESS = [
-  { value: "excellent", label: "Excellent — often first to report" },
-  { value: "good", label: "Good — reports the same day" },
-  { value: "fair", label: "Fair — a few days behind" },
-  { value: "poor", label: "Poor — weeks behind" },
+  { value: "excellent", label: "Excellent: often first to report" },
+  { value: "good", label: "Good: reports the same day" },
+  { value: "fair", label: "Fair: a few days behind" },
+  { value: "poor", label: "Poor: weeks behind" },
 ];
 
 const RELEVANCE = [
-  { value: "high", label: "High — almost always worth reading" },
-  { value: "medium", label: "Medium — sometimes worth reading" },
-  { value: "low", label: "Low — rarely worth reading" },
+  { value: "high", label: "High: almost always worth reading" },
+  { value: "medium", label: "Medium: sometimes worth reading" },
+  { value: "low", label: "Low: rarely worth reading" },
 ];
 
 const ON_OFF = [
@@ -215,8 +215,8 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
     const summarize = <T,>(pick: (f: Feed) => T, render: (v: T) => string): string => {
       const values = [...new Set(feeds.map(pick))];
       if (values.length === 0) return "";
-      if (values.length > 1) return " — mixed today";
-      return ` — all ${render(values[0])}`;
+      if (values.length > 1) return " (mixed today)";
+      return ` (all ${render(values[0])})`;
     };
     const onOff = (v: boolean) => (v ? "on" : "off");
 
@@ -379,7 +379,7 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
                 setProcessing,
                 PROCESSING,
                 current.processing,
-                "Not analysing a feed leaves its articles searchable but pulls nothing out of them."
+                "If a feed is not analysed, its articles stay searchable but nothing is extracted from them."
               )}
               {field(
                 "cat-ai",

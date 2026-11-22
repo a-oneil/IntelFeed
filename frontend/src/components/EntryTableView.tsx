@@ -211,7 +211,7 @@ const COLUMNS: DataTableColumn<TableRow>[] = [
         return (
           <span
             className={styles.threadTitle}
-            title={`${r.thread.title} — ${threadSummaryLine(r.thread)}`}
+            title={`${r.thread.title}: ${threadSummaryLine(r.thread)}`}
           >
             <span className={styles.threadGlyph} aria-hidden>⟲</span>
             <span className={`${table.strong} ${table.ellipsis}`}>{r.thread.title}</span>
@@ -321,10 +321,10 @@ const COLUMNS: DataTableColumn<TableRow>[] = [
         rank === 4
           ? "CISA KEV CVE (actively exploited) with no detection rules"
           : rank === 3
-            ? "High-risk CVE (high EPSS / weaponized) with no detection rules"
+            ? "High-risk CVE (high EPSS or weaponized) with no detection rules"
             : rank === 2
-              ? "No detection rule exists for the observed TTPs/CVEs"
-              : "Library rules exist, but required data sources aren't in your telemetry";
+              ? "No detection rule covers the TTPs or CVEs in this article"
+              : "Library rules exist, but required data sources are not in your telemetry";
       return <span className={`${styles.oppBadge} ${cls}`} title={tip}>{label}</span>;
     },
   },

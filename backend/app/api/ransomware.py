@@ -320,7 +320,7 @@ async def _watchlist_exposure(db: AsyncSession, user: User, start: datetime) -> 
                     name=name,
                     kind="watched group",
                     status="hit" if c else "clear",
-                    detail=f"{c} victims · window" if c else "no new activity",
+                    detail=f"{c} new victims in window" if c else "no new activity",
                     hit=c > 0,
                 )
             )

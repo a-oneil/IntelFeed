@@ -254,10 +254,10 @@ describe("pipeline plans", () => {
 
   it("reports the ledger scan only while the feed is analysed", () => {
     expect(summarizeStages(values(), ctx(true))).toContain(
-      "checked against your indicator ledger"
+      "checked against your IOC list"
     );
     expect(
       summarizeStages(values({ intel_extraction_mode: "none" }), ctx(true))
-    ).not.toContain("checked against your indicator ledger");
+    ).not.toContain("checked against your IOC list");
   });
 });

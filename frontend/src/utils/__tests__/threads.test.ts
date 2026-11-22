@@ -161,8 +161,8 @@ describe("magazineQueueItems", () => {
 });
 
 describe("threadSummaryLine", () => {
-  it("counts outlets, articles, what is new, and what was folded", () => {
-    expect(threadSummaryLine(thread())).toBe("3 outlets · 3 articles · 2 new · 1 folded");
+  it("counts outlets, articles, what is new, and what was grouped", () => {
+    expect(threadSummaryLine(thread())).toBe("3 outlets · 3 articles · 2 new · 1 grouped");
   });
 
   it("drops the empty halves", () => {

@@ -832,7 +832,7 @@ async def create_mitigation_manual(
     if mitigation is None:
         raise AppError(
             code="bad_request",
-            message="Not an ATT&CK mitigation: use a catalog M-ID (e.g. M1017) or its exact name",
+            message="Not an ATT&CK mitigation. Use a catalog id such as M1017, or the mitigation's exact name.",
             status_code=400,
         )
 
@@ -2381,7 +2381,7 @@ DETECTION_GAPS_JUNCTION_MAP = {
 
 @router.get("/{entity_type}/{entity_id}/detection-gaps")
 async def get_entity_detection_gaps(
-    entity_type: str = Path(..., description="threat_actor or malware — the only types with TTP-bearing entries."),
+    entity_type: str = Path(..., description="threat_actor or malware, the only types with TTP-bearing entries."),
     entity_id: uuid.UUID = Path(..., description="UUID of the entity whose technique coverage to classify."),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -2586,7 +2586,7 @@ async def _visitor_story_cards(db: AsyncSession, rows) -> list[dict]:
 
 @router.get("/{entity_type}/{entity_id}/attack-techniques")
 async def get_entity_attack_techniques(
-    entity_type: str = Path(..., description="threat_actor or malware — the only types with TTP-bearing entries."),
+    entity_type: str = Path(..., description="threat_actor or malware, the only types with TTP-bearing entries."),
     entity_id: uuid.UUID = Path(..., description="UUID of the entity."),
     user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
@@ -2634,7 +2634,7 @@ async def get_entity_attack_techniques(
 
 @router.get("/{entity_type}/{entity_id}/attack-layer")
 async def get_entity_attack_layer(
-    entity_type: str = Path(..., description="threat_actor or malware — the only types with TTP-bearing entries."),
+    entity_type: str = Path(..., description="threat_actor or malware, the only types with TTP-bearing entries."),
     entity_id: uuid.UUID = Path(..., description="UUID of the entity to build the Navigator layer for."),
     user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
@@ -2975,13 +2975,13 @@ async def generate_entity_ai_summary(
     if status == "provider_paused":
         raise AppError(
             code="ai_unavailable",
-            message="AI provider is rate-limited or paused — try again later.",
+            message="The AI provider is rate limited or paused. Try again later.",
             status_code=503,
         )
     if status == "ai_error":
         raise AppError(
             code="ai_error",
-            message=f"AI generation failed ({outcome.get('ai_status')}) — the model returned unusable output.",
+            message=f"AI generation failed ({outcome.get('ai_status')}): the model returned no usable output.",
             status_code=502,
         )
     if status != "updated":
@@ -3072,7 +3072,7 @@ async def fetch_wikipedia_content(
         getattr(entity, "name", None) or getattr(entity, "cve_id", None) or getattr(entity, "technique_id", None)
     )
     if not entity_name:
-        raise AppError(code="bad_request", message="Entity has no searchable name", status_code=400)
+        raise AppError(code="bad_request", message="This entity has no name to search Wikipedia for.", status_code=400)
 
     from app.enrichment.gateway import GatewayError
     from app.enrichment.pipeline import gateway_for

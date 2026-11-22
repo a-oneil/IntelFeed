@@ -88,7 +88,7 @@ async def _drop_alias(db: AsyncSession, entity_type: str, entity_id: uuid.UUID, 
     if entity_type not in MERGE_CONFIG:
         raise AppError(
             code="bad_request",
-            message=f"{entity_type} entities have no aliases — use scope 'entry' or 'global' instead.",
+            message=f"{entity_type} entities have no aliases. Use scope 'entry' or 'global' instead.",
             status_code=422,
         )
 

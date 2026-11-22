@@ -187,7 +187,7 @@ async def _generate_reddit_digest():
             feed_id=digest_feed.id,
             guid=digest_guid,
             url=None,
-            title=f"Reddit Digest \u2014 {today_str}",
+            title=f"Reddit Digest {today_str}",
             author="IntelFeed AI",
             content_html=digest_html,
             content_text=content_text,

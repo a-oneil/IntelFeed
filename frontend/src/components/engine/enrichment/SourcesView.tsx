@@ -109,7 +109,7 @@ function Row({ x, current, onPick }: { x: EnrichmentConsoleSource; current: bool
       {x.trigger_mode && (
         <span
           className={x.trigger_mode === "auto" ? `${s.mode} ${s.modeAuto}` : s.mode}
-          title={x.trigger_mode === "auto" ? "Looks up new entities on its own" : "Runs when someone asks, and in its jobs"}
+          title={x.trigger_mode === "auto" ? "Looks up new entities automatically" : "Runs on request and in its scheduled jobs"}
         >
           {x.trigger_mode === "auto" ? "Auto" : "Manual"}
         </span>
@@ -133,7 +133,7 @@ export function SourceSwitch({ x }: { x: EnrichmentConsoleSource }) {
         update.mutate(
           { sourceId: x.id, is_enabled: !x.enabled },
           {
-            onError: (e) => toast.error(`Couldn't turn ${x.label} ${x.enabled ? "off" : "on"}: ${(e as Error).message}`),
+            onError: (e) => toast.error(`Could not turn ${x.label} ${x.enabled ? "off" : "on"}: ${(e as Error).message}`),
           },
         )
       }

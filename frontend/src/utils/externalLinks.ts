@@ -217,7 +217,7 @@ export function collectNotes(url: URL, text = ""): LinkNote[] {
     notes.push({
       id: "userinfo",
       message:
-        "This URL has a username/password section before the host — a common way to make a link look like it goes somewhere else.",
+        "This URL has a username and password section before the host. This is a common way to disguise where a link goes.",
     });
   }
   if (url.protocol === "http:" && text.split(/\s+/).some((token) => {
@@ -248,7 +248,7 @@ export function collectNotes(url: URL, text = ""): LinkNote[] {
   if (URL_SHORTENERS.has(bare)) {
     notes.push({
       id: "shortener",
-      message: "URL shortener — the final destination is hidden until the redirect is followed.",
+      message: "URL shortener. The final destination is hidden until the redirect is followed.",
     });
   }
   return notes;

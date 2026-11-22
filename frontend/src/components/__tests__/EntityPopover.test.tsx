@@ -159,7 +159,7 @@ describe("EntityPopover — wrong-match menu", () => {
 
   it("lists convert targets except the entity's current type", () => {
     openWrongMenu();
-    fireEvent.click(screen.getByText(/Wrong type — convert/));
+    fireEvent.click(screen.getByText(/Wrong type: convert/));
 
     expect(screen.getByRole("button", { name: "Threat Actor" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Malware Family" })).toBeDefined();
@@ -169,7 +169,7 @@ describe("EntityPopover — wrong-match menu", () => {
 
   it("converts through the shared convert action", async () => {
     openWrongMenu();
-    fireEvent.click(screen.getByText(/Wrong type — convert/));
+    fireEvent.click(screen.getByText(/Wrong type: convert/));
     fireEvent.click(screen.getByText("Product"));
 
     await waitFor(() =>
@@ -182,7 +182,7 @@ describe("EntityPopover — wrong-match menu", () => {
 
   it("opens the merge picker for mergeable types", () => {
     openWrongMenu();
-    fireEvent.click(screen.getByText("Duplicate — merge into…"));
+    fireEvent.click(screen.getByText("Duplicate: merge into…"));
 
     expect(screen.getByTestId("merge-modal").textContent).toContain("Sprocket Security");
   });
@@ -207,8 +207,8 @@ describe("EntityPopover — wrong-match menu", () => {
     // The analyst-scoped fixes stay available...
     expect(screen.getByText(/Never match/)).toBeDefined();
     // ...but the instance-wide ones are gone rather than 403-ing on click.
-    expect(screen.queryByText(/Wrong type — convert/)).toBeNull();
-    expect(screen.queryByText("Duplicate — merge into…")).toBeNull();
+    expect(screen.queryByText(/Wrong type: convert/)).toBeNull();
+    expect(screen.queryByText("Duplicate: merge into…")).toBeNull();
     expect(screen.queryByText("Unlink from every article")).toBeNull();
   });
 
@@ -224,7 +224,7 @@ describe("EntityPopover — wrong-match menu", () => {
 
     // The autolinker rungs never appear on a ledger value.
     expect(screen.queryByText(/Never match/)).toBeNull();
-    expect(screen.queryByText(/Wrong type — convert/)).toBeNull();
+    expect(screen.queryByText(/Wrong type: convert/)).toBeNull();
 
     fireEvent.click(screen.getByText(/remove sighting/));
     expect(unlinkSightingMutate).toHaveBeenCalledWith(
@@ -261,7 +261,7 @@ describe("EntityPopover — wrong-match menu", () => {
     };
     openWrongMenu(observable);
     expect(screen.queryByText(/Never capture/)).toBeNull();
-    expect(screen.getByText(/needs an admin/)).toBeDefined();
+    expect(screen.getByText(/Only an admin can deny/)).toBeDefined();
   });
 
   it("shows no wrong-match actions on public shared pages", () => {
@@ -342,7 +342,7 @@ describe("EntityPopover — enrichment glance", () => {
       expect.anything(),
     );
     expect(screen.getByText(/GreyNoise Community is at its daily cap/)).toBeInTheDocument();
-    expect(screen.getByText(/Shodan InternetDB didn't answer/)).toBeInTheDocument();
+    expect(screen.getByText(/Shodan InternetDB did not answer/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(enrichMutate).toHaveBeenLastCalledWith(
       expect.objectContaining({ sourceTypes: ["shodan"] }),

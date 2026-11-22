@@ -77,7 +77,7 @@ def _endpoint_message(problem: EndpointProblem) -> str:
     """The sentence a person sees for an endpoint the engine would refuse."""
     if problem.switchable:
         return (
-            f"{problem.reason}. This instance doesn't allow private endpoints for personal keys. "
+            f"{problem.reason}. This instance does not allow private endpoints for personal keys. "
             "Use a public URL, or ask your admin to turn on private endpoints."
         )
     return f"{problem.reason}."
@@ -99,15 +99,15 @@ async def _check_personal_policy(db: AsyncSession, provider_type: str, base_url:
     if not await get_setting("allow_user_ai_providers", db):
         raise AppError(
             code="user_ai_disabled",
-            message="Your admin hasn't enabled personal AI keys on this instance.",
+            message="Personal AI keys are turned off on this instance. Ask your admin to enable them.",
             status_code=403,
         )
     if provider_type == "claude_code":
         raise AppError(
             code="provider_type_not_allowed",
             message=(
-                "Claude Code can't be a personal key. It runs one CLI sign-in shared by the whole "
-                "instance, so it can't be yours alone. Use a Claude API key instead."
+                "Claude Code cannot be a personal key. It uses one CLI sign-in shared by the whole "
+                "instance. Use a Claude API key instead."
             ),
             status_code=400,
         )
@@ -184,7 +184,7 @@ async def create_provider(
     elif body.provider_type == "claude_code":
         raise AppError(
             code="provider_type_not_allowed",
-            message="Claude Code is set up by the instance at startup and can't be added here.",
+            message="Claude Code is set up by the instance at startup and cannot be added here.",
             status_code=400,
         )
 
@@ -242,9 +242,7 @@ async def update_provider(
         provider.name = body.name
     if body.base_url is not None:
         if not body.base_url.strip() and provider.provider_type in ("ollama", "openai_compatible"):
-            raise AppError(
-                code="validation_error", message="base_url cannot be empty for this provider type", status_code=400
-            )
+            raise AppError(code="validation_error", message="This provider type needs a base URL", status_code=400)
         if provider.is_personal:
             problem = await _personal_url_problem(db, provider.provider_type, body.base_url)
             if problem:
@@ -332,7 +330,7 @@ async def test_provider(
         instance = _get_provider_instance(provider)
         healthy = await instance.check_health()
         if not healthy:
-            return await _outcome("Provider health check failed")
+            return await _outcome("The provider did not answer its health check. Check the address and the key.")
         models = await instance.list_models()
     except Exception as e:
         return await _outcome(str(e))
@@ -370,14 +368,16 @@ async def commission_provider(
     if provider.is_personal:
         raise AppError(
             code="personal_provider",
-            message="A personal key can't run the instance's prompts; route it from Settings > My AI instead.",
+            message="A personal key cannot run the instance's prompts. Route it from Settings > My AI instead.",
             status_code=400,
         )
 
     instance = _get_provider_instance(provider)
     try:
         if not await instance.check_health():
-            return AIProviderCommissionResult(success=False, message="Provider health check failed")
+            return AIProviderCommissionResult(
+                success=False, message="The provider did not answer its health check. Check the address and the key."
+            )
         models = await instance.list_models()
     except Exception as e:
         return AIProviderCommissionResult(success=False, message=str(e))

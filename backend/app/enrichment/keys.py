@@ -97,13 +97,13 @@ def _note(cred: Credential) -> str:
     classes = [SOURCE_REGISTRY[s] for s in cred.sources]
     if any(c.requires_api_key for c in classes):
         if len(classes) > 1:
-            return f"Needed. One key for all {len(classes)} sources."
-        return "Needed. The source answers nothing without it."
+            return f"Required. One key covers all {len(classes)} sources."
+        return "Required. The source rejects requests without a key."
     keyed = next((c.quota for c in classes if c.quota.keyed), None)
     if keyed:
         k = keyed.keyed
         if keyed.period_seconds == k.period_seconds:
-            per = f"per {keyed.period_seconds} seconds" if keyed.period_seconds != 3600 else "an hour"
+            per = f"per {keyed.period_seconds} seconds" if keyed.period_seconds != 3600 else "per hour"
             return f"Optional. Raises the limit from {keyed.requests_per_period} to {k.requests_per_period} {per}."
         return "Optional. Raises the source's rate limit."
     return "Optional. Raises the source's daily limit."
@@ -296,7 +296,7 @@ async def test_key(db: AsyncSession, key_id: str) -> dict:
     except Exception:
         healthy = False
     if not healthy:
-        return {"status": "unreachable", "message": f"Couldn't reach {row.display_name}; try again in a moment"}
+        return {"status": "unreachable", "message": f"Could not reach {row.display_name}. Try again in a moment."}
     for r in rows:
         r.health_status = "healthy"
     await db.flush()

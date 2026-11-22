@@ -24,7 +24,7 @@ export function entityColorVar(entityType: string): string {
 }
 
 const ENTITY_LABELS: Record<string, string> = {
-  threat_actor: "TAs",
+  threat_actor: "Actors",
   malware: "Malware",
   tool: "Tools",
   cve: "CVEs",
@@ -52,7 +52,7 @@ export function DeltaText({
   if (value === null || value === undefined) return null;
   const rounded = Math.round(value * 10) / 10;
   if (rounded === 0) {
-    return <span className={styles.deltaFlat}>— no change</span>;
+    return <span className={styles.deltaFlat}>no change</span>;
   }
   const up = rounded > 0;
   const good = goodWhenDown ? !up : up;

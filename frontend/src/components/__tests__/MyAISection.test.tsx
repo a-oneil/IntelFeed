@@ -184,7 +184,7 @@ describe("MyAISection", () => {
     render(<MyAISection />, { wrapper: MemoryRouter });
     expect(screen.getByText(/Personal keys are off on this instance/)).toBeInTheDocument();
     // Add is hidden and the server refuses adds, so the notice must not promise a queue.
-    expect(screen.getByText(/every prompt you run runs on the instance's providers/)).toBeInTheDocument();
+    expect(screen.getByText(/every prompt you run uses the instance's providers/)).toBeInTheDocument();
     expect(screen.queryByText(/waits until/)).toBeNull();
     expect(screen.queryByText("+ Add key")).toBeNull();
   });
@@ -293,7 +293,7 @@ describe("MyAISection", () => {
     render(<MyAISection />, { wrapper: MemoryRouter });
     await user.click(screen.getByText("+ Add key"));
     await user.selectOptions(screen.getByLabelText("Provider type"), "claude_code");
-    expect(screen.getByText(/Claude Code can't be a personal key/)).toBeInTheDocument();
+    expect(screen.getByText(/Claude Code cannot be a personal key/)).toBeInTheDocument();
     expect(screen.getByText("Test and save")).toHaveProperty("disabled", true);
   });
 });

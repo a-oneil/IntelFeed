@@ -220,7 +220,7 @@ async def _cwe_cves(f: Facts):
         )
     ).one()
     if total:
-        return Item(f"Behind {_count(total, 'CVE')}" + (f", {_n(kev)} in KEV" if kev else ""))
+        return Item(f"Weakness in {_count(total, 'CVE')}" + (f", {_n(kev)} in KEV" if kev else ""))
 
 
 # ── Technique ────────────────────────────────────────────────────────
@@ -376,7 +376,7 @@ async def _mitigation_counters(f: Facts):
 
     n = (await f.db.execute(select(func.count()).where(TTPMitigation.mitigation_id == f.entity.id))).scalar_one()
     if n:
-        return Item(f"Counters {_count(n, 'technique')}")
+        return Item(f"Mitigates {_count(n, 'technique')}")
 
 
 # ── Observable ───────────────────────────────────────────────────────

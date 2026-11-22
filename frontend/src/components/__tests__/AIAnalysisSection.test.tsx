@@ -113,7 +113,7 @@ describe("AIAnalysisSection row labels", () => {
     renderIt();
     expect(rowButton()).toHaveTextContent("instance · key paused");
     expect(screen.getByLabelText("instance")).toBeInTheDocument();
-    expect(rowButton().title).toMatch(/your key paused/);
+    expect(rowButton().title).toMatch(/\(key paused\)/);
   });
 
   it("warns 'needs a key' when the policy would refuse the click, and 'over cap' for a cap", () => {

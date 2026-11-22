@@ -47,7 +47,7 @@ def _check_balanced(text: str, open_char: str, close_char: str) -> list[Validati
                 line=None,
                 column=None,
                 severity="error",
-                message=f"Unmatched '{open_char}' — missing {count} closing '{close_char}'",
+                message=f"Unmatched '{open_char}': {count} closing '{close_char}' missing",
             )
         )
     return errors
@@ -244,7 +244,7 @@ def validate_kql(rule_content: str) -> ValidationResult:
     # KQL should typically start with a table name
     first_token = content.split()[0] if content.split() else ""
     if first_token.startswith("|"):
-        suggestions.append("KQL queries typically start with a table name before pipe operators")
+        suggestions.append("KQL queries usually start with a table name before the first pipe")
 
     has_errors = any(e.severity == "error" for e in errors)
     return ValidationResult(valid=not has_errors, errors=errors, suggestions=suggestions)
@@ -268,7 +268,7 @@ def validate_elastic_ql(rule_content: str) -> ValidationResult:
     words = _strip_comments(content).split()
     first_word = words[0].lower() if words else ""
     if first_word not in eql_categories and first_word not in ("where", "from"):
-        suggestions.append(f"EQL queries typically start with an event category: {', '.join(eql_categories)}")
+        suggestions.append(f"EQL queries usually start with an event category: {', '.join(eql_categories)}")
 
     has_errors = any(e.severity == "error" for e in errors)
     return ValidationResult(valid=not has_errors, errors=errors, suggestions=suggestions)
@@ -558,7 +558,7 @@ def validate_rule(rule_type: str, rule_content: str) -> ValidationResult:
         return ValidationResult(
             valid=True,
             errors=[],
-            suggestions=[f"No syntax check for {UNCHECKED_RULE_TYPES[rule_type]} yet; the rule is saved as written"],
+            suggestions=[f"{UNCHECKED_RULE_TYPES[rule_type]} has no syntax check. The rule is saved as written."],
         )
     if not validator:
         return ValidationResult(

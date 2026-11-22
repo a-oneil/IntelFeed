@@ -154,8 +154,8 @@ export default function TriageFlowWidget({ config }: Props) {
             <g key={day.date}>
               <title>
                 {isVisitor
-                  ? `${axisDate(day.date)} — ${day.arrived} arrived`
-                  : `${axisDate(day.date)} — ${day.arrived} arrived, ${day.read} read`}
+                  ? `${axisDate(day.date)}: ${day.arrived} arrived`
+                  : `${axisDate(day.date)}: ${day.arrived} arrived, ${day.read} read`}
               </title>
               {day.arrived > 0 && (
                 <rect

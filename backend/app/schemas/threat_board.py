@@ -16,7 +16,7 @@ class ThreatBoardItem(BaseModel):
         ),
     )
     echoes_folded: int = Field(default=0, description="Window articles the row's stories folded as re-reports")
-    beats: int = Field(default=0, description="Waves of coverage on this row's story thread — its spine length")
+    beats: int = Field(default=0, description="Number of updates on this row's story thread (its timeline length)")
     new_techniques: int = Field(description="Techniques first seen for this threat inside the window")
     on_record: int = Field(description="Distinct techniques ever extracted for this threat")
     prior_rules: int = Field(description="Library rules resolving to this threat, from rule_coverage")
@@ -33,7 +33,7 @@ class ThreatBoardItem(BaseModel):
         description=(
             "The window's lead article: the story thread's first in-window report where a thread "
             "holds the row (`is_origin` true when the thread marks it the origin), otherwise the "
-            "most technique-dense then latest — {entry_id, title, url, source, published_at}"
+            "most technique-dense then latest: {entry_id, title, url, source, published_at}"
         ),
     )
     sources: list[str] = Field(
@@ -42,14 +42,14 @@ class ThreatBoardItem(BaseModel):
     writable_observables: int = Field(
         default=0,
         description=(
-            "In-window technique links carrying a real observable sentence — writable evidence, old techniques included"
+            "In-window technique links carrying a real observable sentence: writable evidence, old techniques included"
         ),
     )
     brief: str | None = Field(
         default=None,
         description=(
             "Nightly AI story line built only from the window's entries; "
-            "null until generated — render headline as fallback"
+            "null until generated; render headline as fallback"
         ),
     )
     brief_sources: list[str] = Field(
@@ -63,7 +63,7 @@ class ThreatBoardItem(BaseModel):
     epss_score: float | None = None
     exploit_status: str | None = Field(None, description="none | poc | weaponized | active_exploitation | kev")
     posture: str | None = Field(
-        None, description="blind (rule blocked by telemetry) | no_rule | defended — from classify_cves"
+        None, description="blind (rule blocked by telemetry) | no_rule | defended, from classify_cves"
     )
     profile_id: str | None = Field(None, description="Entity uuid for profile navigation on CVE rows")
     thread_slug: str | None = Field(None, description="Slug of the story thread holding this row's window coverage")
@@ -71,14 +71,14 @@ class ThreatBoardItem(BaseModel):
     is_story: bool = Field(
         False,
         description=(
-            "A row backed only by a story thread — the articles resolved to no actor, malware "
+            "A row backed only by a story thread: the articles resolved to no actor, malware "
             "or CVE. entity_key is the thread slug; open it at /priority-queue?thread=<slug>"
         ),
     )
     merged_from: list[dict] = Field(
         default_factory=list,
         description=(
-            "Rows folded into this one — {entity_type, entity_key, label}: actor/malware rows a single "
+            "Rows grouped into this one, as {entity_type, entity_key, label}: actor/malware rows a single "
             "thread holds together, and on the all facet the CVEs this threat's window articles claim "
             "(entity_type cve, with is_kev / product / in_stack so the row can name them)"
         ),
@@ -123,7 +123,7 @@ class ThreatBoardResponse(BaseModel):
 class ThreatStateUpdate(BaseModel):
     state: str = Field(
         pattern=r"^(open|handled|muted|tracked)$",
-        description="tracked pins the threat above the ranking regardless of attention — the pull path",
+        description="tracked pins the threat above the ranking regardless of how many sources report it",
     )
     note: str | None = None
 
@@ -166,7 +166,7 @@ class HuntPack(BaseModel):
 
 
 class HuntPackResponse(BaseModel):
-    status: str = Field(description="ready | none — none until a pack is drafted for this row, window and language")
+    status: str = Field(description="ready | none. none until a pack is drafted for this row, window and language")
     language: str
     language_name: str
     pack: HuntPack | None = None

@@ -15,7 +15,7 @@ See diagram: [Entry lifecycle](diagrams/entries-lifecycle.md)
 | Save | `feed_tasks.py`, `backend/app/services/meilisearch_client.py` | Saves, indexes in Meilisearch, sends one `feed_fetched` SSE per fetch (`feed_id`, `new_entries`, `entry_ids`). |
 | Dispatch | `dispatch_entry_pipeline` and `entry_post_processing` (`backend/app/workers/feed_tasks.py`); stages in `backend/app/pipeline/registry.py` | A Celery chord: (1) optional `translate_entry_task`; (2) in parallel: autolink, observables, Telegram link scan, extraction (if on for the feed); (3) `entry_post_processing` — co-occurrence, correlation events and requirement matching in parallel; (4) `score_entry_task`. `run_entry_automations` and keyword alerts run outside the chord. |
 | Autolink | `backend/app/intelligence/autolinker.py` | Finds known entity names ([Autolinking](#autolinking)). |
-| Observables | `backend/app/workers/intel_feed_tasks.py` (`observables_entry_task`) | Stages indicator-like strings as candidates and sights values already in the ledger. Never creates a ledger row. See [observables.md](observables.md). |
+| Observables | `backend/app/workers/intel_feed_tasks.py` (`observables_entry_task`) | Stages indicator-like strings as candidates and records sightings of values already in the observables list. Never creates an observable row. See [observables.md](observables.md). |
 | Extraction | `backend/app/workers/intel_feed_tasks.py` (`extract_entry_intel_task`), `backend/app/intelligence/rule_extraction.py` | GitHub entries with a `content_type` (such as a Sigma file) import as rules. Otherwise regex finds ATT&CK technique, CVE and mitigation ids; new CVEs are looked up in NVD API 2.0. `extract_detection_rules` pulls Sigma, Elastic TOML (`elastic_ql` / `kql`), YARA, Snort/Suricata, and SPL / KQL / EQL / ES\|QL queries from code blocks. |
 | One-pass AI analysis | `backend/app/services/entry_analysis.py` | Queued by scoring on the `ai` queue. One AI call returns entities, indicators, sectors and relationships, and confirms or rejects held autolinks; the adjudicate stage reviews its links. |
 | Enrichment | `backend/app/workers/enrichment_tasks.py`, `backend/app/workers/job_registry.py` | New entities are enriched automatically; scheduled syncs add more (see [Scheduled enrichment](#beat-scheduled-enrichment)). |
@@ -33,7 +33,7 @@ Scans title, summary and each paragraph with an Aho-Corasick dictionary (fast se
 - **What it knows:** actors, malware and countries with aliases, plus vendors, products and tools; vocabulary versioned in Redis for all workers.
 - **What it filters out:** names under a minimum length, known false-positive names, junk aliases (`is_junk_alias()`), and Windows binary names (LOLBins such as `.exe` and `.dll`).
 - **Confidence:** exact canonical names score above aliases; both drop for feeds with weak reliability.
-- **Dictionary words** like "Royal" or "Hive" wait in `pending_autolink_matches` until the one-pass AI links or rejects them; the adjudicator then checks that call.
+- **Dictionary words** like "Royal" or "Hive" wait in `pending_autolink_matches` until the one-pass AI links or rejects them; the adjudicator then checks that decision.
 
 ### Admiralty grade
 
@@ -46,14 +46,14 @@ Each article from a rated feed shows a two-part grade such as **B2** next to its
 |---|---|---|
 | 1 Confirmed | Another independent outlet reports the same story | The platform: a 2 or 3 becomes 1 when its story thread holds a different outlet's article. Copies (echoes) and the same outlet don't count, nor do articles rated 4–6. |
 | 2 Probably true | Logical, specific, backed by evidence it shows | The one-pass AI, from the article alone |
-| 3 Possibly true | Reasonably logical but thin or secondhand | The one-pass AI |
+| 3 Possibly true | Reasonably logical but weakly supported or secondhand | The one-pass AI |
 | 4 Doubtfully true | Possible but unsupported: anonymous claims, an actor's boasts, speculation | The one-pass AI |
 | 5 Improbable | Illogical or self-contradicting | The one-pass AI |
 | 6 Cannot be judged | Nothing to judge: marketing, opinion, a bare link | The one-pass AI |
 
-The AI also records whether the author saw events firsthand or is relaying someone else, and one sentence of reasoning. Click the grade to see it. Any signed-in user can set the number by hand there; that rating is shared, stamped with the user's name, and stays put through re-analysis until someone resets it. Confirmation is re-checked after every story-thread sweep (`backend/app/workers/thread_tasks.py`), so an article can become confirmed days later. Code: `backend/app/services/info_rating.py`.
+The AI also records whether the author saw events firsthand or is relaying someone else, and one sentence of reasoning. Click the grade to see it. Any signed-in user can set the number by hand there; that rating is shared, stamped with the user's name, and kept through re-analysis until someone resets it. Confirmation is re-checked after every story-thread sweep (`backend/app/workers/thread_tasks.py`), so an article can become confirmed days later. Code: `backend/app/services/info_rating.py`.
 
-Only articles analyzed after this feature shipped have a number; older ones show a dash in place of the number (B–) until re-analyzed or rated by hand. The grade is display and search only (`info:`, `grade:`); it does not change scoring or tag confidence.
+An article with no number yet shows a dash in its place (B–) until it is re-analyzed or rated by hand. The grade is display and search only (`info:`, `grade:`); it does not change scoring or tag confidence.
 
 ## Beat-scheduled enrichment
 

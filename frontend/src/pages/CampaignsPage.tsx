@@ -114,7 +114,7 @@ export function CampaignsPage() {
               <button
                 className={`${workbench.btn} ${workbench.btnAI}`}
                 onClick={() => setShowAutoDetect(true)}
-                title="Let the AI propose campaigns from recent coverage"
+                title="Ask the AI to propose campaigns from recent articles"
               >
                 ✦ Discover
               </button>
@@ -210,7 +210,7 @@ function AutoDetectModal({
           {!hasRun && (
             <div className={styles.modalCenter}>
               <p className={styles.modalDesc}>
-                Look for actors and malware carrying more than one story, or one that kept moving.
+                Find actors and malware with more than one story thread, or one story that ran for several days.
               </p>
               <button
                 className={styles.createBtn}
@@ -271,7 +271,7 @@ function AutoDetectModal({
                     )}
                     {(s.wider_entry_count ?? 0) > s.entry_count && (
                       <div className={styles.widerHint}>
-                        {s.wider_entry_count} entries mention {s.pivot_entity.name} — the rest wait in Suggestions
+                        {s.wider_entry_count} entries mention {s.pivot_entity.name}. The rest are listed under Suggestions.
                       </div>
                     )}
                   </div>

@@ -102,12 +102,12 @@ const COMMENT_PREFIX: Record<string, string> = {
 function seedHeader(seed: BenchSeed, ruleType: string): string {
   const c = COMMENT_PREFIX[ruleType] ?? "#";
   const lines = [
-    `${c} Draft for ${seed.techniqueId ?? seed.label}${seed.techniqueName ? ` — ${seed.techniqueName}` : ""} (${seed.label})`,
+    `${c} Draft for ${seed.techniqueId ?? seed.label}${seed.techniqueName ? `: ${seed.techniqueName}` : ""} (${seed.label})`,
   ];
   for (const q of seed.quotes) {
     lines.push(`${c} evidence: "${q.text.slice(0, 200)}"`);
     lines.push(
-      `${c}   — ${q.entry_title}${q.paragraph_indices?.length ? ` ¶${q.paragraph_indices[0]}` : ""}`
+      `${c}   source: ${q.entry_title}${q.paragraph_indices?.length ? ` ¶${q.paragraph_indices[0]}` : ""}`
     );
     if (q.observable_value) {
       lines.push(`${c} observable (${q.observable_type ?? "artefact"}): ${q.observable_value}`);
@@ -125,10 +125,10 @@ function draftWithAiPrompt(seed: BenchSeed, ruleType: string): string {
         .map((q) => {
           const cite = `${q.entry_title}${q.paragraph_indices?.length ? ` ¶${q.paragraph_indices[0]}` : ""}`;
           const obs = q.observable_value ? `\n  observable (${q.observable_type ?? "artefact"}): ${q.observable_value}` : "";
-          return `- "${q.text}" — ${cite}${obs}`;
+          return `- "${q.text}" (source: ${cite})${obs}`;
         })
         .join("\n")
-    : "- (no verbatim quotes captured this window — draft from the technique's documented behaviour)";
+    : "- (no verbatim quotes captured this window; draft from the technique's documented behaviour)";
   return [
     `Draft a complete ${ruleType} detection rule for ${seed.techniqueId ?? "the behaviour"}${seed.techniqueName ? ` (${seed.techniqueName})` : ""} as used by ${seed.label}.`,
     "",
@@ -590,7 +590,7 @@ export default function RuleDetailPage() {
           const e = err as { code?: string; response?: { data?: { error?: { message?: string } } }; message?: string };
           toast.error(
             e.code === "ECONNABORTED"
-              ? "Conversion timed out — the AI provider took too long to respond."
+              ? "Conversion timed out. The AI provider took too long to respond."
               : e.response?.data?.error?.message ?? e.message ?? "Conversion failed"
           );
         },
@@ -849,7 +849,7 @@ export default function RuleDetailPage() {
                 <button
                   className={styles.metaToggle}
                   disabled={chatStreaming}
-                  title="Builds a first cut from the behaviour's evidence — arrives as a code block you apply to the editor, never a silent save"
+                  title="Drafts a rule from the evidence. The draft arrives as a code block you apply to the editor; nothing is saved automatically."
                   onClick={() => sendChat(draftWithAiPrompt(seed, ruleType))}
                 >
                   Draft with AI
@@ -921,7 +921,7 @@ export default function RuleDetailPage() {
 
           {isExtendMode && seed && seed.quotes.length > 0 && !viewingVersion && (
             <div className={styles.obsChecklist}>
-              <div className={styles.obsHead}>The window&rsquo;s observables — ticked items become the version note</div>
+              <div className={styles.obsHead}>Observables from this window. Ticked items become the version note.</div>
               {seed.quotes.map((q, i) => (
                 <label key={`${q.entry_id}-${i}`} className={styles.obsRow}>
                   <input
@@ -930,7 +930,7 @@ export default function RuleDetailPage() {
                     onChange={() => toggleObs(i, q.text)}
                   />
                   <span className={coveredObs.includes(i) ? styles.obsDone : styles.obsText}>
-                    {q.observable_value ? `${q.observable_value} — ` : ""}
+                    {q.observable_value ? `${q.observable_value}: ` : ""}
                     {q.text.slice(0, 120)}
                     <i className={styles.obsCite}>
                       {q.entry_title}

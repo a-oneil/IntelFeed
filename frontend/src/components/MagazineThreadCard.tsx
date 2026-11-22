@@ -50,8 +50,8 @@ export function MagazineThreadCard({ thread, score, onOpen }: MagazineThreadCard
       <div className={styles.head}>
         <Hint
           title="Story thread"
-          body="A run of coverage of the same event, clustered into one card instead of nine."
-          aside="Its articles are folded in — open it to read the spine."
+          body="Articles about the same event, grouped into one card."
+          aside="Open it to see the timeline of what changed."
         >
           <span className={styles.kicker}>
             <span className={styles.glyph} aria-hidden>

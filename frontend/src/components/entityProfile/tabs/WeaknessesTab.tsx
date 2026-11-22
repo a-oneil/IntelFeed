@@ -23,11 +23,11 @@ import styles from "../entityProfile.module.css";
 /** Why MITRE's guidance matters for an assignment that isn't plain "Allowed". */
 const MAPPING_NOTES: Record<string, string> = {
   Prohibited:
-    "MITRE marks this a prohibited mapping target — categories and retired entries were never meant to be assigned to a CVE.",
+    "MITRE marks this a prohibited mapping target. Categories and retired entries are not meant to be assigned to a CVE.",
   Discouraged:
-    "MITRE discourages this id: it sits high on the abstraction ladder, so the classification is imprecise rather than wrong.",
+    "MITRE discourages this id: it sits high in the abstraction hierarchy, so the classification is imprecise rather than wrong.",
   "Allowed-with-Review":
-    "MITRE allows this id but asks for review — a more specific weakness may fit better.",
+    "MITRE allows this id but asks for review. A more specific weakness may fit better.",
 };
 
 function WeaknessSection({ row }: { row: CVEWeaknessRow }) {
@@ -76,7 +76,7 @@ function WeaknessSection({ row }: { row: CVEWeaknessRow }) {
         <div className={styles.tagRow}>
           {/* The ladder reads as a path, not as rows — root-first, ending on
               this weakness, which is where the reader already is. */}
-          <span className={styles.metaLabel}>Ladder</span>
+          <span className={styles.metaLabel}>Hierarchy</span>
           {family.lineage.map((a) => (
             <span key={a.cwe_id}>
               <Link className={styles.familyLink} to={a.id ? entityProfilePath("cwe", a.id) : "#"} title={a.name}>

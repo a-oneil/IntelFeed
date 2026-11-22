@@ -219,7 +219,7 @@ async def public_rss_all(
 
     base = _base_url(request)
     xml = _build_rss(
-        title="IntelFeed — All Sources",
+        title="IntelFeed: All Sources",
         description="Aggregated entries from all IntelFeed sources.",
         self_url=f"{base}/api/public/rss/{token}.xml",
         site_url=base,
@@ -253,7 +253,7 @@ async def public_rss_category(
 
     base = _base_url(request)
     xml = _build_rss(
-        title=f"IntelFeed — {match.name}",
+        title=f"IntelFeed: {match.name}",
         description=f"Aggregated entries from the {match.name} category.",
         self_url=f"{base}/api/public/rss/{token}/category/{slug}.xml",
         site_url=base,

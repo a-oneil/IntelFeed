@@ -120,13 +120,13 @@ function Welcome({ Logo, isAdmin }: { Logo: ComponentType<{ className?: string }
         <Title>Welcome to IntelFeed</Title>
       </div>
       <Lead>
-        IntelFeed reads security sources for you, pulls out the actors, malware, CVEs and techniques
-        they mention, and connects them so one article becomes a thread you can pull.
+        IntelFeed reads security sources, extracts the actors, malware, CVEs and techniques they
+        mention, and links them across articles.
       </Lead>
       <Lead>
         {isAdmin
-          ? "This walks you through getting the instance working, then how to actually use it. Every step is skippable, and closing this box saves your place rather than losing it."
-          : "This walks you through how to use it — reading, triage, entities, search and the workbench. Every step is skippable, and closing this box saves your place rather than losing it."}
+          ? "This walks you through setting up the instance, then how to use it. Every step can be skipped. Closing this box saves your place."
+          : "This walks you through reading, triage, entities, search and the workbench. Every step can be skipped. Closing this box saves your place."}
       </Lead>
     </>
   );
@@ -142,10 +142,10 @@ function Readiness({
   const ref = status?.reference_data;
   return (
     <>
-      <Title>Is this instance ready?</Title>
+      <Title>Reference data</Title>
       <Lead>
-        Before anything links to anything, the intelligence engine needs its vocabulary. This is the
-        single most common reason a fresh install ingests articles and extracts <b>nothing</b>.
+        The autolinker needs reference data (the entity vocabulary) before it can link articles to
+        entities. Without it, a fresh install ingests articles and extracts nothing.
       </Lead>
       <ul className={styles.checks}>
         {(ref?.checks ?? []).map((c) => (
@@ -160,7 +160,7 @@ function Readiness({
       </ul>
       {ref && !ref.ok && (
         <div className={`${styles.callout} ${styles.calloutWarn}`}>
-          <b>Reference data isn't seeded.</b> {ref.consequence} Run this once, then re-check:
+          <b>Reference data is not seeded.</b> {ref.consequence} Run this once, then re-check:
           {/* The whole line comes from the server, compose file included — the UI
               has no way to know which compose file this instance runs under. */}
           <pre className={styles.code}>{ref.remedy}</pre>
@@ -221,7 +221,7 @@ function Feeds() {
       queryClient.invalidateQueries({ queryKey: ["feeds"] });
       queryClient.invalidateQueries({ queryKey: ["categories"] });
     } catch {
-      setError("That file didn't import. Check it's a valid OPML export.");
+      setError("Could not import that file. Check that it is a valid OPML export.");
     } finally {
       setBusy(false);
     }
@@ -235,7 +235,7 @@ function Feeds() {
       await addFeed.mutateAsync({ url: url.trim() });
       setUrl("");
     } catch {
-      setError("Couldn't add that URL. Check it and try again.");
+      setError("Could not add that URL. Check it and try again.");
     } finally {
       setBusy(false);
     }
@@ -243,10 +243,10 @@ function Feeds() {
 
   return (
     <>
-      <Title>Give it something to read</Title>
+      <Title>Add feeds</Title>
       <Lead>
-        Curated packs of audited security sources ship with IntelFeed, so you don't have to go and
-        find them. Core is a good first run. Nothing is added until you choose.
+        IntelFeed ships with packs of reviewed security sources. Core is a good first choice. Nothing
+        is added until you choose.
       </Lead>
 
       <div className={styles.cards}>
@@ -323,7 +323,7 @@ function Feeds() {
           {result.categories_created > 0 &&
             ` in ${result.categories_created} categor${result.categories_created !== 1 ? "ies" : "y"}`}
           {result.feeds_skipped > 0 && ` (${result.feeds_skipped} already existed)`}.
-          {result.feeds_added > 0 && " They're fetching now."}
+          {result.feeds_added > 0 && " They are fetching now."}
         </div>
       )}
       {error && <div className={`${styles.callout} ${styles.calloutBad}`}>{error}</div>}
@@ -336,7 +336,7 @@ const AI_CHOICES = [
     id: "ollama",
     title: "Ollama",
     tag: "Local & free",
-    desc: "Point at your own Ollama host. An 8–14B instruct model is plenty for summaries and extraction — bigger models want more VRAM than the work needs.",
+    desc: "Point at your own Ollama host. An 8 to 14B instruct model is enough for summaries and extraction.",
     needsUrl: true,
   },
   {
@@ -350,13 +350,13 @@ const AI_CHOICES = [
     id: "openai_compatible",
     title: "OpenAI-compatible",
     tag: "Any endpoint",
-    desc: "OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter or Groq — anything speaking the /v1/chat/completions dialect.",
+    desc: "OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter, Groq, or any endpoint that implements /v1/chat/completions.",
     needsUrl: true,
     optionalKey: true,
   },
   {
     id: "none",
-    title: "Skip — run without AI",
+    title: "Skip: run without AI",
     desc: "You keep ingest, autolinking, search, dedup and regex detection-rule extraction. You lose summaries, the one-pass entry analysis and AI entity assessments. Add a provider any time.",
   },
 ] as const;
@@ -410,16 +410,16 @@ function AIStep() {
       if (!outcome.success) {
         setError(
           choice === "openai_compatible"
-            ? `Couldn't set up that endpoint — ${outcome.message}.`
+            ? `Could not set up that endpoint: ${outcome.message}.`
             : choice === "ollama"
-              ? `Couldn't reach that host — ${outcome.message}.`
-              : `That key was rejected — ${outcome.message}.`,
+              ? `Could not reach that host: ${outcome.message}.`
+              : `That key was rejected: ${outcome.message}.`,
         );
         return;
       }
       setResult(outcome);
     } catch {
-      setError("Couldn't save that provider. Check the details and try again.");
+      setError("Could not save that provider. Check the details and try again.");
     }
   };
 
@@ -429,8 +429,8 @@ function AIStep() {
     <>
       <Title>Choose an AI provider</Title>
       <Lead>
-        AI handles summaries, the one-pass analysis that reads each entry, and entity assessments.
-        Everything else — ingest, autolinking, search, detection-rule extraction — runs without it.
+        AI handles summaries, the one-pass analysis of each entry, and entity assessments. Ingest,
+        autolinking, search and detection-rule extraction run without it.
       </Lead>
 
       <div className={styles.cards}>
@@ -543,7 +543,7 @@ function AIStep() {
       )}
       {result && (
         <div className={`${styles.callout} ${styles.calloutOk}`}>
-          <b>Connected, and AI is wired up.</b> {result.tasks_assigned + result.tasks_reassigned} task
+          <b>Connected. AI tasks are assigned.</b> {result.tasks_assigned + result.tasks_reassigned} task
           {result.tasks_assigned + result.tasks_reassigned !== 1 ? "s" : ""} now run on{" "}
           <code>{result.model}</code>
           {result.models.length > 1 && ` (${result.models.length} models available)`}. Change any of
@@ -553,7 +553,7 @@ function AIStep() {
               {" "}
               {result.tasks_skipped_agentic.length} agentic task
               {result.tasks_skipped_agentic.length !== 1 ? "s" : ""} stayed where they were: they need
-              tool calling or web search, which this provider doesn't have turned on.
+              tool calling or web search, which this provider does not have enabled.
             </>
           )}
         </div>
@@ -568,7 +568,7 @@ function Extras() {
     <>
       <Title>Optional services, and your team</Title>
       <Lead>
-        All optional — each is a container that's either running or not. Nothing here blocks you.
+        All optional. Each is a container that is either running or not. Nothing here blocks setup.
       </Lead>
       <Facts
         rows={[
@@ -583,7 +583,7 @@ function Extras() {
       </Lead>
       <Facts
         rows={[
-          ["Invites", <>Registration closed behind an invite code the moment your account was created. Find the code, change it, or reopen registration under <b>Settings → Users</b>.</>],
+          ["Invites", <>Registration requires an invite code now that the first account exists. Find the code, change it, or reopen registration under <b>Settings → Users</b>.</>],
           ["Roles", <>Promote or demote accounts under <b>Settings → Users</b>.</>],
         ]}
       />
@@ -604,8 +604,7 @@ function Verify() {
     <>
       <Title>{working ? "It works" : "Waiting for the first poll"}</Title>
       <Lead>
-        Configuring something isn't the same as it working. This watches a real fetch land, so you
-        never finish setup staring at an empty reader wondering whether that's normal.
+        This step waits for the first feed poll to complete and the first entries to be linked.
       </Lead>
       <ul className={styles.checks}>
         <li className={`${styles.check} ${feeds && feeds.polled_ok > 0 ? styles.checkOk : styles.checkWait}`}>
@@ -656,13 +655,13 @@ function Verify() {
       </ul>
       {working ? (
         <div className={`${styles.callout} ${styles.calloutOk}`}>
-          <b>Your instance is live.</b> Articles are arriving and being linked to entities as they
-          land. Everything from here is about using it.
+          <b>Your instance is working.</b> Articles are arriving and being linked to entities. The
+          remaining steps cover using it.
         </div>
       ) : (
         <div className={styles.callout}>
           Feeds poll on their own schedule, so the first articles can take a few minutes. You can
-          move on — this keeps running in the background.
+          move on. Polling continues in the background.
           {!!feeds?.errored && (
             <>
               {" "}
@@ -682,9 +681,8 @@ function Reader() {
       <Title>The reading loop</Title>
       <ReaderSchematic />
       <Lead>
-        Three panels: your feeds, the entries in the one you picked, and the article. Entities are
-        linked as each article ingests, so what you're reading is already connected to everything
-        else you've read.
+        Three panels: your feeds, the entries in the selected feed, and the article. Entities are
+        linked when each article is ingested.
       </Lead>
       <Facts
         rows={[
@@ -704,14 +702,14 @@ function Queue() {
       <Title>The Priority Queue</Title>
       <QueueSchematic />
       <Lead>
-        Not everything deserves equal attention. The queue ranks what came in by signal — how many
-        independent sources carried it, whether it touches something you watch, whether a CVE is
-        being actively exploited — and every entry can tell you <b>why</b> it surfaced.
+        The queue ranks new entries by signal: how many independent sources reported it, whether it
+        mentions an entity you watch, and whether a CVE is being exploited. Each entry shows why it
+        ranked where it did.
       </Lead>
       <Chips items={["multi-source", "watched entity", "known exploited", "vendor you track", "first report"]} lit />
       <Lead>
-        Ranking is system-wide. Your own reading adds a small per-analyst lift on top — it never
-        rewrites the score for everyone else.
+        Ranking is system-wide. Your own reading adds a small per-analyst lift that does not change
+        the score for other users.
       </Lead>
     </>
   );
@@ -723,9 +721,8 @@ function Entities() {
       <Title>Entities, and pivoting between them</Title>
       <PivotSchematic />
       <Lead>
-        Every article is scanned against your catalog as it arrives. Each match is a real entity with
-        a profile — and that profile gathers every other article that ever named it. That's the
-        pivot: one mention becomes the whole history.
+        Every article is scanned against the entity catalog as it arrives. Each match links to an
+        entity profile that lists every other article that named it. That is a pivot.
       </Lead>
       <Chips
         items={[
@@ -742,7 +739,7 @@ function Entities() {
         ]}
       />
       <Lead>
-        Wrong match? Every link has a <b>Wrong?</b> control that tells the engine to stop making it.
+        Every link has a <b>Wrong?</b> control that tells the engine to stop making that match.
       </Lead>
     </>
   );
@@ -751,10 +748,10 @@ function Entities() {
 function Search() {
   return (
     <>
-      <Title>Finding things again</Title>
+      <Title>Search</Title>
       <Lead>
         One search bar, one results page with a facet rail. Press <kbd className={styles.kbd}>⌘K</kbd>{" "}
-        anywhere for the command palette — it jumps to entities and surfaces as well as searching.
+        anywhere for the command palette, which jumps to entities and pages as well as searching.
       </Lead>
       <Facts
         rows={[
@@ -773,21 +770,20 @@ function Search() {
 function Workbench() {
   return (
     <>
-      <Title>When you stop reading and start working</Title>
+      <Title>The workbench</Title>
       <Lead>The reader is for triage. The workbench is where you investigate what you triaged.</Lead>
       <Facts
         rows={[
-          ["Threats", "What's actually moving, ranked as stories rather than outlets"],
+          ["Threats", "Current activity, ranked by story rather than by outlet"],
           ["Entities", "Every actor, malware family, CVE and technique you've seen"],
           ["Detection", "Your rule library, and coverage against ATT&CK"],
-          ["Campaigns", "Group related activity into one tracked thing"],
+          ["Campaigns", "Group related activity into one tracked campaign"],
           ["Reports", "Generate and export from what you've gathered"],
           ["Engine", "Admin only: what the pipeline is doing to every entry"],
         ]}
       />
       <Lead>
-        Switch between Reading and Workbench modes from the sidebar — the same data, organised for a
-        different job.
+        Switch between Reading and Workbench modes from the sidebar. Both use the same data.
       </Lead>
     </>
   );
@@ -796,21 +792,20 @@ function Workbench() {
 function Intel() {
   return (
     <>
-      <Title>Detection rules, and what you make from all this</Title>
+      <Title>Detection rules and intel products</Title>
       <Lead>
-        Rules are pulled out of articles automatically and checked for syntax as they're extracted.
-        Six formats:
+        Rules are extracted from articles automatically and syntax-checked. Six formats:
       </Lead>
       <Chips items={["Sigma", "Splunk SPL", "CrowdStrike QL", "Elastic QL", "KQL", "YARA"]} lit />
       <Facts
         rows={[
           [
             "Story threads",
-            "One unfolding story clustered into a single narrative instead of forty near-duplicate headlines",
+            "Articles about the same event, grouped into one thread with a timeline",
           ],
           [
             "Observables",
-            "The IOC ledger. A regex never creates one — rows come from judgement, then known values get sighted by exact match",
+            "The IOC list. Regex scanning never creates an observable; they come from AI or analyst confirmation, and known values are then matched exactly",
           ],
           ["Reports", "Markdown or HTML, with CSV and ATT&CK Navigator export"],
         ]}
@@ -822,10 +817,10 @@ function Intel() {
 function ThemeStep({ themes }: { themes: ThemeControl }) {
   return (
     <>
-      <Title>Make it readable</Title>
+      <Title>Appearance</Title>
       <Lead>
-        {themes.list.length} themes ship, switchable any time from <b>Settings → Appearance</b>. Text
-        contrast is computed per theme, so nothing becomes unreadable whichever you pick.
+        {themes.list.length} themes are included. Switch any time from <b>Settings → Appearance</b>.
+        Text contrast is computed per theme.
       </Lead>
       <div className={styles.themeGrid}>
         {themes.list.map((t) => (
@@ -889,8 +884,8 @@ function Shortcuts() {
 function Help({ username }: { username: string | undefined }) {
   return (
     <>
-      <Title>When you get stuck</Title>
-      <Lead>That's everything{username ? `, ${username}` : ""}. Three places to go, all inside the app:</Lead>
+      <Title>Where to find help</Title>
+      <Lead>That is the end of the tour{username ? `, ${username}` : ""}. Three places to find help inside the app:</Lead>
       <Facts
         rows={[
           [
@@ -906,12 +901,11 @@ function Help({ username }: { username: string | undefined }) {
         ]}
       />
       <div className={styles.callout}>
-        You can <b>replay this tour any time</b> from <b>Settings → Account</b>. Closing it never
-        destroys it.
+        Replay this tour any time from <b>Settings → Account</b>.
       </div>
       <Lead>
-        Driving IntelFeed from Claude Code or an MCP client is set up under{" "}
-        <b>Settings → Claude Code Skill</b> when you want it.
+        To use IntelFeed from Claude Code or an MCP client, see{" "}
+        <b>Settings → Claude Code Skill</b>.
       </Lead>
     </>
   );

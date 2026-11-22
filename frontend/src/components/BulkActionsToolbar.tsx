@@ -119,7 +119,7 @@ export const BulkActionsToolbar = memo(function BulkActionsToolbar({
         { entry_ids: ids, action },
         {
           onSuccess: () => {
-            toast.success(`${label} — ${count} entries`);
+            toast.success(`${label}: ${count} entries`);
             onClearSelection();
           },
           onError: () => toast.error(`Failed to ${label.toLowerCase()}`),
@@ -201,7 +201,7 @@ export const BulkActionsToolbar = memo(function BulkActionsToolbar({
       a.download = "intelfeed-research-bundle.zip";
       a.click();
       URL.revokeObjectURL(url);
-      toast.success(`Exported research bundle — ${count} entries`);
+      toast.success(`Exported research bundle: ${count} entries`);
     } catch {
       toast.error("Failed to export research bundle");
     }
@@ -402,7 +402,7 @@ export const BulkActionsToolbar = memo(function BulkActionsToolbar({
         <button
           className={`${styles.btn} ${styles.btnAccent}`}
           onClick={() => setShowSummary(true)}
-          title="AI summarize selected entries"
+          title="Summarize selected entries with AI"
         >
           Summarize
         </button>

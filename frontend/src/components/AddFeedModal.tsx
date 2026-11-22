@@ -361,7 +361,7 @@ export function AddFeedModal({ onClose }: Props) {
     }
     const parsed = parseOpml(await file.text());
     if (!parsed) {
-      setOpmlFileError("This doesn't look like an OPML subscription file.");
+      setOpmlFileError("This file is not an OPML subscription file.");
       return;
     }
     if (parsed.feeds === 0) {
@@ -773,9 +773,9 @@ export function AddFeedModal({ onClose }: Props) {
                   onChange={(e) => setBskyMode(e.target.value as BlueskyMode)}
                   className={styles.select}
                 >
-                  <option value="author">Author — every post from a handle</option>
-                  <option value="feed">Custom feed — a feed-generator AT URI</option>
-                  <option value="search">Search — posts matching a query</option>
+                  <option value="author">Author: every post from a handle</option>
+                  <option value="feed">Custom feed: a feed-generator AT URI</option>
+                  <option value="search">Search: posts matching a query</option>
                 </select>
               </div>
 
@@ -908,7 +908,7 @@ export function AddFeedModal({ onClose }: Props) {
                     className={styles.urlInput}
                   />
                   <span className={styles.fieldHint}>
-                    Generate a dedicated app password — never your account password.
+                    Use a dedicated app password, not your account password.
                   </span>
                 </div>
               </details>
@@ -1011,9 +1011,9 @@ export function AddFeedModal({ onClose }: Props) {
           {mode === "telegram" && (
             <div className={styles.repoForm}>
               <p className={styles.fieldHint}>
-                Requires a server-side Telegram account. If you haven&apos;t completed Telegram setup yet,
-                this feed will fail with &quot;Telegram session not authorized&quot; — ask your administrator.
-                See deployment docs.
+                Requires a server-side Telegram account. Until Telegram setup is complete, this feed
+                fails with &quot;Telegram session not authorized&quot;. Ask your administrator or see the
+                deployment docs.
               </p>
 
               <div className={styles.field}>
@@ -1031,8 +1031,8 @@ export function AddFeedModal({ onClose }: Props) {
                   {tgDiscover.isPending ? "Loading…" : "Discover from my Telegram account"}
                 </button>
                 <span className={styles.fieldHint}>
-                  Lists every channel the IntelFeed account is joined to. Click one to fill the channel
-                  field below — or just type the handle directly.
+                  Lists every channel the IntelFeed account has joined. Click one to fill the channel
+                  field below, or type the handle directly.
                 </span>
               </div>
 
@@ -1040,7 +1040,7 @@ export function AddFeedModal({ onClose }: Props) {
                 <div className={styles.field}>
                   {tgDiscover.isError && (
                     <p className={styles.error}>
-                      Discovery failed. Telegram may be unconfigured on the server.
+                      Discovery failed. Telegram may not be configured on the server.
                     </p>
                   )}
                   {tgDiscover.data && (
@@ -1104,7 +1104,7 @@ export function AddFeedModal({ onClose }: Props) {
                       })}
                       {tgDiscover.data.items.length === 0 && (
                         <p className={styles.fieldHint}>
-                          No channels found. The bootstrap account isn&apos;t joined to any.
+                          No channels found. The IntelFeed account has not joined any.
                         </p>
                       )}
                     </div>
@@ -1179,8 +1179,8 @@ export function AddFeedModal({ onClose }: Props) {
                   </select>
                   <span className={styles.fieldHint}>
                     If this channel <strong>is</strong> a threat actor (ransomware leak site, hacktivist
-                    channel, broker), pick the actor here. Every message will be auto-linked with high
-                    confidence — no autolinker guessing required.
+                    channel, broker), pick the actor here. Every message is linked to that actor with
+                    high confidence.
                   </span>
                 </div>
                 <div className={styles.field}>
@@ -1198,8 +1198,7 @@ export function AddFeedModal({ onClose }: Props) {
                     ))}
                   </select>
                   <span className={styles.fieldHint}>
-                    Link every message from this channel to a tracked operation (e.g. an ongoing intrusion
-                    campaign). Useful for live coverage of an active incident.
+                    Link every message from this channel to a campaign, for example an ongoing intrusion.
                   </span>
                 </div>
               </details>
@@ -1227,8 +1226,8 @@ export function AddFeedModal({ onClose }: Props) {
 
               {addFeed.isError && (
                 <p className={styles.error}>
-                  Failed to subscribe. Telegram may be unconfigured on the server, or the channel may be
-                  unavailable.
+                  Failed to subscribe. Telegram may not be configured on the server, or the channel may
+                  be unavailable.
                 </p>
               )}
 
@@ -1261,7 +1260,7 @@ export function AddFeedModal({ onClose }: Props) {
                     {!!opmlResult.feeds_skipped_invalid && (
                       <p className={styles.fieldHint}>
                         {opmlResult.feeds_skipped_invalid} outline
-                        {opmlResult.feeds_skipped_invalid === 1 ? "" : "s"} skipped — no
+                        {opmlResult.feeds_skipped_invalid === 1 ? "" : "s"} skipped: no
                         usable feed URL.
                       </p>
                     )}
@@ -1309,7 +1308,7 @@ export function AddFeedModal({ onClose }: Props) {
                     <span className={styles.dropzoneHint}>
                       {opmlFile
                         ? "Click to choose a different file"
-                        : "or click to browse \u2014 exports from Feedly, Inoreader, NewsBlur, and other readers"}
+                        : "or click to browse. Accepts exports from Feedly, Inoreader, NewsBlur and other readers."}
                     </span>
                   </label>
 

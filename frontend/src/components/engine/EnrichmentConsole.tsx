@@ -87,7 +87,7 @@ export function EnrichmentConsole({
 
   if (!data) {
     return consoleQ.isError ? (
-      <p className={s.note}>Couldn't load the enrichment console.</p>
+      <p className={s.note}>Could not load the enrichment console.</p>
     ) : (
       <AsyncStateLoading label="Loading enrichment…" />
     );
@@ -139,7 +139,7 @@ export function EnrichmentConsole({
               {label}
               {extra != null &&
                 (typeof extra === "number" ? (
-                  <span className={s.badge} aria-label={`${extra} need a look`}>
+                  <span className={s.badge} aria-label={`${extra} need attention`}>
                     {extra}
                   </span>
                 ) : (
@@ -165,18 +165,18 @@ function Header({ data }: { data: ConsoleData }) {
   const { paused } = data.summary;
   const toggle = () =>
     pause.mutate(!paused, {
-      onError: (e) => toast.error(`Couldn't ${paused ? "resume" : "pause"}: ${(e as Error).message}`),
+      onError: (e) => toast.error(`Could not ${paused ? "resume" : "pause"}: ${(e as Error).message}`),
     });
   return (
     <div className={s.head}>
       <span className={paused ? `${s.state} ${s.statePaused}` : s.state}>
         <span className={paused ? `${s.dot} ${s.dotWarn}` : `${s.dot} ${s.dotOk}`} aria-hidden />
-        {paused ? "Paused · nothing leaves the box" : "Running"}
+        {paused ? "Paused · no requests are sent" : "Running"}
       </span>
       <span className={s.spacer} />
       <Hint
         title={paused ? "Resume all sources" : "Pause all sources"}
-        body="Stops every request to outside sources at once. Queued lookups wait and resume when you resume. Per-source settings don't change."
+        body="Stops every request to outside sources at once. Queued lookups wait until you resume. Per-source settings do not change."
       >
         <button type="button" className={s.btn} onClick={toggle} disabled={pause.isPending}>
           {paused ? "Resume all sources" : "Pause all sources"}
@@ -201,13 +201,13 @@ function Strip({ data }: { data: ConsoleData }) {
         <em>{a.waiting_backfill ? `${num(a.waiting_backfill)} are backfill` : "none are backfill"}</em>
       </div>
       <div>
-        <span>Put off · 24h</span>
+        <span>Deferred · 24h</span>
         <b>{num(a.deferred)}</b>
         <em>rate limit or daily cap</em>
       </div>
       <div>
         <span>Indicators sent out · 24h</span>
-        <b>{a.iocs_sent == null ? "—" : num(a.iocs_sent)}</b>
+        <b>{a.iocs_sent == null ? "n/a" : num(a.iocs_sent)}</b>
         <em>{a.ioc_sources.length ? `to ${a.ioc_sources.join(", ")}` : "no source that receives them is on"}</em>
       </div>
       <div>
@@ -226,7 +226,7 @@ function Attention({ data, go }: { data: ConsoleData; go: (a: EnrichmentAction) 
     if (action.kind !== "retry") return go(action);
     retry.mutate(action.source, {
       onSuccess: (r) => toast.success(`Queued ${num(r.queued)} lookups again`),
-      onError: (e) => toast.error(`Couldn't retry: ${(e as Error).message}`),
+      onError: (e) => toast.error(`Could not retry: ${(e as Error).message}`),
     });
   };
   return (

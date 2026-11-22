@@ -1,21 +1,21 @@
 # Observables — the IOC ledger, end to end
 
-An **observable** (IOC) is a value you can match exactly in logs: an IP, hash, C2 domain, or a host artifact quoted in research (command line, file path, registry value, task or service name, mutex, user-agent, custom HTTP header). This page covers how a value becomes a ledger row, the checks it passes, how its confidence changes, and where it is published.
+An **observable** (IOC) is a value you can match exactly in logs: an IP, hash, C2 domain, or a host artifact quoted in research (command line, file path, registry value, task or service name, mutex, user-agent, custom HTTP header). This page covers how a value becomes an observable row, the checks it passes, how its confidence changes, and where it is published.
 
 Related: summary in [intelligence-engine.md](intelligence-engine.md#observables--the-ioc-ledger), columns in [data-model.md](data-model.md#observable--the-ioc-ledger), settings in [engine-settings.md](engine-settings.md#observables-stage).
 
 | File | Holds |
 |---|---|
-| `backend/app/intelligence/observables.py` | Scanning, validation, doors, sightings, decay |
+| `backend/app/intelligence/observables.py` | Scanning, validation, the creation paths, sightings, decay |
 | `backend/app/services/analysis_window.py` | What the AI sees of an article |
 | `backend/app/intelligence/infrastructure.py` | "What infrastructure does this actor use?" |
 | `backend/app/models/observable.py` | Kinds, roles, decay rates, the table |
 
 ## The contract
 
-**Regex never creates a row.** Scanning only nominates *candidates* on the entry (`entries.observable_candidates`, at most `observables_candidate_max`, default 200). Only a judgment "door" creates a row, setting `created_via` and a starting confidence:
+**Regex never creates a row.** Scanning only nominates *candidates* on the entry (`entries.observable_candidates`, at most `observables_candidate_max`, default 200). Only one of these paths creates a row, setting `created_via` and a starting confidence:
 
-| Door | `created_via` | Base confidence | What it is |
+| Path | `created_via` | Base confidence | What it is |
 |---|---|---|---|
 | Analyst | `manual` | 1.0 | The `promote_observable` tool (the copilot and the skills) |
 | Article IOC table | `publisher_ioc` | 0.9 | The IOC file an article links to (Talos `.txt` and STIX `.json`, Bitdefender CSV, Datadog CSV). Allow-listed repos only; roles from publisher labels; sighting recorded on the article. Switch: `observables_publisher_ioc_enabled` |
@@ -26,7 +26,7 @@ Related: summary in [intelligence-engine.md](intelligence-engine.md#observables-
 
 Defanged values (`evil[.]com`, `hxxps://`) get +0.1. No `created_via` value means "regex".
 
-Door input must pass `validate_kind_value()` (`backend/app/intelligence/observables.py:1460`). New entries are then **sighted**: `sight_known_values()` (`backend/app/intelligence/observables.py:1176`) records exact matches of ledger values.
+Every path's input must pass `validate_kind_value()` (`backend/app/intelligence/observables.py:1460`). New entries are then **sighted**: `sight_known_values()` (`backend/app/intelligence/observables.py:1176`) records exact matches of known observable values.
 
 ## What becomes a candidate
 
@@ -69,7 +69,7 @@ python scripts/maintenance/rescan_observable_candidates.py --purge-all-scan --pu
 | | `url` | 60 days | A full `http(s)://` URL |
 | | `uri_path` | 120 days | Starts with `/`; benign paths (`/favicon.ico`, `/login`) rejected |
 | | `ja3`, `ja4`, `cert_fingerprint` | never decays | Correct fingerprint shape |
-| hash | `md5`, `sha1`, `sha256` | never decays | Length sets the kind; the AI door rejects hex its evidence calls a key, token or secret, a certificate TBS digest, a RichPE header hash, a thumbprint or a git commit |
+| hash | `md5`, `sha1`, `sha256` | never decays | Length sets the kind; the AI analysis path rejects hex its evidence calls a key, token or secret, a certificate TBS digest, a RichPE header hash, a thumbprint or a git commit |
 | host | `cmdline`, `path`, `registry`, `scheduled_task`, `service_name`, `mutex`, `named_pipe`, `user_agent`, `http_header` | never decays | See below |
 | script | `script` | never decays | SHA-256 of the normalised snippet (kept in `content`) |
 
@@ -91,7 +91,7 @@ Host rules (`_plausible_cmdline`, `_plausible_path_atom`, and the branches of `v
 `build_analysis_variables()` (`backend/app/services/entry_analysis.py:101`) renders the article for the prompt via `analysis_window.py`:
 
 - HTML is flattened with structure kept: table rows become `cell | cell` (a hash stays by its "loader" description), headings get their own line (an empty `<h2 id="indicators-of-compromise">` renders its id), `<pre>` keeps line breaks.
-- If the body exceeds `ai_analysis_content_max_chars`, the **indicator appendix** (an IOC heading past the first 20% of the body, an indicator table header, or else the trailing region with three or more hash, IP or defanged candidates) is appended after the article start behind a marker line. It gets up to `observables_analysis_tail_reserve` (default 0.4) of the budget. Indicator-only lines are capped per kind (10 per hash kind, 15 per network kind); the publisher door handles full IOC files.
+- If the body exceeds `ai_analysis_content_max_chars`, the **indicator appendix** (an IOC heading past the first 20% of the body, an indicator table header, or else the trailing region with three or more hash, IP or defanged candidates) is appended after the article start behind a marker line. It gets up to `observables_analysis_tail_reserve` (default 0.4) of the budget. Indicator-only lines are capped per kind (10 per hash kind, 15 per network kind); the article IOC table path handles full IOC files.
 - Candidate hints are ranked (earlier AI stagings, defanged values, hashes, IPs); scanned host candidates are never hints.
 
 (Talos, Unit 42, Huntress, Datadog and Bitdefender put IOCs at the end of 20,000–80,000-character articles.)
@@ -105,27 +105,27 @@ Every candidate gets one judgment from the [adjudicate stage](engine-settings.md
 - **capture**: an attacker indicator the article reports. It becomes an observable (`created_via = adjudicator`, sighting source `adjudicator`) and leaves the candidate list.
 - **drop**: not an indicator (a version number, a how-to's command, an example value, a reference site). It is removed from the article.
 
-Both follow the adjudicator's shadow/apply switch: in apply mode, verdicts at the confidence floor run at once; everything else is a proposal in Engine → Review → Proposals (origin Adjudicator, domain Entities), where Apply, Dismiss and Restore work like any other row. Restoring a capture removes the sighting, deletes the observable if the capture created it and nothing else sights it, and puts the candidate back. Dropping a captured value removes the article's sighting; when that was the observable's last sighting and a model captured it (`ai_extraction`, `ttp_observable` or `adjudicator`), the observable is tombstoned (`is_denied`), since exact-match sighting would otherwise attach it to the next article that prints the value. Restoring the drop clears the tombstone and puts the sighting back.
+Both follow the adjudicator's shadow/apply switch. In apply mode, verdicts at the confidence floor run at once. Everything else is a proposal in Engine → Review → Proposals (origin Adjudicator, domain Entities), where Apply, Dismiss and Restore work like any other row. Restoring a capture removes the sighting, deletes the observable if the capture created it and nothing else sights it, and puts the candidate back. Dropping a captured value removes the article's sighting. When that was the observable's last sighting and a model captured it (`ai_extraction`, `ttp_observable` or `adjudicator`), the observable is tombstoned (`is_denied`). Otherwise exact-match sighting would attach it to the next article that prints the value. Restoring the drop clears the tombstone and puts the sighting back.
 
-A judged candidate carries `reviewed: true` and is not shown again. A candidate left without a verdict stays on the article only as a hint for a later analysis. Each review judges at most 20 candidates (`_MAX_CANDIDATE_ITEMS`), defanged values, hashes and IPs first; the rest are judged in a recheck. Every 30 minutes `queue_candidate_reviews` (inside `submit_analysis_batches`) queues a recheck for up to 50 reviewed articles from the last 30 days that still carry unjudged candidates, and none while the AI queue is backed up. A review whose answer comes back malformed still marks its candidates judged.
+A judged candidate carries `reviewed: true` and is not shown again. A candidate left without a verdict stays on the article only as a hint for a later analysis. Each review judges at most 20 candidates (`_MAX_CANDIDATE_ITEMS`), defanged values, hashes and IPs first; the rest are judged in a recheck. Every 30 minutes `queue_candidate_reviews` (inside `submit_analysis_batches`) queues a recheck for up to 50 reviewed articles from the last 30 days that still carry unjudged candidates, and none while the AI queue has a backlog. A review whose answer comes back malformed still marks its candidates judged.
 
 ## Shadow, capture, and the per-kind list
 
-`observables_ai_capture_mode` controls the AI door:
+`observables_ai_capture_mode` controls the AI analysis path:
 
 - **`capture`** (default) writes rows only for kinds in `observables_ai_capture_kinds` (default: network kinds except `uri_path`, hash kinds and `script`).
 - **`shadow`** stages every AI value as a candidate **carrying its role, evidence, confidence and technique**, for the adjudicator to capture or drop.
 
-Kinds outside the list are staged as in shadow. The TTP door obeys both switches.
+Kinds outside the list are staged as in shadow. The TTP observable path follows both switches.
 
-In both modes the AI door refuses three things an analyst can still add by hand:
+In both modes the AI analysis path refuses three things an analyst can still add by hand:
 - a bare service host (`webhook.site`, `api.github.com`, `login.microsoftonline.com`, the reference hosts in `observables.py`), or its URL with no path; a subdomain or a full URL on the service still counts;
 - a Cloudflare edge IP, since the lure domain behind it is the indicator;
 - a sha1/sha256 whose evidence calls it a wallet, contract or transaction.
 
-Every door rejects a domain without a real public suffix (table cells glued together), and URLs and emails carrying templates or redactions. `&amp;` in a URL is stored as `&`. Host kinds stay off the list until the fixture (below) shows they are precise. Promoting a staged value (UI, API or tool) carries its judgment to the new row.
+Every path rejects a domain without a real public suffix (table cells glued together), and URLs and emails carrying templates or redactions. `&amp;` in a URL is stored as `&`. Host kinds stay off the list until the fixture (below) shows they are precise. Promoting a staged value (UI, API or tool) carries its judgment to the new row.
 
-After changing either, `scripts/maintenance/replay_ai_observables.py` replays stored analysis results through the door and re-creates actor/malware → observable relationships.
+After changing either, `scripts/maintenance/replay_ai_observables.py` replays stored analysis results through the AI analysis path and re-creates actor/malware → observable relationships.
 
 ## Measuring the judge: the extraction fixture
 
@@ -144,16 +144,16 @@ The UI shows **Sources** instead of the raw `sighting_count`:
 - `report_count` — distinct reporting entries (articles, advisories, rule files)
 - `feed_source_count` — distinct indicator feeds (a feed's eighteen CSV variants count once)
 
-`record_sighting()` adds to `report_count` for every door but the indicator feed; the nightly `reconcile-observable-counters` job recomputes the counters. A feed-only row reads "listed on 1 indicator feed, no reporting".
+`record_sighting()` adds to `report_count` for every path except the indicator feed; the nightly `reconcile-observable-counters` job recomputes the counters. A feed-only row reads "listed on 1 indicator feed, no reporting".
 
 ## Attribution: claimed vs reported alongside
 
 `backend/app/intelligence/infrastructure.py` answers "what infrastructure does X use?":
 
-- **Claimed** — `entity_relationships` edges onto the ledger (`threat_actor|malware|tool|campaign → uses|communicates_with|controls → observable`), from the one-pass AI's evidence, an analyst or a tool, with a trust level. The graph's only observable edges.
-- **Reported alongside** — observables sighted by a reporting door in articles linking the entity, computed at read time. Excludes indicator-list files and newsletter-style articles (over 2 actors or over 3 malware families).
+- **Claimed** — `entity_relationships` edges to observables (`threat_actor|malware|tool|campaign → uses|communicates_with|controls → observable`), from the one-pass AI's evidence, an analyst or a tool, with a trust level. The graph's only observable edges.
+- **Reported alongside** — observables sighted through any path except the indicator feed, in articles that link the entity, computed at read time. Excludes indicator-list files and newsletter-style articles (over 2 actors or over 3 malware families).
 
-Surfaces: `GET /api/entities/{type}/{id}/infrastructure` (`?format=csv` for a file), `GET /api/observables/{id}/backlinks`, the **Infrastructure** panel on actor, malware, campaign and tool profiles, the **Attribution** panel on the observable profile, claim-backed Relationships-tab rows (co-mention observables hidden), `get_entity_infrastructure`.
+Where it appears: `GET /api/entities/{type}/{id}/infrastructure` (`?format=csv` for a file), `GET /api/observables/{id}/backlinks`, the **Infrastructure** panel on actor, malware, campaign and tool profiles, the **Attribution** panel on the observable profile, claim-backed Relationships-tab rows (co-mention observables hidden), `get_entity_infrastructure`.
 
 ## Tools, automation, enrichment
 
@@ -161,7 +161,7 @@ Surfaces: `GET /api/entities/{type}/{id}/infrastructure` (`?format=csv` for a fi
 
 **Automation:**
 
-- `on_observable_captured` fires once per rule per entry when the AI, article IOC table or an analyst promote writes rows — never for the indicator-feed door or replay script.
+- `on_observable_captured` fires once per rule per entry when the AI, article IOC table or an analyst promote writes rows. It never fires for the indicator-feed path or the replay script.
 - Its `trigger_config` matches the `has_observable` condition (kinds, roles, `min_confidence`, exclude dual-use, sighting sources), which also works on any entry-triggered rule.
 - `{observables_count}` and `{observables}` (defanged, one per line) feed notifications and webhooks.
 - `add_to_campaign` with `link_observables` attaches captured rows to the campaign.
@@ -169,7 +169,7 @@ Surfaces: `GET /api/entities/{type}/{id}/infrastructure` (`?format=csv` for a fi
 
 **Search and browse:** "Open in observables browser" on a profile is `GET /api/observables?linked_entity=<type>:<id>` (claimed plus reported alongside). The search language has `ioc.reports:>0` and `ioc.feeds:>0` (also `observable.reports` / `observable.feeds`); see [query-language.md](query-language.md).
 
-**Enrichment:** new IPv4, IPv6, domain and hash rows from the AI, analyst and article-IOC-table doors queue lookups in the [enrichment job queue](automation-ai-enrichment.md#enrichment-job-queue) at each auto source that takes the kind (max 25 per entry); bulk feed rows never do. Shodan InternetDB, GreyNoise Community, Team Cymru and RDAP need no key; VirusTotal needs one, and ThreatFox, URLhaus and MalwareBazaar share one abuse.ch key (Settings → Engine → Enrichment). Reputation goes to `Observable.reputation`; network context has its own columns:
+**Enrichment:** new IPv4, IPv6, domain and hash rows from the AI, analyst and article-IOC-table paths queue lookups in the [enrichment job queue](automation-ai-enrichment.md#enrichment-job-queue) at each auto source that takes the kind (max 25 per entry); bulk feed rows never do. Shodan InternetDB, GreyNoise Community, Team Cymru and RDAP need no key; VirusTotal needs one, and ThreatFox, URLhaus and MalwareBazaar share one abuse.ch key (Settings → Engine → Enrichment). Reputation goes to `Observable.reputation`; network context has its own columns:
 
 | Column | Source | What it holds |
 |---|---|---|
@@ -178,9 +178,9 @@ Surfaces: `GET /api/entities/{type}/{id}/infrastructure` (`?format=csv` for a fi
 | `popularity_rank` | Tranco (daily job) | The domain's exact rank in the top-1M list, null when unlisted |
 | `noise_class` | GreyNoise | `malicious` / `benign` / `unknown` when seen mass-scanning; empty when GreyNoise hasn't seen the IP scanning |
 
-Shodan, GreyNoise, VirusTotal and the abuse.ch lookups send the indicator to a third party, so they run only when an analyst presses Enrich (or a backfill an admin starts), unless an admin sets the source to `auto`. Team Cymru, RDAP, Shodan and GreyNoise look up only `active` rows on their own; aged and expired rows are never queued or backfilled, though an analyst's Enrich button still runs. Shodan's matched CVEs become `observable exposes cve` claims for the CVEs IntelFeed tracks. RDAP caches each registrable domain for 7 days, so a second subdomain costs no request. A domain that enters the Tranco top 10,000 gets `needs_review` once (a popular site named as an indicator is often a false positive); it stays in the ledger, and shows in the browser's Review column and `search_observables(needs_review=true)`. The prefix, registry and allocation date, the registrar, expiry, status and nameservers, and the rank show in the profile's Context panel. A dual-use host (Shodan `vpn` / `proxy` / `tor`, GreyNoise RIOT → `benign_service`) gets an `infra_tag`, keeping it out of published feeds. The provenance panel shows Network, Registered (with the domain's age) and Popularity rows, and the browser has a hidden-by-default Reputation column.
+Shodan, GreyNoise, VirusTotal and the abuse.ch lookups send the indicator to a third party, so they run only when an analyst presses Enrich (or a backfill an admin starts), unless an admin sets the source to `auto`. Team Cymru, RDAP, Shodan and GreyNoise look up only `active` rows on their own; aged and expired rows are never queued or backfilled, though an analyst's Enrich button still runs. Shodan's matched CVEs become `observable exposes cve` claims for the CVEs IntelFeed tracks. RDAP caches each registrable domain for 7 days, so a second subdomain costs no request. A domain that enters the Tranco top 10,000 gets `needs_review` once, because a popular site named as an indicator is often a false positive. It stays in the observables list, and shows in the browser's Review column and `search_observables(needs_review=true)`. The prefix, registry and allocation date, the registrar, expiry, status and nameservers, and the rank show in the profile's Context panel. A dual-use host (Shodan `vpn` / `proxy` / `tor`, GreyNoise RIOT → `benign_service`) gets an `infra_tag`, which keeps it out of published feeds. The provenance panel shows Network, Registered (with the domain's age) and Popularity rows, and the browser has a hidden-by-default Reputation column.
 
-**abuse.ch:** once a key is saved, the `threatfox-sync` (daily) and `urlhaus-sync` (every six hours) jobs download ThreatFox's IOC export and the URLhaus dump and match them exactly against the ledger, sending nothing about it; only `active` rows are written. A match fills a blank `role` (ThreatFox `botnet_cc` → `c2`, `payload_delivery` → `delivery`, `payload` → `payload`; a URLhaus URL → `delivery`), claims the malware families IntelFeed already tracks (the connection is the family's: `malware communicates_with` a C2, `malware uses` delivery and payload material; an unknown family name is held, never created), and shows the threat type, confidence, first and last seen, tags and a link in the Context panel, with a URLhaus online / offline badge (offline is neutral). A row the export answered loses that context and those claims when it leaves the export; an analyst's lookup is never withdrawn by an export. Looking one indicator up at ThreatFox, URLhaus or MalwareBazaar sends it to abuse.ch, so those lookups only run when an analyst presses Enrich. See [automation-ai-enrichment.md](automation-ai-enrichment.md#abusech).
+**abuse.ch:** once a key is saved, the `threatfox-sync` (daily) and `urlhaus-sync` (every six hours) jobs download ThreatFox's IOC export and the URLhaus dump and match them exactly against the observables list. Nothing is sent to abuse.ch, and only `active` rows are written. A match fills a blank `role` (ThreatFox `botnet_cc` → `c2`, `payload_delivery` → `delivery`, `payload` → `payload`; a URLhaus URL → `delivery`). It claims the malware families IntelFeed already tracks: the connection belongs to the family (`malware communicates_with` a C2, `malware uses` delivery and payload material), and an unknown family name is held, never created. It also shows the threat type, confidence, first and last seen, tags and a link in the Context panel, with a URLhaus online / offline badge (offline is neutral). A row the export answered loses that context and those claims when it leaves the export; an analyst's lookup is never withdrawn by an export. Looking one indicator up at ThreatFox, URLhaus or MalwareBazaar sends it to abuse.ch, so those lookups only run when an analyst presses Enrich. See [automation-ai-enrichment.md](automation-ai-enrichment.md#abusech).
 
 ## Publishing
 

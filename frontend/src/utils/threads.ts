@@ -22,7 +22,7 @@ export function threadSummaryLine(thread: StoryThread): string {
     `${thread.entry_count} article${thread.entry_count === 1 ? "" : "s"}`,
   ];
   if (thread.new_since_opened > 0) parts.push(`${thread.new_since_opened} new`);
-  if (thread.echo_count > 0) parts.push(`${thread.echo_count} folded`);
+  if (thread.echo_count > 0) parts.push(`${thread.echo_count} grouped`);
   return parts.join(" · ");
 }
 

@@ -63,8 +63,8 @@ export function ExposurePage() {
         }
         subtitle={
           view === "vulns"
-            ? "New and actively-exploited vulnerabilities in the vendors and products you follow — with detection-library coverage."
-            : "Follow the vendors and products you care about. Their vulnerabilities surface here and in your Radar."
+            ? "New and actively exploited vulnerabilities in the vendors and products you follow, with detection rule coverage."
+            : "Follow vendors and products. Their vulnerabilities are listed here and in your Radar."
         }
       />
 
@@ -117,8 +117,8 @@ export function VulnView({ data, onFollow }: { data: StackExposureResponse; onFo
       <div className={styles.empty}>
         <p className={styles.emptyTitle}>You&rsquo;re not following any vendors yet.</p>
         <p className={styles.emptyBody}>
-          Switch to <em>Following</em>, or open any vendor/product profile and choose <em>Follow</em>. Their
-          vulnerabilities — new, exploited, and trending across the whole landscape — will surface here.
+          Switch to <em>Following</em>, or open a vendor or product profile and choose <em>Follow</em>. New,
+          exploited and trending vulnerabilities in them are listed here.
         </p>
         <button className={styles.emptyCta} onClick={onFollow}>
           Follow a vendor →
@@ -370,8 +370,8 @@ export function FollowView({ data }: { data: StackExposureResponse }) {
       <div className={styles.searchPanel}>
         <h3 className={styles.panelH}>Follow a vendor or product</h3>
         <p className={styles.panelSub}>
-          Search IntelFeed&rsquo;s vendor &amp; product entities. Each maps to NVD CPE, so their vulnerabilities are
-          matched exactly across the whole landscape.
+          Search vendor and product entities. Each maps to an NVD CPE, so its vulnerabilities are
+          matched exactly.
         </p>
         <div className={styles.sbox}>
           <span className={styles.mono} style={{ color: "var(--text-muted)" }}>
@@ -410,7 +410,7 @@ export function FollowView({ data }: { data: StackExposureResponse }) {
             {followRows?.length ?? 0}
           </span>
         </div>
-        {(followRows ?? []).length === 0 && <div className={styles.noResults}>Not following anything yet — search to follow.</div>}
+        {(followRows ?? []).length === 0 && <div className={styles.noResults}>Not following anything yet. Search above to follow a vendor or product.</div>}
         {(followRows ?? []).map((row) => {
           const c = countByName.get(row.entity_name ?? "");
           return (

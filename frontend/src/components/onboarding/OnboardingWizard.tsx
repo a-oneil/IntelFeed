@@ -154,7 +154,7 @@ function OnboardingSession() {
             </span>
           </span>
           <button type="button" className={styles.close} onClick={close}>
-            Close &mdash; resumes here
+            Close (resumes here)
           </button>
         </div>
 

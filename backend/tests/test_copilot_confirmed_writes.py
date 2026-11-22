@@ -186,7 +186,7 @@ async def test_destructive_calls_cannot_be_edited(client: AsyncClient, admin_hea
         json={"action_id": action_id, "approved": True, "edited_params": {"feed_id": str(uuid.uuid4())}},
         headers=admin_headers,
     )
-    assert resp.json()["status"] == "error" and "can't be edited" in resp.json()["message"]
+    assert resp.json()["status"] == "error" and "cannot be edited" in resp.json()["message"]
     from app.services.redis_client import get_redis
 
     await (await get_redis()).delete(f"{STAGED_KEY_PREFIX}{action_id}")

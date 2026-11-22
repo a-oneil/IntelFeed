@@ -305,7 +305,9 @@ async def _execute_action(
                 # day, not one per entry. Only meaningful in batch mode.
                 result = {
                     "status": "skipped",
-                    "message": "use_daily_summary only runs in batch mode (scheduled/manual digest rules)",
+                    "message": (
+                        "The use_daily_summary action runs only in batch mode (scheduled or manual digest rules)."
+                    ),
                 }
             case _:
                 result = {"status": "error", "message": f"Unknown action type: {action_type}"}
@@ -1190,12 +1192,12 @@ async def _action_send_notification_batch(
         return {
             "status": "skipped",
             "message": (
-                "Nothing to send — the rendered message was empty. If you used "
-                "{ai_summary}, the AI task returned no extractable text."
+                "Nothing to send: the rendered message was empty. If you used "
+                "{ai_summary}, the AI task returned no usable text."
             ),
         }
 
-    header = f"**IntelFeed Digest** — {count} {'entry' if count == 1 else 'entries'}"
+    header = f"**IntelFeed Digest**: {count} {'entry' if count == 1 else 'entries'}"
 
     # Build platform-specific payload(s). Discord may require several messages
     # to fit a long briefing within its per-message limits.
@@ -1206,15 +1208,15 @@ async def _action_send_notification_batch(
             # to mrkdwn and split across blocks (and messages if needed) so
             # nothing is truncated.
             blocks = _slack_blocks_from_text(_markdown_to_mrkdwn(message_text))
-            fallback = f"IntelFeed Briefing — {count} {'entry' if count == 1 else 'entries'}"
+            fallback = f"IntelFeed Briefing: {count} {'entry' if count == 1 else 'entries'}"
         else:
             # Entry listing — already built as mrkdwn, add a header
             blocks = [
-                {"type": "header", "text": {"type": "plain_text", "text": f"IntelFeed Digest — {count} entries"}},
+                {"type": "header", "text": {"type": "plain_text", "text": f"IntelFeed Digest: {count} entries"}},
                 {"type": "divider"},
                 *_slack_blocks_from_text(message_text),
             ]
-            fallback = f"IntelFeed Digest — {count} {'entry' if count == 1 else 'entries'}"
+            fallback = f"IntelFeed Digest: {count} {'entry' if count == 1 else 'entries'}"
         payloads = _slack_block_messages(blocks, username, channel, fallback)
 
     elif platform == "discord":

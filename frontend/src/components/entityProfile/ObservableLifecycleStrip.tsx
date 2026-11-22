@@ -44,7 +44,7 @@ export function ObservableLifecycleStrip({ detail }: { detail: ObservableRespons
       key: "last",
       label: lifecycleSightingLabel(detail),
       date: detail.last_seen_at,
-      sub: detail.confidence_pinned ? "pinned" : decays ? "clock reset" : "no decay",
+      sub: detail.confidence_pinned ? "pinned" : decays ? "decay reset" : "no decay",
       kind: "sight",
     },
   ];

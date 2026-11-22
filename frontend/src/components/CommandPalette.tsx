@@ -342,7 +342,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         <div className={styles.results} ref={listRef}>
           {results.length === 0 && query.length > 0 && (
             <div className={styles.noResults}>
-              No command matches — try the Search page for entities and articles
+              No command matches. Use the Search page for entities and articles.
             </div>
           )}
 

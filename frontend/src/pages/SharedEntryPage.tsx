@@ -430,7 +430,7 @@ export function SharedEntryPage() {
       <div className={styles.errorContainer}>
         <div className={styles.errorTitle}>{is410 ? "Link Expired" : is404 ? "Not Found" : "Error"}</div>
         <div className={styles.errorMessage}>
-          {is410 ? "This share link has expired." : is404 ? "This share link doesn't exist or has been revoked." : "Something went wrong loading this article."}
+          {is410 ? "This share link has expired." : is404 ? "This share link does not exist or has been revoked." : "Could not load this article."}
         </div>
       </div>
     );

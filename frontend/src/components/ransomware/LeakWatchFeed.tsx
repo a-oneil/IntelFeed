@@ -103,7 +103,7 @@ export function LeakWatchFeed({
             WATCHLIST HIT
           </Chip>
           <div className={styles.alertMsg}>
-            <b className={styles.org}>{alert.victim_name}</b> — a watched organization — was posted to{" "}
+            <b className={styles.org}>{alert.victim_name}</b>, a watched organization, was posted to{" "}
             <b>{alert.group_name ?? "an unattributed group"}</b>&apos;s leak site <b>{rel(alert.posted_at)}</b>.
           </div>
           <button className={styles.alertX} onClick={() => setAlertDismissed(true)} aria-label="Dismiss">

@@ -165,7 +165,7 @@ export function SelectionContextMenu({
         : JSON.stringify(res.result, null, 2);
       setAiResult(resultStr);
     } catch {
-      setAiResult("Failed — check that this task has an AI provider assigned.");
+      setAiResult("The task failed. Check that it has an AI provider assigned.");
     }
   };
 

@@ -216,7 +216,7 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
           errorText = parsed.message || parsed.detail || msg;
         } catch {
           if (msg.includes("422")) {
-            errorText = "Not configured — assign a provider + model in Settings > AI";
+            errorText = "Not configured. Assign a provider and model in Settings > AI.";
           }
         }
       }
@@ -267,7 +267,7 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
                     : "This instance requires your own key for this prompt",
                 );
               } else if (est.unassigned && !onMyKey) {
-                titleParts.push("Not configured — assign a provider + model in Settings > AI");
+                titleParts.push("Not configured. Assign a provider and model in Settings > AI.");
               } else if (est.label) {
                 titleParts.push(`Estimated ${est.label}`);
               }
@@ -276,7 +276,7 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
                   onMyKey
                     ? "Runs on your own key"
                     : blocked
-                      ? `Runs on the instance's provider — your ${blocked}`
+                      ? `Runs on the instance's provider (${blocked})`
                       : "Runs on the instance's provider",
                 );
               }
@@ -287,7 +287,7 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
                       className={styles.taskRowBtn}
                       onClick={() => handleRun(task.name)}
                       disabled={runningTask === task.name || isCompleted}
-                      title={titleParts.join(" — ")}
+                      title={titleParts.join("\n")}
                     >
                       <span className={styles.taskIcon}>
                         {runningTask === task.name ? <span className={styles.spinner} /> : taskGlyph(task)}
@@ -329,7 +329,7 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
                     <input
                       type="text"
                       className={styles.focusInput}
-                      placeholder="Focus (optional) — e.g. detection"
+                      placeholder="Focus (optional), e.g. detection"
                       value={focusText[task.name] || ""}
                       onChange={(e) =>
                         setFocusText((prev) => ({ ...prev, [task.name]: e.target.value }))

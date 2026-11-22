@@ -46,7 +46,7 @@ function ClaimRow({ claim, onOpenArticle }: { claim: FieldClaim; onOpenArticle?:
 
       {claim.agrees === false && (
         <div className={styles.stale}>
-          Asserted a different value than the profile shows now:
+          Reported a different value than the profile shows now:
           <span className={styles.staleValue}>{claim.value}</span>
         </div>
       )}
@@ -127,15 +127,15 @@ export function FieldProvenance({
   const title = unsourced
     ? `${label} has no recorded source`
     : conflicting > 0
-      ? `${agreeing} source${agreeing === 1 ? "" : "s"} agree, ${conflicting} asserted something else`
+      ? `${agreeing} source${agreeing === 1 ? "" : "s"} agree, ${conflicting} reported a different value`
       : `${agreeing || claims.length} source${(agreeing || claims.length) === 1 ? "" : "s"}`;
 
   return (
     <span className={styles.wrap} ref={wrapRef}>
       <Hint
         title="Where this came from"
-        body="Every field on a dossier records what asserted it and whether the sources agree."
-        aside={`${title} — click to see the claims.`}
+        body="Every field on a profile records which sources reported it and whether they agree."
+        aside={`${title}. Click to see the claims.`}
         place="left"
         align="center"
         disabled={open}
@@ -175,9 +175,9 @@ export function FieldProvenance({
 
           {unsourced ? (
             <p className={styles.unsourcedBody}>
-              This value is on the profile but nothing recorded where it came from &mdash; it predates
-              provenance tracking, or was written by a path that doesn&rsquo;t report one. Editing the
-              field records you as its source.
+              This value is on the profile, but no source was recorded for it. It predates provenance
+              tracking or was written by a path that does not report one. Editing the field records you
+              as its source.
             </p>
           ) : (
             <ul className={styles.claims}>

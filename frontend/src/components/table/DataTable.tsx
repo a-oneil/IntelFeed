@@ -542,7 +542,7 @@ export function DataTable<T>({
                     </label>
                   ))}
                 <span className={styles.columnsMenuHint}>
-                  Drag headers to reorder · choices, order &amp; widths save automatically
+                  Drag headers to reorder. Visibility, order and widths are saved automatically.
                 </span>
                 <button
                   className={styles.columnsMenuReset}
@@ -597,7 +597,7 @@ export function DataTable<T>({
                       : col.sticky
                         ? col.label
                         : sortable
-                          ? `Sort by ${col.label} — drag to reorder`
+                          ? `Sort by ${col.label}. Drag to reorder.`
                           : "Drag to reorder"
                   }
                   draggable={!col.sticky}

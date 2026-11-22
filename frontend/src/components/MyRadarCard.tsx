@@ -48,12 +48,12 @@ function pct(weight: number): string {
 function votesHint(row: MyRadarFamily, minSamples: number): string {
   if (row.learned) return `${row.sample_count} votes decided by this family`;
   if (row.sample_count > 0) {
-    return `${row.sample_count} of ${minSamples} votes needed — each thumb counts toward one family only`;
+    return `${row.sample_count} of ${minSamples} votes needed. Each vote counts toward one family only.`;
   }
   if (row.votes_seen > 0) {
-    return `Fired on ${row.votes_seen} voted entries, but another signal always contributed more to the score`;
+    return `Present on ${row.votes_seen} voted entries, but another signal always contributed more to the score.`;
   }
-  return "No votes on entries carrying this family yet";
+  return "No votes yet on entries with this signal family.";
 }
 
 function FamilyRow({ row, minSamples }: { row: MyRadarFamily; minSamples: number }) {
@@ -68,7 +68,7 @@ function FamilyRow({ row, minSamples }: { row: MyRadarFamily; minSamples: number
       <div className={styles.rowHead}>
         <span className={styles.famName}>{FAMILY_LABEL[row.family] ?? row.family}</span>
         <span className={`${styles.famDelta} ${styles[direction]}`}>
-          {direction === "flat" ? "house weight" : pct(row.weight)}
+          {direction === "flat" ? "default weight" : pct(row.weight)}
         </span>
       </div>
       <div className={styles.track}>
@@ -123,7 +123,7 @@ export function MyRadarCard() {
             checked={data.personalized}
             onChange={(e) =>
               setPersonalized.mutate(e.target.checked, {
-                onError: () => toast.error("Couldn't change your Radar ranking"),
+                onError: () => toast.error("Could not change your Radar ranking"),
               })
             }
           />
@@ -132,16 +132,16 @@ export function MyRadarCard() {
       </div>
 
       <p className={styles.lede}>
-        Your ▲/▼ votes on Priority Queue items are fitted into a weight per signal family and
-        applied to your ordering only. The score itself stays shared &mdash; personalising changes
-        the order you see, never which entries reach the queue.
+        Your ▲/▼ votes on Priority Queue items set a weight per signal family, applied to your
+        ordering only. The shared score does not change. Personalising changes the order you
+        see, not which entries reach the queue.
       </p>
 
       {learnedCount === 0 ? (
         <div className={styles.empty}>
           <b>Nothing learned yet.</b> Vote on Priority Queue items with ▲ and ▼. A family starts
-          steering your order once it has {data.min_samples} votes in the last {data.window_days}{" "}
-          days &mdash; {data.total_votes === 0 ? "you have none so far" : `you have ${data.total_votes} so far`}.
+          changing your order once it has {data.min_samples} votes in the last {data.window_days}{" "}
+          days. {data.total_votes === 0 ? "You have none so far." : `You have ${data.total_votes} so far.`}
         </div>
       ) : (
         <>
@@ -154,7 +154,7 @@ export function MyRadarCard() {
             <span className={styles.dim}>
               {data.personalized
                 ? `Fitted from ${data.total_votes} votes in the last ${data.window_days} days · refits nightly`
-                : "Paused — you're seeing the shared ranking"}
+                : "Paused. You are seeing the shared ranking."}
             </span>
             <button
               className={styles.reset}
@@ -162,11 +162,11 @@ export function MyRadarCard() {
               onClick={() =>
                 reset.mutate(undefined, {
                   onSuccess: (r) => toast.success(`Cleared ${r.cleared} learned weights`),
-                  onError: () => toast.error("Couldn't clear your learned weights"),
+                  onError: () => toast.error("Could not clear your learned weights"),
                 })
               }
             >
-              Forget what it learned
+              Reset learned weights
             </button>
           </div>
         </>

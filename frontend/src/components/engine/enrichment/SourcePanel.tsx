@@ -36,8 +36,8 @@ const LANE_LABEL: Record<EnrichmentLane, string> = {
 
 /** Why queued lookups wait again, in the console's words. */
 const REASON_TEXT: Record<EnrichmentQueueReason, string> = {
-  rate_limited: "retrying after the source said \"too many requests\"",
-  breaker_open: "waiting out a back-off",
+  rate_limited: "retrying after the source answered \"too many requests\"",
+  breaker_open: "waiting for a back-off period to end",
   budget_exhausted: "waiting for tomorrow's cap",
   backfill_share: "waiting for backfill room",
   paused: "held by the pause",
@@ -124,7 +124,7 @@ export function SourcePanel({
             </button>
           </div>
         ) : !detail ? (
-          <p className={s.note}>{detailQ.isError ? `Couldn't load ${x.label}.` : "Loading…"}</p>
+          <p className={s.note}>{detailQ.isError ? `Could not load ${x.label}.` : "Loading…"}</p>
         ) : (
           <>
             {tab === "overview" && <Overview x={x} d={detail} setTab={setTab} openKey={openKey} />}
@@ -218,7 +218,7 @@ function Overview({
             </p>
           ))}
           {d.queue.failed > 0 && (
-            <p className={s.note}>{num(d.queue.failed)} gave up after repeated errors; retry them from Activity.</p>
+            <p className={s.note}>{num(d.queue.failed)} gave up after repeated errors. Retry them from Activity.</p>
           )}
         </div>
       )}
@@ -255,7 +255,7 @@ function Limits({ x, d }: { x: EnrichmentConsoleSource; d: EnrichmentSourceDetai
       },
       {
         onSuccess: () => toast.success(`Saved ${x.label}'s limits`),
-        onError: (e) => toast.error(`Couldn't save: ${(e as Error).message}`),
+        onError: (e) => toast.error(`Could not save the limits: ${(e as Error).message}`),
       },
     );
   };
@@ -279,7 +279,7 @@ function Limits({ x, d }: { x: EnrichmentConsoleSource; d: EnrichmentSourceDetai
         <label htmlFor="enr-cap">Daily cap</label>
         <span className={s.in}>
           <input id="enr-cap" type="number" min={0} placeholder="none" value={cap} onChange={(e) => setCap(e.target.value)} />
-          requests{l.backfill_share != null && `; backfill may use ${Math.round(l.backfill_share * 100)}%`}
+          requests{l.backfill_share != null && `. Backfill may use ${Math.round(l.backfill_share * 100)}%.`}
         </span>
         {x.trigger_mode && (
           <>
@@ -342,7 +342,7 @@ function Fields({ x, d }: { x: EnrichmentConsoleSource; d: EnrichmentSourceDetai
   return (
     <div className={s.stack}>
       {d.outputs.length === 0 ? (
-        <p className={s.note}>Writes nothing onto entities directly.</p>
+        <p className={s.note}>This source writes nothing onto entities directly.</p>
       ) : (
         <div className={s.fields}>
           {d.outputs.map((o) => (
@@ -370,8 +370,8 @@ function Fields({ x, d }: { x: EnrichmentConsoleSource; d: EnrichmentSourceDetai
           <p className={s.note}>
             {num(gap.missing)} {getEntityPluralLabel(gap.entity_type)} have no {gap.field.replace(/_/g, " ")}.{" "}
             {gap.in_scope > 0
-              ? `${num(gap.in_scope)} can be looked up now; the rest are already queued or outside what ${x.label} covers.`
-              : `None can be looked up now: they're already queued or outside what ${x.label} covers.`}
+              ? `${num(gap.in_scope)} can be looked up now. The rest are already queued or outside what ${x.label} covers.`
+              : `None can be looked up now: they are already queued or outside what ${x.label} covers.`}
           </p>
           {gap.in_scope > 0 && (
             <div className={s.actions}>
@@ -407,7 +407,7 @@ function Jobs({ x, d }: { x: EnrichmentConsoleSource; d: EnrichmentSourceDetail 
   const [saved, setSaved] = useState(false);
 
   if (d.jobs.length === 0) {
-    return <p className={s.note}>No scheduled jobs. {x.label} only answers lookups.</p>;
+    return <p className={s.note}>{x.label} has no scheduled jobs. It only answers lookups.</p>;
   }
   const done = () => {
     setEditing(null);
@@ -446,7 +446,7 @@ function Jobs({ x, d }: { x: EnrichmentConsoleSource; d: EnrichmentSourceDetail 
                   onClick={() =>
                     runNow.mutate(j.key, {
                       onSuccess: () => toast.success(`${j.key} queued`),
-                      onError: (e) => toast.error(`Couldn't run ${j.key}: ${(e as Error).message}`),
+                      onError: (e) => toast.error(`Could not run ${j.key}: ${(e as Error).message}`),
                     })
                   }
                 >
@@ -470,7 +470,7 @@ function Jobs({ x, d }: { x: EnrichmentConsoleSource; d: EnrichmentSourceDetail 
                 onSave={(schedule) =>
                   update.mutate(
                     { name: j.key, schedule },
-                    { onSuccess: done, onError: (e) => toast.error(`Couldn't save the schedule: ${(e as Error).message}`) },
+                    { onSuccess: done, onError: (e) => toast.error(`Could not save the schedule: ${(e as Error).message}`) },
                   )
                 }
                 onReset={
@@ -478,7 +478,7 @@ function Jobs({ x, d }: { x: EnrichmentConsoleSource; d: EnrichmentSourceDetail 
                     ? () =>
                         reset.mutate(j.key, {
                           onSuccess: done,
-                          onError: (e) => toast.error(`Couldn't reset the schedule: ${(e as Error).message}`),
+                          onError: (e) => toast.error(`Could not reset the schedule: ${(e as Error).message}`),
                         })
                     : undefined
                 }

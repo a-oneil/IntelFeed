@@ -224,7 +224,7 @@ export function SettingsPage() {
       ))}
       {q && filteredGroups.length === 0 && (
         <p className={styles.navNoMatch}>
-          No settings match &ldquo;{navFilter.trim()}&rdquo; — the{" "}
+          No settings match &ldquo;{navFilter.trim()}&rdquo;. The{" "}
           <Link to="/documentation">documentation</Link> may cover it.
         </p>
       )}
@@ -295,7 +295,7 @@ export function SettingsPage() {
         ))}
         {q && filteredGroups.length === 0 && (
           <p className={styles.navNoMatch}>
-            No settings match &ldquo;{navFilter.trim()}&rdquo; — the{" "}
+            No settings match &ldquo;{navFilter.trim()}&rdquo;. The{" "}
             <Link to="/documentation">documentation</Link> may cover it.
           </p>
         )}
@@ -365,7 +365,7 @@ function AccountSection() {
   return (
     <div className={styles.sectionContent}>
       <h2 className={styles.sectionTitle}>Account</h2>
-      <p className={styles.sectionDesc}>Manage your profile and security settings.</p>
+      <p className={styles.sectionDesc}>Your profile details and password.</p>
 
       <div className={styles.card}>
         <h3 className={styles.cardTitle}>Profile</h3>
@@ -400,7 +400,7 @@ function AccountSection() {
         <p className={styles.sectionDesc}>
           {canResumeTour
             ? "You closed the tour partway through. Pick it up where you left off, or start it again from the beginning."
-            : "Replay the setup and usage tour from the beginning. It covers the reading loop, the priority queue, entities and search — and, if you're an admin, anything this instance still needs."}
+            : "Replay the setup and usage tour from the beginning. It covers the reading loop, the priority queue, entities and search. Admins also see what this instance still needs."}
         </p>
         <div className={styles.cardActions}>
           {canResumeTour && (
@@ -486,7 +486,7 @@ function AppearanceSection() {
   return (
     <div className={styles.sectionContent}>
       <h2 className={styles.sectionTitle}>Appearance</h2>
-      <p className={styles.sectionDesc}>Customize the look and feel of IntelFeed.</p>
+      <p className={styles.sectionDesc}>Choose a theme or edit your own.</p>
 
       <div className={styles.card}>
         <ThemeSwitcher />
@@ -525,7 +525,7 @@ function ReadingSection() {
     <div className={styles.sectionContent}>
       <h2 className={styles.sectionTitle}>Reading</h2>
       <p className={styles.sectionDesc}>
-        Customize how you read and interact with feed entries.
+        Reader typography, view mode, mark-as-read behaviour, summaries, translation and read-aloud voice.
         {saveMsg && <span className={styles.autoSaveIndicator}>{saveMsg}</span>}
       </p>
 
@@ -804,12 +804,12 @@ function ReaderTypographySettings() {
           value={fontSize}
           onChange={(e) => setFontSize(Number(e.target.value) as ReaderFontSize)}
         >
-          <option value={13}>13px — Small</option>
+          <option value={13}>13px (small)</option>
           <option value={14}>14px</option>
-          <option value={15}>15px — Default</option>
+          <option value={15}>15px (default)</option>
           <option value={16}>16px</option>
           <option value={18}>18px</option>
-          <option value={20}>20px — Large</option>
+          <option value={20}>20px (large)</option>
         </select>
       </div>
 
@@ -827,7 +827,7 @@ function ReaderTypographySettings() {
         >
           <option value={1.4}>Tight (1.4)</option>
           <option value={1.6}>Normal (1.6)</option>
-          <option value={1.7}>Relaxed (1.7) — Default</option>
+          <option value={1.7}>Relaxed (1.7, default)</option>
           <option value={1.8}>Loose (1.8)</option>
           <option value={2.0}>Double (2.0)</option>
         </select>
@@ -848,7 +848,7 @@ function ReaderTypographySettings() {
           <option value={600}>Narrow (600px)</option>
           <option value={720}>Medium (720px)</option>
           <option value={860}>Wide (860px)</option>
-          <option value={1000}>Extra wide (1000px) — Default</option>
+          <option value={1000}>Extra wide (1000px, default)</option>
           <option value={0}>Full width</option>
         </select>
       </div>
@@ -903,8 +903,8 @@ function EngineHost() {
     <div className={styles.sectionContent}>
       <h2 className={styles.sectionTitle}>Engine</h2>
       <p className={styles.sectionDesc}>
-        The ingestion pipeline: what came in, what was linked, and what each stage decided —
-        feed health, stage settings, AI extraction, enrichment, hygiene, scheduled jobs and plans.
+        Settings and status for every stage of the ingestion pipeline: feed health, stage settings,
+        AI extraction, enrichment, review proposals, scheduled jobs and pipeline plans.
       </p>
       <EngineSection />
     </div>
@@ -928,7 +928,7 @@ function SystemSection() {
     setRevalidateStatus(null);
     try {
       const res = await api.post("/autolink/revalidate");
-      setRevalidateStatus(`Queued (task ${res.data.task_id?.slice(0, 8)}…) — stale links will be cleaned up in the background.`);
+      setRevalidateStatus(`Queued (task ${res.data.task_id?.slice(0, 8)}…). Stale links are removed in the background.`);
     } catch {
       setRevalidateStatus("Failed to queue revalidation");
     } finally {
@@ -941,7 +941,7 @@ function SystemSection() {
     setRebuildStatus(null);
     try {
       const res = await api.post("/search/rebuild");
-      setRebuildStatus(`Queued (task ${res.data.task_id?.slice(0, 8)}…) — search index will rebuild in the background.`);
+      setRebuildStatus(`Queued (task ${res.data.task_id?.slice(0, 8)}…). The search index rebuilds in the background.`);
     } catch {
       setRebuildStatus("Failed to queue search index rebuild");
     } finally {
@@ -954,7 +954,7 @@ function SystemSection() {
     setEntitySyncStatus(null);
     try {
       const res = await api.post("/search/entities/sync");
-      setEntitySyncStatus(`Queued (task ${res.data.task_id?.slice(0, 8)}…) — entity indexes will sync in the background.`);
+      setEntitySyncStatus(`Queued (task ${res.data.task_id?.slice(0, 8)}…). Entity indexes sync in the background.`);
     } catch {
       setEntitySyncStatus("Failed to queue entity index sync");
     } finally {
@@ -966,7 +966,7 @@ function SystemSection() {
     <div className={styles.sectionContent}>
       <h2 className={styles.sectionTitle}>System</h2>
       <p className={styles.sectionDesc}>
-        Infrastructure settings and administrative maintenance tools.
+        Email, monitoring, backups, data retention and search index maintenance.
       </p>
 
       <SystemSettings
@@ -1824,7 +1824,7 @@ function UsersSection() {
     <div className={styles.sectionContent}>
       <h2 className={styles.sectionTitle}>User Management</h2>
       <p className={styles.sectionDesc}>
-        Manage user accounts, roles, and access.
+        User accounts, roles, invites and registration.
       </p>
 
       <SystemSettings
@@ -2006,9 +2006,8 @@ function TelegramSection() {
     <div className={styles.sectionContent}>
       <h2 className={styles.sectionTitle}>Telegram Setup</h2>
       <p className={styles.sectionDesc}>
-        Telegram is a high-signal source for threat intel — ransomware leak sites, hacktivist
-        coordination channels, and eCrime brokers all publish there. Setup is a one-time bootstrap
-        per IntelFeed instance because Telegram requires an interactive login on stdin.
+        Ransomware leak sites, hacktivist channels and eCrime brokers publish on Telegram. Setup is
+        done once per IntelFeed instance, because Telegram requires an interactive login.
       </p>
 
       <div className={styles.card}>
@@ -2018,7 +2017,7 @@ function TelegramSection() {
           channels they aren't admin of). Aggressive use can permanently ban the account, and the
           resulting session file is a credential equivalent to the account password. Use a
           dedicated burner SIM / Telegram identity, not your personal account. Monitoring channels
-          banned in your jurisdiction may have legal implications — operator's responsibility.
+          banned in your jurisdiction may have legal implications. That is the operator's responsibility.
         </p>
       </div>
 
@@ -2053,7 +2052,7 @@ TELEGRAM_API_HASH=abc123...`}</code>
       <div className={styles.card}>
         <h3 className={styles.cardTitle}>3. Run the interactive bootstrap script</h3>
         <p className={styles.cardDesc}>
-          The <code className={styles.inlineCode}>-it</code> flags are critical — Telethon prompts
+          The <code className={styles.inlineCode}>-it</code> flags are required. Telethon prompts
           on stdin for your phone number, the SMS code Telegram sends, and (if enabled) your 2FA
           password.
         </p>
@@ -2072,7 +2071,7 @@ TELEGRAM_API_HASH=abc123...`}</code>
         <p className={styles.cardDesc}>
           The session file lives at{" "}
           <code className={styles.inlineCode}>./telegram_data/telegram.session</code> on the host.
-          Treat it as a credential — back it up alongside the database and lock down its
+          Treat it as a credential. Back it up alongside the database and lock down its
           permissions:
         </p>
         <pre className={styles.codeBlock}>
@@ -2109,8 +2108,8 @@ TELEGRAM_API_HASH=abc123...`}</code>
             Media (photos, videos, voice notes, documents) downloads to{" "}
             <code className={styles.inlineCode}>./telegram_media/</code> and serves from{" "}
             <code className={styles.inlineCode}>/api/telegram-media/...</code> (auth required).
-            Default cap is 25 MB — set{" "}
-            <code className={styles.inlineCode}>TELEGRAM_MAX_MEDIA_SIZE_MB</code> to change.
+            Default cap is 25 MB; set{" "}
+            <code className={styles.inlineCode}>TELEGRAM_MAX_MEDIA_SIZE_MB</code> to change it.
           </li>
           <li>
             Multi-session: pass{" "}
@@ -2130,7 +2129,7 @@ TELEGRAM_API_HASH=abc123...`}</code>
           </li>
           <li>
             Keep the host clock in sync (<code className={styles.inlineCode}>chronyd</code> /{" "}
-            <code className={styles.inlineCode}>systemd-timesyncd</code>) — MTProto rejects
+            <code className={styles.inlineCode}>systemd-timesyncd</code>). MTProto rejects
             requests that drift more than ~5 minutes.
           </li>
         </ul>
@@ -2145,8 +2144,8 @@ function SkillSection() {
     <div className={styles.sectionContent}>
       <h2 className={styles.sectionTitle}>Claude Code Skill</h2>
       <p className={styles.sectionDesc}>
-        Query IntelFeed directly from Claude Code using the IntelFeed skill.
-        Search entries, extract intelligence, generate detection rules, and more — all through natural language.
+        Use IntelFeed from Claude Code with the IntelFeed skill: search entries, look up entities
+        and generate detection rules.
       </p>
 
       <div className={styles.card}>
@@ -2162,13 +2161,13 @@ function SkillSection() {
       <div className={styles.card}>
         <h3 className={styles.cardTitle}>1a. Select the skill you want to use</h3>
         <p className={styles.cardDesc}>
-          Setup the lite skill if you just want the agent to perform searches and retrieve content from intelfeed.
+          Set up the lite skill if the agent only needs to search and read IntelFeed.
         </p>
         <pre className={styles.codeBlock}>
           <code>cp -r ~/Downloads/intelfeed/claude/skills/intelfeed-lite ~/.claude/skills/intelfeed-lite</code>
         </pre>
         <p className={styles.cardDesc}>
-          Setup the full skill if you need the agent to modify intelfeed configurations.
+          Set up the full skill if the agent needs to change IntelFeed configuration.
         </p>
         <pre className={styles.codeBlock}>
           <code>cp -r ~/Downloads/intelfeed/claude/skills/intelfeed ~/.claude/skills/intelfeed</code>

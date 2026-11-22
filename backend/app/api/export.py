@@ -162,7 +162,7 @@ async def _build_research_bundle_zip(db: AsyncSession, entry_ids: list[uuid.UUID
         zf.writestr("attack_layer.json", json.dumps(layer, indent=2))
 
         manifest = [
-            f"IntelFeed research bundle — {bundle_name}",
+            f"IntelFeed research bundle: {bundle_name}",
             f"Entries: {len(entries)}",
             f"Generated: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}",
         ]
@@ -506,7 +506,7 @@ async def bulk_export_entities(
             exported += 1
 
         manifest = [
-            f"IntelFeed entity export — {type_label}",
+            f"IntelFeed entity export: {type_label}",
             f"Exported: {exported} profile(s)",
         ]
         if truncated_total and truncated_total > len(ids):

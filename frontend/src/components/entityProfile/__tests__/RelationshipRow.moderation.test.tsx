@@ -55,7 +55,7 @@ describe("RelationshipRow", () => {
     render(<RelationshipRow row={row} viewedLabel="Germany" onOpen={vi.fn()} />);
     expect(screen.getByText(/corroborated · MITRE/)).toBeInTheDocument();
     // Corroborated rows are settled — no pin/reject moderation buttons.
-    expect(screen.queryByTitle("Pin — mark corroborated by you")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Pin: mark as corroborated by you")).not.toBeInTheDocument();
   });
 
   it("labels AI-adjudicated corroboration with evidence count", () => {
@@ -90,9 +90,9 @@ describe("RelationshipRow", () => {
         onReject={onReject}
       />,
     );
-    fireEvent.click(screen.getByTitle("Pin — mark corroborated by you"));
+    fireEvent.click(screen.getByTitle("Pin: mark as corroborated by you"));
     expect(onConfirm).toHaveBeenCalledWith("r1");
-    fireEvent.click(screen.getByTitle("Reject — hide and never re-infer"));
+    fireEvent.click(screen.getByTitle("Reject: hide and never infer again"));
     expect(onReject).toHaveBeenCalledWith("r1");
   });
 

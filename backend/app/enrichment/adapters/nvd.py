@@ -127,7 +127,7 @@ class NVDAdapter(EnrichmentAdapter):
         except httpx.HTTPError:
             return False
         if resp.status_code == 404 and self.api_key:
-            raise AuthFailed("NVD doesn't know this key")
+            raise AuthFailed("NVD rejected this API key")
         return resp.status_code == 200
 
 

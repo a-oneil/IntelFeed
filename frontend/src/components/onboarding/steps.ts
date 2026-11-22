@@ -18,7 +18,7 @@ export type ChapterId = "intro" | "setup" | "learn" | "yours";
 export const CHAPTERS: Record<ChapterId, { title: string; blurb: string }> = {
   intro: { title: "Welcome", blurb: "What this is" },
   setup: { title: "Set up", blurb: "Get this instance working" },
-  learn: { title: "Learn the app", blurb: "How to actually use it" },
+  learn: { title: "Learn the app", blurb: "How to use it" },
   yours: { title: "Make it yours", blurb: "Settle in" },
 };
 
@@ -102,7 +102,7 @@ export const STEPS: StepDef[] = [
 
   { id: "theme", chapter: "yours", label: "Appearance" },
   { id: "shortcuts", chapter: "yours", label: "Keyboard" },
-  { id: "help", chapter: "yours", label: "Where help lives" },
+  { id: "help", chapter: "yours", label: "Finding help" },
 ];
 
 export type SkipReason = "admin only" | "already set up";

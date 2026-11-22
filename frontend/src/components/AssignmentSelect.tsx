@@ -42,7 +42,7 @@ export default function AssignmentSelect({
             disabled={incompatible}
           >
             {p.name} / {m}
-            {incompatible ? " — no tool support" : ""}
+            {incompatible ? " (no tool support)" : ""}
           </option>
         ));
       })}

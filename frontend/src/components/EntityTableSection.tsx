@@ -42,7 +42,7 @@ const COVERAGE_LABEL: Record<string, string> = {
 };
 const COVERAGE_TIP: Record<string, string> = {
   no_rule: "No detection rule references this technique",
-  library_only: "Rules exist, but their required data sources aren't in your telemetry inventory",
+  library_only: "Rules exist, but their required data sources are not in your telemetry inventory",
   covered: "A non-draft rule covers this technique and its data sources are satisfiable",
 };
 
@@ -221,7 +221,7 @@ export function EntityTableSection<T>({
     setSelectedIds(new Set());
     if (failed === 0) toast.success(`${verb} ${ids.length} ${word}`);
     else if (failed === ids.length) toast.error(`Couldn't ${verb.toLowerCase()} ${failed} ${word}`);
-    else toast.warning(`${verb} ${ids.length - failed} of ${ids.length} — ${failed} failed`);
+    else toast.warning(`${verb} ${ids.length - failed} of ${ids.length}. ${failed} failed.`);
   };
 
   // Bulk delete skips the single-row undo window — a confirm is the guard.
@@ -231,8 +231,8 @@ export function EntityTableSection<T>({
     const word = ids.length === 1 ? noun : (nounPlural ?? `${noun}s`);
     const message =
       entityType === "observable"
-        ? `Delete ${ids.length} ${word}? Their sightings and relationships go with them, and nothing stops a future article from capturing the values again — use "Never capture" for that. This can't be undone.`
-        : `Delete ${ids.length} ${word}? Their entry links and relationships go with them. This can't be undone.`;
+        ? `Delete ${ids.length} ${word}? Their sightings and relationships are deleted with them. A future article can capture the values again; use "Never capture" to stop that. This cannot be undone.`
+        : `Delete ${ids.length} ${word}? Their entry links and relationships are deleted with them. This cannot be undone.`;
     if (!(await confirmDialog({ title: `Delete ${word}`, message, confirmLabel: "Delete", destructive: true }))) return;
     setDeletingSelected(true);
     const failed = await runOnSelection(ids, (id) => deleteEntity(entityType, id));
@@ -249,7 +249,7 @@ export function EntityTableSection<T>({
     if (
       !(await confirmDialog({
         title: "Never capture these values",
-        message: `Never capture ${ids.length} ${word}? Every door refuses the values from now on and they leave the outbound feeds; the rows and their sightings are kept as history.`,
+        message: `Never capture ${ids.length} ${word}? The values will not be captured again and are removed from outbound feeds. The rows and their sightings are kept as history.`,
         confirmLabel: "Never capture",
         destructive: true,
       }))
@@ -376,7 +376,7 @@ export function EntityTableSection<T>({
                 return (
                   <span
                     className={`${table.count} ${table.rule}`}
-                    title={`${info.rule_count} rule${info.rule_count === 1 ? "" : "s"} reference this technique — ${info.satisfiable_rule_count} satisfiable by your telemetry`}
+                    title={`${info.rule_count} rule${info.rule_count === 1 ? "" : "s"} reference this technique. ${info.satisfiable_rule_count} can be satisfied by your telemetry.`}
                   >
                     {info.rule_count}
                     {info.satisfiable_rule_count !== info.rule_count && (
@@ -534,7 +534,7 @@ export function EntityTableSection<T>({
                             className={styles.btn}
                             disabled={tombstoningSelected}
                             onClick={handleTombstoneSelected}
-                            title="Tombstone: never capture or export these values again"
+                            title="Never capture or export these values again."
                           >
                             {tombstoningSelected ? "Tombstoning…" : `Never capture (${selectedIds.size})`}
                           </button>
@@ -587,7 +587,7 @@ export function EntityTableSection<T>({
                       className={styles.btn}
                       disabled={tombstoningSelected}
                       onClick={handleTombstoneSelected}
-                      title="Tombstone: never capture or export these values again"
+                      title="Never capture or export these values again."
                     >
                       {tombstoningSelected ? "Tombstoning…" : "Never capture"}
                     </button>

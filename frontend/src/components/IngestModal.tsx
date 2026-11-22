@@ -47,7 +47,7 @@ function getErrorMessage(err: unknown): string {
     axiosErr?.response?.data?.error?.message ||
     axiosErr?.response?.data?.message ||
     axiosErr?.message ||
-    "Something went wrong. Try again."
+    "Could not add it to the batch. Try again."
   );
 }
 

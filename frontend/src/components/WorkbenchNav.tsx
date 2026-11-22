@@ -37,16 +37,16 @@ export const SECTION_ENTITY_TYPE: Partial<Record<WorkspaceSection, string>> = {
 const GROUP_HINTS: Record<string, { title: string; body: string; aside?: string }> = {
   DETECTION: {
     title: "Detection",
-    body: "What you can actually catch: your rule library, the ATT&CK grid behind it, and the logs it all depends on.",
+    body: "Your rule library, the ATT&CK matrix it maps to, and the telemetry sources the rules depend on.",
   },
   ENTITIES: {
     title: "Entities",
-    body: "Everything the engine pulled out of your reading — actors, malware, CVEs, techniques, vendors.",
-    aside: "Each one has a dossier that fills in as you read.",
+    body: "Entities extracted from your articles: actors, malware, CVEs, techniques, vendors.",
+    aside: "Each one has a profile built from the articles that mention it.",
   },
   INTELLIGENCE: {
     title: "Intelligence",
-    body: "The analyst's own workspace — what you're watching, what you owe an answer on, and what you write up.",
+    body: "Analyst tools: the watchlist, intelligence requirements, Telegram mentions, ransomware victims and the glossary.",
   },
 };
 
@@ -71,7 +71,7 @@ export const SECTION_CONFIG: Array<{
         key: "reports", label: "Reports", swatch: "var(--accent-intel)",
         hint: {
           title: "Reports",
-          body: "Build and publish intelligence products — exposure profiles, flash alerts, actor dossiers — from what the feeds collected.",
+          body: "Build and publish reports from collected articles, such as exposure reports and flash alerts.",
         },
       },
     ],
@@ -83,7 +83,7 @@ export const SECTION_CONFIG: Array<{
         key: "attack_matrix", label: "ATT&CK Matrix", swatch: "var(--accent-detect)",
         hint: {
           title: "ATT&CK Matrix",
-          body: "MITRE's grid, shaded two ways: what your feeds have reported, and what your rules already cover.",
+          body: "The MITRE ATT&CK matrix, shaded by what your feeds have reported and by what your rules cover.",
         },
       },
       { key: "rules", label: "Rules Library", swatch: "var(--accent-detect)" },
@@ -91,14 +91,14 @@ export const SECTION_CONFIG: Array<{
         key: "telemetry", label: "Telemetry Sources", swatch: "var(--accent-detect)",
         hint: {
           title: "Telemetry Sources",
-          body: "The logs your rules depend on. Tick the ones you actually collect and coverage stops being theoretical.",
+          body: "The log sources your rules depend on. Mark the ones you collect so coverage reflects what can run.",
         },
       },
       {
         path: "/workbench/threats", label: "Threats", swatch: "var(--accent-detect)",
         hint: {
           title: "Threats",
-          body: "What's moving right now, ranked by story rather than by outlet — so ten write-ups of one breach count once.",
+          body: "Active threats ranked by story, not by outlet. Ten articles about one breach count once.",
         },
       },
     ],
@@ -130,7 +130,7 @@ export const SECTION_CONFIG: Array<{
         key: "requirements", label: "Requirements", swatch: "var(--accent-intel)",
         hint: {
           title: "Requirements",
-          body: "The standing questions you owe someone an answer on. New articles get matched against them as they arrive.",
+          body: "Questions you need to answer. New articles are matched against them as they arrive.",
         },
       },
       { key: "telegram_mentions", label: "Telegram Mentions", swatch: "var(--accent-intel)" },
@@ -138,7 +138,7 @@ export const SECTION_CONFIG: Array<{
         key: "watchlist", label: "Watchlist", swatch: "var(--accent-intel)",
         hint: {
           title: "Watchlist",
-          body: "Entities you're tracking. New mentions of them surface here before they reach your feed.",
+          body: "Entities you follow. New mentions are listed here.",
         },
       },
     ],

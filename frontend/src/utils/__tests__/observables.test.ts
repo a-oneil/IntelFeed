@@ -25,8 +25,8 @@ describe("observable enrichment labels", () => {
 
   it("shows a registration date with its age", () => {
     const now = new Date("2026-10-28T12:00:00Z");
-    expect(registeredLabel("1996-10-29T05:00:00Z", now)).toBe("Oct 29, 1996 — 29 years ago");
-    expect(registeredLabel("2026-10-25T00:00:00Z", now)).toBe("Oct 25, 2026 — 3 days ago");
-    expect(registeredLabel("2026-10-28T06:00:00Z", now)).toBe("Oct 28, 2026 — today");
+    expect(registeredLabel("1996-10-29T05:00:00Z", now)).toBe("Oct 29, 1996 (29 years ago)");
+    expect(registeredLabel("2026-10-25T00:00:00Z", now)).toBe("Oct 25, 2026 (3 days ago)");
+    expect(registeredLabel("2026-10-28T06:00:00Z", now)).toBe("Oct 28, 2026 (today)");
   });
 });

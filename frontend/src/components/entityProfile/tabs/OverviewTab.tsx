@@ -320,7 +320,7 @@ export function OverviewTab({
       { entityType, entityId },
       {
         onSuccess: () => toast.success("Assessment drafted from linked reporting"),
-        onError: () => toast.error("Failed to draft assessment"),
+        onError: () => toast.error("Could not draft the assessment"),
       },
     );
   };
@@ -341,7 +341,7 @@ export function OverviewTab({
         }
         if (vendorGroups.size === 0 && products.length === 0) return null;
         return (
-          <Panel key={key} title={vendorGroups.size > 0 ? "Affected — from NVD CPE" : "Affected"}>
+          <Panel key={key} title={vendorGroups.size > 0 ? "Affected (from NVD CPE)" : "Affected"}>
             {vendorGroups.size > 0 ? (
               <div className={styles.affGrid}>
               {[...vendorGroups.entries()].map(([cpeVendor, group]) => {
@@ -502,8 +502,8 @@ export function OverviewTab({
             <Panel key={key} title="Infrastructure">
               <div className={styles.metaLabel} style={{ textTransform: "none", letterSpacing: 0 }}>
                 No infrastructure captured yet. IPs, domains and hashes found in{" "}
-                {entityType === "campaign" ? "this campaign's articles" : "articles about it"} will appear here —
-                ones attributed to it first, then ones merely reported alongside it.
+                {entityType === "campaign" ? "this campaign's articles" : "articles about it"} appear here: ones
+                attributed to it first, then ones reported alongside it.
                 {staged > 0 && (
                   <>
                     {" "}
@@ -534,7 +534,7 @@ export function OverviewTab({
             a.click();
             URL.revokeObjectURL(url);
           } catch {
-            toast.error("Export failed");
+            toast.error("Could not export the CSV");
           }
         };
         const byKind = infra.counts?.by_kind ?? {};
@@ -585,7 +585,7 @@ export function OverviewTab({
               <div className={styles.affGroup}>
                 <div className={styles.affGroupHead}>
                   <span>Claimed</span>
-                  <span className={styles.metaLabel}>attribution edges with evidence</span>
+                  <span className={styles.metaLabel}>attribution claims backed by evidence</span>
                 </div>
                 {visibleClaimed.map((c) => renderRow(c, `${c.relationship_type.replace(/_/g, " ")} · ${trust(c)}${c.evidence_count > 1 ? ` ×${c.evidence_count}` : ""}`))}
               </div>
@@ -631,7 +631,7 @@ export function OverviewTab({
               <div className={styles.affGroup}>
                 <div className={styles.affGroupHead}>
                   <span>Claimed by</span>
-                  <span className={styles.metaLabel}>evidence-backed edges</span>
+                  <span className={styles.metaLabel}>claims backed by evidence</span>
                 </div>
                 {b.claimed_by.map((c) =>
                   row(c, `${c.entity_type.replace(/_/g, " ")} · ${(c.relationship_type ?? "").replace(/_/g, " ")} · ${c.relationship_confidence}`),
@@ -664,7 +664,7 @@ export function OverviewTab({
             {o.infra_tag && (
               <Row
                 k="Infrastructure"
-                v={`${o.infra_tag.replace(/_/g, " ")} — dual-use, excluded from publishing`}
+                v={`${o.infra_tag.replace(/_/g, " ")}: dual-use, excluded from publishing`}
               />
             )}
             {o.role && <Row k="Role" v={o.role} />}
@@ -673,7 +673,7 @@ export function OverviewTab({
             {o.popularity_rank != null && (
               <Row
                 k="Popularity"
-                v={`Tranco #${o.popularity_rank.toLocaleString()}${o.popularity_rank <= 10_000 ? " — a top-10k site, often a false positive" : ""}`}
+                v={`Tranco #${o.popularity_rank.toLocaleString()}${o.popularity_rank <= 10_000 ? " (a top-10k site, often a false positive)" : ""}`}
               />
             )}
             {o.evidence && (
@@ -688,8 +688,8 @@ export function OverviewTab({
               k="Decay"
               v={
                 o.decay_half_life_days
-                  ? `${o.decay_half_life_days}d half-life — a new sighting resets the clock`
-                  : "never — behavior and math persist"
+                  ? `${o.decay_half_life_days}d half-life. A new sighting resets decay.`
+                  : "never (this kind does not decay)"
               }
             />
             {o.expires_at && !o.confidence_pinned && (
@@ -706,7 +706,7 @@ export function OverviewTab({
             {!o.report_count && o.feed_source_count > 0 && (
               <Row
                 k="Reporting"
-                v="None — this value is listed on an indicator feed; no article has reported it yet, so there is nothing to attribute"
+                v="None. This value is listed on an indicator feed, but no article has reported it yet, so there is nothing to attribute."
               />
             )}
             {["ipv4", "ipv6", "domain", "url", "email"].includes(o.kind) && (
@@ -733,7 +733,7 @@ export function OverviewTab({
                     a.remove();
                     setTimeout(() => URL.revokeObjectURL(url), 1000);
                   } catch {
-                    toast.error("Sightings export failed");
+                    toast.error("Could not export sightings");
                   }
                 }}
               >
@@ -863,7 +863,7 @@ export function OverviewTab({
       case "cwe_affected_vendors": {
         if (!cweVendors?.length) return null;
         return (
-          <Panel key={key} title="Most-affected vendors — from NVD CPE">
+          <Panel key={key} title="Most-affected vendors (from NVD CPE)">
             {cweVendors.map((v) => (
               <div key={v.vendor_id} className={styles.affRow}>
                 <Link className={styles.affProdLink} to={entityProfilePath("vendor", v.vendor_id)}>
@@ -881,7 +881,7 @@ export function OverviewTab({
       case "cwe_vendors": {
         if (!weaknessProfile?.length) return null;
         return (
-          <Panel key={key} title="Weakness profile — from NVD">
+          <Panel key={key} title="Weakness profile (from NVD)">
             {weaknessProfile.map((w) => (
               <div key={w.cwe_id} className={styles.affRow}>
                 <span className={styles.mono}>{w.cwe_id}</span>
@@ -1078,7 +1078,7 @@ export function OverviewTab({
           );
         }}
       >
-        {clearWikipedia.isPending ? "Clearing…" : "None — no Wikipedia article"}
+        {clearWikipedia.isPending ? "Clearing…" : "None: no Wikipedia article"}
       </button>
     </div>
   );
@@ -1179,7 +1179,7 @@ export function OverviewTab({
                           className={styles.wikiSearchBtn}
                           onClick={() => toggleWikiSearch("article")}
                         >
-                          Wrong article?
+                          Change article
                         </button>
                       )}
                     </div>
@@ -1276,8 +1276,8 @@ export function OverviewTab({
               <>
                 This is a MITRE <em>category</em>, not a weakness. Categories group weaknesses
                 sideways and every one is marked <span className={styles.mono}>Prohibited</span> for
-                mapping, so a CVE should never carry this id — the ones that do were tagged back when
-                NVD mapped against categories.
+                mapping, so a CVE should not carry this id. The ones that do were tagged when NVD still
+                mapped against categories.
               </>
             ) : entity.superseded_by ? (
               <>
@@ -1289,7 +1289,7 @@ export function OverviewTab({
                 ) : (
                   <span className={styles.mono}>{entity.superseded_by}</span>
                 )}
-                . CVEs already tagged with the old id keep it — NVD does not rewrite history.
+                . CVEs already tagged with the old id keep it. NVD does not update old records.
               </>
             ) : (
               <>This entry is retired from the CWE catalog and no longer maintained.</>

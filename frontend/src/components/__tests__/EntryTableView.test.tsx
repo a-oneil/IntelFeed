@@ -135,7 +135,7 @@ describe("EntryTableView thread rows", () => {
     expect(within(row).getByText("Sandworm")).toBeInTheDocument();
     expect(within(row).getByTitle("11 outlets · 23 articles · 6 new")).toBeInTheDocument();
     expect(
-      within(row).getByTitle("BlueMoon exploit kit — 11 outlets · 23 articles · 6 new"),
+      within(row).getByTitle("BlueMoon exploit kit: 11 outlets · 23 articles · 6 new"),
     ).toBeInTheDocument();
     // TTP / CVE counts belong to an article; the thread row must not invent them.
     expect(within(row).queryByText("23")).not.toBeInTheDocument();

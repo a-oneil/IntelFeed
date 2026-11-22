@@ -420,7 +420,7 @@ function GlossaryFormModal({ term, categories, onClose }: GlossaryFormModalProps
       }
       onClose();
     } catch {
-      setError("Failed to save term. It may already exist.");
+      setError("Could not save the term. A term with that name may already exist.");
     }
   };
 

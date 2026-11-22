@@ -379,7 +379,7 @@ async def _iter_worker_events(run_id: str, blpop_timeout: float):
     while True:
         item = await r.blpop([key], timeout=int(blpop_timeout))
         if item is None:
-            raise TimeoutError("Copilot worker produced no output — it may be down or overloaded.")
+            raise TimeoutError("Copilot worker produced no output. It may be down or overloaded.")
         _, raw = item
         try:
             ev = json.loads(raw)
@@ -998,7 +998,10 @@ async def copilot_confirm(
 
     tool_name = pending["tool_name"]
     if body.edited_params is not None and _is_destructive(tool_name):
-        return {"status": "error", "message": "This change can't be edited. Confirm it as shown or cancel it."}
+        return {
+            "status": "error",
+            "message": "This action cannot be edited before it runs. Confirm it as shown, or cancel it.",
+        }
     args = body.edited_params if body.edited_params is not None else (pending.get("args") or {})
 
     claim_key = await _claim(r, key)

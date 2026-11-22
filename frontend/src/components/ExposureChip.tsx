@@ -37,7 +37,7 @@ export function ExposureChip({ exposure }: { exposure: EntryExposure }) {
           tone="toned"
           tint="var(--accent-dash)"
           pill
-          title="No detection rule in the library yet — a content gap"
+          title="No detection rule in the library yet."
         >
           no detection
         </Chip>

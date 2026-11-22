@@ -95,7 +95,10 @@ class GreyNoiseAdapter(EnrichmentAdapter):
                         "found": False,
                         "noise": data.get("noise", False),
                         "riot": data.get("riot", False),
-                        "note": "not seen mass-scanning — targeted, not noise",
+                        "note": (
+                            "GreyNoise has not seen this IP mass-scanning the internet. "
+                            "Traffic from it is targeted rather than background noise."
+                        ),
                     },
                     ttl_hours=168,
                 )

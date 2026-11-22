@@ -221,7 +221,7 @@ export function EntityRowActions({
         title: `Delete "${name}"`,
         message:
           `"${name}" is deleted with all its article links and relationships, and every pending proposal about it is cleared.` +
-          (denies ? " Its name and aliases go on the do-not-recreate list, so the extractor and the autolinker won't mint it again." : "") +
+          (denies ? " Its name and aliases go on the do-not-recreate list, so the extractor and the autolinker will not create it again." : "") +
           " This cannot be undone.",
         confirmLabel: "Delete",
         destructive: true,
@@ -235,7 +235,7 @@ export function EntityRowActions({
         deny: denies,
       });
       if (data.deleted) toast.success(denies ? `Deleted "${name}" and denylisted its names` : `Deleted "${name}"`);
-      else toast.message("Nothing was deleted — already gone");
+      else toast.message("Nothing was deleted: the entity was already gone");
       changed();
     } catch (err) {
       toast.error(errMsg(err, "Delete failed"));

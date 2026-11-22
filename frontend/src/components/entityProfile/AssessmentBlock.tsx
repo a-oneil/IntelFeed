@@ -67,7 +67,7 @@ export function AssessmentBlock({
       source: "entity",
       id: entityId,
       entityType,
-      track: { entryId: "", title: `${displayName} — assessment`, feedTitle: "IntelFeed briefing" },
+      track: { entryId: "", title: `${displayName}: assessment`, feedTitle: "IntelFeed briefing" },
     });
   };
 
@@ -79,7 +79,7 @@ export function AssessmentBlock({
         onError: (err: unknown) =>
           toast.error(
             (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-              "Failed to refresh assessment",
+              "Could not refresh the assessment",
           ),
       },
     );
@@ -118,7 +118,7 @@ export function AssessmentBlock({
             className={styles.assessmentRefresh}
             onClick={refresh}
             disabled={runAI.isPending}
-            title="Regenerate from linked articles and relationships using your assigned AI model — saves to the description"
+            title="Regenerate from linked articles and relationships with your assigned AI model. The result is saved as the description."
           >
             {runAI.isPending ? "Refreshing…" : "↻ AI refresh"}
           </button>
@@ -136,7 +136,7 @@ export function AssessmentBlock({
       >
         <InlineEditField
           value={entity.description || ""}
-          placeholder={editable ? "No assessment yet — write one, or let AI draft it from recent reporting…" : "No assessment yet"}
+          placeholder={editable ? "No assessment yet. Write one, or use AI refresh to draft one from recent reporting." : "No assessment yet"}
           multiline
           renderMarkdown
           linkEntities

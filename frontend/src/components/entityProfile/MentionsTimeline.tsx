@@ -344,7 +344,7 @@ export function MentionsTimeline({
               <div
                 className={styles.chartPeakMarker}
                 style={{ left: `${x(peakIdx)}%`, top: `${y(counts[peakIdx])}%` }}
-                title={`Coverage peak — ${counts[peakIdx]} article${counts[peakIdx] === 1 ? "" : "s"}/${bucketNoun}${
+                title={`Coverage peak: ${counts[peakIdx]} article${counts[peakIdx] === 1 ? "" : "s"}/${bucketNoun}${
                   points[peakIdx].feeds > 0 ? ` across ${points[peakIdx].feeds} feeds` : ""
                 } · ${bucketLabel(points[peakIdx].date, bucket, spansYears)}`}
               >
@@ -385,7 +385,7 @@ export function MentionsTimeline({
                       style={{ background: EVENT_COLORS[e.event_type!] || "var(--text-muted)" }}
                     />
                     <span className={styles.markerTooltipText}>
-                      {e.date ? `${bucketLabel(e.date, "day", spansYears)} — ` : ""}
+                      {e.date ? `${bucketLabel(e.date, "day", spansYears)}: ` : ""}
                       {e.title.length > 70 ? `${e.title.slice(0, 70)}…` : e.title}
                     </span>
                   </div>
@@ -472,7 +472,7 @@ export function MentionsTimeline({
                       style={{ background: EVENT_COLORS[e.event_type!] || "var(--text-muted)" }}
                     />
                     <span className={styles.bucketPanelRowTitle}>
-                      {e.date ? `${bucketLabel(e.date, "day", true)} — ` : ""}
+                      {e.date ? `${bucketLabel(e.date, "day", true)}: ` : ""}
                       {e.title}
                     </span>
                   </button>

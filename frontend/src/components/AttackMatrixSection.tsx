@@ -232,7 +232,7 @@ export function AttackMatrixSection() {
             </>
           )}
           <span className={styles.summaryMeta}>
-            {data.technique_count} techniques · heat = articles seen {windowLabel}
+            {data.technique_count} techniques · shading shows articles seen {windowLabel}
           </span>
         </div>
       )}
@@ -261,7 +261,7 @@ export function AttackMatrixSection() {
       {tooltip && (
         <div className={styles.tooltip} style={{ left: tooltip.x, top: tooltip.y }}>
           <div className={styles.tooltipTitle}>
-            {tooltip.tech.technique_id} — {tooltip.tech.name}
+            {tooltip.tech.technique_id}: {tooltip.tech.name}
           </div>
           <div className={styles.tooltipRow}>Tactic: {tooltip.tacticName}</div>
           <div className={styles.tooltipRow}>
@@ -272,7 +272,7 @@ export function AttackMatrixSection() {
           </div>
           {tooltip.tech.coverage && (
             <div className={styles.tooltipRow}>
-              Rules: {tooltip.tech.rule_count} —{" "}
+              Rules: {tooltip.tech.rule_count} ·{" "}
               <span style={{ color: COVERAGE_VARS[tooltip.tech.coverage] }}>
                 {COVERAGE_LABELS[tooltip.tech.coverage]}
               </span>

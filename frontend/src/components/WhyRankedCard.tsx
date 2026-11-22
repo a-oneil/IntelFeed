@@ -124,10 +124,10 @@ export function WhyRankedCard({ score, raw, signals, exposure, personal, entryId
       <div className={styles.headerRow}>
         <Hint
           title="Why this ranked"
-          body={entryId ? "The signals that pushed this article up your queue." : "The signals that pushed this article up the queue."}
+          body={entryId ? "The signals that set this article's rank in your queue." : "The signals that set this article's rank in the queue."}
           aside={
             entryId
-              ? "▲ / ▼ tunes your weights only — it doesn't move anyone else's queue."
+              ? "▲ / ▼ changes your weights only. It does not change anyone else's queue."
               : undefined
           }
         >
@@ -135,7 +135,7 @@ export function WhyRankedCard({ score, raw, signals, exposure, personal, entryId
           className={styles.header}
           onClick={() => setCollapsed(!collapsed)}
           aria-expanded={!collapsed}
-          aria-label={collapsed ? "Why it's ranked — show the breakdown" : "Why it's ranked — hide the breakdown"}
+          aria-label={collapsed ? "Why it's ranked: show the breakdown" : "Why it's ranked: hide the breakdown"}
         >
           <span className={`${styles.score} ${styles[band]}`}>◆ {score.toFixed(1)}</span>
           {collapsed ? (
@@ -166,7 +166,7 @@ export function WhyRankedCard({ score, raw, signals, exposure, personal, entryId
                   <span className={`${styles.rowFam} ${styles[`fam_${row.family}`] ?? ""}`}>
                     {row.label}
                     {i === 0 && rows.length > 1 && row.value > 0 && (
-                      <span className={styles.driver}> · biggest driver</span>
+                      <span className={styles.driver}> · largest contribution</span>
                     )}
                   </span>
                   <span className={styles.rowText}>{row.text}</span>
@@ -189,7 +189,7 @@ export function WhyRankedCard({ score, raw, signals, exposure, personal, entryId
                   <span className={styles.mathCalc}>
                     {row.raw != null && row.raw !== 0
                       ? `${row.raw.toFixed(2)} × ${(row.value / row.raw).toFixed(2)} rarity`
-                      : "read-time lift"}
+                      : "added at read time"}
                   </span>
                   <span className={styles.mathVal}>{signed(row.value)}</span>
                 </div>
@@ -219,11 +219,11 @@ export function WhyRankedCard({ score, raw, signals, exposure, personal, entryId
                 </div>
               )}
               <p className={styles.mathNote}>
-                Rarity weights self-tune nightly: a signal that fires on 40% of articles is
+                Rarity weights are recomputed nightly. A signal that fires on 40% of articles is
                 worth less than one that fires on 1%. The sum is then ranked against the last 30
-                days onto a 0–10 scale: 9 is about the top 5%, 10 the top 1%.
+                days on a 0 to 10 scale: 9 is about the top 5%, 10 the top 1%.
                 {drifted
-                  ? " This entry's stored score was computed with earlier weights, so it differs from today's arithmetic."
+                  ? " This entry's stored score was computed with earlier weights, so it differs from today's total."
                   : " This score is the same for everyone."}
               </p>
             </div>
@@ -232,7 +232,7 @@ export function WhyRankedCard({ score, raw, signals, exposure, personal, entryId
           <div className={styles.footer}>
             {personal && personal.families.length > 0 && (
               <span className={styles.footItem}>
-                Your votes shift this{" "}
+                Your votes change this by{" "}
                 <b className={styles.footLift}>{signed(personal.lift)}</b> in your ordering
                 only{" "}
                 <span className={styles.footDetail}>
@@ -254,7 +254,7 @@ export function WhyRankedCard({ score, raw, signals, exposure, personal, entryId
                 <button
                   className={styles.footLink}
                   onClick={() => navigate("/settings?section=reading")}
-                  title="See the weights your votes taught it, pause personalisation, or start it over"
+                  title="See the weights learned from your votes, pause personalisation, or reset them"
                 >
                   Your Radar
                 </button>

@@ -41,7 +41,7 @@ export default function CopilotReauthModal({ open, onClose, onSuccess }: Props) 
       .catch((err) => {
         const msg =
           (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
-          "Couldn't start re-authentication";
+          "Could not start re-authentication";
         toast.error(msg);
         onClose();
       });
@@ -80,7 +80,7 @@ export default function CopilotReauthModal({ open, onClose, onSuccess }: Props) 
     try {
       await submitCode.mutateAsync({ sessionId, code: code.trim() });
     } catch {
-      toast.error("Couldn't submit code");
+      toast.error("Could not submit the code");
     }
   };
 

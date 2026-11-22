@@ -568,7 +568,7 @@ export default function PromptWorkspace() {
             onDeleted={() => setSelectedId(null)}
           />
         ) : (
-          <div className={styles.emptyDetail}>No AI tasks yet — create one to get started.</div>
+          <div className={styles.emptyDetail}>No AI tasks yet. Use New to create one.</div>
         )}
       </div>
     </div>
@@ -649,7 +649,7 @@ function CreateTaskPane({
           <option value="custom">Custom</option>
         </select>
         <label className={styles.fieldLabel}>
-          System prompt <span className={styles.fieldHint}>— optional, sent once per call</span>
+          System prompt <span className={styles.fieldHint}>(optional, sent once per call)</span>
         </label>
         <textarea
           className={styles.createTextarea}
@@ -660,7 +660,7 @@ function CreateTaskPane({
           onChange={(e) => setForm({ ...form, system: e.target.value })}
         />
         <label className={styles.fieldLabel}>
-          User prompt <span className={styles.fieldHint}>— Jinja2, rendered per call</span>
+          User prompt <span className={styles.fieldHint}>(Jinja2, rendered per call)</span>
         </label>
         <textarea
           className={styles.createTextarea}
@@ -1056,7 +1056,7 @@ function TaskDetail({
                 <div className={styles.promptEditors}>
                   <div className={styles.fieldLabel}>
                     System prompt{" "}
-                    <span className={styles.fieldHint}>— sent once per call, cacheable</span>
+                    <span className={styles.fieldHint}>(sent once per call, cacheable)</span>
                   </div>
                   <PromptCodeEditor
                     value={editSystemText}
@@ -1065,7 +1065,7 @@ function TaskDetail({
                     minHeight="5rem"
                   />
                   <div className={styles.fieldLabel}>
-                    User prompt <span className={styles.fieldHint}>— Jinja2, rendered per call</span>
+                    User prompt <span className={styles.fieldHint}>(Jinja2, rendered per call)</span>
                   </div>
                   <PromptCodeEditor
                     ref={userEditorRef}
@@ -1078,9 +1078,9 @@ function TaskDetail({
                 <aside className={styles.varsBox}>
                   <h4>Variables</h4>
                   <p className={styles.varsHint}>
-                    Click to insert at the cursor. Availability depends on how the task is invoked —
-                    per-entry contexts expose <code>{"{{ entry.* }}"}</code>; batch automation
-                    populates <code>entries</code>, <code>entry_count</code>, <code>entry</code>.
+                    Click to insert at the cursor. Availability depends on how the task is run.
+                    Per-entry contexts expose <code>{"{{ entry.* }}"}</code>. Batch automation
+                    populates <code>entries</code>, <code>entry_count</code> and <code>entry</code>.
                   </p>
                   {AI_VARIABLE_GROUPS.map((group) => (
                     <div key={group.group}>
@@ -1107,7 +1107,7 @@ function TaskDetail({
                   <div className={styles.fieldLabel}>
                     Output schema{" "}
                     <span className={styles.fieldHint}>
-                      — JSON Schema the model's reply must follow
+                      (JSON Schema the model's reply must follow)
                     </span>
                   </div>
                   {schemaDirty && <span className={styles.unsaved}>● Unsaved</span>}
@@ -1132,7 +1132,7 @@ function TaskDetail({
                         }
                         title={
                           isCustomTask
-                            ? "Remove the schema — the task returns free-form text"
+                            ? "Remove the schema. The task returns free-form text."
                             : task.output_schema_override != null
                               ? "Remove the override and return to the shipped default"
                               : "Already using the shipped default schema"
@@ -1152,20 +1152,20 @@ function TaskDetail({
                 </div>
                 {!isCustomTask && task.output_schema == null ? (
                   <p className={styles.varsHint}>
-                    This task returns free-form text — there is no structured output schema.
+                    This task returns free-form text. There is no structured output schema.
                   </p>
                 ) : (
                   <>
                     {pipelineFields.length > 0 && (
                       <p className={styles.schemaWarning}>
-                        This task's output is parsed by pipeline code — keep{" "}
+                        This task's output is parsed by pipeline code. Keep{" "}
                         {pipelineFields.map((f, i) => (
                           <span key={f}>
                             {i > 0 && ", "}
                             <code>{f}</code>
                           </span>
                         ))}{" "}
-                        in <code>required</code> or the worker consuming it will break.
+                        in <code>required</code>, or the worker that reads it will fail.
                       </p>
                     )}
                     <PromptCodeEditor
@@ -1178,7 +1178,7 @@ function TaskDetail({
                       minHeight="10rem"
                       placeholder={
                         isCustomTask
-                          ? 'No schema — the model replies with free-form text. Add one to force JSON, e.g. {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}'
+                          ? 'No schema. The model replies with free-form text. Add one to force JSON, e.g. {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}'
                           : undefined
                       }
                     />
@@ -1268,7 +1268,7 @@ function TestBench({
         ms: performance.now() - t0,
       });
     } catch (err) {
-      setRunError(err instanceof Error ? err.message : "Run failed");
+      setRunError(err instanceof Error ? err.message : "Could not run the prompt");
     }
   };
 
@@ -1291,7 +1291,7 @@ function TestBench({
           onChange={(e) => setEntrySel(e.target.value)}
         >
           <option value="latest">
-            {entries?.[0] ? `Latest entry — "${entries[0].title.slice(0, 60)}"` : "Latest entry"}
+            {entries?.[0] ? `Latest entry: "${entries[0].title.slice(0, 60)}"` : "Latest entry"}
           </option>
           {(entries ?? []).slice(1).map((entry) => (
             <option key={entry.id} value={entry.id}>
@@ -1334,8 +1334,8 @@ function TestBench({
       </div>
       {isDirty && (
         <div className={styles.benchNote}>
-          Render preview uses your unsaved edits; <b>Run once uses the last saved version</b> — save
-          first to test edits end-to-end.
+          Render preview uses your unsaved edits. <b>Run once uses the last saved version.</b> Save
+          first to test edits end to end.
         </div>
       )}
 
@@ -1370,7 +1370,7 @@ function TestBench({
         </div>
         <div>
           <p className={styles.paneTitle}>
-            Response{assignment ? ` — ${providerName ?? ""} / ${assignment.model_name}` : ""}
+            Response{assignment ? `: ${providerName ?? ""} / ${assignment.model_name}` : ""}
           </p>
           {runError ? (
             <div className={styles.renderError}>{runError}</div>
@@ -1461,7 +1461,7 @@ function AgentToolsRow({
   const isDefault = !override || override.length === 0;
   const summary = isDefault
     ? isCopilot
-      ? `Curated default (${defaultNames.length}) + find/call for the rest`
+      ? `Default set (${defaultNames.length}) + find/call for the rest`
       : `All read-only (${defaultNames.length})`
     : `Custom (${override.length})`;
 
@@ -1679,7 +1679,7 @@ function RoutingPanel({
         <div className={styles.settingInfo}>
           <div className={styles.settingLabel}>Model assignment</div>
           <div className={styles.settingHint}>
-            Provider and model used whenever this task runs — reader panel, automation, or copilot.
+            Provider and model used whenever this task runs: reader panel, automation, or copilot.
           </div>
         </div>
         <div className={styles.settingCtl}>
@@ -1902,7 +1902,7 @@ function HistoryPanel({
   if (!history || history.length === 0) {
     return (
       <section className={styles.panel}>
-        <div className={styles.benchEmpty}>No saved versions yet — edits create version history.</div>
+        <div className={styles.benchEmpty}>No saved versions yet. Saving an edit creates one.</div>
       </section>
     );
   }
@@ -1983,7 +1983,7 @@ function HistoryPanel({
           ) : (
             <div className={styles.benchEmpty}>
               {history.length > 1
-                ? "This is the active version — select an older version to compare."
+                ? "This is the active version. Select an older version to compare."
                 : "Only one version exists."}
             </div>
           )}

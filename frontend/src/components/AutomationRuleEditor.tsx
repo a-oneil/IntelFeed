@@ -19,7 +19,7 @@ function tagArray(config: Record<string, unknown>): TagSpec[] {
 const TRIGGER_TYPES = [
   { value: "on_new_entry", label: "New entry arrives" },
   { value: "on_entry_scored", label: "Entry scored (signal engine)" },
-  { value: "on_observable_captured", label: "Observable captured (IOC ledger)" },
+  { value: "on_observable_captured", label: "Observable captured (IOC list)" },
   { value: "on_schedule", label: "On schedule (cron)" },
   { value: "on_keyword_match", label: "Keyword match" },
   { value: "on_cve_detected", label: "CVE detected" },
@@ -227,7 +227,7 @@ function actionConfigFields(
           placeholder: "",
           fieldType: "select",
           options: (aiTasks ?? []).map((t) => ({ value: t.name, label: t.display_name })),
-          hint: "Prompt {{ }} variables depend on the trigger's execution mode — Per-entry: {{ entry.* }}; Batch: {{ entries }}, {{ entry_count }}, {{ entry.* }}. (date_label / scope_label are feed-UI only, not injected here.)",
+          hint: "Prompt {{ }} variables depend on the trigger's execution mode. Per-entry: {{ entry.* }}. Batch: {{ entries }}, {{ entry_count }}, {{ entry.* }}. date_label and scope_label are not available here.",
         },
       ];
     case "use_daily_summary":
@@ -241,7 +241,7 @@ function actionConfigFields(
             { value: "yesterday", label: "Yesterday (complete day)" },
             { value: "today", label: "Today (partial day so far)" },
           ],
-          hint: "Reuses the shared day-divider briefing instead of generating a second one — fills {ai_summary} for a following notification or webhook. Batch rules only.",
+          hint: "Reuses the cached day-divider briefing instead of generating a second one. Fills {ai_summary} for a following notification or webhook. Batch rules only.",
         },
         {
           key: "on_missing",
@@ -250,7 +250,7 @@ function actionConfigFields(
           fieldType: "select",
           options: [
             { value: "generate", label: "Generate it (also fills the day divider)" },
-            { value: "skip", label: "Skip — send nothing" },
+            { value: "skip", label: "Skip (send nothing)" },
           ],
         },
         {
@@ -262,7 +262,7 @@ function actionConfigFields(
             { value: "original", label: "Original article URLs (for Discord/Slack)" },
             { value: "app", label: "IntelFeed reader links (needs PUBLIC_BASE_URL)" },
           ],
-          hint: "The cached briefing links into the IntelFeed reader. Outside the app those links need a session, so they're rewritten to each article's source URL by default.",
+          hint: "The cached briefing links into the IntelFeed reader. Outside the app those links need a session, so they are rewritten to each article's source URL by default.",
         },
       ];
     case "extract_ttps":
@@ -994,8 +994,8 @@ export function AutomationRuleEditor({ rule, onClose }: Props) {
                     value={(triggerConfig.execution_mode as string) ?? "per_entry"}
                     onChange={(e) => updateTriggerField("execution_mode", e.target.value)}
                   >
-                    <option value="per_entry">Per entry — actions run on each entry individually</option>
-                    <option value="batch">Batch — all entries processed together (digest/briefing)</option>
+                    <option value="per_entry">Per entry: actions run on each entry individually</option>
+                    <option value="batch">Batch: all entries processed together (digest or briefing)</option>
                   </select>
                   <span className={styles.hint}>
                     {(triggerConfig.execution_mode as string) === "batch"
@@ -1032,7 +1032,7 @@ export function AutomationRuleEditor({ rule, onClose }: Props) {
                         onChange={(e) => updateTriggerField("cron", e.target.value)}
                         placeholder="0 8 * * 1-5"
                       />
-                      <span className={styles.hint}>min hour dom month dow (UTC)</span>
+                      <span className={styles.hint}>minute hour day-of-month month day-of-week (UTC)</span>
                     </div>
                     <div className={styles.itemField}>
                       <label>Lookback Window</label>
@@ -1173,8 +1173,8 @@ export function AutomationRuleEditor({ rule, onClose }: Props) {
                 {triggerType === "on_observable_captured" && (
                   <>
                     <div className={styles.hint}>
-                      Fires once per article when a reporting door (one-pass AI, the article's IOC table, analyst
-                      promote) captures an observable. Blocklist feeds never fire it.
+                      Fires once per article when an observable is captured by AI analysis, the article's IOC
+                      table, or an analyst promotion. Blocklist feeds never fire it.
                     </div>
                     <div className={styles.itemField}>
                       <label>Kinds (comma-separated, blank = any)</label>

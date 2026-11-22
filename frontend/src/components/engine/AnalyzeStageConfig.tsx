@@ -119,9 +119,9 @@ export function AnalyzeStageConfig() {
             onBlur={(e) => handleMaxTokens(e.target.value)}
           />
           <span className={styles.modelHint}>
-            Response budget per analysis call. Too low truncates the payload mid-JSON — the
-            schema front-loads summary, observables and relationships, so the trailing
-            timeline/patch keys are lost first.
+            The response budget per analysis call. If it is too low, the response is cut off
+            mid-JSON. Summary, observables and relationships come first in the schema, so
+            the timeline and patch keys are lost first.
           </span>
         </div>
       )}
@@ -142,9 +142,9 @@ export function AnalyzeStageConfig() {
           ai_use_batches: () =>
             assignedProvider && assignedProvider.provider_type !== "claude" ? (
               <div className={styles.batchesNote}>
-                The Batches API only applies to Anthropic-API (claude) providers — the current
-                analysis provider ({assignedProvider.name}) runs sequential per-entry calls
-                regardless of this toggle.
+                The Batches API applies only to Anthropic API (claude) providers. The current
+                analysis provider ({assignedProvider.name}) runs one call per entry regardless
+                of this toggle.
               </div>
             ) : null,
         }}

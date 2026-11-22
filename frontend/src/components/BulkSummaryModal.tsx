@@ -23,7 +23,7 @@ export function BulkSummaryModal({ entryIds, onClose }: Props) {
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div className={styles.header}>
           <span className={styles.title}>
-            Summary — {entryIds.length} articles
+            Summary of {entryIds.length} articles
           </span>
           <button className={styles.closeBtn} onClick={onClose}>
             &times;

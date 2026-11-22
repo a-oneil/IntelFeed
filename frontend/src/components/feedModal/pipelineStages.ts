@@ -85,12 +85,12 @@ export const STAGE_COPY: Record<StageId, { label: string; detail: string }> = {
   master: {
     label: "Analyse this feed",
     detail:
-      "Off, articles still arrive, stay searchable, get a priority score, join story threads and run through your automation rules. Nothing is tagged and nothing is created from them \u2014 no entities, CVEs, indicators or detection rules, whatever the switches below say.",
+      "When off, articles still arrive, stay searchable, get a priority score, join story threads and run through your automation rules. Nothing is tagged or created from them: no entities, CVEs, indicators or detection rules, regardless of the switches below.",
   },
   autolink: {
     label: "Tag articles with entities you already track",
     detail:
-      "Matches names and aliases from your catalog \u2014 actors, malware, vendors, products, tools \u2014 plus CVE and ATT&CK IDs. Links what exists, with one exception: a CVE ID you don't have yet becomes a new CVE record.",
+      "Matches names and aliases from your catalog (actors, malware, vendors, products, tools) plus CVE and ATT&CK IDs. Links what exists, with one exception: a CVE ID you don't have yet becomes a new CVE record.",
   },
   relevance: {
     label: "Skip off-topic articles",
@@ -100,12 +100,12 @@ export const STAGE_COPY: Record<StageId, { label: string; detail: string }> = {
   ai: {
     label: "Let the AI read each article",
     detail:
-      "Finds TTPs, actors, malware, sectors, indicators and relationships, and double-checks the tags above. This is what turns up things you have never seen before. With AI off, common-word names aren't tagged.",
+      "Finds TTPs, actors, malware, sectors, indicators and relationships, and double-checks the tags above. This is what finds entities you do not have yet. With AI off, common-word names aren't tagged.",
   },
   tools: {
     label: "Create records for new tools",
     detail:
-      "Off, the AI still tags tools already in your catalog but never adds a new one. Tagging from the catalog keeps running either way. Worth turning off for advisory and rule-repository feeds, which list affected software rather than attacker tooling.",
+      "When off, the AI still tags tools already in your catalog but never adds a new one. Tagging from the catalog runs either way. Turn it off for advisory and rule-repository feeds, which list affected software rather than attacker tooling.",
   },
   regex: {
     label: "Fetch CVE details from NVD",
@@ -154,7 +154,7 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
       label: STAGE_COPY.ai.label,
       detail: aiEnabled
         ? STAGE_COPY.ai.detail
-        : "Switched off for the whole instance. Turn on “AI one pass” in Engine settings before this can do anything.",
+        : "Switched off for the whole instance. Turn on “AI one pass” in Engine settings to enable it.",
       on: processing && aiEnabled && values.ai_analysis_enabled,
       scope: aiEnabled ? "feed" : "global",
       disabled: !processing || !aiEnabled,
@@ -262,14 +262,14 @@ export function summarizeStages(values: FeedFormValues, ctx: Context): string {
 
   // No row of its own — there is no individual switch for it — but it does
   // follow "Analyse this feed", so the sentence only claims it when that is on.
-  parts.push("checked against your indicator ledger");
+  parts.push("checked against your IOC list");
 
   let summary = `Every article is ${joinWords(parts)}.`;
   summary += on("ai")
     ? " The AI can add entities you do not have yet."
     : on("autolink")
-      ? " Nothing new is added except CVE records for CVE IDs you don't have yet — everything else must already be in your catalog."
-      : " Nothing new is added — only what is already in your catalog gets linked.";
+      ? " Nothing new is added except CVE records for CVE IDs you don't have yet. Everything else must already be in your catalog."
+      : " Nothing new is added. Only what is already in your catalog gets linked.";
   if (on("rules")) summary += " Detection rules written out in the text are saved to your library.";
   return summary;
 }

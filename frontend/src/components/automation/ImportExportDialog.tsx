@@ -65,7 +65,7 @@ export function ImportExportDialog({ onClose }: Props) {
           }
         },
         onError: () => {
-          toast.error("Import failed");
+          toast.error("Could not import the rules");
         },
       }
     );

@@ -85,7 +85,7 @@ describe("evidence structure", () => {
     expect(
       screen.getByText(
         (_, el) =>
-          el?.tagName === "BUTTON" && el.textContent === "one story — “Russian OWA zero-day espionage”",
+          el?.tagName === "BUTTON" && el.textContent === "one story “Russian OWA zero-day espionage”",
       ),
     ).toBeTruthy();
     expect(screen.getByText("one story").tagName).toBe("B");

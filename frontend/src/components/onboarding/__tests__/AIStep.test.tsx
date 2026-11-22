@@ -84,7 +84,7 @@ describe("the onboarding AI step", () => {
     renderAIStep();
     await user.click(screen.getByRole("button", { name: /^Connect$/ }));
 
-    await waitFor(() => expect(screen.getByText(/AI is wired up/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/AI tasks are assigned/i)).toBeInTheDocument());
     expect(screen.getByText(/28 tasks now run on/)).toBeInTheDocument();
     expect(screen.getByText("qwen3.5:9b")).toBeInTheDocument();
     // Agentic tasks staying on the CLI is expected behaviour, so say so.
@@ -107,7 +107,7 @@ describe("the onboarding AI step", () => {
 
     // The old copy asserted a connection failure it had no way to know about.
     await waitFor(() => expect(screen.getByText(/Connection refused/)).toBeInTheDocument());
-    expect(screen.queryByText(/AI is wired up/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/AI tasks are assigned/i)).not.toBeInTheDocument();
   });
 
   it("reuses a provider of the same type instead of minting duplicates", async () => {
@@ -164,7 +164,7 @@ describe("the onboarding AI step", () => {
   it("still lets an admin decline AI outright", async () => {
     const user = userEvent.setup();
     renderAIStep();
-    await user.click(screen.getByRole("button", { name: /Skip — run without AI/ }));
+    await user.click(screen.getByRole("button", { name: /Skip: run without AI/ }));
 
     expect(screen.getByText(/Nothing to configure/)).toBeInTheDocument();
     expect(commissionProvider).not.toHaveBeenCalled();

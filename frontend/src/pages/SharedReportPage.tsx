@@ -93,8 +93,8 @@ export function SharedReportPage() {
             : is410
               ? "This share link has expired."
               : is404
-                ? "This share link doesn't exist or has been revoked."
-                : "Something went wrong loading this report."}
+                ? "This share link does not exist or has been revoked."
+                : "Could not load this report."}
         </div>
       </div>
     );

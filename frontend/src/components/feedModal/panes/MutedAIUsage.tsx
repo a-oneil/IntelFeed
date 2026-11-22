@@ -48,7 +48,7 @@ export function MutedAIUsage({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }
             ? `Muted, but still analysed: ${u.runs} AI ${u.runs === 1 ? "run" : "runs"} and ${formatTokens(
                 u.tokens_input + u.tokens_output
               )} tokens in the last ${u.days} days.`
-            : `Muted, and no AI runs in the last ${u.days} days — but new articles are still analysed.`
+            : `Muted, and no AI runs in the last ${u.days} days, but new articles are still analysed.`
           : `Muted, and AI analysis is off for this feed. ${
               u.runs > 0 ? `${u.runs} AI runs in the last ${u.days} days.` : ""
             }`.trim()}{" "}

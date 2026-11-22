@@ -467,7 +467,7 @@ class ClaudeProvider(AIProvider):
             tool_uses = [b for b in final.content if getattr(b, "type", None) == "tool_use"]
             if final.stop_reason != "tool_use" or not tool_uses or tool_executor is None:
                 if final.stop_reason == "max_tokens":
-                    yield {"kind": "text", "text": "\n\n_[answer truncated — model hit its output limit]_"}
+                    yield {"kind": "text", "text": "\n\n_[Answer truncated: the model reached its output limit.]_"}
                 yield _done()
                 return
 

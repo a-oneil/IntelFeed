@@ -43,8 +43,8 @@ For a project overview and quickstart, see [`../readme.md`](../readme.md). To in
 | **[workers-search-dashboards.md](workers-search-dashboards.md)** | The Celery workers and schedule, Meilisearch indexing and queries, and the widgets on the workbench Dashboard. |
 | **[frontend.md](frontend.md)** | The React app: routing, layouts, Zustand stores, TanStack Query, the Axios client, theming, components and testing. |
 | **[api-reference.md](api-reference.md)** | The REST API: every router and endpoint, auth, errors, pagination, rate limits and middleware. |
-| **[observables.md](observables.md)** | The IOC ledger: kinds and validators, which sources can create an observable (and why regex alone never does), shadow and capture modes, corroboration, attribution, publishing and enrichment. |
-| **[story-threads.md](story-threads.md)** | Entry embeddings, grouping articles into story threads, the spine, where threads appear, and the tuning settings. |
+| **[observables.md](observables.md)** | The observables list: kinds and validators, which sources can create an observable (and why regex alone never does), shadow and capture modes, corroboration, attribution, publishing and enrichment. |
+| **[story-threads.md](story-threads.md)** | Entry embeddings, grouping articles into story threads, the thread timeline, where threads appear, and the tuning settings. |
 | **[data-model.md](data-model.md)** | The database: ER diagram, tables and junction tables, enums, indexes, JSONB columns and migration conventions. |
 
 ## How to navigate

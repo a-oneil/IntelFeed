@@ -17,14 +17,14 @@ export function CoverageView({ openSource }: { openSource: (source: string) => v
   const covQ = useEnrichmentCoverage();
   const [type, setType] = useState("all");
   if (!covQ.data) {
-    return <p className={s.note}>{covQ.isError ? "Couldn't load coverage." : "Counting fields…"}</p>;
+    return <p className={s.note}>{covQ.isError ? "Could not load coverage." : "Counting fields…"}</p>;
   }
   const types = [...new Map(covQ.data.map((f) => [f.entity_type, f.entity_label])).entries()];
   const shown = covQ.data.filter((f) => type === "all" || f.entity_type === type);
 
   return (
     <div className={s.stack}>
-      <p className={s.note}>How full each field is across every entity of its type, and who fills it.</p>
+      <p className={s.note}>This table shows how many entities of each type have each field filled, and which source fills it.</p>
       <div className={s.filters} role="group" aria-label="Filter by entity type">
         {[["all", "All"] as const, ...types].map(([id, label]) => (
           <button key={id} type="button" className={s.chip} aria-pressed={type === id} onClick={() => setType(id)}>
@@ -94,7 +94,7 @@ function FieldAction({ f }: { f: EnrichmentCoverageField }) {
               onSuccess: (r) =>
                 r.queued
                   ? toast.success(`Queued ${num(r.queued)} lookups`)
-                  : toast.message("Nothing to queue: the rest are waiting already or outside the source's reach"),
+                  : toast.message("Nothing to queue: the rest are already queued or outside what the source covers"),
               onError: (e) => toast.error(`Backfill failed: ${(e as Error).message}`),
             },
           )
@@ -114,9 +114,9 @@ function FieldAction({ f }: { f: EnrichmentCoverageField }) {
           { entity_type: f.entity_type, field: a.field, limit: 10 },
           {
             onSuccess: (r) => {
-              if (!r.supported) toast.error(r.message ?? "AI research can't fill this field");
+              if (!r.supported) toast.error(r.message ?? "AI research cannot fill this field");
               else if (r.enqueued === 0) toast.message(r.message ?? "Nothing to research");
-              else toast.success(`Researching ${r.batch_size} of ${num(r.total_missing)}; results fill in over about a minute`);
+              else toast.success(`Researching ${r.batch_size} of ${num(r.total_missing)}. Results arrive over about a minute.`);
             },
             onError: (e) => toast.error(`Research failed: ${(e as Error).message}`),
           },

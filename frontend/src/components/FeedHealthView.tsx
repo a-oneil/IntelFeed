@@ -29,7 +29,7 @@ function ReachCell({ feed }: { feed: FeedHealthFeed }) {
         onClick={() => setOpen((v) => !v)}
         title={
           subscriber_count === 0
-            ? "No readers — manage subscribers"
+            ? "No subscribers yet. Click to manage subscribers."
             : feed.reach.subscribers
                 .map((s) => (s.is_muted ? `${s.username} (muted)` : s.username))
                 .join(", ")
@@ -321,7 +321,7 @@ export function FeedHealthView({
                               className={styles.actionBtn}
                               onClick={() => resumeFeed.mutate(f.id)}
                               disabled={resumeFeed.isPending}
-                              title="Re-activate and clear the failure streak"
+                              title="Resume polling and reset the error count"
                             >
                               Resume
                             </button>

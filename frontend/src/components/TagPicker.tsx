@@ -56,7 +56,7 @@ function NewTagEditor({ spec, onChange }: { spec: NewTagSpec; onChange: (spec: N
           />
           Show as chip
         </label>
-        <label className={styles.chipToggle} title="One shared assignment per entry that every analyst sees">
+        <label className={styles.chipToggle} title="Everyone sees the same tag on an entry">
           <input
             type="checkbox"
             checked={!!spec.global}
@@ -90,7 +90,7 @@ function NewTagEditor({ spec, onChange }: { spec: NewTagSpec; onChange: (spec: N
         type="text"
         className={styles.description}
         maxLength={255}
-        placeholder="Tooltip — what this chip means (optional)"
+        placeholder="Tooltip: what this chip means (optional)"
         value={spec.description ?? ""}
         onChange={(e) => onChange({ ...spec, description: e.target.value })}
       />

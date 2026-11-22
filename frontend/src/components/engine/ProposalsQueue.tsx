@@ -210,7 +210,7 @@ function appliedByLabel(row: FeedRow): string {
   if (row.applied_by === "adjudicator") return "Adjudicator";
   if (row.applied_by === "merge_review") return "Duplicate review";
   if (row.applied_by === "person") return row.applied_by_name ?? "Analyst";
-  return "—";
+  return "Unknown";
 }
 
 function whyMeta(origin: string | null | undefined, articles: number): string {
@@ -355,7 +355,7 @@ function ProposalRow({
               <EntityCell
                 entityType={row.entity_type}
                 entityId={row.entity_id}
-                name={row.entity_name ?? row.subject ?? "—"}
+                name={row.entity_name ?? row.subject ?? "(unknown)"}
                 meta={entityMeta(row.entity_type, row.entity_id)}
               />
             </td>
@@ -373,8 +373,8 @@ function ProposalRow({
             <td className={styles.proposedCol}>
               <span className={styles.tag}>{label}</span>
             </td>
-            <td className={styles.plain}>{row.origin ? SOURCE_LABEL[row.origin] : "—"}</td>
-            <td className={styles.plain}>{row.confidence ?? "—"}</td>
+            <td className={styles.plain}>{row.origin ? SOURCE_LABEL[row.origin] : "Unknown"}</td>
+            <td className={styles.plain}>{row.confidence ?? "n/a"}</td>
             {why}
             <td className={styles.when} title={formatDateTime(row.when)}>{formatShortDateTime(row.when)}</td>
             {actions}
@@ -429,7 +429,7 @@ function GroupRows({
       {feed.data?.has_more && (
         <tr className={cg.subRow}>
           <td colSpan={7} className={styles.muted}>
-            Showing the newest {rows.length} of {group.proposals.toLocaleString()} — the row's buttons settle all of them.
+            Showing the newest {rows.length} of {group.proposals.toLocaleString()}. The row's buttons act on all of them.
           </td>
         </tr>
       )}
@@ -556,14 +556,14 @@ export function ProposalsQueue({
     {
       label: "Review duplicates (AI)",
       title:
-        "Put the most likely duplicate pairs of actors, malware and tools in front of the model on the AI worker; each pair it calls the same thing lands here as a Merge proposal. Runs daily on its own too.",
+        "Sends the most likely duplicate pairs of actors, malware and tools to the AI worker. Each pair the model judges to be the same entity is filed here as a Merge proposal. Also runs daily.",
       busy: scanDupes.isPending,
       run: () =>
         scanDupes
           .mutateAsync()
           .then((r) =>
             r.dispatched
-              ? toast.success("Duplicate review started on the AI worker — Merge rows appear as it finishes")
+              ? toast.success("Duplicate review started on the AI worker. Merge rows appear as it finishes.")
               : toast.message("The duplicate review is already running"),
           )
           .catch((e) => toast.error(`Review failed: ${(e as Error).message}`)),
@@ -684,7 +684,7 @@ export function ProposalsQueue({
     if (
       !(await confirmDialog({
         title: "Dismiss proposals",
-        message: `Dismiss ${scopeLabel()} proposals without applying them? Entities and links are untouched, and the adjudicator won't file these verdicts for these articles again.`,
+        message: `Dismiss ${scopeLabel()} proposals without applying them? Entities and links are untouched, and the adjudicator will not file these verdicts for these articles again.`,
         confirmLabel: "Dismiss",
         destructive: true,
       }))
@@ -705,7 +705,7 @@ export function ProposalsQueue({
     if (
       !(await confirmDialog({
         title: "Apply proposals",
-        message: `Apply ${scopeLabel()} proposals now? Each one is applied the way the stage would in Applied mode (type changes to their proposed type), and each stays undoable from History. This runs in the background; the queue updates as it goes.`,
+        message: `Apply ${scopeLabel()} proposals now? Each one is applied the way the stage would in Applied mode (type changes to their proposed type), and each can be undone from History. This runs in the background and the queue updates as it goes.`,
         confirmLabel: "Apply all",
         destructive: true,
       }))
@@ -714,7 +714,7 @@ export function ProposalsQueue({
     try {
       const job = await startBulkApply.mutateAsync(scope);
       setBulkJobId(job.job_id);
-      if (job.total === 0) toast.message("Nothing here can be applied — assessments are notes only");
+      if (job.total === 0) toast.message("Nothing here can be applied: assessments are notes only");
       else toast.info(`Applying ${job.total.toLocaleString()} proposal${job.total === 1 ? "" : "s"} in the background`);
     } catch (e) {
       toast.error(`Apply failed: ${(e as Error).message}`);
@@ -818,7 +818,7 @@ export function ProposalsQueue({
               {scans.map((s) => (
                 <DropdownItem
                   key={s.label}
-                  label={s.busy ? `${s.label} — working…` : s.label}
+                  label={s.busy ? `${s.label} (working…)` : s.label}
                   title={s.title}
                   disabled={s.busy}
                   onClick={s.run}
@@ -828,7 +828,7 @@ export function ProposalsQueue({
             <button
               className={styles.btn}
               disabled={bulkRunning || pendingTotal === 0}
-              title="Apply every proposal the table shows, in the background, through the same code a row's Apply uses"
+              title="Apply every proposal the table shows, in the background, the same way a row's Apply does"
               onClick={applyAll}
             >
               {bulkLabel}
@@ -910,8 +910,8 @@ export function ProposalsQueue({
                           ))}
                         </div>
                       </td>
-                      <td className={styles.plain}>{SOURCE_LABEL[g.origin] ?? "—"}</td>
-                      <td className={styles.plain}>{g.confidence ?? "—"}</td>
+                      <td className={styles.plain}>{SOURCE_LABEL[g.origin] ?? "Unknown"}</td>
+                      <td className={styles.plain}>{g.confidence ?? "n/a"}</td>
                       <td className={styles.why}>
                         <div className={styles.whyBox}>
                           {!entityMenu && g.subject && <span className={styles.subject}>{g.subject}</span>}
@@ -936,7 +936,7 @@ export function ProposalsQueue({
                             <ToolbarDropdown
                               label="Convert"
                               triggerClassName={`${styles.rowBtn} ${styles.bGood}`}
-                              title="The articles disagree on the type — pick one; every article's copy settles at once"
+                              title="The articles disagree on the type. Pick one and every article's proposal is settled at once."
                             >
                               {convertTargets.map((t) => (
                                 <DropdownItem
@@ -952,7 +952,7 @@ export function ProposalsQueue({
                               className={`${styles.rowBtn} ${styles.bGood}`}
                               disabled={busy || bulkRunning}
                               onClick={() => reclassifyGroup(g, convertTargets[0].type)}
-                              title={`Convert ${g.name} to a ${getEntityLabel(convertTargets[0].type).toLowerCase()}; every article's copy settles at once`}
+                              title={`Convert ${g.name} to a ${getEntityLabel(convertTargets[0].type).toLowerCase()}. Every article's proposal is settled at once.`}
                             >
                               Convert
                             </button>
@@ -974,8 +974,8 @@ export function ProposalsQueue({
                             onClick={() => dismissGroup(g)}
                             title={
                               g.entity_id
-                                ? "Leave it as it is: clear what this row shows under the filters. The adjudicator won't file these verdicts for these articles again, and a dismissed type change isn't proposed again; a scan can propose its fix again"
-                                : "Drop this proposal; the adjudicator won't file it for this article again"
+                                ? "Leave it as it is and clear what this row shows under the filters. The adjudicator will not file these verdicts for these articles again. A dismissed type change is not proposed again, but a scan can propose its fix again."
+                                : "Drop this proposal. The adjudicator will not file it for this article again."
                             }
                           >
                             Dismiss
@@ -1002,7 +1002,7 @@ export function ProposalsQueue({
             {!hist && !groups.isLoading && groupRows.length === 0 && (
               <tr>
                 <td colSpan={7} className={styles.empty}>
-                  {q ? "No pending proposals match." : "No pending proposals — nothing waiting for review. Run scan files more."}
+                  {q ? "No pending proposals match." : "No pending proposals. Run scan can file more."}
                 </td>
               </tr>
             )}

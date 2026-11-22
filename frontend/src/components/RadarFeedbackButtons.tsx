@@ -35,7 +35,7 @@ export function RadarFeedbackButtons({ entryId }: { entryId: string }) {
       <button
         className={`${styles.btn} ${verdict === 1 ? styles.active : ""}`}
         onClick={(e) => send(1, e)}
-        title="Useful signal — teach the ranking to boost entries like this"
+        title="Useful. Rank entries like this higher."
         aria-pressed={verdict === 1}
       >
         ▲
@@ -43,7 +43,7 @@ export function RadarFeedbackButtons({ entryId }: { entryId: string }) {
       <button
         className={`${styles.btn} ${verdict === -1 ? styles.activeDown : ""}`}
         onClick={(e) => send(-1, e)}
-        title="Noise — teach the ranking to quiet entries like this"
+        title="Noise. Rank entries like this lower."
         aria-pressed={verdict === -1}
       >
         ▼

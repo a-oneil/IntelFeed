@@ -1,8 +1,6 @@
 # Searching
 
 This page covers the search box, the results page, filters and saved searches.
-By the end you can find any article, entity or note, narrow the results, and
-save a search to come back to.
 
 There is one search box, in the header on every page. Typing in it opens the
 results page at `/search`.
@@ -13,7 +11,7 @@ results page at `/search`.
 
 ## The basics
 
-Press `/` to jump to the search box. Then type what you're looking for:
+Press `/` to jump to the search box. Then type what you are looking for:
 
 - `ransomware` finds articles that mention it.
 - `APT29` finds articles about APT29, and the APT29 entity itself. (An
@@ -43,9 +41,9 @@ Entity results come in two groups.
 
 - **Direct matches** are entities whose name, alias or ID matches what you
   typed. Searching `lockbit` shows the LockBit group itself. The top one is
-  opened up so you can read it straight away.
-- **Mentions** are entities that only talk about it, such as other actor
-  profiles or detection rules that refer to LockBit. They are grouped by type
+  expanded.
+- **Mentions** are entities whose text refers to it, such as other actor
+  profiles or detection rules that mention LockBit. They are grouped by type
   below the direct matches.
 
 Articles that match are listed too, when the scope includes them.
@@ -59,8 +57,8 @@ Starred, Bookmarked, Has notes), **Feed**, **Content type**, **Tags**,
 
 Every box you tick is written into the search box as a filter. Tick
 "Last 7 days" and "Unread" and the box gains a `date:` filter and `is:unread`.
-You can see exactly what the rail did, edit it by hand, and save it. Clicking
-around the rail is a good way to learn the query syntax.
+You can see what the rail did, edit it by hand, and save it. Using the rail is
+a good way to learn the query syntax.
 
 On a phone, the rail opens from the **Filters** button.
 
@@ -134,15 +132,15 @@ Feed health.
 
 ## The rule library has its own search
 
-**Workbench → Rules Library** has its own search, because there the rules are
-the whole subject. You can filter by **Rule format**, **Severity**,
+**Workbench → Rules Library** has its own search, because that page is only
+about rules. You can filter by **Rule format**, **Severity**,
 **Source repo**, **ATT&CK tactic**, **Technique**, **Threat actor**,
 **Malware**, **Tool**, **Vendor**, **Product**, **Telemetry**, **Tags** and
 **License**. The counts update as you filter. Ticking two values in the same
 group shows rules that match either one.
 
 Use `rule.` filters in the main search box when you want rules mixed with other
-results. Use the library when rules are the work. See
+results. Use the library when you only want rules. See
 [Writing detection rules](detection-rules.md).
 
 ## Saved searches
@@ -157,8 +155,8 @@ type:youtube OR type:podcast             # things to watch or listen to
 signal:under_reported                    # what IntelFeed thinks is under-covered
 ```
 
-The number next to a saved search is worked out in the background, so it can
-lag behind, and it stops counting at 5,000. Opening the saved search always
-runs the real query, so the results themselves are always current.
+The number next to a saved search is computed in the background, so it can
+lag behind, and it stops counting at 5,000. Opening the saved search runs the
+real query, so the results are current.
 
 Next: [Entities and profiles](entities.md)

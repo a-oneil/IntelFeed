@@ -475,13 +475,13 @@ export function RelationshipsTab({
     return (
       <div className={styles.targetBlock}>
         <div className={styles.targetSummary}>
-          Targeting reported across {countries.length} countries — weighted to{" "}
+          Targeting reported across {countries.length} countries, mostly{" "}
           {top.slice(0, 3).map((r) => r.label).join(", ")}.
           {regions.length > 0 && (
             <span className={styles.groupNote}>
               {" "}
               {regions.map((r) => `“${r.label}”`).join(", ")} {regions.length === 1 ? "is a region" : "are regions"}{" "}
-              mis-filed as {regions.length === 1 ? "a country" : "countries"} — folded here.
+              mis-filed as {regions.length === 1 ? "a country" : "countries"}, grouped here.
             </span>
           )}
         </div>
@@ -491,7 +491,7 @@ export function RelationshipsTab({
               key={rowKey(r)}
               className={styles.targetBarRow}
               onClick={() => onOpenEntity(r.type, r.item.id, r.label)}
-              title={`${r.label} — ${ctxCount(r)} article${ctxCount(r) === 1 ? "" : "s"}`}
+              title={`${r.label}: ${ctxCount(r)} article${ctxCount(r) === 1 ? "" : "s"}`}
             >
               <span className={styles.targetLabel}>{r.label}</span>
               <span className={styles.targetTrack}>
@@ -525,7 +525,7 @@ export function RelationshipsTab({
       <div className={styles.claimFold} key={key}>
         <button className={styles.foldToggle} onClick={() => toggleGroup(key)}>
           <span className="caret-glyph">{open ? "▾" : "▸"}</span> <b>{label}</b>
-          {note && <span> — {note}</span>}
+          {note && <span>: {note}</span>}
         </button>
         {cap && <span className={styles.foldCap}>{cap}</span>}
         {open && (
@@ -620,19 +620,19 @@ export function RelationshipsTab({
               .slice(0, 4)
               .map((r) => r.label)
               .join(", ") + (everyday.length > 4 ? ` + ${everyday.length - 4} more` : ""),
-            "same fold as reporting vendors",
+            "grouped with reporting vendors",
             everyday,
           )}
         {folded.length > 0 &&
           renderFold(
             `fold:${g.key}`,
-            `${folded.length} thin claim${folded.length === 1 ? "" : "s"}`,
+            `${folded.length} single mention${folded.length === 1 ? "" : "s"}`,
             folded.every((r) => (r.item.strength?.articles ?? 1) <= 1)
-              ? "one loose mention each, no story yet"
-              : "loose mentions & roundup co-mentions, no story yet",
-            "held from promotion",
+              ? "one mention each, not yet part of a story"
+              : "mentions and roundup co-mentions, not yet part of a story",
+            "needs a second source",
             folded,
-            "Each of these stays a claim — if a second story ever asserts one, it earns a row and surfaces automatically.",
+            "Each of these is a single mention. It becomes a relationship when a second article reports it.",
           )}
         {implausible.length > 0 &&
           renderFold(
@@ -688,7 +688,7 @@ export function RelationshipsTab({
         key={rowKey(row)}
         className={`${styles.ctxChip} ${opts?.dim ? styles.ctxChipDim : ""}`}
         onClick={() => onOpenEntity(row.type, row.item.id, row.label)}
-        title={`${row.label} — co-mentioned in ${n} shared article${n === 1 ? "" : "s"}`}
+        title={`${row.label}: co-mentioned in ${n} shared article${n === 1 ? "" : "s"}`}
       >
         {opts?.dot && <span className={styles.relDot} style={{ background: getEntityColor(row.type) }} />}
         {row.label}
@@ -964,7 +964,7 @@ export function RelationshipsTab({
                 : storyFilter
                 ? `filtered to one story · ${assertedView.length} claims`
                 : foldedAll.length > 0
-                  ? `${earnedAll.length} shown · rest folded below each group`
+                  ? `${earnedAll.length} shown · rest grouped below each verb`
                   : "typed claims, graded by trust"}
             </span>
           </div>
@@ -982,7 +982,7 @@ export function RelationshipsTab({
         <div className={styles.section}>
           <div className={styles.sectionHeader}>
             Appears alongside <span className={styles.sectionCount}>{context.length}</span>
-            <span className={styles.sectionNote}>co-mentioned in shared reporting — not claims</span>
+            <span className={styles.sectionNote}>co-mentioned in shared reporting, not claims</span>
           </div>
           {context.length === 0 ? (
             <div className={styles.emptySection}>No co-mention context{search ? " matches the search" : ""}.</div>
@@ -994,14 +994,14 @@ export function RelationshipsTab({
                   <button
                     className={styles.metaLink}
                     onClick={() => setReportingOpen((o) => !o)}
-                    title="Vendors & products named across most coverage — the reporter or the platform in the story, not a relationship"
+                    title="Vendors and products named across most coverage: the reporter or the platform in the story, not a relationship"
                   >
                     <span className="caret-glyph">{reportingOpen ? "▾" : "▸"}</span> {ctxReporting.length} ubiquitous vendor
                     {ctxReporting.length === 1 ? "" : "s"} &amp; products
                   </button>
                   <span className={styles.groupNote}>
                     {reportingOpen
-                      ? "named across most coverage — background, not relationships"
+                      ? "named across most coverage: background, not relationships"
                       : ctxReporting
                           .slice(0, 4)
                           .map((r) => r.label)

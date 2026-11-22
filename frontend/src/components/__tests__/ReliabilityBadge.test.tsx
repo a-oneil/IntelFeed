@@ -7,7 +7,7 @@ describe("ReliabilityBadge", () => {
     render(<ReliabilityBadge rating="A" />);
     const badge = screen.getByText("A");
     expect(badge).toBeInTheDocument();
-    expect(badge).toHaveAttribute("data-tooltip", "A — Reliable source");
+    expect(badge).toHaveAttribute("data-tooltip", "A: Reliable source");
   });
 
   it.each(["A", "B", "C", "D", "E", "F"])("renders rating %s", (rating) => {

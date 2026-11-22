@@ -76,12 +76,12 @@ answer with no tool chips came from the model alone, not your data.
 **Ask Copilot** buttons open it focused on one thing. Remove the pill to ask
 about everything.
 
-**Changes need your OK.** The copilot can do most things you can do: make a
-campaign, add a note or tag, watch an entity, and (for admins) merge or delete.
-It only proposes them. Each change shows up as a card with the exact action and
-its details, and nothing happens until you click **Confirm**. Deletes and
-admin-only changes get a warning line. It never gets tools your account can't
-use.
+**Changes need confirmation.** The copilot can do most things you can do: make
+a campaign, add a note or tag, watch an entity, and (for admins) merge or
+delete. It only proposes them. Each change shows as a card with the exact
+action and its details, and nothing happens until you click **Confirm**.
+Deletes and admin-only changes get a warning line. It never gets tools your
+account cannot use.
 
 **Conversations** are saved. **History** reopens old ones. **Share** makes a
 public read-only link (see [Notes and sharing](notes-and-sharing.md#share-links)).
@@ -115,10 +115,10 @@ run on your key.
 - Set a default key, or pick one per task. **Instance default** sends that task
   back to the instance's provider.
 - The page shows this month's spend and today's requests. Set your own monthly
-  cap, and turn off **Fall back to the instance's providers** if you never want
-  the instance to answer for you.
+  cap, and turn off **Fall back to the instance's providers** if you do not
+  want the instance's providers to handle your tasks.
 
-Two things to know:
+Two limits:
 
 - The copilot has the same tools on your key as on the instance's. The one
   exception is an OpenAI-compatible key with **Tool calling** turned off; the
@@ -156,7 +156,7 @@ Code, the Claude API, OpenAI-compatible and Ollama. An OpenAI-compatible
 provider has a **Tool calling** switch in its Configure panel; turn it off for a
 local server that handles tools badly, and those tasks can't be assigned to it.
 On the copilot's page in **Prompts**, **Skip Confirm for** picks low-risk
-changes, such as notes and tags, that run without the click. It is empty by
+changes, such as notes and tags, that run without confirmation. It is empty by
 default; deletes and admin-only changes always ask. The copilot on the
 documentation page only looks things up.
 
@@ -164,7 +164,7 @@ On the Cost Dashboard, a copilot on a flat-rate sign-in shows what the tokens
 *would* cost at API prices, not a real charge. The real limit is the plan's
 quota.
 
-If extraction keeps making the same mistake, one sentence in its prompt usually
-fixes it.
+If extraction repeats the same mistake, adding one sentence to its prompt
+usually fixes it.
 
 Next: [Notes and sharing](notes-and-sharing.md)

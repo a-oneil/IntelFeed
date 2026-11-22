@@ -20,7 +20,7 @@ function queuedCount(state: EngineState): number | null {
 }
 
 function queuedNote(queued: number | null): string {
-  if (queued === null) return "How many tasks are waiting is unknown: Redis couldn't be asked.";
+  if (queued === null) return "The number of waiting tasks is unknown: Redis could not be reached.";
   return queued ? `${queued} queued tasks are waiting.` : "";
 }
 
@@ -144,9 +144,9 @@ export function CheckEngineBanner() {
       <strong>Check engine:</strong>{" "}
       {err ? (
         <>
-          {total.toLocaleString()} {total === 1 ? "entry is" : "entries are"} erroring -{" "}
+          {total.toLocaleString()} {total === 1 ? "entry is" : "entries are"} failing.{" "}
           <button type="button" className={styles.bannerLink} onClick={retry} disabled={retryErrors.isPending}>
-            {retryErrors.isPending ? "retrying…" : "retry"}
+            {retryErrors.isPending ? "Retrying…" : "Retry"}
           </button>
         </>
       ) : (

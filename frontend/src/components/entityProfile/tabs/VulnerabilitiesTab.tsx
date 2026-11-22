@@ -87,7 +87,7 @@ function Row({
               {viaDescendant && (
                 <span
                   className={styles.prodTag}
-                  title={`Tagged ${item.matched_cwe}${item.matched_cwe_name ? ` — ${item.matched_cwe_name}` : ""}, which sits below ${subjectCwe} on the abstraction ladder`}
+                  title={`Tagged ${item.matched_cwe}${item.matched_cwe_name ? ` (${item.matched_cwe_name})` : ""}, which sits below ${subjectCwe} in the abstraction hierarchy`}
                 >
                   via {item.matched_cwe}
                 </span>
@@ -103,9 +103,9 @@ function Row({
                   )}
                 </span>
               ))}
-              {/* Same em-dash the vendor rows use — without it the chip and the
+              {/* Same separator the vendor rows use; without it the chip and the
                   description run together. */}
-              {" — "}
+              {": "}
             </>
           )}
           {mode === "vendor" &&
@@ -121,10 +121,10 @@ function Row({
                     )}
                   </span>
                 ))}
-                {" — "}
+                {": "}
               </>
             ) : (
-              <span className={styles.vendTag}>vendor-level — </span>
+              <span className={styles.vendTag}>vendor-level: </span>
             ))}
           {item.description ?? "No description available."}
           {version && <span className={styles.verTag}> · {version}</span>}
@@ -210,7 +210,7 @@ export function VulnerabilitiesTab({
             </>
           ) : mode === "vendor" ? (
             <>
-              <b>{distinctTotal.toLocaleString()} CVEs</b> affect {entityName} —{" "}
+              <b>{distinctTotal.toLocaleString()} CVEs</b> affect {entityName}:{" "}
               <b>{first.vendor_level_count.toLocaleString()}</b> vendor-level ·{" "}
               <b>{productLinked.toLocaleString()}</b> via {first.by_product.length} tracked product
               {first.by_product.length === 1 ? "" : "s"}
@@ -273,7 +273,7 @@ export function VulnerabilitiesTab({
             className={!includeDescendants ? styles.fchipActive : undefined}
             onClick={() => setIncludeDescendants((v) => !v)}
             aria-pressed={!includeDescendants}
-            title="Only CVEs tagged with this exact weakness, excluding everything below it on the ladder"
+            title="Only CVEs tagged with this exact weakness, excluding everything below it in the hierarchy"
           >
             Direct only
           </Chip>
@@ -333,7 +333,7 @@ export function VulnerabilitiesTab({
             {first && distinctTotal === 0
               ? mode === "cwe"
                 ? "No CVE in the corpus carries this weakness."
-                : "No NVD affects-data links to this entity yet."
+                : "NVD lists no affected CVEs for this entity yet."
               : "No CVEs match the current filters."}
           </div>
         ) : (

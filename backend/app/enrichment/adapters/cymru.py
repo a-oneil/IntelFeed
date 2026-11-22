@@ -149,7 +149,7 @@ class CymruAdapter(EnrichmentAdapter):
             "cymru-bulk-sync",
             "app.workers.enrichment_tasks.run_cymru_bulk_sync",
             {"type": "crontab", "minute": "25", "hour": "*/6"},
-            "Map the ledger's active IPs to their AS over one Team Cymru bulk WHOIS connection",
+            "Map active IP observables to their AS over one Team Cymru bulk WHOIS connection",
         ),
     )
     outputs = (

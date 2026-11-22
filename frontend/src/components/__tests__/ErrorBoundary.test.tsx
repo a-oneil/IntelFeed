@@ -34,7 +34,7 @@ describe("ErrorBoundary", () => {
         <ProblemChild />
       </ErrorBoundary>
     );
-    expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    expect(screen.getByText("This page could not be displayed")).toBeInTheDocument();
     expect(screen.queryByText("Child rendered successfully")).not.toBeInTheDocument();
   });
 
@@ -47,7 +47,7 @@ describe("ErrorBoundary", () => {
     expect(screen.getByText("Test explosion")).toBeInTheDocument();
   });
 
-  it("reloads the page when Try Again is clicked", () => {
+  it("reloads the page when Reload is clicked", () => {
     const reload = vi.fn();
     const originalLocation = window.location;
     Object.defineProperty(window, "location", {
@@ -60,7 +60,7 @@ describe("ErrorBoundary", () => {
         <ProblemChild />
       </ErrorBoundary>
     );
-    fireEvent.click(screen.getByText("Try Again"));
+    fireEvent.click(screen.getByText("Reload"));
 
     expect(reload).toHaveBeenCalledOnce();
     Object.defineProperty(window, "location", {
@@ -111,7 +111,7 @@ describe("ErrorBoundary", () => {
         </ErrorBoundary>
       );
       expect(reload).not.toHaveBeenCalled();
-      expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+      expect(screen.getByText("This page could not be displayed")).toBeInTheDocument();
     });
 
     it("leaves other errors alone", () => {
@@ -134,7 +134,7 @@ describe("ErrorBoundary", () => {
     );
 
     expect(screen.getByText("Custom error page")).toBeInTheDocument();
-    expect(screen.queryByText("Something went wrong")).not.toBeInTheDocument();
-    expect(screen.queryByText("Try Again")).not.toBeInTheDocument();
+    expect(screen.queryByText("This page could not be displayed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Reload")).not.toBeInTheDocument();
   });
 });

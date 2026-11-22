@@ -81,9 +81,9 @@ def ai_prompt_variable_contexts() -> dict:
         "batch": {
             "label": "Batch",
             "note": (
-                "The prompt runs once over all matching entries. Note: "
-                "date_label / scope_label are NOT injected by automation — "
-                "they exist only in the feed-UI daily summary."
+                "The prompt runs once over all matching entries. "
+                "date_label and scope_label are not available here; "
+                "they exist only in the daily summary shown in the reader."
             ),
             "groups": [
                 {
@@ -91,7 +91,7 @@ def ai_prompt_variable_contexts() -> dict:
                     "variables": [
                         {
                             "name": "entries",
-                            "description": "List of all matching entries — loop with {% for entry in entries %}",
+                            "description": "List of all matching entries. Loop over it with {% for entry in entries %}",
                         },
                         {
                             "name": "entry_count",

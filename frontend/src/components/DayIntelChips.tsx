@@ -59,10 +59,10 @@ interface Props {
 
 /** Legend copy for the four low-priority fill chips, which are built in a loop. */
 const FILL_BLURBS: Record<string, string> = {
-  threat_actor: "The threat actor named in the most of this day's articles.",
-  malware: "The malware family named in the most of this day's articles.",
-  product: "The product named in the most of this day's articles.",
-  country: "The country named in the most of this day's articles.",
+  threat_actor: "The threat actor this day's articles name most often.",
+  malware: "The malware family this day's articles name most often.",
+  product: "The product this day's articles name most often.",
+  country: "The country this day's articles name most often.",
 };
 
 /** One chip plus the plain-English line the legend shows for it. The strip is
@@ -116,7 +116,7 @@ export function DayIntelChips({ dayKey, filters, focus, onFocus }: Props) {
           e.stopPropagation();
           onFocus(active ? null : { dayKey, chip: chipKey, label, filter });
         }}
-        title={active ? `Showing only ${label} — click to clear` : `${title} — click to show only these`}
+        title={active ? `Showing only ${label}. Click to clear.` : `${title}. Click to show only these.`}
       >
         {children}
         {active && (
@@ -170,7 +170,7 @@ export function DayIntelChips({ dayKey, filters, focus, onFocus }: Props) {
         `articles mentioning ${n.name}`,
         { entity_type: n.type, entity_id: n.id },
         n.total > 1
-          ? `${n.total} newly-tracked entities today — ${n.name} first seen`
+          ? `${n.total} entities first tracked today, including ${n.name}`
           : `${n.name} first tracked today`,
         <>
           <span className={styles.star} aria-hidden="true">
@@ -189,7 +189,7 @@ export function DayIntelChips({ dayKey, filters, focus, onFocus }: Props) {
     chips.push({
       key: "ttp",
       term: "ttp",
-      blurb: "The ATT&CK technique named in the most of this day's articles.",
+      blurb: "The ATT&CK technique this day's articles name most often.",
       node: chipButton(
         "ttp",
         styles.ttp,
@@ -211,7 +211,7 @@ export function DayIntelChips({ dayKey, filters, focus, onFocus }: Props) {
     chips.push({
       key: "sector",
       term: "sector",
-      blurb: "The industry named as the target in the most of this day's articles.",
+      blurb: "The industry this day's articles name as the target most often.",
       node: chipButton(
         "sector",
         styles.sector,
@@ -233,7 +233,7 @@ export function DayIntelChips({ dayKey, filters, focus, onFocus }: Props) {
       key: "cve",
       term: cve.kev ? "cve · kev" : "cve",
       blurb:
-        "The day's headline vulnerability — exploited ones outrank merely popular ones, and KEV says it's in CISA's known-exploited catalog. The trailing number is its CVSS score.",
+        "The day's top CVE. Exploited CVEs rank above ones that are only mentioned. KEV means it is in CISA's Known Exploited Vulnerabilities catalog. The trailing number is its CVSS score.",
       node: chipButton(
         "cve",
         styles.cve,
@@ -357,8 +357,8 @@ function ChipLegend({ items }: { items: ChipSpec[] }) {
         type="button"
         className={`${styles.chip} ${styles.explain}`}
         aria-expanded={open}
-        aria-label="What are these chips?"
-        title="What are these chips?"
+        aria-label="Explain these chips"
+        title="Explain these chips"
         onClick={(e) => {
           e.stopPropagation();
           setOpen((v) => !v);
@@ -380,9 +380,9 @@ function ChipLegend({ items }: { items: ChipSpec[] }) {
           >
             <div className={styles.legendTitle}>What this day was about</div>
             <p className={styles.legendIntro}>
-              A read of the entities IntelFeed pulled out of this day's articles — the
-              most-mentioned ones, with anything urgent first. Click a chip to show only the
-              articles it appears in; click it again to bring the rest back.
+              The entities mentioned most in this day's articles, with urgent ones first.
+              Click a chip to show only the articles it appears in. Click it again to clear
+              the filter.
             </p>
             <dl className={styles.legendList}>
               {items.map((i) => (
@@ -395,8 +395,8 @@ function ChipLegend({ items }: { items: ChipSpec[] }) {
               ))}
             </dl>
             <p className={styles.legendFoot}>
-              ×N is how many of this day's articles mention it. Counts include muted feeds, so the
-              strip can be wider than the list below it. Five chips max.
+              ×N is how many of this day's articles mention it. Counts include muted feeds, so they
+              can exceed the list below. At most five chips are shown.
             </p>
           </div>,
           document.body,

@@ -33,7 +33,7 @@ class ThreadMember(BaseModel):
     published_at: datetime | None
     priority_score: float | None
     feed_title: str
-    source: str | None = Field(description="Source domain — the outlet, not the feed row")
+    source: str | None = Field(description="Source domain (the outlet, not the feed row)")
     role: str = Field(description="origin | beat | echo")
     similarity: float
     duplicate_of_entry_id: uuid.UUID | None = Field(description="For echoes: the article this one re-reports")
@@ -72,7 +72,7 @@ class ThreadSummary(BaseModel):
     unread_count: int
     new_since_opened: int = Field(description="Members added since this analyst last opened the thread")
     top_score: float | None = Field(
-        description="Priority score of the best unread non-echo member — the rank the thread row takes"
+        description="Priority score of the best unread non-echo member: the rank the thread row takes"
     )
     top_entry_id: uuid.UUID | None
     entry_ids: list[uuid.UUID] = Field(

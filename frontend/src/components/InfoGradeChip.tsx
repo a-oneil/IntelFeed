@@ -83,7 +83,7 @@ export function InfoGradeChip({ entryId, reliability, rating, ratingBy, aiRating
   const choose = (value: number | null) => {
     setRating.mutate(
       { entryId, rating: value },
-      { onError: () => toast.error("Couldn't save the rating") },
+      { onError: () => toast.error("Could not save the rating") },
     );
   };
 
@@ -133,7 +133,7 @@ export function InfoGradeChip({ entryId, reliability, rating, ratingBy, aiRating
                     key={n}
                     type="button"
                     className={`${styles.pickBtn} ${rating === n && ratingBy === "analyst" ? styles.picked : ""}`}
-                    title={`${n} — ${INFO_RATINGS[n].label}: ${INFO_RATINGS[n].meaning}`}
+                    title={`${n}: ${INFO_RATINGS[n].label}. ${INFO_RATINGS[n].meaning}`}
                     disabled={setRating.isPending}
                     onClick={() => choose(n)}
                   >

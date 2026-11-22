@@ -99,7 +99,7 @@ async def create_report_share_link(
     if not _tlp_allows_sharing(report):
         raise AppError(
             code="tlp_restricted",
-            message=f"{report.tlp_marking} reports can't be shared by public link",
+            message=f"{report.tlp_marking} reports cannot be shared by public link. Only TLP:CLEAR and TLP:GREEN can.",
             status_code=400,
         )
 

@@ -122,7 +122,7 @@ export function RelationshipRow({
               title={
                 trust.tier === "corroborated"
                   ? `Corroborated by ${trust.provenance}`
-                  : "Engine inference — corroboration pending"
+                  : "Inferred by the engine. Not yet confirmed by a second source."
               }
             >
               {trust.tier}
@@ -167,7 +167,7 @@ export function RelationshipRow({
           {canModerate && onConfirm && (
             <button
               className={`${styles.rowActionBtn} ${styles.rowActionConfirm}`}
-              title="Pin — mark corroborated by you"
+              title="Pin: mark as corroborated by you"
               onClick={() => onConfirm(item.relationship_id!)}
             >
               ✓
@@ -176,7 +176,7 @@ export function RelationshipRow({
           {canModerate && onReject && (
             <button
               className={`${styles.rowActionBtn} ${styles.rowActionReject}`}
-              title="Reject — hide and never re-infer"
+              title="Reject: hide and never infer again"
               onClick={() => onReject(item.relationship_id!)}
             >
               ✕

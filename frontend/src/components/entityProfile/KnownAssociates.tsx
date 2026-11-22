@@ -153,7 +153,7 @@ export function KnownAssociates({
                 phrase ? `${phrase.lead} ${phrase.rest}`.trim() : null,
               ]
                 .filter(Boolean)
-                .join(" — ")}
+                .join(". ")}
             >
               <span className={styles.associateDot} style={{ background: getEntityColor(type) }} />
               <span className={styles.associateVerb}>{verbChipLabel(item)}</span>

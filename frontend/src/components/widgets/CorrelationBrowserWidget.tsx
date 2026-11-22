@@ -180,9 +180,9 @@ export default function CorrelationBrowserWidget({ config }: Props) {
           <button
             className={`${styles.corrFilterBtn} ${corrFilter === "smart" ? styles.corrFilterActive : ""}`}
             onClick={() => { setCorrFilter("smart"); setCorrSeverity(""); }}
-            title="High severity + unread"
+            title="Unread events with high severity"
           >
-            Smart
+            High unread
           </button>
           <button
             className={`${styles.corrFilterBtn} ${corrFilter === "unread" ? styles.corrFilterActive : ""}`}
@@ -322,8 +322,8 @@ export default function CorrelationBrowserWidget({ config }: Props) {
             <p>{corrFilter === "smart" ? "No high-severity unread correlations" : corrFilter === "unread" ? "No unread correlations" : "No correlation events yet"}</p>
             <span>
               {timeBounds.since
-                ? "Nothing in the selected range \u2014 widen it from the range bar above"
-                : "Correlations appear when intelligence extraction finds entity relationships across articles"}
+                ? "Nothing in the selected range. Widen it from the range bar above."
+                : "Correlations appear when intelligence extraction finds entity relationships across articles."}
             </span>
           </div>
         )}

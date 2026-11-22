@@ -6,7 +6,7 @@ import styles from "./AppDialog.module.css";
 
 const DEFAULT_TITLE: Record<DialogRequest["kind"], string> = {
   confirm: "Are you sure?",
-  alert: "Heads up",
+  alert: "Notice",
   prompt: "Enter a value",
 };
 

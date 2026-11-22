@@ -131,8 +131,8 @@ function GitHubRepoFields({ form }: AdapterProps) {
         <span className={styles.checkText}>
           <span className={styles.checkLabel}>Import the file contents</span>
           <span className={styles.hint}>
-            Off, you get a record that a file changed without the file itself,
-            which uses less of the GitHub API allowance.
+            When off, only the fact that a file changed is recorded, not its
+            contents. This uses less of the GitHub API allowance.
           </span>
         </span>
       </label>
@@ -157,8 +157,8 @@ function WebScraperFields({ form }: AdapterProps) {
           onChange={(e) => setAdapter("link_selector", e.target.value || null)}
         />
         <span className={styles.hint}>
-          A CSS selector matching the links to article pages. Leave blank to let
-          IntelFeed work it out.
+          A CSS selector matching the links to article pages. Leave blank to
+          detect them automatically.
         </span>
       </div>
 
@@ -334,7 +334,7 @@ function BlueskyFields({ form }: AdapterProps) {
           <span className={styles.checkText}>
             <span className={styles.checkLabel}>Include reposts</span>
           <span className={styles.hint}>
-            Off, only the account&rsquo;s own posts are collected.
+            When off, only the account&rsquo;s own posts are collected.
           </span>
           </span>
         </label>
@@ -473,7 +473,7 @@ function TelegramFields({ feedId, form }: AdapterProps) {
           </div>
           {h.flood_wait_seconds !== null && (
             <div className={`${styles.banner} ${styles.bannerWarn}`}>
-              Flood wait: {h.flood_wait_seconds}s — Telegram is rate-limiting this
+              Flood wait: {h.flood_wait_seconds}s. Telegram is rate-limiting this
               account.
             </div>
           )}
@@ -523,8 +523,8 @@ function TelegramFields({ feedId, form }: AdapterProps) {
         <span className={styles.checkText}>
           <span className={styles.checkLabel}>Receive messages as they arrive</span>
           <span className={styles.hint}>
-            Needs the telegram-listener service. If it stops, this falls back to
-            checking every 30 minutes on its own.
+            Needs the telegram-listener service. If it stops, this feed falls
+            back to polling every 30 minutes.
           </span>
         </span>
       </label>

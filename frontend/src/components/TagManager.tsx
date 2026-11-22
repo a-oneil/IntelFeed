@@ -118,7 +118,7 @@ export function TagManager() {
           toast.success(
             isGlobal
               ? `"${name}" is now visible to everyone`
-              : `"${name}" is personal again — everyone kept their own copy`,
+              : `"${name}" is personal again. Everyone kept their own copy.`,
           ),
         onError: (e) => toast.error(errMessage(e, "Couldn't change who sees the tag")),
       },
@@ -282,7 +282,7 @@ export function TagManager() {
             <input type="checkbox" checked={newChip} onChange={(e) => setNewChip(e.target.checked)} />
             Chip
           </label>
-          <label className={styles.chipToggle} title="One shared assignment per entry that every analyst sees; otherwise each analyst's tagging is their own">
+          <label className={styles.chipToggle} title="Everyone sees the same tag on an entry. Otherwise each analyst's tags are their own.">
             <input type="checkbox" checked={newGlobal} onChange={(e) => setNewGlobal(e.target.checked)} />
             Everyone
           </label>
@@ -354,7 +354,7 @@ export function TagManager() {
           <div className={`${styles.row} ${styles.head}`}>
             <span />
             <span>Tag</span>
-            <span title="Articles carrying the tag as you see it: your own for a personal tag, everyone's for a global one">Articles</span>
+            <span title="Articles with this tag: your own for a personal tag, everyone's for a global tag">Articles</span>
             <span className={styles.actionsCol}>Actions</span>
           </div>
 
@@ -466,8 +466,8 @@ export function TagManager() {
                         aria-pressed={t.is_global}
                         title={
                           t.is_global
-                            ? "Make personal: hand the shared assignments to every analyst as their own"
-                            : "Make global: merge everyone's assignments into one that every analyst sees"
+                            ? "Make personal: each analyst gets their own copy of the tag assignments"
+                            : "Make global: merge everyone's tag assignments into one that everyone sees"
                         }
                       >
                         {t.is_global ? "Unshare" : "Share"}
