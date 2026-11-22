@@ -84,7 +84,7 @@ Each endpoint below lists one of these access levels:
 | **Public** | Anyone, no token. Some of these check their own token instead (share links, publish feeds, RSS). | none |
 | **Visitor** | A signed-in user. With [public read-only mode](public-read-only-mode.md) on, also an anonymous visitor (read only, with some fields removed). | `get_viewer()` (`backend/app/core/security.py:180`), or `get_entry_viewer()` (`backend/app/core/security.py:213`) for one-article routes |
 | **User** | Any signed-in user. | `get_current_user()` (`backend/app/core/security.py:126`) |
-| **Admin** | Users with the `admin` role. Everyone else gets 403. | `get_admin_user()` (`backend/app/core/security.py:316`) |
+| **Admin** | Users with the `admin` role. Everyone else gets 403. | `get_admin_user()` (`backend/app/core/security.py:326`) |
 | **Owner** | A signed-in user, but only the row's creator or an admin may change or delete it (403 otherwise). | checked inside the route |
 
 "User (admin for …)" means the route is open to users, but some fields or options are admin-only.

@@ -13,6 +13,7 @@ import {
   useConfirmExtraction,
   useConvertExtractionEntity,
   useDeleteExtractionEntities,
+  useExtractionBulk,
   useExtractionEntities,
   useExtractionStats,
   useInvalidateExtraction,
@@ -30,12 +31,14 @@ import { confirmDialog, promptDialog } from "@/utils/dialog";
 
 const ALL_TYPES: ExtractionType[] = ["threat_actor", "malware", "cve", "tool", "ttp", "observable"];
 type EntityStatus = "all" | "review" | "orphan" | "dupe";
+export type ReviewEntityStatus = Exclude<EntityStatus, "all">;
 
-const CONF_BAR: Record<string, { pct: number; cls: string }> = {
-  high: { pct: 92, cls: styles.confHigh },
-  medium: { pct: 60, cls: styles.confMed },
-  low: { pct: 30, cls: styles.confLow },
-};
+/** Review › Entities: the status switch, in the order the lens shows them. */
+const REVIEW_STATUSES: { value: ReviewEntityStatus; label: string }[] = [
+  { value: "review", label: "Unconfirmed" },
+  { value: "dupe", label: "Duplicates" },
+  { value: "orphan", label: "Orphans" },
+];
 
 const PAGE_SIZE = 50;
 const EMPTY_ITEMS: ExtractionEntity[] = [];
@@ -43,11 +46,17 @@ const EMPTY_ITEMS: ExtractionEntity[] = [];
 export function ExtractionTab({
   status = "all",
   window: timeWindow,
+  statusSwitch,
 }: {
-  /** One status only: each of Review's entity lenses lists one; Entities lists them all. */
+  /** One status only (Review's Entities lens); Entities lists them all. */
   status?: EntityStatus;
   /** The console's time picker: entities first seen in this window. */
   window: NonNullable<ExtractionParams["window"]>;
+  /** Review's Entities lens: the Unconfirmed / Duplicates / Orphans switch, with its counts. */
+  statusSwitch?: {
+    onChange: (s: ReviewEntityStatus) => void;
+    counts: Partial<Record<ReviewEntityStatus, number>>;
+  };
 }) {
   const navigate = useNavigate();
   const [entityType, setEntityType] = useState<ExtractionType | "">("");
@@ -94,6 +103,7 @@ export function ExtractionTab({
   const notDupMut = useNotDuplicate();
   const updateMut = useUpdateExtractionEntity();
   const convertMut = useConvertExtractionEntity();
+  const bulkMut = useExtractionBulk();
   const invalidateExtraction = useInvalidateExtraction();
 
   // Row whose "Merge into…" modal is open (search + fold into any same-type entity).
@@ -352,21 +362,81 @@ export function ExtractionTab({
 
   const allSelected = items.length > 0 && selected.size === items.length;
 
+  // The bulk buttons act on what the table shows: the status, the type pick and the search.
+  const whatShows = () => {
+    const type = entityType ? ` ${TYPE_LABELS[entityType].toLowerCase()}` : "";
+    const named = q ? ` matching “${q}”` : "";
+    return `${total.toLocaleString()}${type} entit${total === 1 ? "y" : "ies"}${named}`;
+  };
+  async function doBulk(action: "confirm" | "delete" | "merge" | "not_duplicate") {
+    if (status === "all" || total === 0) return;
+    const copy = {
+      confirm: { title: "Confirm all", message: `Confirm ${whatShows()}? Each is kept as it is and leaves this list.`, label: "Confirm all", destructive: false },
+      delete: {
+        title: "Delete all",
+        message: `Delete ${whatShows()}, with every article link and relationship? Their names go on the do-not-recreate list. This cannot be undone.`,
+        label: "Delete all",
+        destructive: true,
+      },
+      merge: {
+        title: "Merge all",
+        message: `Fold each of ${whatShows()} into the entity it most resembles? Aliases and article links move over. Each merge is its own change in History.`,
+        label: "Merge all",
+        destructive: true,
+      },
+      not_duplicate: {
+        title: "Not duplicates",
+        message: `Mark each of ${whatShows()} as a different thing from the entity it resembles? The pairs stop being flagged.`,
+        label: "Not duplicates",
+        destructive: false,
+      },
+    }[action];
+    if (!(await confirmDialog({ title: copy.title, message: copy.message, confirmLabel: copy.label, destructive: copy.destructive }))) return;
+    try {
+      const r = await bulkMut.mutateAsync({ action, status, types: effectiveTypes, q: q || undefined, window: timeWindow });
+      const verb = { confirm: "Confirmed", delete: "Deleted", merge: "Merged", not_duplicate: "Marked" }[action];
+      const parts = [`${verb} ${r.done.toLocaleString()} of ${r.matched.toLocaleString()}`];
+      if (r.skipped) parts.push(`${r.skipped.toLocaleString()} skipped`);
+      toast.success(parts.join(", "));
+      setSelected(new Set());
+    } catch (err) {
+      toast.error(errMsg(err, `${copy.title} failed`));
+    }
+  }
+  const bulkBusy = bulkMut.isPending;
+  const bulkAll =
+    status === "review"
+      ? [
+          { label: "Confirm all", action: "confirm" as const, danger: false, title: "Confirm every entity the table shows" },
+          { label: "Delete all", action: "delete" as const, danger: true, title: "Delete every entity the table shows" },
+        ]
+      : status === "dupe"
+        ? [
+            { label: "Merge all", action: "merge" as const, danger: false, title: "Fold every entity the table shows into the one it resembles" },
+            { label: "Not duplicates", action: "not_duplicate" as const, danger: false, title: "Stop flagging every pair the table shows" },
+          ]
+        : status === "orphan"
+          ? [{ label: "Delete all", action: "delete" as const, danger: true, title: "Delete every entity the table shows" }]
+          : [];
+
   return (
     <div className={styles.wrap}>
       {/* toolbar */}
       <div className={styles.toolbar}>
-        <label className={styles.search}>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6">
-            <circle cx="7" cy="7" r="5" />
-            <path d="M11 11l3.5 3.5" />
-          </svg>
-          <input
-            placeholder="Search created entities, aliases…"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-          />
-        </label>
+        {statusSwitch && (
+          <span className={styles.seg} aria-label="Entity status">
+            {REVIEW_STATUSES.map((s) => (
+              <button
+                key={s.value}
+                className={status === s.value ? styles.segOn : ""}
+                onClick={() => resetTo(() => statusSwitch.onChange(s.value))}
+              >
+                {s.label}
+                <span className={styles.segCnt}>{(statusSwitch.counts[s.value] ?? 0).toLocaleString()}</span>
+              </button>
+            ))}
+          </span>
+        )}
 
         <select
           className={styles.filt}
@@ -383,6 +453,36 @@ export function ExtractionTab({
             </option>
           ))}
         </select>
+
+        <label className={styles.search}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
+            <circle cx="7" cy="7" r="5" />
+            <path d="M11 11l3.5 3.5" />
+          </svg>
+          <input
+            aria-label="Search created entities"
+            placeholder="Search created entities, aliases…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+          />
+        </label>
+
+        {bulkAll.length > 0 && (
+          <>
+            <span className={styles.grow} />
+            {bulkAll.map((b) => (
+              <button
+                key={b.action}
+                className={`${styles.bulkbtn} ${b.danger ? styles.danger : ""}`}
+                disabled={bulkBusy || total === 0}
+                title={b.title}
+                onClick={() => doBulk(b.action)}
+              >
+                {bulkBusy ? "Working…" : b.label}
+              </button>
+            ))}
+          </>
+        )}
       </div>
 
       {/* bulk bar */}
@@ -428,11 +528,11 @@ export function ExtractionTab({
                 <SortTh label="Entity" col="name" sortBy={sortBy} sortOrder={sortOrder} onSort={toggleSort} />
                 <th>Type</th>
                 <SortTh label="Confidence" col="confidence" sortBy={sortBy} sortOrder={sortOrder} onSort={toggleSort} />
-                <SortTh label="Entries" col="entries" sortBy={sortBy} sortOrder={sortOrder} onSort={toggleSort} />
+                <SortTh label="Articles" col="entries" sortBy={sortBy} sortOrder={sortOrder} onSort={toggleSort} />
                 <th className={styles.hideSm}>First source</th>
                 <SortTh label="Created" col="created" sortBy={sortBy} sortOrder={sortOrder} onSort={toggleSort} className={styles.hideSm} />
-                <th>Status</th>
-                <th className={styles.actionsCol}>Actions</th>
+                {status === "all" && <th>Status</th>}
+                <th className={styles.actionsCol} />
               </tr>
             </thead>
             <tbody>
@@ -474,21 +574,7 @@ export function ExtractionTab({
                         {TYPE_LABELS[e.entity_type]}
                       </span>
                     </td>
-                    <td>
-                      {e.created_confidence && CONF_BAR[e.created_confidence] ? (
-                        <span className={styles.conf}>
-                          <span className={styles.cbar}>
-                            <span
-                              className={CONF_BAR[e.created_confidence].cls}
-                              style={{ width: `${CONF_BAR[e.created_confidence].pct}%` }}
-                            />
-                          </span>
-                          <span className={styles.pct}>{e.created_confidence}</span>
-                        </span>
-                      ) : (
-                        <span className={styles.mut}>—</span>
-                      )}
-                    </td>
+                    <td className={styles.mut}>{e.created_confidence ?? "—"}</td>
                     <td className={styles.num}>{e.article_count}</td>
                     <td className={`${styles.hideSm} ${styles.mut} ${styles.sourceCell}`} title={e.source_entry_title ?? ""}>
                       <button
@@ -500,18 +586,18 @@ export function ExtractionTab({
                       </button>
                     </td>
                     <td className={`${styles.hideSm} ${styles.when}`}>{relTime(e.first_seen_at)}</td>
+                    {status === "all" && (
+                      <td>
+                        <StatusPill status={e.status} duplicateOf={e.duplicate_of} />
+                      </td>
+                    )}
                     <td>
-                      <StatusPill status={e.status} duplicateOf={e.duplicate_of} />
-                    </td>
-                    <td>
+                      {/* a fixed grid — primary / secondary / ⋯ / ✕ — so the buttons line up down the table */}
                       <div className={styles.rowacts}>
-                        <button className={styles.iact} title="Pivot to profile" onClick={() => pivot(e)}>
-                          ↗
-                        </button>
-                        {e.status === "dupe" && e.duplicate_of_id && (
+                        {e.status === "dupe" && e.duplicate_of_id ? (
                           <>
                             <button
-                              className={styles.dupAct}
+                              className={`${styles.act} ${styles.actGood}`}
                               title={`Fold ${e.name} into ${e.duplicate_of} — aliases and article links move over`}
                               disabled={mergeMut.isPending}
                               onClick={() => doMergeIntoSibling(e)}
@@ -519,7 +605,7 @@ export function ExtractionTab({
                               Merge
                             </button>
                             <button
-                              className={styles.dupAct}
+                              className={styles.act}
                               title={`${e.name} and ${e.duplicate_of} are different things — stop flagging the pair`}
                               disabled={notDupMut.isPending}
                               onClick={() => doNotDuplicate(e)}
@@ -527,11 +613,18 @@ export function ExtractionTab({
                               Not a dupe
                             </button>
                           </>
-                        )}
-                        {e.needs_review && (
-                          <button className={styles.iact} title="Confirm" onClick={() => doConfirm([e])}>
-                            ✓
-                          </button>
+                        ) : e.needs_review ? (
+                          <>
+                            <button className={`${styles.act} ${styles.actGood}`} title="Keep it as it is" onClick={() => doConfirm([e])}>
+                              Confirm
+                            </button>
+                            <span />
+                          </>
+                        ) : (
+                          <>
+                            <span />
+                            <span />
+                          </>
                         )}
                         <RowActionsMenu
                           entity={e}
@@ -542,6 +635,7 @@ export function ExtractionTab({
                         />
                         <button
                           className={`${styles.iact} ${styles.iactDanger}`}
+                          aria-label={e.entity_type === "observable" ? "Deny" : "Delete"}
                           title={e.entity_type === "observable" ? "Deny — never capture this value again" : "Delete"}
                           onClick={() => doDelete([e])}
                         >
@@ -721,8 +815,8 @@ function RowActionsMenu({
   const canAlias = ALIAS_TYPES.has(t);
   const canConvert = CONVERTIBLE_TYPES.has(t);
   const convertTargets = CONVERT_TARGETS.filter((x) => x.key !== t);
-  // Observables support none of these — don't hang an empty popover off the row.
-  if (!canMerge && !canRename && !canAlias && !canConvert) return null;
+  // Observables support none of these — keep the slot so the row's buttons stay aligned.
+  if (!canMerge && !canRename && !canAlias && !canConvert) return <span />;
 
   function run(fn: () => void) {
     setOpen(false);

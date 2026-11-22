@@ -133,9 +133,20 @@ export interface FeedRow {
   context?: string | null;
   /** The verdict's confidence, where the stage gave one. */
   confidence?: Confidence | null;
+  /** History: who applied it — a person (named in applied_by_name where the
+   *  row recorded them), the adjudicator at ingest, or the duplicate review. */
+  applied_by?: AppliedBy | null;
+  applied_by_id?: string | null;
+  applied_by_name?: string | null;
 }
 
 export type ProposalOrigin = "adjudicator" | "merge_review" | "scan";
+export type AppliedBy = "person" | "adjudicator" | "merge_review";
+
+export interface FeedPerson {
+  id: string;
+  name: string;
+}
 
 /** Observables are an entity type, so dropping one is an "entities" proposal. */
 export type ProposalDomain = "links" | "entities" | "relationships";
@@ -145,6 +156,8 @@ export interface FeedResponse {
   rows: FeedRow[];
   has_more: boolean;
   next_offset: number;
+  /** History: everyone who has applied something, for its "Applied by" filter. */
+  people: FeedPerson[];
 }
 
 export interface FeedFilters {
@@ -162,6 +175,12 @@ export interface FeedFilters {
   /** One entity's rows (the Review queue's expand). */
   entity_type?: string;
   entity_id?: string;
+  /** Only rows created at or after this ISO timestamp (History's time window). */
+  since?: string;
+  /** History: 'adjudicator' | 'merge_review' | 'person' | a user id. */
+  applied_by?: string;
+  /** Only rows about an entity whose name contains this. */
+  q?: string;
   limit?: number;
   offset?: number;
 }
@@ -216,6 +235,9 @@ export function useHygieneFeed(filters: FeedFilters, opts: { enabled?: boolean }
       if (filters.orphaned) params.orphaned = "true";
       if (filters.entity_type) params.entity_type = filters.entity_type;
       if (filters.entity_id) params.entity_id = filters.entity_id;
+      if (filters.since) params.since = filters.since;
+      if (filters.applied_by) params.applied_by = filters.applied_by;
+      if (filters.q) params.q = filters.q;
       // one entity's rows: small enough to carry the article snippet
       if (filters.entity_id) params.context = "true";
       const { data } = await api.get<FeedResponse>("/admin/hygiene/feed", { params });
@@ -325,8 +347,12 @@ interface ReviewGroupsResponse {
   facets: { domains: Partial<Record<ProposalDomain, number>>; origins: Partial<Record<ProposalOrigin, number>> };
 }
 
-export function useReviewGroups(params: ReviewScope & { sort?: ReviewSort; limit?: number; offset?: number }) {
+export function useReviewGroups(
+  params: ReviewScope & { sort?: ReviewSort; limit?: number; offset?: number },
+  opts: { enabled?: boolean } = {},
+) {
   return useQuery({
+    enabled: opts.enabled ?? true,
     queryKey: [...HYGIENE_KEYS, "review-groups", params],
     queryFn: async () => {
       const { data } = await api.get<ReviewGroupsResponse>("/admin/hygiene/review-groups", { params });

@@ -8,13 +8,15 @@ import { EngineSection } from "../engine/EngineSection";
 // wiring: default matrix, jobs/feeds/plans browse views, legacy deep links.
 vi.mock("../engine/EngineMatrix", () => ({
   MATRIX_VIEWS: ["entries", "entities", "links", "relationships", "review", "feeds"],
-  REVIEW_LENSES: ["proposals", "unconfirmed", "duplicates", "orphans", "relationships", "history"],
+  REVIEW_LENSES: ["queue", "entities", "relationships", "history"],
+  LEGACY_ENTITY_LENS: { unconfirmed: "review", duplicates: "dupe", orphans: "orphan" },
   EngineMatrix: ({
     initialView,
     initialOpenStage,
     initialStage,
     initialStatus,
     initialLens,
+    initialEntityStatus,
     onBrowse,
     onHighlightSetting,
   }: {
@@ -23,6 +25,7 @@ vi.mock("../engine/EngineMatrix", () => ({
     initialStage?: string;
     initialStatus?: string;
     initialLens?: string;
+    initialEntityStatus?: string;
     onBrowse: (v: string) => void;
     onHighlightSetting: (key: string) => void;
   }) => (
@@ -33,6 +36,7 @@ vi.mock("../engine/EngineMatrix", () => ({
       data-stage={initialStage ?? ""}
       data-status={initialStatus ?? ""}
       data-lens={initialLens ?? ""}
+      data-show={initialEntityStatus ?? ""}
     >
       <button onClick={() => onBrowse("jobs")}>browse-jobs</button>
       <button onClick={() => onBrowse("plans")}>browse-plans</button>
@@ -115,9 +119,17 @@ describe("EngineSection", () => {
     expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-view", "entities");
   });
 
-  it("opens a Review lens from ?lens=, and ignores an unknown one", () => {
+  it("opens a Review lens from ?lens=, maps the old per-status lenses onto Entities, and ignores an unknown one", () => {
+    renderSection("?view=review&lens=history");
+    expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-lens", "history");
+    cleanup();
     renderSection("?view=review&lens=orphans");
-    expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-lens", "orphans");
+    expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-lens", "entities");
+    expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-show", "orphan");
+    cleanup();
+    renderSection("?view=review&lens=entities&show=dupe");
+    expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-lens", "entities");
+    expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-show", "dupe");
     cleanup();
     renderSection("?view=review&lens=nope");
     expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-lens", "");

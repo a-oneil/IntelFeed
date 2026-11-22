@@ -604,6 +604,17 @@ class FeedRow(BaseModel):
     # the first mention), so a reviewer needn't open the article. At most
     # FEED_CONTEXT_MAX characters; None when the row has no article or no match.
     context: str | None = None
+    # History: who applied it. "person" (a user, named in applied_by_name
+    # where the row recorded them), "adjudicator" (the stage, at ingest) or
+    # "merge_review" (the duplicate review). None while it is only proposed.
+    applied_by: str | None = None
+    applied_by_id: uuid.UUID | None = None
+    applied_by_name: str | None = None
+
+
+class FeedPerson(BaseModel):
+    id: uuid.UUID
+    name: str
 
 
 class EvidenceFact(BaseModel):
@@ -657,6 +668,8 @@ class FeedResponse(BaseModel):
     rows: list[FeedRow]
     has_more: bool
     next_offset: int
+    # History (mode=apply): everyone who has applied something, for its "Applied by" filter.
+    people: list[FeedPerson] = []
 
 
 ORIGIN_ADJUDICATOR = "adjudicator"
@@ -710,6 +723,88 @@ def _maint_origin_clause(origin: str):
         func.coalesce(EntityMaintenanceLog.after["kind"].astext == ADJUDICATOR_ALIAS_KIND, False),
     )
     return and_(adjudicator, not_review) if origin == ORIGIN_ADJUDICATOR else and_(~adjudicator, not_review)
+
+
+APPLIED_BY_PERSON = "person"
+APPLIED_BY_FILTERS = (ORIGIN_ADJUDICATOR, ORIGIN_MERGE_REVIEW, APPLIED_BY_PERSON)
+_APPLIED_BY_HELP = (
+    "History: who applied it. 'adjudicator' = the stage at ingest, 'merge_review' = the duplicate review, "
+    "'person' = anyone by hand, or a user id for one person. Omit for everyone."
+)
+# A person's Apply on a link proposal writes the `removed` row with this reason.
+_PROMOTED_PREFIX = "Promoted from proposal"
+
+
+def _link_applied_by(r: EntityLinkValidationLog) -> tuple[str | None, str | None]:
+    """Who applied a link-log row, and the name where the row itself says
+    (a hand unlink names the user in its reason). Rows from before
+    ``applied_by`` was recorded are told apart by how they were written: a
+    hand unlink, a promoted proposal and a restore are a person's; any other
+    `removed` row is the stage's."""
+    if r.action not in ("removed", "restored"):
+        return None, None
+    if r.applied_by is not None:
+        return APPLIED_BY_PERSON, None
+    reason = r.reason or ""
+    if reason.startswith(HAND_UNLINK_PREFIX):
+        return APPLIED_BY_PERSON, reason[len(HAND_UNLINK_PREFIX) :].split(" ")[0] or None
+    if reason.startswith(_PROMOTED_PREFIX) or r.action == "restored":
+        return APPLIED_BY_PERSON, None
+    return ORIGIN_ADJUDICATOR, None
+
+
+def _maint_applied_by(r: EntityMaintenanceLog) -> str | None:
+    """Who applied a maintenance-log row. The stage and the duplicate review
+    apply in `apply` mode; a proposal filed in `shadow` mode only ever
+    becomes applied by a person's hand."""
+    if not r.applied:
+        return None
+    if r.applied_by is not None or r.mode == "shadow":
+        return APPLIED_BY_PERSON
+    origin = _maint_origin(r.action, r.after)
+    return origin if origin in (ORIGIN_ADJUDICATOR, ORIGIN_MERGE_REVIEW) else APPLIED_BY_PERSON
+
+
+def _parse_applied_by(value: str | None) -> str | uuid.UUID | None:
+    if value is None:
+        return None
+    if value in APPLIED_BY_FILTERS:
+        return value
+    try:
+        return uuid.UUID(value)
+    except ValueError:
+        raise AppError(code="invalid", message=f"unknown applied_by: {value}", status_code=400) from None
+
+
+def _link_applied_by_clause(who: str | uuid.UUID):
+    """The History "Applied by" filter as a link-log predicate (see _link_applied_by)."""
+    L = EntityLinkValidationLog
+    if isinstance(who, uuid.UUID):
+        return L.applied_by == who
+    if who == ORIGIN_MERGE_REVIEW:
+        return false()
+    by_hand = or_(
+        L.applied_by.isnot(None),
+        L.action == "restored",
+        func.coalesce(L.reason, "").like(f"{HAND_UNLINK_PREFIX}%"),
+        func.coalesce(L.reason, "").like(f"{_PROMOTED_PREFIX}%"),
+    )
+    return by_hand if who == APPLIED_BY_PERSON else and_(L.action == "removed", ~by_hand)
+
+
+def _maint_applied_by_clause(who: str | uuid.UUID):
+    """The History "Applied by" filter as a maintenance-log predicate (see _maint_applied_by)."""
+    M = EntityMaintenanceLog
+    if isinstance(who, uuid.UUID):
+        return M.applied_by == who
+    machine = and_(
+        M.applied_by.is_(None),
+        M.mode == "apply",
+        or_(_maint_origin_clause(ORIGIN_ADJUDICATOR), _maint_origin_clause(ORIGIN_MERGE_REVIEW)),
+    )
+    if who == APPLIED_BY_PERSON:
+        return ~machine
+    return and_(machine, _maint_origin_clause(who))
 
 
 def _link_origin_clause(origin: str):
@@ -1430,6 +1525,7 @@ def _link_feed_row(r: EntityLinkValidationLog) -> FeedRow:
         )
     if r.entry_id:
         links.append(FeedLink(kind="entry", entity_id=str(r.entry_id), label="source entry"))
+    applied_by, applied_by_name = _link_applied_by(r)
     return FeedRow(
         id=f"link_validator:{r.id}",
         source="link_validator",
@@ -1457,6 +1553,9 @@ def _link_feed_row(r: EntityLinkValidationLog) -> FeedRow:
         origin=None if (r.reason or "").startswith(HAND_UNLINK_PREFIX) else ORIGIN_ADJUDICATOR,
         domain=proposal_domain("link_validator", r.action),
         confidence=r.verdict_confidence,
+        applied_by=applied_by,
+        applied_by_id=r.applied_by,
+        applied_by_name=applied_by_name,
     )
 
 
@@ -1484,6 +1583,8 @@ def _maint_feed_row(r: EntityMaintenanceLog) -> FeedRow:
         origin=_maint_origin(r.action, r.after),
         domain=proposal_domain("entity_maintenance", r.action),
         confidence=(r.after or {}).get("confidence"),
+        applied_by=_maint_applied_by(r),
+        applied_by_id=r.applied_by,
     )
 
 
@@ -1515,6 +1616,10 @@ async def hygiene_feed(
         "auto-dismissed.",
     ),
     since: datetime | None = Query(None, description="Only rows created at or after this timestamp"),
+    applied_by: str | None = Query(None, description=_APPLIED_BY_HELP),
+    name: str | None = Query(
+        None, alias="q", description="Only rows about an entity whose name contains this (case-insensitive)"
+    ),
     entity_type: str | None = Query(None, description="Only rows about entities of this type (with entity_id)"),
     entity_id: uuid.UUID | None = Query(None, description="Only rows about this entity (the Review tab's expand)"),
     context: bool = Query(
@@ -1554,9 +1659,16 @@ async def hygiene_feed(
         context = True
     if not isinstance(pending, bool):
         pending = False
+    if not isinstance(applied_by, str):
+        applied_by = None
+    if not isinstance(name, str):
+        name = None
     if domain is not None and domain not in DOMAINS:
         raise AppError(code="invalid", message=f"unknown domain: {domain}", status_code=400)
     _check_origin(origin)
+    who = _parse_applied_by(applied_by)
+    needle = (name or "").strip()
+    like = f"%{needle}%" if needle else None
     actions = _parse_action_list(action)
     link_actions = actions & _LINK_VALIDATOR_ACTIONS
     maint_actions = actions & _MAINTENANCE_ACTIONS
@@ -1613,6 +1725,10 @@ async def hygiene_feed(
             q = q.where(EntityLinkValidationLog.action.in_(["removed", "restored"]))
         if since:
             q = q.where(EntityLinkValidationLog.created_at >= since)
+        if who is not None:
+            q = q.where(_link_applied_by_clause(who))
+        if like:
+            q = q.where(EntityLinkValidationLog.entity_name_snapshot.ilike(like))
         if entity_type:
             q = q.where(EntityLinkValidationLog.entity_type == entity_type)
         if entity_id:
@@ -1667,6 +1783,10 @@ async def hygiene_feed(
                 q = q.where(EntityMaintenanceLog.action.in_(sorted(_MAINTENANCE_ACTIONS)))
         if since:
             q = q.where(EntityMaintenanceLog.created_at >= since)
+        if who is not None:
+            q = q.where(_maint_applied_by_clause(who))
+        if like:
+            q = q.where(_maint_name_clause(like))
         if entity_type:
             q = q.where(EntityMaintenanceLog.entity_type == entity_type)
         if entity_id:
@@ -1692,13 +1812,58 @@ async def hygiene_feed(
     sliced = feed[offset : offset + limit]
     has_more = len(feed) > offset + limit
     await _attach_entity_names(db, sliced)
+    await _attach_applied_by_names(db, sliced)
     if context:
         await _attach_context(db, sliced)
     return FeedResponse(
         rows=sliced,
         has_more=has_more,
         next_offset=offset + len(sliced),
+        people=await _applied_by_people(db) if mode == "apply" else [],
     )
+
+
+# The catalogue types a maintenance-log row can be about, for a name search.
+_NAME_SEARCH_TYPES = ("threat_actor", "malware", "tool", "vendor", "product", "country", "cve", "ttp", "observable")
+
+
+def _maint_name_clause(like: str):
+    """Rows about an entity whose live name (or the name the row snapshotted) matches."""
+    from app.services.entry_adjudication import _model_for
+
+    M = EntityMaintenanceLog
+    conds = [M.before["entity"]["name"].astext.ilike(like)]
+    for etype in _NAME_SEARCH_TYPES:
+        model = _model_for(etype)
+        if model is None:
+            continue
+        name_col = next(getattr(model, a) for a in ("name", "cve_id", "technique_id", "value") if hasattr(model, a))
+        conds.append(and_(M.entity_type == etype, M.entity_id.in_(select(model.id).where(name_col.ilike(like)))))
+    return or_(*conds)
+
+
+async def _attach_applied_by_names(db: AsyncSession, rows: list[FeedRow]) -> None:
+    """Name the person each applied row recorded."""
+    ids = {f.applied_by_id for f in rows if f.applied_by_id is not None}
+    if not ids:
+        return
+    names = dict((await db.execute(select(User.id, User.username).where(User.id.in_(ids)))).all())
+    for f in rows:
+        if f.applied_by_id is not None and f.applied_by_name is None:
+            f.applied_by_name = names.get(f.applied_by_id)
+
+
+async def _applied_by_people(db: AsyncSession) -> list[FeedPerson]:
+    """Everyone who has applied a change, for History's "Applied by" filter."""
+    ids: set[uuid.UUID] = set()
+    for model in (EntityLinkValidationLog, EntityMaintenanceLog):
+        ids.update(
+            (await db.execute(select(model.applied_by).where(model.applied_by.isnot(None)).distinct())).scalars()
+        )
+    if not ids:
+        return []
+    rows = (await db.execute(select(User.id, User.username).where(User.id.in_(ids)).order_by(User.username))).all()
+    return [FeedPerson(id=i, name=n) for i, n in rows]
 
 
 async def _attach_entity_names(db: AsyncSession, rows: list[FeedRow]) -> None:
@@ -3212,7 +3377,9 @@ async def start_bulk_apply(
     job_id = uuid.uuid4().hex
     progress = new_progress(job_id, scope=scope.model_dump(exclude_none=True), total=total)
     await write_progress(progress)
-    bulk_apply_proposals.apply_async(kwargs={"job_id": job_id, "scope": scope.model_dump(), "limit": body.limit})
+    bulk_apply_proposals.apply_async(
+        kwargs={"job_id": job_id, "scope": scope.model_dump(), "limit": body.limit, "user_id": str(user.id)}
+    )
     return BulkApplyProgress(**progress)
 
 

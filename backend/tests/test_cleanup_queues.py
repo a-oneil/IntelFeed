@@ -611,3 +611,125 @@ async def test_row_dismiss_takes_only_a_proposal(client, admin_headers, db_sessi
     resp = await client.delete(f"/api/admin/hygiene/feed/entity_maintenance/{audit.id}", headers=admin_headers)
     assert resp.status_code == 400
     assert await _count(db_session, EntityMaintenanceLog, EntityMaintenanceLog.id == audit.id) == 1
+
+
+async def test_history_names_who_applied_and_filters_by_them(client, admin_headers, admin_user, db_session, test_feed):
+    """A person's Apply stamps the applied rows with them; History names them,
+    lists them under "Applied by", and filters by person, by the stage, by
+    name and by time window."""
+    malware, tool, _entries_ = await _seed_unlinks(db_session, test_feed)
+    mid, tid = malware.id, tool.id
+    # One row the stage removed on its own at ingest: no person behind it.
+    db_session.add(
+        EntityLinkValidationLog(
+            entry_id=_entries_[1].id,
+            entity_type="tool",
+            entity_id=tid,
+            entity_name_snapshot=tool.name,
+            action="removed",
+            reason="stage apply mode",
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/admin/hygiene/review-groups/apply",
+        json={"action": "shadow_remove", "items": [{"entity_type": "malware", "entity_id": str(mid)}]},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["applied"] == 3
+
+    removed = (
+        (
+            await db_session.execute(
+                select(EntityLinkValidationLog).where(
+                    EntityLinkValidationLog.entity_id == mid, EntityLinkValidationLog.action == "removed"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(removed) == 3 and all(r.applied_by == admin_user.id for r in removed)
+
+    hist = (await client.get("/api/admin/hygiene/feed?mode=apply", headers=admin_headers)).json()
+    mine = [r for r in hist["rows"] if r["entity_id"] == str(mid)]
+    assert len(mine) == 3
+    assert {(r["applied_by"], r["applied_by_name"]) for r in mine} == {("person", "adminuser")}
+    stage = next(r for r in hist["rows"] if r["entity_id"] == str(tid))
+    assert stage["applied_by"] == "adjudicator" and stage["applied_by_name"] is None
+    assert hist["people"] == [{"id": str(admin_user.id), "name": "adminuser"}]
+
+    feed = "/api/admin/hygiene/feed?mode=apply"
+    by_me = (await client.get(f"{feed}&applied_by={admin_user.id}", headers=admin_headers)).json()
+    assert {r["entity_id"] for r in by_me["rows"]} == {str(mid)}
+    by_stage = (await client.get(f"{feed}&applied_by=adjudicator", headers=admin_headers)).json()
+    assert [r["entity_id"] for r in by_stage["rows"]] == [str(tid)]
+    anyone = (await client.get(f"{feed}&applied_by=person", headers=admin_headers)).json()
+    assert {r["entity_id"] for r in anyone["rows"]} == {str(mid)}
+    assert (await client.get(f"{feed}&applied_by=nobody", headers=admin_headers)).status_code == 400
+
+    named = (await client.get(f"{feed}&q=linuxISH", headers=admin_headers)).json()
+    assert {r["entity_id"] for r in named["rows"]} == {str(mid)}
+    assert (await client.get(f"{feed}&q=zzz", headers=admin_headers)).json()["rows"] == []
+    future = "2999-01-01T00:00:00Z"
+    assert (await client.get(f"{feed}&since={future}", headers=admin_headers)).json()["rows"] == []
+
+
+async def test_entities_bulk_acts_on_what_the_lens_shows(client, admin_headers, db_session, test_feed):
+    """Review › Entities: Confirm all / Not duplicates / Merge all / Delete all
+    act on every row the status, type and search filters show."""
+    from app.models.entity_index import EntityNameDenylist
+
+    a = Tool(name="Cobalt Strike", created_via="ai_extraction")
+    b = Tool(name="CobaltStrike", created_via="ai_extraction")
+    unconfirmed = MalwareFamily(name="Prometheus", created_via="ai_extraction", needs_review=True)
+    db_session.add_all([a, b, unconfirmed])
+    await db_session.commit()
+    aid, bid = a.id, b.id
+
+    resp = await client.post(
+        "/api/engine/extraction/bulk", json={"action": "confirm", "status": "review"}, headers=admin_headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["done"] == 1
+    await db_session.refresh(unconfirmed)
+    assert unconfirmed.needs_review is False
+
+    # The two tools flag each other; marking the pair once per row is the same pair.
+    resp = await client.post(
+        "/api/engine/extraction/bulk", json={"action": "not_duplicate", "status": "dupe"}, headers=admin_headers
+    )
+    assert resp.json()["matched"] == 2 and resp.json()["done"] == 2
+    stats = (await client.get("/api/engine/extraction/stats?window=all", headers=admin_headers)).json()
+    assert stats["by_status"].get("dupe", 0) == 0
+    assert await db_session.get(Tool, aid) is not None and await db_session.get(Tool, bid) is not None
+
+    c = Tool(name="Mimikatz", created_via="ai_extraction", article_count=2)
+    d = Tool(name="Mimi katz", created_via="ai_extraction", article_count=1)
+    db_session.add_all([c, d])
+    await db_session.commit()
+    cid, did = c.id, d.id
+    resp = await client.post(
+        "/api/engine/extraction/bulk", json={"action": "merge", "status": "dupe", "q": "mimi"}, headers=admin_headers
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # One of the pair folds into the other; the other's sibling is then gone.
+    assert body == {"action": "merge", "matched": 2, "done": 1, "skipped": 1}
+    assert await _count(db_session, Tool, Tool.id.in_([cid, did])) == 1
+
+    (source_entry,) = await _entries(db_session, test_feed, 1)
+    orphan = ThreatActor(
+        name="Ghost Crew", created_via="ai_extraction", article_count=0, created_from_entry_id=source_entry.id
+    )
+    db_session.add(orphan)
+    await db_session.commit()
+    oid = orphan.id
+    resp = await client.post(
+        "/api/engine/extraction/bulk", json={"action": "delete", "status": "orphan"}, headers=admin_headers
+    )
+    assert resp.json()["done"] == 1
+    assert await _count(db_session, ThreatActor, ThreatActor.id == oid) == 0
+    assert await _count(db_session, EntityNameDenylist, EntityNameDenylist.display_name == "Ghost Crew") == 1

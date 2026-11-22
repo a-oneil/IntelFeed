@@ -1,3 +1,4 @@
+import app.models.applied_by  # noqa: F401 — registers the applied_by session hook
 from app.models.ai_analysis import AIAnalysisRequest, AIBatchJob
 
 # Phase 4: AI & Threat Intelligence

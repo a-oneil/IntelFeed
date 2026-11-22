@@ -13,8 +13,45 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+.grow { flex: 1; }
+/* Review's status switch: Unconfirmed / Duplicates / Orphans, with counts. */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.seg button {
+  appearance: none;
+  background: none;
+  border: none;
+  border-right: 1px solid var(--border);
+  font: inherit;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 5px 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.seg button:last-child { border-right: none; }
+.segOn {
+  background: var(--bg-tertiary) !important;
+  color: var(--text-primary) !important;
+  font-weight: 700 !important;
+}
+.segCnt {
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.segOn .segCnt { color: var(--accent); }
 .search {
-  flex: 1 1 220px;
+  flex: 0 1 260px;
   min-width: 180px;
   display: flex;
   align-items: center;
@@ -171,14 +208,6 @@
 .t_observable { color: var(--entity-ioc); }
 .t_observable .swatch { background: var(--entity-ioc); }
 
-.conf { display: inline-flex; align-items: center; gap: 8px; }
-.cbar { width: 44px; height: 5px; border-radius: var(--r-sm); background: var(--bg-tertiary); overflow: hidden; }
-.cbar span { display: block; height: 100%; border-radius: var(--r-sm); }
-.confHigh { background: var(--success); }
-.confMed { background: var(--warning); }
-.confLow { background: var(--danger); }
-.pct { font-family: var(--font-display); font-size: var(--fs-sm); color: var(--text-secondary); text-transform: capitalize; }
-
 .num { font-family: var(--font-display); font-variant-numeric: tabular-nums; }
 .when { color: var(--text-secondary); font-size: var(--fs-base); white-space: nowrap; }
 .sourceCell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -198,7 +227,31 @@
 .stOrphan { background: color-mix(in srgb, var(--text-secondary) 15%, transparent); color: var(--text-secondary); }
 .stDupe { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
 
-.rowacts { display: flex; gap: 4px; justify-content: flex-end; }
+/* A fixed grid — primary / secondary / ⋯ / ✕ — so the buttons line up down the table. */
+.rowacts {
+  display: grid;
+  grid-template-columns: 76px 84px 27px 27px;
+  gap: 4px;
+  align-items: center;
+  justify-content: end;
+}
+.rowacts > * { justify-self: stretch; min-width: 0; }
+.act {
+  height: 27px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  border-radius: var(--r-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.act:hover:not(:disabled) { color: var(--text-primary); border-color: var(--bg-hover); }
+.act:disabled { opacity: 0.5; cursor: default; }
+.actGood { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, var(--border)); }
 .iact {
   width: 27px;
   height: 27px;
@@ -214,22 +267,6 @@
 }
 .iact:hover { color: var(--text-primary); border-color: var(--bg-hover); }
 .iactDanger:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
-/* Duplicate rows: one-click merge into the sibling, or "different things". */
-.dupAct {
-  height: 27px;
-  padding: 0 9px;
-  border: 1px solid var(--border);
-  background: var(--bg-secondary);
-  border-radius: var(--r-md);
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  white-space: nowrap;
-}
-.dupAct:hover:not(:disabled) { color: var(--text-primary); border-color: var(--bg-hover); }
-.dupAct:disabled { opacity: 0.5; cursor: default; }
-
 /* per-row ⋯ manage menu — fixed-positioned, right-aligned to the button */
 .rowmenu {
   position: fixed;

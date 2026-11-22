@@ -672,6 +672,129 @@ async def extraction_delete(
     return {"deleted": len(rows), "denied": denied}
 
 
+class ExtractionBulkRequest(BaseModel):
+    """Act on every AI-created entity the Review › Entities table shows."""
+
+    action: Literal["confirm", "delete", "merge", "not_duplicate"]
+    status: Literal["review", "orphan", "dupe"]
+    types: list[str] | None = None
+    q: str | None = None
+    window: Literal["1h", "24h", "7d", "30d", "all"] = "all"
+    deny: bool = True
+
+    model_config = ConfigDict(json_schema_extra={"example": {"action": "confirm", "status": "review", "window": "all"}})
+
+
+class ExtractionBulkResponse(BaseModel):
+    action: str
+    matched: int
+    done: int
+    skipped: int
+
+
+_BULK_CAP = 5000
+
+
+@router.post("/bulk", response_model=ExtractionBulkResponse)
+async def extraction_bulk(
+    body: ExtractionBulkRequest = Body(...),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExtractionBulkResponse:
+    """The Entities lens's bulk buttons, over what its filters show rather
+    than a checked selection: Confirm all / Delete all on Unconfirmed, Merge
+    all / Not duplicates on Duplicates, Delete all on Orphans. Each row is
+    handled the way its own button would handle it; a merge folds the row
+    into the sibling it most resembles."""
+    from app.api.entity_merge import perform_same_type_merge
+    from app.services.proposal_dismissals import mark_not_duplicate, settle_gone_entity
+
+    requested = [t for t in (body.types or []) if t in AI_TYPES] or list(AI_TYPES)
+    days = _WINDOW_DAYS[body.window]
+    window_start = None if days is None else _now() - timedelta(days=days)
+    rows = await _fetch_rows(db, requested, window_start, (body.q or "").strip() or None)
+    dup = await _duplicate_map(db, requested)
+    for r in rows:
+        r["status"] = _status(r, dup)
+        sibling = dup.get(str(r["id"]))
+        r["duplicate_of"], r["duplicate_of_id"] = sibling if sibling else (None, None)
+    rows = [r for r in rows if r["status"] == body.status]
+    if body.action in ("merge", "not_duplicate"):
+        rows = [r for r in rows if r["duplicate_of_id"]]
+    matched = len(rows)
+    rows = rows[:_BULK_CAP]
+    done = skipped = 0
+
+    if body.action == "confirm":
+        by_type: dict[str, list[uuid.UUID]] = defaultdict(list)
+        for r in rows:
+            if r["needs_review"]:
+                by_type[r["entity_type"]].append(r["id"])
+            else:
+                skipped += 1
+        for etype, ids in by_type.items():
+            m = AI_TYPES[etype]["model"]
+            res = await db.execute(update(m).where(m.id.in_(ids)).values(needs_review=False).returning(m.id))
+            done += len(res.all())
+        await db.commit()
+
+    elif body.action == "delete":
+        obs_ids = [r["id"] for r in rows if r["entity_type"] == "observable"]
+        if obs_ids:
+            done += (await _delete_observables(db, obs_ids, deny=body.deny))["deleted"]
+        named = 0
+        for etype in requested:
+            if etype == "observable" or etype not in DELETABLE_TYPES:
+                continue
+            ids = [r["id"] for r in rows if r["entity_type"] == etype]
+            if not ids:
+                continue
+            model = ENTITY_CONFIG[etype][0]
+            for entity in (await db.execute(select(model).where(model.id.in_(ids)))).scalars().all():
+                await delete_named_entity(
+                    db, etype, entity, deny=body.deny, reason="Deleted from the Engine review queues"
+                )
+                named += 1
+        done += named
+        await db.commit()
+        if named:
+            await schedule_vocabulary_refresh(db)
+
+    elif body.action == "merge":
+        gone: set[uuid.UUID] = set()
+        for r in rows:
+            target = uuid.UUID(str(r["duplicate_of_id"]))
+            if r["id"] in gone or target in gone:
+                skipped += 1  # its sibling was folded earlier in this run
+                continue
+            try:
+                await perform_same_type_merge(
+                    db,
+                    entity_type=r["entity_type"],
+                    target_id=target,
+                    source_id=r["id"],
+                    mode="apply",
+                    reasoning=f"Merge all from Review › Entities: {r['name']} into {r['duplicate_of']}",
+                )
+            except AppError:  # one half of the pair is already gone; nothing was written
+                skipped += 1
+                continue
+            # As after a single Merge: the folded entity's pending proposals close
+            # (a merge proposal into it moves to the keeper).
+            await settle_gone_entity(db, r["entity_type"], r["id"], successor=(r["entity_type"], target))
+            gone.add(r["id"])
+            done += 1
+        await db.commit()
+
+    else:  # not_duplicate
+        for r in rows:
+            await mark_not_duplicate(db, r["entity_type"], r["id"], uuid.UUID(str(r["duplicate_of_id"])), user.id)
+            done += 1
+        await db.commit()
+
+    return ExtractionBulkResponse(action=body.action, matched=matched, done=done, skipped=skipped)
+
+
 # --- Do-not-recreate list -------------------------------------------------
 # The denylist the extract stage consults before minting an entity. Rows land
 # here from the AI entities table's delete, the entity profile's delete popover,

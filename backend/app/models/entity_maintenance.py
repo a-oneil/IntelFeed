@@ -47,6 +47,11 @@ class EntityMaintenanceLog(Base):
         index=True,
     )
     applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # The person who applied it (History's "Applied by"); NULL when the stage
+    # or the duplicate review applied it on its own. Set by models/applied_by.py.
+    applied_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     __table_args__ = (
         Index("ix_entity_maintenance_log_entity_type_action", "entity_type", "action", "created_at"),

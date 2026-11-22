@@ -30,13 +30,32 @@ vi.mock("../engine/StagePanel", () => ({
   StagePanel: ({ stage }: { stage: string }) => <div data-testid="stage-panel" data-stage={stage} />,
 }));
 vi.mock("../engine/ProposalsQueue", () => ({
-  ProposalsQueue: ({ onToggleSettings }: { onToggleSettings: () => void }) => (
+  ProposalsQueue: ({ lens }: { lens: string }) => <div data-testid="queue" data-lens={lens} />,
+}));
+vi.mock("../engine/AdjudicatorMenu", () => ({
+  AdjudicatorMenu: ({ onToggleSettings }: { onToggleSettings: () => void }) => (
     <button onClick={onToggleSettings}>tuning</button>
   ),
 }));
 vi.mock("../engine/ExtractionTab", () => ({
-  ExtractionTab: ({ window, status = "all" }: { window: string; status?: string }) => (
-    <div data-testid="entities" data-window={window} data-status={status} />
+  ExtractionTab: ({
+    window,
+    status = "all",
+    statusSwitch,
+  }: {
+    window: string;
+    status?: string;
+    statusSwitch?: { onChange: (s: string) => void; counts: Record<string, number> };
+  }) => (
+    <div data-testid="entities" data-window={window} data-status={status}>
+      {statusSwitch &&
+        ["review", "dupe", "orphan"].map((s) => (
+          <button key={s} onClick={() => statusSwitch.onChange(s)}>
+            status-{s}
+            {statusSwitch.counts[s] ?? ""}
+          </button>
+        ))}
+    </div>
   ),
 }));
 vi.mock("../engine/AutolinkingSection", () => ({
@@ -80,54 +99,65 @@ describe("EngineMatrix", () => {
     expect(screen.queryByTestId("stage-panel")).toBeNull();
   });
 
-  it("counts the Review lenses on the Review tab, except unconfirmed and unjudged edges", () => {
+  it("counts the Review lenses on the Review tab; the badge leaves out unconfirmed and unjudged edges", () => {
     renderMatrix();
-    // 3 dupe + 2 orphan; the 4 unconfirmed and 5 unjudged edges keep their lens counts only.
+    // 3 dupe + 2 orphan; the 4 unconfirmed and 5 unjudged edges count on their lens only.
     expect(tab("Review")).toHaveTextContent("Review5");
     expect(screen.getByText(/to review/).textContent).toContain("5");
     fireEvent.click(tab("Review"));
-    expect(screen.getByRole("button", { name: /^Unconfirmed4/ })).toBeInTheDocument();
+    // Entities: 4 unconfirmed + 3 duplicates + 2 orphans.
+    expect(screen.getByRole("button", { name: /^Entities9/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Relationships5/ })).toBeInTheDocument();
-    expect(screen.queryByText(/duplicate candidates/)).toBeNull();
+    expect(screen.getByRole("button", { name: /^Queue$/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Unconfirmed/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Duplicates/ })).toBeNull();
   });
 
-  it("has one Needs you shortcut for Review, opening the first lens with something in it", () => {
+  it("has one Needs you shortcut for Review, opening the first list with something in it", () => {
     renderMatrix();
     expect(screen.queryByText(/to reclassify/)).toBeNull();
     expect(screen.queryByText(/adjudication verdicts/)).toBeNull();
     fireEvent.click(screen.getByText(/to review/));
-    // Proposals is empty here (no hygiene stats) and Unconfirmed isn't counted, so it opens Duplicates.
+    // The queue is empty here (no hygiene stats) and Unconfirmed isn't counted, so it opens Entities at Duplicates.
     expect(new URL(window.location.href).searchParams.get("view")).toBe("review");
     expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "dupe");
   });
 
-  it("opens the duplicate candidates as a Review lens, over all time", () => {
+  it("opens the duplicate candidates on the Entities lens, over all time", () => {
     renderMatrix();
     fireEvent.click(tab("Review"));
-    fireEvent.click(screen.getByRole("button", { name: /^Duplicates/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Entities9/ }));
+    expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "review");
+    fireEvent.click(screen.getByText("status-dupe3"));
     expect(screen.getByTestId("entities")).toHaveAttribute("data-window", "all");
     expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "dupe");
     expect(new URL(window.location.href).searchParams.get("view")).toBe("review");
-    expect(new URL(window.location.href).searchParams.get("lens")).toBe("duplicates");
+    expect(new URL(window.location.href).searchParams.get("lens")).toBe("entities");
+    expect(new URL(window.location.href).searchParams.get("show")).toBe("dupe");
     // The console's own window is untouched.
     fireEvent.click(tab("Links"));
     expect(screen.getByTestId("links")).toHaveAttribute("data-hours", "24");
     fireEvent.click(tab("Entities"));
     expect(screen.getByTestId("entities")).toHaveAttribute("data-window", "24h");
     expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "all");
+    expect(new URL(window.location.href).searchParams.get("show")).toBeNull();
   });
 
-  it("lists each entity status and the unjudged edges as their own Review lens, over all time", () => {
+  it("lists each entity status under the Entities lens and the unjudged edges under Relationships, over all time", () => {
     renderMatrix("review");
-    fireEvent.click(screen.getByRole("button", { name: /^Unconfirmed/ }));
+    expect(screen.getByTestId("queue")).toHaveAttribute("data-lens", "queue");
+    fireEvent.click(screen.getByRole("button", { name: /^Entities9/ }));
     expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "review");
     expect(screen.getByTestId("entities")).toHaveAttribute("data-window", "all");
-    fireEvent.click(screen.getByRole("button", { name: /^Orphans/ }));
+    fireEvent.click(screen.getByText("status-orphan2"));
     expect(screen.getByTestId("entities")).toHaveAttribute("data-status", "orphan");
-    expect(new URL(window.location.href).searchParams.get("lens")).toBe("orphans");
+    expect(new URL(window.location.href).searchParams.get("show")).toBe("orphan");
     fireEvent.click(screen.getByRole("button", { name: /^Relationships5/ }));
     expect(screen.getByTestId("links")).toHaveAttribute("data-unreviewed", "true");
     expect(screen.getByTestId("links")).toHaveAttribute("data-hours", "undefined");
+    fireEvent.click(screen.getByRole("button", { name: /^History$/ }));
+    expect(screen.getByTestId("queue")).toHaveAttribute("data-lens", "history");
+    expect(new URL(window.location.href).searchParams.get("lens")).toBe("history");
   });
 
   it("lists every status on Entities, with no status picker of its own", () => {

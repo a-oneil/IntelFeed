@@ -140,6 +140,8 @@ export interface RelationshipFilters {
   hours?: number;
   /** Only machine-made edges neither an analyst nor the adjudicator has judged. */
   unreviewed?: boolean;
+  /** Only edges with an entity at either end whose name contains this. */
+  q?: string;
   limit: number;
   offset: number;
 }
@@ -163,6 +165,7 @@ export function useAllRelationships(filters: RelationshipFilters, enabled = true
       if (filters.evidence_entry_id) params.evidence_entry_id = filters.evidence_entry_id;
       if (filters.hours) params.hours = filters.hours;
       if (filters.unreviewed) params.unreviewed = true;
+      if (filters.q) params.q = filters.q;
       const { data } = await api.get<PaginatedResponse<EntityRelationship>>("/entity-relationships", { params });
       return data;
     },

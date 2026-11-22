@@ -86,3 +86,15 @@ export function formatDateTime(input: DateInput, fallback = ""): string {
       return toRelative(date);
   }
 }
+
+/**
+ * A compact timestamp for dense tables ("Nov 21, 1:26 PM"): the date and
+ * time without the year or the relative tail. Put the full formatDateTime()
+ * on the cell's title.
+ */
+export function formatShortDateTime(input: DateInput, fallback = ""): string {
+  if (!input) return fallback;
+  const date = input instanceof Date ? input : new Date(input);
+  if (isNaN(date.getTime())) return typeof input === "string" ? input : fallback;
+  return date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}

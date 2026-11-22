@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from datetime import UTC, datetime
 
 from app.workers.celery_app import celery_app
@@ -34,11 +35,11 @@ _SOFT_LIMIT = 3 * 60 * 60
     soft_time_limit=_SOFT_LIMIT,
     time_limit=_SOFT_LIMIT + 60,
 )
-def bulk_apply_proposals(self, job_id: str, scope: dict, limit: int | None = None) -> dict:
-    return run_async(_bulk_apply(job_id, scope, limit=limit))
+def bulk_apply_proposals(self, job_id: str, scope: dict, limit: int | None = None, user_id: str | None = None) -> dict:
+    return run_async(_bulk_apply(job_id, scope, limit=limit, user_id=user_id))
 
 
-async def _bulk_apply(job_id: str, scope: dict, *, limit: int | None) -> dict:
+async def _bulk_apply(job_id: str, scope: dict, *, limit: int | None, user_id: str | None = None) -> dict:
     from app.api.hygiene import (
         _GROUPS_PER_CHUNK,
         ReviewScope,
@@ -50,6 +51,10 @@ async def _bulk_apply(job_id: str, scope: dict, *, limit: int | None) -> dict:
         review_scope_groups,
     )
     from app.services import proposal_apply as svc
+    from app.services.acting_user import set_acting_user
+
+    # Apply all runs here on a person's behalf: History names them, not the stage.
+    set_acting_user(uuid.UUID(user_id) if user_id else None)
 
     progress = await svc.read_progress(job_id)
     if progress is None:

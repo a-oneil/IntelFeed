@@ -58,6 +58,11 @@ class EntityLinkValidationLog(Base):
         UUID(as_uuid=True), ForeignKey("ai_results.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # The person behind a `removed` / `restored` row (History's "Applied by");
+    # NULL when the stage removed the link itself. Set by models/applied_by.py.
+    applied_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     __table_args__ = (
         Index("ix_link_validation_log_entity", "entity_type", "entity_id"),

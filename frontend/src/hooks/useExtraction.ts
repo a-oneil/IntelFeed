@@ -213,6 +213,40 @@ export function useDeleteExtractionEntities() {
   });
 }
 
+export interface ExtractionBulkRequest {
+  action: "confirm" | "delete" | "merge" | "not_duplicate";
+  status: "review" | "orphan" | "dupe";
+  types?: ExtractionType[];
+  q?: string;
+  window?: ExtractionParams["window"];
+  deny?: boolean;
+}
+
+export interface ExtractionBulkResult {
+  action: string;
+  matched: number;
+  done: number;
+  skipped: number;
+}
+
+/** The Entities lens's bulk buttons: act on every entity the table's filters
+ *  show (Confirm all, Delete all, Merge all, Not duplicates). */
+export function useExtractionBulk() {
+  const invalidate = useInvalidateExtraction();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: ExtractionBulkRequest) => {
+      const { data } = await api.post<ExtractionBulkResult>("/engine/extraction/bulk", body);
+      return data;
+    },
+    onSuccess: () => {
+      invalidate();
+      qc.invalidateQueries({ queryKey: ["hygiene"] });
+      qc.invalidateQueries({ queryKey: ["engine"] });
+    },
+  });
+}
+
 export function useMergeExtractionEntities() {
   const invalidate = useInvalidateExtraction();
   return useMutation({

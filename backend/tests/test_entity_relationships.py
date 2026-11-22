@@ -693,3 +693,65 @@ async def test_unreviewed_lists_only_machine_edges_nobody_judged(
 
     stats = (await client.get("/api/entity-links/stats", headers=auth_headers)).json()
     assert stats["relationships_unreviewed"] == 2
+
+
+@pytest.mark.asyncio
+async def test_search_finds_either_end_and_bulk_review_settles_what_it_shows(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    """Review › Relationships: the search box matches a name at either end,
+    and Confirm all / Reject all settle only the unjudged edges the filters show."""
+    qilin = ThreatActor(name="Qilin")
+    spider = ThreatActor(name="Scattered Spider")
+    cobalt = Tool(name="Cobalt Strike")
+    db_session.add_all([qilin, spider, cobalt])
+    await db_session.flush()
+
+    def edge(actor: ThreatActor, source: str = "auto_extracted") -> EntityRelationship:
+        return EntityRelationship(
+            source_type="threat_actor",
+            source_id=actor.id,
+            target_type="tool",
+            target_id=cobalt.id,
+            relationship_type="uses",
+            confidence="probable",
+            source=source,
+            description="deployed beacons",
+        )
+
+    q_edge, s_edge, judged = edge(qilin), edge(spider), edge(qilin, "analyst_rejected")
+    judged.relationship_type = "drops"
+    db_session.add_all([q_edge, s_edge, judged])
+    await db_session.flush()
+
+    found = (
+        await client.get(
+            "/api/entity-relationships",
+            params={"q": "qilin", "unreviewed": True, "all_confidence": True},
+            headers=admin_headers,
+        )
+    ).json()
+    assert [r["id"] for r in found["items"]] == [str(q_edge.id)]
+    by_tool = (
+        await client.get(
+            "/api/entity-relationships",
+            params={"q": "cobalt", "unreviewed": True, "all_confidence": True},
+            headers=admin_headers,
+        )
+    ).json()
+    assert {r["id"] for r in by_tool["items"]} == {str(q_edge.id), str(s_edge.id)}
+
+    resp = await client.post(
+        "/api/entity-relationships/bulk-review", json={"action": "confirm", "q": "qilin"}, headers=admin_headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"action": "confirm", "matched": 1, "done": 1}
+    await db_session.refresh(q_edge)
+    await db_session.refresh(s_edge)
+    assert (q_edge.source, q_edge.confidence) == ("analyst_confirmed", "confirmed")
+    assert s_edge.source == "auto_extracted"
+
+    resp = await client.post("/api/entity-relationships/bulk-review", json={"action": "reject"}, headers=admin_headers)
+    assert resp.json() == {"action": "reject", "matched": 1, "done": 1}
+    await db_session.refresh(s_edge)
+    assert s_edge.source == "analyst_rejected"

@@ -135,6 +135,109 @@
   cursor: pointer;
 }
 
+.grow {
+  flex: 1;
+}
+.btnDangerSolid {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: transparent;
+}
+
+/* ---- relationships: one row per edge, "A verb B" ---- */
+.table.relTable tbody td {
+  white-space: normal;
+}
+.rel {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-wrap: wrap;
+}
+.rel > span {
+  overflow-wrap: anywhere;
+}
+.relVerb {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.relMeta {
+  display: block;
+  margin-top: 3px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+/* Source, Confidence: plain words, no pill, no bars. */
+.plain {
+  color: var(--text-secondary);
+  font-size: var(--fs-base);
+  white-space: nowrap !important;
+}
+.why {
+  min-width: 240px;
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+  line-height: 1.45;
+}
+/* Caps the sentence's line length, so the Why column never pushes the buttons off the edge. */
+.whyBox {
+  max-width: 400px;
+}
+.whyMeta {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+.when {
+  white-space: nowrap !important;
+  color: var(--text-muted);
+  font-size: var(--fs-base);
+}
+/* A fixed grid — Confirm / Reject / ⋯ — so the buttons line up down the table. */
+.acts {
+  display: grid;
+  grid-template-columns: 76px 64px 28px;
+  gap: 6px;
+  align-items: center;
+  justify-content: end;
+  white-space: nowrap;
+}
+.acts > * {
+  justify-self: stretch;
+  min-width: 0;
+}
+.acts > :last-child {
+  justify-self: end;
+}
+.act {
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  text-align: center;
+}
+.act:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--bg-hover, var(--accent));
+}
+.act:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.actGood {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+}
+
 /* ---- bulk action bar ---- */
 .bulk {
   display: flex;
@@ -273,16 +376,6 @@
   color: var(--text-muted);
 }
 
-.verb {
-  font-family: var(--font-display, ui-monospace, monospace);
-  font-size: var(--fs-sm);
-  color: var(--text-primary);
-  background: var(--bg-tertiary, var(--bg-secondary));
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  padding: 2px 7px;
-}
-
 .matched {
   display: inline-flex;
   gap: 4px;
@@ -370,13 +463,6 @@
   font-family: var(--font-display, ui-monospace, monospace);
   font-size: var(--fs-sm);
   color: var(--text-muted);
-}
-.ev {
-  font-variant-numeric: tabular-nums;
-  color: var(--text-secondary);
-}
-.ev b {
-  color: var(--text-primary);
 }
 .evToggle {
   border: none;
