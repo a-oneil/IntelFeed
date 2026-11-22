@@ -426,7 +426,7 @@ async def test_unencrypted_connection_is_refused(db_session: AsyncSession, feed:
         result = await execute_action(db_session, entry, action, test_user.id)
 
     assert result["status"] == "error"
-    assert "Connection Security 'none' isn't supported" in result["message"]
+    assert "Connection Security 'none' is not supported" in result["message"]
     send.assert_not_awaited()
     # Refused before the hourly budget is touched
     assert fake_redis.counts == {}

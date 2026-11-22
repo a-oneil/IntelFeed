@@ -706,7 +706,7 @@ async def test_adding_a_personal_key_follows_the_admins_policy(
 
     cli = await client.post("/api/ai/providers", json={**body, "provider_type": "claude_code"}, headers=auth_headers)
     assert cli.status_code == 400
-    assert "can't be a personal key" in cli.json()["error"]["message"]
+    assert "cannot be a personal key" in cli.json()["error"]["message"]
 
     monkeypatch.setattr(env_settings, "user_ai_provider_types", "claude,openai_compatible")
     private = await client.post(
