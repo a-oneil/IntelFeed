@@ -1,6 +1,8 @@
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, Path, Query, Response
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,6 +54,45 @@ async def _invalidate_rel_caches(rel: EntityRelationship) -> None:
 
     await invalidate_entity_cache(rel.source_type, str(rel.source_id))
     await invalidate_entity_cache(rel.target_type, str(rel.target_id))
+
+
+def _name_models() -> dict[str, tuple]:
+    from app.models.campaign import Campaign
+    from app.models.country import Country
+    from app.models.cve import CVE
+    from app.models.malware_family import MalwareFamily
+    from app.models.mitigation import Mitigation
+    from app.models.product import Product
+    from app.models.sector import Sector
+    from app.models.threat_actor import ThreatActor
+    from app.models.tool import Tool
+    from app.models.ttp import TTP
+    from app.models.vendor import Vendor
+
+    return {
+        "ttp": (TTP, TTP.technique_name),
+        "cve": (CVE, CVE.cve_id),
+        "threat_actor": (ThreatActor, ThreatActor.name),
+        "malware": (MalwareFamily, MalwareFamily.name),
+        "campaign": (Campaign, Campaign.name),
+        "country": (Country, Country.name),
+        "sector": (Sector, Sector.name),
+        "mitigation": (Mitigation, Mitigation.name),
+        "tool": (Tool, Tool.name),
+        "vendor": (Vendor, Vendor.name),
+        "product": (Product, Product.name),
+    }
+
+
+def _name_match_condition(needle: str):
+    """Edges with an entity at either end whose name contains ``needle``."""
+    like = f"%{needle}%"
+    conds = []
+    for etype, (model, name_col) in _name_models().items():
+        ids = select(model.id).where(name_col.ilike(like))
+        conds.append((EntityRelationship.source_type == etype) & EntityRelationship.source_id.in_(ids))
+        conds.append((EntityRelationship.target_type == etype) & EntityRelationship.target_id.in_(ids))
+    return or_(*conds)
 
 
 async def _enrich_names(db: AsyncSession, relationships: list[EntityRelationship]) -> list[EntityRelationshipResponse]:
@@ -153,6 +194,7 @@ async def list_entity_relationships(
         description="Only machine-made edges (auto_extracted, co_occurrence) that neither an analyst nor the "
         "adjudicator has judged yet.",
     ),
+    q: str | None = Query(None, description="Only edges with an entity at either end whose name contains this."),
     limit: int = Query(50, ge=1, le=500, description="Maximum relationships per page."),
     offset: int = Query(0, ge=0, description="Number of relationships to skip for pagination."),
     user: User = Depends(get_viewer),
@@ -165,6 +207,11 @@ async def list_entity_relationships(
     """
     base = select(EntityRelationship)
     count_base = select(func.count()).select_from(EntityRelationship)
+
+    if q and q.strip():
+        condition = _name_match_condition(q.strip())
+        base = base.where(condition)
+        count_base = count_base.where(condition)
 
     # A rejection is an analyst's call on this instance: visitors don't see them.
     if not include_rejected or user.is_anonymous:
@@ -645,6 +692,71 @@ async def reject_entity_relationship(
     await db.refresh(rel)
     await _invalidate_rel_caches(rel)
     return EntityRelationshipResponse.model_validate(rel)
+
+
+class RelationshipBulkReviewRequest(BaseModel):
+    """Confirm or reject every unjudged edge the Review › Relationships table shows."""
+
+    action: Literal["confirm", "reject"]
+    entity_type: str | None = None
+    relationship_type: str | None = None
+    q: str | None = None
+    hours: int | None = Field(default=None, ge=1, le=87_600)
+
+    model_config = ConfigDict(json_schema_extra={"example": {"action": "confirm", "entity_type": "threat_actor"}})
+
+
+class RelationshipBulkReviewResponse(BaseModel):
+    action: str
+    matched: int
+    done: int
+
+
+_BULK_REVIEW_CAP = 5000
+
+
+@router.post("/bulk-review", response_model=RelationshipBulkReviewResponse)
+async def bulk_review_relationships(
+    body: RelationshipBulkReviewRequest = Body(...),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Confirm all / Reject all on Review › Relationships: every machine-made
+    edge nobody has judged that the lens's filters show, each settled the way
+    its own Confirm or Reject button settles it."""
+    query = select(EntityRelationship).where(unreviewed_relationship_condition())
+    if body.q and body.q.strip():
+        query = query.where(_name_match_condition(body.q.strip()))
+    if body.entity_type:
+        query = query.where(
+            or_(
+                EntityRelationship.source_type == body.entity_type,
+                EntityRelationship.target_type == body.entity_type,
+            )
+        )
+    if body.relationship_type:
+        query = query.where(EntityRelationship.relationship_type == body.relationship_type)
+    if body.hours:
+        from datetime import UTC, datetime, timedelta
+
+        query = query.where(EntityRelationship.created_at >= datetime.now(UTC) - timedelta(hours=body.hours))
+    rels = list((await db.execute(query.order_by(EntityRelationship.created_at))).scalars().all())
+    matched = len(rels)
+    done = 0
+    for rel in rels[:_BULK_REVIEW_CAP]:
+        if body.action == "confirm":
+            rel.source = "analyst_confirmed"
+            rel.confidence = "confirmed"
+            verdict = es.KEEP
+        else:
+            rel.source = "analyst_rejected"
+            verdict = es.DEMOTE
+        db.add(rel)
+        await es.record_review(db, rel.id, reviewer=es.ANALYST, verdict=verdict, counted=True)
+        await _invalidate_rel_caches(rel)
+        done += 1
+    await db.flush()
+    return RelationshipBulkReviewResponse(action=body.action, matched=matched, done=done)
 
 
 @router.delete("/{relationship_id}", status_code=204)

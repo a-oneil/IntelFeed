@@ -4,7 +4,16 @@ import { useSearchParams } from "react-router-dom";
 import JobSchedules from "@/components/JobSchedules";
 import SystemSettings, { SettingsHighlightContext } from "@/components/SystemSettings";
 
-import { type BrowseView, EngineMatrix, MATRIX_VIEWS, type MatrixView, REVIEW_LENSES, type ReviewLens } from "./EngineMatrix";
+import {
+  type BrowseView,
+  EngineMatrix,
+  LEGACY_ENTITY_LENS,
+  MATRIX_VIEWS,
+  type MatrixView,
+  REVIEW_LENSES,
+  type ReviewLens,
+} from "./EngineMatrix";
+import type { ReviewEntityStatus } from "./ExtractionTab";
 import { EngineStoppedBanner } from "./EngineSwitch";
 import { EnrichmentConsole } from "./EnrichmentConsole";
 import { MaintenancePanel } from "./MaintenancePanel";
@@ -20,9 +29,14 @@ const BROWSE_TITLES: Record<BrowseView, string> = {
   publishing: "Publishing",
 };
 
+// The statuses ?show= may name on the Entities lens.
+const LEGACY_ENTITY_LENS_VALUES: Record<ReviewEntityStatus, true> = { review: true, dupe: true, orphan: true };
+
 interface ConsoleState {
   view?: MatrixView;
   lens?: ReviewLens;
+  /** The Entities lens's status (?show=dupe; the old ?lens=duplicates maps here too). */
+  entityStatus?: ReviewEntityStatus;
   openStage?: string;
   stage?: string;
   status?: string;
@@ -34,13 +48,23 @@ interface ConsoleState {
 }
 
 // Deep links: ?view= opens one of the console's tabs (?view=entities;
-// ?view=review&lens=duplicates opens one of Review's lenses). The old six-tab
-// layout (?tab=) and the even older Settings sections (?section=) are mapped
-// onto the console's states.
+// ?view=review&lens=history opens one of Review's lenses, and
+// &lens=entities&show=dupe one status of its Entities lens). The old six-tab
+// layout (?tab=), the old per-status lenses (?lens=duplicates) and the even
+// older Settings sections (?section=) are mapped onto the console's states.
 function legacyState(params: URLSearchParams): ConsoleState {
   const view = params.get("view");
-  if (view && (MATRIX_VIEWS as readonly string[]).includes(view))
-    return { view: view as MatrixView, lens: REVIEW_LENSES.find((l) => l === params.get("lens")) };
+  if (view && (MATRIX_VIEWS as readonly string[]).includes(view)) {
+    const lensParam = params.get("lens") ?? "";
+    const legacyStatus = LEGACY_ENTITY_LENS[lensParam];
+    const show = params.get("show") ?? "";
+    const entityStatus = legacyStatus ?? (show in LEGACY_ENTITY_LENS_VALUES ? (show as ReviewEntityStatus) : undefined);
+    return {
+      view: view as MatrixView,
+      lens: legacyStatus ? "entities" : REVIEW_LENSES.find((l) => l === lensParam),
+      entityStatus,
+    };
+  }
   const tab = params.get("tab");
   const stage = params.get("stage");
   if (tab === "processing")
@@ -180,6 +204,7 @@ export function EngineSection() {
           key={nonce}
           initialView={initial.view}
           initialLens={initial.lens}
+          initialEntityStatus={initial.entityStatus}
           initialOpenStage={initial.openStage}
           initialStage={initial.stage}
           initialStatus={initial.status}

@@ -145,9 +145,9 @@
   margin-bottom: var(--sp-4);
   flex-wrap: wrap;
 }
-.subLensHint {
-  font-size: var(--fs-base);
-  color: var(--text-secondary);
+/* Pushes the adjudicator's menu to the right end of the lens row. */
+.subLensGrow {
+  flex: 1;
 }
 
 .subCap {

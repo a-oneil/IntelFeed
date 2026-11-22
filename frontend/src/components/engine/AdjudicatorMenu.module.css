@@ -1,0 +1,20 @@
+/* "Adjudicator  Proposed ▾" — the stage's name muted, its mode in full colour. */
+.trigger {
+  font: inherit;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.trigger:hover {
+  border-color: var(--bg-hover, var(--accent));
+}
+.system {
+  font-weight: 500;
+  color: var(--text-secondary);
+}

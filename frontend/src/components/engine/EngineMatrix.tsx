@@ -35,9 +35,9 @@ import { AutolinkingSection } from "./AutolinkingSection";
 import { EngineSettingsSearch } from "./EngineSettingsSearch";
 import { CheckEngineBanner, ClearCheckEngine, EngineSwitch } from "./EngineSwitch";
 import { EntryOutputs } from "./EntryOutputs";
-import { ExtractionTab } from "./ExtractionTab";
+import { AdjudicatorMenu } from "./AdjudicatorMenu";
+import { ExtractionTab, type ReviewEntityStatus } from "./ExtractionTab";
 import { ProposalsQueue } from "./ProposalsQueue";
-import type { ProposalDomain, ProposalOrigin } from "@/hooks/useHygiene";
 import { StagePanel } from "./StagePanel";
 import { skipReason, waitingOn } from "./adjudicationCopy";
 import type { EngineDest } from "./engineSettingsIndex";
@@ -50,36 +50,41 @@ export type BrowseView = "jobs" | "plans" | "enrichment" | "maintenance" | "publ
 export const MATRIX_VIEWS = ["entries", "entities", "links", "relationships", "review", "feeds"] as const;
 export type MatrixView = (typeof MATRIX_VIEWS)[number];
 /** The Review tab's lenses: the proposals queue, the AI-created entities
- *  waiting on a person (one lens per status), the machine-made edges nobody
- *  has judged, and the applied history. */
-export const REVIEW_LENSES = ["proposals", "unconfirmed", "duplicates", "orphans", "relationships", "history"] as const;
+ *  waiting on a person (unconfirmed, duplicates and orphans, as a status
+ *  switch inside the lens), the machine-made edges nobody has judged, and
+ *  the applied history. */
+export const REVIEW_LENSES = ["queue", "entities", "relationships", "history"] as const;
 export type ReviewLens = (typeof REVIEW_LENSES)[number];
-// The entity lenses, each the Extraction list narrowed to one status.
-const ENTITY_LENS_STATUS = { unconfirmed: "review", duplicates: "dupe", orphans: "orphan" } as const;
-type EntityLens = keyof typeof ENTITY_LENS_STATUS;
-const isEntityLens = (l: ReviewLens): l is EntityLens => l in ENTITY_LENS_STATUS;
-// Lenses that show their count but stay out of the tab badge and the "to
-// review" chip: backlogs to browse, not a queue that has to reach zero.
-const UNBADGED_LENSES: ReadonlySet<ReviewLens> = new Set(["unconfirmed", "relationships"]);
+/** Old lens links (?lens=duplicates) land on the Entities lens at that status. */
+export const LEGACY_ENTITY_LENS: Record<string, ReviewEntityStatus> = {
+  unconfirmed: "review",
+  duplicates: "dupe",
+  orphans: "orphan",
+};
 const REVIEW_LENS_LABELS: Record<ReviewLens, string> = {
-  proposals: "Proposals",
-  unconfirmed: "Unconfirmed",
-  duplicates: "Duplicates",
-  orphans: "Orphans",
+  queue: "Queue",
+  entities: "Entities",
   relationships: "Relationships",
   history: "History",
 };
-const REVIEW_LENS_HINTS: Record<ReviewLens, string> = {
-  proposals:
-    "Everything the adjudicator, the duplicate review and the scans want changed, one row per entity. Its buttons settle every article's copy at once; every apply stays undoable from History.",
-  unconfirmed:
-    "Entities the analysis created that nobody has confirmed. Confirm keeps one; merge, convert or delete fixes the rest. Duplicates and orphans have their own lenses.",
-  duplicates:
-    "AI-created actors, malware and tools whose names nearly match another entity of the same type. Merge folds one into the other; Not a dupe stops flagging the pair. A pair the AI duplicate review has already filed also shows under Proposals.",
-  orphans: "AI-created entities whose every article link was removed. Delete the wrong ones; restore the link from History when the removal was wrong.",
-  relationships:
-    "Edges the analysis or co-occurrence drew that neither an analyst nor the adjudicator has judged. Confirm or Reject them here; the adjudicator works through the rest as articles come in.",
-  history: "Everything that was applied, by a person or by the stage in apply mode. Restore puts it back.",
+// Each lens explains itself on its button's hover card.
+const REVIEW_LENS_HINTS: Record<ReviewLens, { body: string; aside?: string }> = {
+  queue: {
+    body: "Everything the adjudicator, the duplicate review and the scans want changed, one row per entity. A row's buttons settle every article's copy at once.",
+    aside: "Every apply stays undoable from History.",
+  },
+  entities: {
+    body: "AI-created entities waiting on a person: unconfirmed ones, likely duplicates of another entity of the same type, and orphans whose every article link was removed.",
+    aside: "Confirm keeps one; Merge, Convert and Delete fix the rest.",
+  },
+  relationships: {
+    body: "Edges the analysis or co-occurrence drew that neither an analyst nor the adjudicator has judged. Confirm or Reject them here.",
+    aside: "The adjudicator works through the rest as articles come in.",
+  },
+  history: {
+    body: "Everything that was applied, by a person or by the adjudicator in Applied mode.",
+    aside: "Restore puts one thing back; nothing bulk.",
+  },
 };
 
 // Tabs that show a snapshot rather than a window of activity: the picker hides on them.
@@ -313,6 +318,7 @@ export function EngineMatrix({
   initialStatus,
   initialView,
   initialLens,
+  initialEntityStatus,
   initialOpenStage,
   onBrowse,
   onHighlightSetting,
@@ -320,8 +326,10 @@ export function EngineMatrix({
   initialStage?: string;
   initialStatus?: string;
   initialView?: MatrixView;
-  /** The Review tab's lens to open on (?lens=duplicates, ?lens=history, …). */
+  /** The Review tab's lens to open on (?lens=entities, ?lens=history, …). */
   initialLens?: ReviewLens;
+  /** The Entities lens's status to open on (?show=dupe). */
+  initialEntityStatus?: ReviewEntityStatus;
   initialOpenStage?: string | null;
   onBrowse: (view: BrowseView) => void;
   /** Flash a setting once its host surface is open. */
@@ -333,12 +341,9 @@ export function EngineMatrix({
   const [view, setView] = useState<MatrixView>(initialView ?? "entries");
   const [openStage, setOpenStage] = useState<string | null>(initialOpenStage ?? null);
   const [lens, setLens] = useState<"timing" | "output">("timing");
-  // Review tab: which lens is showing.
-  const [reviewLens, setReviewLens] = useState<ReviewLens>(initialLens ?? "proposals");
-  // Pre-applied filters when a chip deep-links into the proposals queue.
-  const [proposalsAction, setProposalsAction] = useState<string | undefined>(undefined);
-  const [proposalsOrigin, setProposalsOrigin] = useState<ProposalOrigin | undefined>(undefined);
-  const [proposalsDomain, setProposalsDomain] = useState<ProposalDomain | undefined>(undefined);
+  // Review tab: which lens is showing, and which status its Entities lens shows.
+  const [reviewLens, setReviewLens] = useState<ReviewLens>(initialLens ?? "queue");
+  const [entityStatus, setEntityStatus] = useState<ReviewEntityStatus>(initialEntityStatus ?? "review");
   const [status, setStatus] = useState<string | undefined>(initialStatus);
   const [stage, setStage] = useState<string | undefined>(initialStage);
   const [feedId, setFeedId] = useState<string | undefined>(undefined);
@@ -356,11 +361,13 @@ export function EngineMatrix({
     const url = new URL(window.location.href);
     if (url.searchParams.get("section") !== "engine") return;
     url.searchParams.set("view", view);
-    if (view === "review" && reviewLens !== "proposals") url.searchParams.set("lens", reviewLens);
+    if (view === "review" && reviewLens !== "queue") url.searchParams.set("lens", reviewLens);
     else url.searchParams.delete("lens");
+    if (view === "review" && reviewLens === "entities" && entityStatus !== "review") url.searchParams.set("show", entityStatus);
+    else url.searchParams.delete("show");
     for (const legacy of ["tab", "stage", "status"]) url.searchParams.delete(legacy);
     if (url.href !== window.location.href) window.history.replaceState(window.history.state, "", url);
-  }, [view, reviewLens]);
+  }, [view, reviewLens, entityStatus]);
 
   // Panels belong to the tab they were opened on.
   const closePanels = () => {
@@ -368,16 +375,15 @@ export function EngineMatrix({
     setOpenId(null);
     setPeek(null);
   };
-  // Deep-link filters are one-shot; drop them on any tab switch. Explicit
-  // helper (not a view-effect) so attention chips can switch view AND land on
-  // a filtered lens in one click without the reset racing them.
+  // Explicit helper (not a view-effect) so attention chips can switch view
+  // AND land on a lens in one click without the reset racing them.
   const switchView = (v: MatrixView) => {
     if (v !== view) closePanels();
     setView(v);
-    setProposalsAction(undefined);
-    setProposalsOrigin(undefined);
-    setProposalsDomain(undefined);
-    if (v !== "review") setReviewLens("proposals");
+    if (v !== "review") {
+      setReviewLens("queue");
+      setEntityStatus("review");
+    }
   };
 
   // "Find a setting" result → open whichever surface owns it, then flash the
@@ -619,17 +625,27 @@ export function EngineMatrix({
 
   const failingFeeds = feedHealth?.erroring_feeds?.length ?? 0;
 
-  // What each Review lens is waiting on; the tab's badge sums the badged ones.
+  // What each Review lens is waiting on. The tab's badge and the "to review"
+  // chip count the queue, the duplicates and the orphans; unconfirmed
+  // entities and unjudged edges show on their lens only — backlogs to
+  // browse, not a queue that has to reach zero.
+  const byStatus = extractionStats?.by_status ?? {};
+  const entityCounts: Partial<Record<ReviewEntityStatus, number>> = {
+    review: byStatus.review,
+    dupe: byStatus.dupe,
+    orphan: byStatus.orphan,
+  };
   const reviewLensCount = (l: ReviewLens): number | undefined =>
-    l === "proposals"
+    l === "queue"
       ? hygieneStats?.pending_total
       : l === "relationships"
         ? linkStats?.relationships_unreviewed
-        : isEntityLens(l)
-          ? extractionStats?.by_status?.[ENTITY_LENS_STATUS[l]]
+        : l === "entities"
+          ? extractionStats
+            ? (byStatus.review ?? 0) + (byStatus.dupe ?? 0) + (byStatus.orphan ?? 0)
+            : undefined
           : undefined;
-  const badgedLenses = REVIEW_LENSES.filter((l) => !UNBADGED_LENSES.has(l));
-  const reviewTotal = badgedLenses.reduce((sum, l) => sum + (reviewLensCount(l) ?? 0), 0);
+  const reviewTotal = (hygieneStats?.pending_total ?? 0) + (byStatus.dupe ?? 0) + (byStatus.orphan ?? 0);
 
   // The queues that need a person. Each chip is a filter on the table: the
   // ones with `active` light up while their view+filter is showing and clear
@@ -665,12 +681,16 @@ export function EngineMatrix({
       cls: m.aWarn,
       onClick: () => {
         switchView("review");
-        // The first lens with something in it, so the click never lands on an empty list.
-        setReviewLens(badgedLenses.find((l) => (reviewLensCount(l) ?? 0) > 0) ?? "proposals");
+        // The first list with something in it, so the click never lands on an empty one.
+        if (hygieneStats?.pending_total) setReviewLens("queue");
+        else {
+          setReviewLens("entities");
+          setEntityStatus(byStatus.dupe ? "dupe" : byStatus.orphan ? "orphan" : "review");
+        }
       },
       hint: {
         title: "To review",
-        body: "The adjudicator's and the scans' proposals, and duplicate and orphaned AI-created entities. Unconfirmed entities and unjudged relationships have their own lenses under Review and are not counted here.",
+        body: "The adjudicator's and the scans' proposals, and duplicate and orphaned AI-created entities. Unconfirmed entities and unjudged relationships are listed under Review but not counted here.",
         aside: "The same count as the Review tab.",
       },
     },
@@ -1055,48 +1075,43 @@ export function EngineMatrix({
             <div className={m.subView}>
               {view === "review" && (
                 <div className={m.subLens}>
-                  <div className={m.lens}>
+                  <div className={m.lens} aria-label="Review lenses">
                     {REVIEW_LENSES.map((l) => {
                       const n = reviewLensCount(l);
+                      const hint = REVIEW_LENS_HINTS[l];
                       return (
-                        <button key={l} className={reviewLens === l ? m.lensOn : ""} onClick={() => setReviewLens(l)}>
-                          {REVIEW_LENS_LABELS[l]}
-                          {n ? <span className={m.viewCnt}>{n.toLocaleString()}</span> : null}
-                        </button>
+                        <Hint key={l} title={REVIEW_LENS_LABELS[l]} body={hint.body} aside={hint.aside} width={300}>
+                          <button className={reviewLens === l ? m.lensOn : ""} onClick={() => setReviewLens(l)}>
+                            {REVIEW_LENS_LABELS[l]}
+                            {n ? <span className={m.viewCnt}>{n.toLocaleString()}</span> : null}
+                          </button>
+                        </Hint>
                       );
                     })}
                   </div>
-                  <span className={m.subLensHint}>{REVIEW_LENS_HINTS[reviewLens]}</span>
+                  <span className={m.subLensGrow} />
+                  <AdjudicatorMenu
+                    settingsOpen={openStage === "adjudicate"}
+                    onToggleSettings={() => setOpenStage(openStage === "adjudicate" ? null : "adjudicate")}
+                  />
                 </div>
               )}
               {view === "links" && <AutolinkingSection embedded view="links" hours={windowHours} />}
               {view === "relationships" && <AutolinkingSection embedded view="relationships" hours={windowHours} />}
-              {view === "review" && reviewLens === "proposals" && (
-                <ProposalsQueue
-                  lens="queue"
-                  key={`q:${proposalsAction ?? "all"}:${proposalsOrigin ?? "all"}:${proposalsDomain ?? "all"}`}
-                  initialAction={proposalsAction}
-                  initialOrigin={proposalsOrigin}
-                  initialDomain={proposalsDomain}
-                  settingsOpen={openStage === "adjudicate"}
-                  onToggleSettings={() => setOpenStage(openStage === "adjudicate" ? null : "adjudicate")}
-                />
-              )}
-              {view === "review" && isEntityLens(reviewLens) && (
+              {view === "review" && reviewLens === "queue" && <ProposalsQueue lens="queue" key="queue" />}
+              {view === "review" && reviewLens === "entities" && (
                 // The counts are across all time, so the lists are too.
-                <ExtractionTab key={reviewLens} status={ENTITY_LENS_STATUS[reviewLens]} window="all" />
+                <ExtractionTab
+                  key={entityStatus}
+                  status={entityStatus}
+                  window="all"
+                  statusSwitch={{ onChange: setEntityStatus, counts: entityCounts }}
+                />
               )}
               {view === "review" && reviewLens === "relationships" && (
                 <AutolinkingSection embedded view="relationships" unreviewed />
               )}
-              {view === "review" && reviewLens === "history" && (
-                <ProposalsQueue
-                  lens="history"
-                  key="hist"
-                  settingsOpen={openStage === "adjudicate"}
-                  onToggleSettings={() => setOpenStage(openStage === "adjudicate" ? null : "adjudicate")}
-                />
-              )}
+              {view === "review" && reviewLens === "history" && <ProposalsQueue lens="history" key="hist" />}
               {view === "entities" && (
                 <ExtractionTab window={window_} />
               )}

@@ -4,31 +4,23 @@
   gap: 12px;
 }
 
-/* toolbar */
+/* ---- the one filter row ---- */
 .toolbar {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
 }
-.system {
-  font-size: var(--fs-base);
-  font-weight: 700;
-  color: var(--text-secondary);
-  letter-spacing: 0.02em;
-}
 .grow {
   flex: 1;
 }
 
-.modeSeg,
 .seg {
   display: inline-flex;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   overflow: hidden;
 }
-.modeSeg button,
 .seg button {
   appearance: none;
   background: none;
@@ -40,27 +32,64 @@
   color: var(--text-secondary);
   padding: 5px 11px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
-.modeSeg button:last-child,
 .seg button:last-child {
   border-right: none;
-}
-.modeSeg button:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-.modeOn {
-  background: var(--accent) !important;
-  color: var(--accent-text) !important;
 }
 .segOn {
   background: var(--bg-tertiary) !important;
   color: var(--text-primary) !important;
   font-weight: 700 !important;
 }
+.segCnt {
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.segOn .segCnt {
+  color: var(--accent);
+}
+
+.sel {
+  font: inherit;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 5px 9px;
+}
+
+.search {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-secondary);
+  padding: 5px 10px;
+  min-width: 160px;
+}
+.search input {
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-base);
+  width: 130px;
+}
 
 .btn,
 .btnDanger {
+  font: inherit;
   font-size: var(--fs-base);
   font-weight: 600;
   padding: 6px 12px;
@@ -69,11 +98,16 @@
   background: var(--bg-secondary);
   color: var(--text-primary);
   cursor: pointer;
+  white-space: nowrap;
 }
 .btn:disabled,
 .btnDanger:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.btnGhost {
+  background: transparent;
+  color: var(--text-secondary);
 }
 .btnDanger {
   border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
@@ -81,7 +115,7 @@
   background: transparent;
 }
 
-/* table */
+/* ---- table ---- */
 /* On a narrow screen the table scrolls sideways rather than squeezing its columns. */
 .tableWrap {
   border: 1px solid var(--border);
@@ -90,7 +124,7 @@
 }
 .table {
   width: 100%;
-  min-width: 760px;
+  min-width: 820px;
   border-collapse: collapse;
   font-size: var(--fs-md);
 }
@@ -101,7 +135,7 @@
   text-transform: uppercase;
   color: var(--text-tertiary, var(--text-secondary));
   font-weight: 600;
-  padding: 9px 14px;
+  padding: 9px 12px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
@@ -110,13 +144,13 @@
   width: 1%;
 }
 .table tbody td {
-  padding: 10px 14px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
 /* The entity column holds names and ids (CVE-2024-12345): wide enough not to break them. */
 .table tbody td:first-child {
-  min-width: 170px;
+  min-width: 140px;
 }
 .table tbody tr:last-child td {
   border-bottom: none;
@@ -125,38 +159,15 @@
   background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 
-/* change tags */
+/* One neutral label per proposed change; the red button marks the destructive rows. */
 .tag {
   display: inline-block;
   font-size: var(--fs-sm);
   font-weight: 600;
   padding: 2px 8px;
   border-radius: var(--r-sm);
-  white-space: nowrap;
-}
-.tRemove {
-  background: color-mix(in srgb, var(--danger) 15%, transparent);
-  color: var(--danger);
-}
-.tRecl {
-  background: color-mix(in srgb, var(--warning) 16%, transparent);
-  color: var(--warning);
-}
-.tMerge {
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent);
-}
-.tVlink {
-  background: color-mix(in srgb, var(--success) 15%, transparent);
-  color: var(--success);
-}
-.tName {
   background: var(--bg-tertiary);
   color: var(--text-secondary);
-}
-.tStale {
-  background: color-mix(in srgb, var(--warning) 12%, transparent);
-  color: var(--warning);
 }
 
 /* entity chip */
@@ -174,12 +185,20 @@
   color: var(--text-primary);
   cursor: pointer;
   padding: 0;
+  /* An observable's value (a URL, a command line) is one unbreakable word:
+     break it rather than let one row set the column's width. */
+  max-width: 260px;
+  overflow-wrap: anywhere;
 }
-.ent:disabled {
-  cursor: default;
-}
-.ent:not(:disabled):hover {
+.ent:hover {
   color: var(--accent);
+}
+.entPlain {
+  display: inline-block;
+  max-width: 260px;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 .entDot {
   width: 8px;
@@ -188,56 +207,55 @@
   flex: none;
 }
 
-/* The Proposed column holds a steady grid of chips. A fixed width keeps every
-   row's chips wrapping at the same point, so chip edges line up down the
-   table; without it the greedy Why column starves this one and the chips
-   stack one per line, a different height on every row. */
+/* The Proposed column holds the change labels. A fixed width keeps every
+   row's labels wrapping at the same point, so their edges line up down the
+   table; without it the greedy Why column starves this one. */
 .proposedCol {
-  width: 230px;
-  min-width: 230px;
+  width: 180px;
+  min-width: 180px;
 }
-/* A td must stay display:table-cell (flex here collapses the column and
-   strands the leftover width as a gap). With no width set this is the
-   column with the most text, so it is the one that absorbs the table's free
-   space; never narrower than a readable line. */
-.detail {
-  min-width: 280px;
+/* History's Change column holds one label, so it is narrower. */
+.changeCol {
+  width: 150px;
+  min-width: 150px;
+}
+/* Source, Confidence, Applied by: plain words, no chip. */
+.plain {
+  color: var(--text-secondary);
+  font-size: var(--fs-base);
+  white-space: nowrap;
+}
+/* With no width set this is the column with the most text, so it is the
+   one that absorbs the table's free space; never narrower than a readable line. */
+.why {
+  min-width: 200px;
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+  line-height: 1.45;
+}
+/* Caps the reason's line length, so the Why column never pushes the buttons off the edge. */
+.whyBox {
+  max-width: 400px;
 }
 .subject {
   display: block;
-  color: var(--text-primary);
 }
 .reason {
   display: block;
+  color: var(--text-primary);
+}
+.subject + .reason {
   margin-top: 2px;
   color: var(--text-secondary);
-  font-size: var(--fs-base);
+}
+.whyMeta {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
 }
 .muted {
   color: var(--text-tertiary, var(--text-secondary));
-}
-.linkChips {
-  display: flex;
-  gap: 6px;
-  margin-top: 4px;
-  flex-wrap: wrap;
-}
-.linkChip {
-  font: inherit;
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  background: transparent;
-  cursor: pointer;
-  padding: 1px 7px;
-  border-radius: var(--r-full);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  text-decoration: none;
-  white-space: nowrap;
-}
-.linkChip:hover {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 .when {
   white-space: nowrap;
@@ -245,23 +263,38 @@
   font-size: var(--fs-base);
 }
 
-/* row action buttons */
-.acts {
-  display: flex;
+/* ---- row actions: a fixed grid, so the buttons line up in columns ----
+   primary / Dismiss (or Restore) / the "⋯" menu. */
+.acts,
+.actsHist {
+  display: grid;
+  grid-template-columns: 96px 60px 28px;
   gap: 6px;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: end;
   white-space: nowrap;
 }
+.acts > *,
+.actsHist > * {
+  justify-self: stretch;
+  min-width: 0;
+}
+.acts > :last-child,
+.actsHist > :last-child {
+  justify-self: end;
+}
 .rowBtn {
+  font: inherit;
   font-size: var(--fs-sm);
   font-weight: 600;
-  padding: 4px 10px;
+  padding: 4px 9px;
   border-radius: var(--r-md);
   border: 1px solid var(--border);
   background: var(--bg-secondary);
   color: var(--text-primary);
   cursor: pointer;
   white-space: nowrap;
+  text-align: center;
 }
 .rowBtn:disabled {
   opacity: 0.5;
@@ -272,17 +305,11 @@
   color: var(--success);
 }
 .bWarn {
-  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
-  color: var(--warning);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
 }
 .bGhost {
-  color: var(--text-secondary);
-}
-
-/* Orphaned facet: why these rows are here and what (doesn't) happen to them. */
-.note {
-  margin: 0;
-  font-size: var(--fs-sm);
+  background: transparent;
   color: var(--text-secondary);
 }
 
@@ -293,30 +320,7 @@
   padding: 28px 14px;
 }
 
-/* Who proposed the row — the adjudicate stage, vs the legacy jobs/scans. */
-.originTag {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 5px;
-  border: 1px solid color-mix(in srgb, var(--entity-ttp, var(--accent-dash)) 50%, transparent);
-  border-radius: 3px;
-  color: var(--entity-ttp, var(--accent-dash));
-  font-family: var(--font-mono);
-  font-size: var(--fs-2xs);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  vertical-align: middle;
-}
-
-/* A filter's label and its control, kept together when the toolbar wraps. */
-.facet {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-/* On a phone a filter row stays one line and scrolls sideways. */
+/* On a phone the filter row stays one line and scrolls sideways. */
 @media (max-width: 720px) {
   .toolbar {
     flex-wrap: nowrap;
@@ -325,59 +329,4 @@
   .toolbar > * {
     flex: none;
   }
-}
-
-/* The verdict's confidence. */
-.conf {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 5px;
-  border-radius: 3px;
-  border: 1px solid currentColor;
-  font-family: var(--font-mono);
-  font-size: var(--fs-2xs);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  vertical-align: middle;
-}
-.confHigh {
-  color: var(--success);
-}
-.confMed {
-  color: var(--warning);
-}
-.confLow {
-  color: var(--text-muted);
-}
-
-.facetLabel {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-xs);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.segCnt {
-  margin-left: 5px;
-  font-weight: 500;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-.segOn .segCnt {
-  color: var(--text-secondary);
-}
-.sel {
-  font: inherit;
-  font-size: var(--fs-base);
-  font-weight: 600;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--text-primary);
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 4px 8px;
 }

@@ -1,60 +1,10 @@
 /* Additions to ProposalsQueue.module.css for the queue's one-row-per-entity groups. */
 
-.search {
-  font: inherit;
-  font-size: var(--fs-base);
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  min-width: 200px;
-}
-
 .chips {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
-}
-
-/* A proposed target type: clicking it converts the entity. */
-.target {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font: inherit;
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  padding: 3px 9px;
-  border-radius: var(--r-md);
-  border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.target:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--success) 12%, var(--bg-secondary));
-}
-.target:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.cnt {
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--text-secondary);
-  background: var(--bg-tertiary);
-  border-radius: var(--r-sm);
-  padding: 0 5px;
-  margin-left: 4px;
-}
-
-.meta {
-  font-size: var(--fs-sm);
-  color: var(--text-secondary);
 }
 
 /* the type · count line under an entity's name */

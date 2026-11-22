@@ -175,6 +175,33 @@ export function useConfirmRelationship() {
   });
 }
 
+export interface RelationshipBulkReview {
+  action: "confirm" | "reject";
+  entity_type?: string;
+  relationship_type?: string;
+  q?: string;
+  hours?: number;
+}
+
+/** Confirm all / Reject all on Review › Relationships: every unjudged edge the filters show. */
+export function useBulkReviewRelationships() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: RelationshipBulkReview) => {
+      const { data } = await api.post<{ action: string; matched: number; done: number }>(
+        "/entity-relationships/bulk-review",
+        body,
+      );
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["relationships"] });
+      qc.invalidateQueries({ queryKey: ["pivot"] });
+      qc.invalidateQueries({ queryKey: ["entity-links", "stats"] });
+    },
+  });
+}
+
 export function useRejectRelationship() {
   const qc = useQueryClient();
   return useMutation({

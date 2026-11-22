@@ -5,10 +5,15 @@ import { toast } from "sonner";
 import type { EntityRelationship } from "@/api/types";
 import { entityProfilePath } from "@/components/entityProfile/entityProfileConfig";
 import {
+  useBulkReviewRelationships,
   useConfirmRelationship,
   useDeleteRelationship,
   useRejectRelationship,
 } from "@/hooks/useRelationships";
+import { confirmDialog } from "@/utils/dialog";
+import { formatDateTime, formatShortDateTime } from "@/utils/formatDate";
+
+import { RowMenu } from "./RowMenu";
 import {
   useAllRelationships,
   useBulkUnlink,
@@ -41,6 +46,33 @@ const SOURCE_LABELS: Record<string, string> = {
   manual: "Analyst",
   unattributed: "Unattributed",
 };
+
+// Where an edge came from, in plain words.
+const EDGE_SOURCE_LABELS: Record<string, string> = {
+  auto_extracted: "Analysis",
+  co_occurrence: "Co-occurrence",
+  analyst_created: "Analyst",
+  analyst_confirmed: "Analyst",
+  analyst_rejected: "Rejected",
+  attack_catalog: "ATT&CK catalog",
+};
+// The verbs the relationship matrix tracks, for the "Any relationship" filter.
+const VERBS = [
+  "uses",
+  "exploits",
+  "targets",
+  "attributed_to",
+  "variant_of",
+  "communicates_with",
+  "controls",
+  "delivers",
+  "drops",
+  "hosts",
+  "operates_from",
+  "operates_in",
+  "related_to",
+];
+const verbLabel = (v: string) => v.replace(/_/g, " ");
 
 const MONO_TYPES = new Set(["cve", "ttp"]);
 
@@ -147,6 +179,7 @@ export function AutolinkingSection({
   const [entityType, setEntityType] = useState("");
   const [source, setSource] = useState("");
   const [confidence, setConfidence] = useState("");
+  const [verb, setVerb] = useState("");
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
@@ -160,7 +193,7 @@ export function AutolinkingSection({
   useEffect(() => {
     setOffset(0);
     setSelected(new Set());
-  }, [view, search, entityType, source, confidence, hours]);
+  }, [view, search, entityType, source, confidence, verb, hours]);
 
   const { data: stats } = useEntityLinkStats();
   // Only the view on screen asks for its rows.
@@ -179,6 +212,8 @@ export function AutolinkingSection({
   const relsQuery = useAllRelationships(
     {
       entity_type: entityType || undefined,
+      relationship_type: verb || undefined,
+      q: search || undefined,
       hours,
       unreviewed,
       limit: PAGE,
@@ -200,6 +235,7 @@ export function AutolinkingSection({
   const confirmRel = useConfirmRelationship();
   const rejectRel = useRejectRelationship();
   const deleteRel = useDeleteRelationship();
+  const bulkReview = useBulkReviewRelationships();
 
   const active = view === "links" ? linksQuery : relsQuery;
   const total = active.data?.total ?? 0;
@@ -241,6 +277,35 @@ export function AutolinkingSection({
     await Promise.all(ids.map((id) => fn.mutateAsync(id)));
     toast.success(`${action[0].toUpperCase()}${action.slice(1)}ed ${ids.length} relationship${ids.length === 1 ? "" : "s"}`);
     setSelected(new Set());
+  }
+
+  // Confirm all / Reject all: every unjudged edge the filters show.
+  async function doBulkAll(action: "confirm" | "reject") {
+    if (total === 0) return;
+    const what = `${total.toLocaleString()} relationship${total === 1 ? "" : "s"}${search ? ` matching “${search}”` : ""}`;
+    const ok = await confirmDialog({
+      title: action === "confirm" ? "Confirm all" : "Reject all",
+      message:
+        action === "confirm"
+          ? `Confirm ${what}? Each is kept as an analyst-confirmed edge.`
+          : `Reject ${what}? Each is hidden from profiles and graphs and won't be drawn again.`,
+      confirmLabel: action === "confirm" ? "Confirm all" : "Reject all",
+      destructive: action === "reject",
+    });
+    if (!ok) return;
+    try {
+      const r = await bulkReview.mutateAsync({
+        action,
+        entity_type: entityType || undefined,
+        relationship_type: verb || undefined,
+        q: search || undefined,
+        hours,
+      });
+      toast.success(`${action === "confirm" ? "Confirmed" : "Rejected"} ${r.done.toLocaleString()} of ${r.matched.toLocaleString()}`);
+      setSelected(new Set());
+    } catch (e) {
+      toast.error(`${action === "confirm" ? "Confirm" : "Reject"} all failed: ${(e as Error).message}`);
+    }
   }
 
   const from = total === 0 ? 0 : offset + 1;
@@ -293,16 +358,17 @@ export function AutolinkingSection({
 
       {/* filters */}
       <div className={styles.filters}>
-        <span className={styles.search}>
-          <Ico d={ICON.search} />
-          <input
-            placeholder={view === "links" ? "Search entity or entry title…" : "Filter relationships…"}
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            disabled={view === "relationships"}
-          />
-        </span>
-        <select className={styles.filt} value={entityType} onChange={(e) => setEntityType(e.target.value)}>
+        {view === "links" && (
+          <span className={styles.search}>
+            <Ico d={ICON.search} />
+            <input
+              placeholder="Search entity or entry title…"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+            />
+          </span>
+        )}
+        <select className={styles.filt} aria-label="Entity type" value={entityType} onChange={(e) => setEntityType(e.target.value)}>
           <option value="">All entity types</option>
           {(view === "links" ? LINK_TYPES : RELATIONSHIP_TYPES).map((t) => (
             <option key={t} value={t}>
@@ -310,7 +376,7 @@ export function AutolinkingSection({
             </option>
           ))}
         </select>
-        {view === "links" && (
+        {view === "links" ? (
           <>
             <select className={styles.filt} value={source} onChange={(e) => setSource(e.target.value)}>
               <option value="">Any source</option>
@@ -326,6 +392,47 @@ export function AutolinkingSection({
               <option value="medium">Medium</option>
               <option value="low">Low</option>
             </select>
+          </>
+        ) : (
+          <>
+            <select className={styles.filt} aria-label="Relationship" value={verb} onChange={(e) => setVerb(e.target.value)}>
+              <option value="">Any relationship</option>
+              {VERBS.map((v) => (
+                <option key={v} value={v}>
+                  {verbLabel(v)}
+                </option>
+              ))}
+            </select>
+            <span className={styles.search}>
+              <Ico d={ICON.search} />
+              <input
+                aria-label="Find an entity"
+                placeholder="Find an entity…"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+              />
+            </span>
+            {unreviewed && (
+              <>
+                <span className={styles.grow} />
+                <button
+                  className={styles.btn}
+                  disabled={bulkReview.isPending || total === 0}
+                  title="Confirm every relationship the table shows"
+                  onClick={() => doBulkAll("confirm")}
+                >
+                  {bulkReview.isPending ? "Working…" : "Confirm all"}
+                </button>
+                <button
+                  className={`${styles.btn} ${styles.btnDangerSolid}`}
+                  disabled={bulkReview.isPending || total === 0}
+                  title="Reject every relationship the table shows"
+                  onClick={() => doBulkAll("reject")}
+                >
+                  Reject all
+                </button>
+              </>
+            )}
           </>
         )}
       </div>
@@ -440,95 +547,123 @@ export function AutolinkingSection({
               </tbody>
             </table>
           ) : (
-            <table className={styles.table}>
+            <table className={`${styles.table} ${styles.relTable}`}>
               <thead>
                 <tr>
                   <th className={styles.colCheck}>
                     <input type="checkbox" checked={allSelected} onChange={() => toggleAll(pageKeys)} />
                   </th>
-                  <th>Source</th>
                   <th>Relationship</th>
-                  <th>Target</th>
+                  <th>Source</th>
                   <th>Confidence</th>
-                  <th>Origin</th>
-                  <th>Evidence</th>
-                  <th>Created</th>
+                  <th>Why</th>
+                  <th>Latest</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
-                {(items as EntityRelationship[]).map((r) => (
-                  <Fragment key={r.id}>
-                    <tr className={selected.has(r.id) ? styles.rowSel : ""}>
-                      <td className={styles.colCheck}>
-                        <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} />
-                      </td>
-                      <td>
-                        <EntityChipLink type={r.source_type} id={r.source_id} name={r.source_name} />
-                      </td>
-                      <td>
-                        <span className={styles.verb}>{r.relationship_type}</span>
-                      </td>
-                      <td>
-                        <EntityChipLink type={r.target_type} id={r.target_id} name={r.target_name} />
-                      </td>
-                      <td>{confidenceBars(r.confidence)}</td>
-                      <td>{sourcePill(r.source)}</td>
-                      <td className={styles.ev}>
-                        <button
-                          className={styles.evToggle}
-                          onClick={() => toggleRel(r.id)}
-                          title="Show the articles, the sentence behind the claim, and its reviews"
-                        >
-                          {openRel.has(r.id) ? "▾" : "▸"} <b>{r.evidence_entry_ids?.length ?? 0}</b>{" "}
-                          {(r.evidence_entry_ids?.length ?? 0) === 1 ? "article" : "articles"}
-                        </button>
-                      </td>
-                      <td className={styles.muted}>{new Date(r.created_at).toLocaleDateString()}</td>
-                      <td>
-                        <div className={styles.rowActs}>
-                          <button
-                            className={`${styles.iact} ${styles.iactGood}`}
-                            title="Confirm"
-                            onClick={async () => {
-                              await confirmRel.mutateAsync(r.id);
-                              toast.success("Relationship confirmed");
-                            }}
-                          >
-                            <Ico d={ICON.check} />
-                          </button>
-                          <button
-                            className={styles.iact}
-                            title="Reject"
-                            onClick={async () => {
-                              await rejectRel.mutateAsync(r.id);
-                              toast.success("Relationship rejected");
-                            }}
-                          >
-                            <Ico d={ICON.x} />
-                          </button>
-                          <button
-                            className={`${styles.iact} ${styles.iactDanger}`}
-                            title="Delete"
-                            onClick={async () => {
-                              await deleteRel.mutateAsync(r.id);
-                              toast.success("Relationship deleted");
-                            }}
-                          >
-                            <Ico d={ICON.unlink} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                    {openRel.has(r.id) && (
-                      <tr>
-                        <td colSpan={9}>
-                          <RelationshipEvidencePanel id={r.id} names={[r.source_name ?? "", r.target_name ?? ""]} />
+                {(items as EntityRelationship[]).map((r) => {
+                  const n = r.evidence_entry_ids?.length ?? 0;
+                  const articles = `${n.toLocaleString()} article${n === 1 ? "" : "s"}`;
+                  const why = r.description
+                    ? r.source === "auto_extracted"
+                      ? `“${r.description}”`
+                      : r.description
+                    : r.source === "co_occurrence"
+                      ? `Named in the same paragraph in ${articles}; no sentence states one ${verbLabel(r.relationship_type)} the other.`
+                      : "No sentence recorded.";
+                  const a = r.source_name ?? "(unknown)";
+                  const b = r.target_name ?? "(unknown)";
+                  const menu = [
+                    { label: `Open ${a}`, onClick: () => navigate(entityProfilePath(r.source_type as EntityType, r.source_id)) },
+                    { label: `Open ${b}`, onClick: () => navigate(entityProfilePath(r.target_type as EntityType, r.target_id)) },
+                    {
+                      label: "Open in graph",
+                      onClick: () => navigate(`${entityProfilePath(r.source_type as EntityType, r.source_id)}?tab=relationships`),
+                    },
+                    {
+                      label: "Delete",
+                      danger: true,
+                      onClick: async () => {
+                        await deleteRel.mutateAsync(r.id);
+                        toast.success("Relationship deleted");
+                      },
+                    },
+                  ];
+                  return (
+                    <Fragment key={r.id}>
+                      <tr className={selected.has(r.id) ? styles.rowSel : ""}>
+                        <td className={styles.colCheck}>
+                          <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} />
+                        </td>
+                        <td>
+                          <span className={styles.rel}>
+                            <span className={styles.entDot} style={{ background: getEntityCssVar(r.source_type) }} />
+                            <span className={MONO_TYPES.has(r.source_type) ? styles.entMono : ""}>{a}</span>
+                            <span className={styles.relVerb}>{verbLabel(r.relationship_type)}</span>
+                            <span className={styles.entDot} style={{ background: getEntityCssVar(r.target_type) }} />
+                            <span className={MONO_TYPES.has(r.target_type) ? styles.entMono : ""}>{b}</span>
+                          </span>
+                          <span className={styles.relMeta}>
+                            {getEntityLabel(r.source_type)} → {getEntityLabel(r.target_type).toLowerCase()}
+                          </span>
+                        </td>
+                        <td className={styles.plain}>{EDGE_SOURCE_LABELS[r.source] ?? SOURCE_LABELS[r.source] ?? r.source}</td>
+                        <td className={styles.plain}>{r.confidence}</td>
+                        <td className={styles.why}>
+                          <div className={styles.whyBox}>
+                          {why}
+                          <span className={styles.whyMeta}>
+                            from {articles} ·{" "}
+                            <button
+                              className={styles.evToggle}
+                              onClick={() => toggleRel(r.id)}
+                              title="Show the articles, the sentence behind the claim, and its reviews"
+                            >
+                              {openRel.has(r.id) ? "▾ hide evidence" : n > 0 ? "▸ evidence and the articles" : "▸ evidence"}
+                            </button>
+                          </span>
+                          </div>
+                        </td>
+                        <td className={styles.when} title={formatDateTime(r.updated_at ?? r.created_at)}>
+                          {formatShortDateTime(r.updated_at ?? r.created_at)}
+                        </td>
+                        <td>
+                          <div className={styles.acts}>
+                            <button
+                              className={`${styles.act} ${styles.actGood}`}
+                              title="Keep it as an analyst-confirmed edge"
+                              onClick={async () => {
+                                await confirmRel.mutateAsync(r.id);
+                                toast.success("Relationship confirmed");
+                              }}
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              className={styles.act}
+                              title="Hide it from profiles and graphs; it won't be drawn again"
+                              onClick={async () => {
+                                await rejectRel.mutateAsync(r.id);
+                                toast.success("Relationship rejected");
+                              }}
+                            >
+                              Reject
+                            </button>
+                            <RowMenu items={menu} name={`${a} ${verbLabel(r.relationship_type)} ${b}`} />
+                          </div>
                         </td>
                       </tr>
-                    )}
-                  </Fragment>
-                ))}
+                      {openRel.has(r.id) && (
+                        <tr>
+                          <td colSpan={7}>
+                            <RelationshipEvidencePanel id={r.id} names={[r.source_name ?? "", r.target_name ?? ""]} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           )}

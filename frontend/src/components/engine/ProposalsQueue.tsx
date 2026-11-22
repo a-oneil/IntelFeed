@@ -1,27 +1,26 @@
-import { IconSettings } from "@tabler/icons-react";
 /**
- * ProposalsQueue — the Engine console's Review tab: everything the AI wants a
- * person to approve, in one queue over both proposal logs.
+ * ProposalsQueue — the Review tab's Queue and History lenses.
  *
- * The queue lens shows one row per entity (the backend files a proposal per
- * article, so "Linux" collects 600 remove-link proposals and "Qilin" a
- * reclassify per mention): the row says what each kind of proposal wants,
- * its buttons settle every article's copy at once, and it expands to the
- * articles behind it. Rows about something that is not a catalogue entity
- * (an edge, an article's assessment) stand alone. A Domain facet (what
- * applying changes: links, entities, relationships), an Origin facet (who
- * proposed it), inline Apply / Dismiss, one background Apply all, the
- * adjudicator's mode switch with a Settings button (the adjudicate stage's
- * panel, which the console opens above the table) and a Generate proposals
- * menu of scans beside it, and a History lens of everything that ran (with
- * Restore).
+ * Queue: everything the adjudicator, the duplicate review and the scans want
+ * changed, one row per entity (the backend files a proposal per article, so
+ * "Linux" collects 600 remove-link proposals and "Qilin" a reclassify per
+ * mention). The row says what is proposed, who proposed it (Source) and how
+ * sure they were (Confidence); its buttons settle every article's copy at
+ * once, and it expands to the evidence and the articles behind it. Rows
+ * about something that is not a catalogue entity (an edge, an article's
+ * assessment) stand alone. One filter row: Domain (what applying changes),
+ * Action, Sort, search; Run scan files more rows; Apply all and Dismiss all
+ * act on what the table shows.
+ *
+ * History: everything that was applied, by a person or by the stage in
+ * Applied mode, with Restore. Filters: Change, Applied by, a time window,
+ * search. Restore puts one thing back; nothing bulk.
  */
 
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
-import api from "@/api/client";
 import { DropdownItem, ToolbarDropdown } from "@/components/ToolbarDropdown";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
@@ -32,7 +31,6 @@ import {
   useBulkApplyProgress,
   useDismissReview,
   useHygieneFeed,
-  useHygieneStats,
   useReviewGroups,
   useRunNameNormalization,
   useScanAliasHygiene,
@@ -40,62 +38,78 @@ import {
   useScanIdHygiene,
   useScanVendorAutolink,
   useStartBulkApply,
-  type Confidence,
   type FeedLink,
   type FeedRow,
   type ProposalDomain,
-  type ProposalOrigin,
   type ReviewGroup,
   type ReviewScope,
   type ReviewSort,
 } from "@/hooks/useHygiene";
 import { useHygieneRowAction } from "@/hooks/useHygieneRowAction";
-import { formatDateTime } from "@/utils/formatDate";
+import { formatDateTime, formatShortDateTime } from "@/utils/formatDate";
 import { getEntityCssVar, getEntityLabel } from "@/utils/entityTheme";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { EntityRowActions } from "./EntityRowActions";
 import { RowEvidencePanel } from "./EvidencePanel";
+import { RowMenu, type RowMenuItem } from "./RowMenu";
 import styles from "./ProposalsQueue.module.css";
 import cg from "./ProposalGroups.module.css";
 import { confirmDialog } from "@/utils/dialog";
 
-export type ReviewLens = "queue" | "history";
-export type { ProposalOrigin };
+export type ProposalsLens = "queue" | "history";
 
-const CHANGE_META: Record<string, { label: string; cls: string }> = {
-  // pending proposals
-  shadow_remove: { label: "Remove link", cls: styles.tRemove },
-  needs_reclassification: { label: "Reclassify", cls: styles.tRecl },
-  vendor_autolink: { label: "Vendor link", cls: styles.tVlink },
-  normalize_name: { label: "Name fix", cls: styles.tName },
-  alias_collision: { label: "Alias trim", cls: styles.tName },
-  ttp_malformed_id: { label: "ID fix", cls: styles.tName },
-  cve_malformed_id: { label: "ID fix", cls: styles.tName },
-  cve_withdrawn: { label: "CVE withdrawn", cls: styles.tRemove },
-  // adjudicate stage (post-analysis review)
-  adjudication_veto: { label: "Veto entity", cls: styles.tRemove },
-  adjudication_merge: { label: "Merge", cls: styles.tMerge },
-  adjudication_unlink: { label: "Unlink", cls: styles.tRemove },
-  adjudication_held_link: { label: "Link", cls: styles.tVlink },
-  adjudication_reclassify: { label: "Reclassify (review)", cls: styles.tRecl },
-  adjudication_edge_demote: { label: "Demote edge", cls: styles.tRecl },
-  adjudication_ioc_drop: { label: "Drop observable", cls: styles.tRecl },
-  adjudication_ioc_capture: { label: "Capture observable", cls: styles.tVlink },
-  adjudication_assessment: { label: "Assessment", cls: styles.tStale },
-  adjudication_restored: { label: "Verdict restored", cls: styles.tVlink },
-  // applied history
-  removed: { label: "Link removed", cls: styles.tRemove },
-  restored: { label: "Link restored", cls: styles.tVlink },
-  merge: { label: "Merged", cls: styles.tMerge },
-  reclassify: { label: "Reclassified", cls: styles.tRecl },
-  orphan_prune: { label: "Orphan pruned", cls: styles.tName },
-  update_description: { label: "Profile update", cls: styles.tName },
-  update_aliases: { label: "Alias update", cls: styles.tName },
-  ai_enrich_filled: { label: "AI enriched", cls: styles.tVlink },
-  ai_enrich_unknown: { label: "AI unknown", cls: styles.tName },
-  merge_review_distinct: { label: "Not duplicates", cls: styles.tName },
-  no_op: { label: "No change", cls: styles.tName },
+/** What a pending proposal wants, in plain words. */
+const CHANGE_LABEL: Record<string, string> = {
+  shadow_remove: "Remove link",
+  needs_reclassification: "Reclassify",
+  vendor_autolink: "Link vendor",
+  normalize_name: "Fix name",
+  alias_collision: "Remove alias",
+  ttp_malformed_id: "Fix ID",
+  cve_malformed_id: "Fix ID",
+  cve_withdrawn: "Delete withdrawn CVE",
+  adjudication_veto: "Delete entity",
+  adjudication_merge: "Merge",
+  adjudication_unlink: "Remove link",
+  adjudication_held_link: "Link held match",
+  adjudication_reclassify: "Reclassify",
+  adjudication_edge_demote: "Demote edge",
+  adjudication_ioc_drop: "Drop observable",
+  adjudication_ioc_capture: "Capture observable",
+  adjudication_assessment: "Assessment note",
+  adjudication_restored: "Verdict restored",
+  // applied history, for rows whose code is only ever applied
+  removed: "Link removed",
+  restored: "Link restored",
+  merge: "Merged",
+  reclassify: "Reclassified",
+  orphan_prune: "Orphan pruned",
+  update_description: "Profile updated",
+  update_aliases: "Aliases updated",
+  ai_enrich_filled: "AI enriched",
+  ai_enrich_unknown: "AI unknown",
+  merge_review_distinct: "Not duplicates",
+  no_op: "No change",
+};
+// History rows read in the past tense; the proposal codes keep their names after they run.
+const APPLIED_LABEL: Record<string, string> = {
+  shadow_remove: "Link removed",
+  adjudication_unlink: "Link removed",
+  adjudication_held_link: "Held match linked",
+  adjudication_veto: "Entity deleted",
+  adjudication_merge: "Merged",
+  adjudication_reclassify: "Reclassified",
+  needs_reclassification: "Reclassified",
+  adjudication_edge_demote: "Edge demoted",
+  adjudication_ioc_drop: "Observable dropped",
+  adjudication_ioc_capture: "Observable captured",
+  alias_collision: "Alias removed",
+  normalize_name: "Name fixed",
+  vendor_autolink: "Vendor linked",
+  ttp_malformed_id: "ID fixed",
+  cve_malformed_id: "ID fixed",
+  cve_withdrawn: "CVE deleted",
 };
 
 const DOMAIN_LABELS: Record<ProposalDomain, string> = {
@@ -104,24 +118,31 @@ const DOMAIN_LABELS: Record<ProposalDomain, string> = {
   relationships: "Relationships",
 };
 
+const SOURCE_LABEL: Record<string, string> = {
+  adjudicator: "Adjudicator",
+  merge_review: "Duplicate review",
+  scan: "Scan",
+  mixed: "Several",
+};
+
 // Action filter: one dropdown over both logs. Values may be comma-lists —
 // the backend feed matches any of the listed action codes.
 const QUEUE_FILTERS = [
   { value: "", label: "Any change" },
-  { value: "adjudication_unlink,shadow_remove", label: "Unlink / remove link" },
+  { value: "adjudication_unlink,shadow_remove", label: "Remove link" },
   { value: "adjudication_held_link", label: "Link held match" },
   { value: "adjudication_edge_demote", label: "Demote edge" },
   { value: "needs_reclassification,adjudication_reclassify", label: "Reclassify" },
-  { value: "adjudication_veto", label: "Veto entity" },
+  { value: "adjudication_veto", label: "Delete entity" },
   { value: "adjudication_merge", label: "Merge" },
   { value: "adjudication_ioc_drop", label: "Drop observable" },
   { value: "adjudication_ioc_capture", label: "Capture observable" },
   { value: "adjudication_assessment", label: "Assessment note" },
-  { value: "normalize_name", label: "Name fix" },
-  { value: "alias_collision", label: "Alias trim" },
-  { value: "vendor_autolink", label: "Vendor link" },
-  { value: "ttp_malformed_id,cve_malformed_id,cve_withdrawn", label: "ID fix" },
-  { value: "orphan_prune", label: "Orphan prune" },
+  { value: "normalize_name", label: "Fix name" },
+  { value: "alias_collision", label: "Remove alias" },
+  { value: "vendor_autolink", label: "Link vendor" },
+  { value: "ttp_malformed_id,cve_malformed_id,cve_withdrawn", label: "Fix ID" },
+  { value: "orphan_prune", label: "Prune orphan" },
 ];
 // What ran. The adjudicator's codes stay the same from proposal to apply
 // (only `applied` flips), so they sit beside the older engines' own codes.
@@ -132,11 +153,11 @@ const HISTORY_FILTERS = [
   { value: "adjudication_held_link", label: "Held match linked" },
   { value: "merge,adjudication_merge", label: "Merged" },
   { value: "reclassify,adjudication_reclassify", label: "Reclassified" },
-  { value: "adjudication_veto", label: "Entity vetoed" },
+  { value: "adjudication_veto", label: "Entity deleted" },
   { value: "adjudication_edge_demote", label: "Edge demoted" },
   { value: "adjudication_ioc_capture", label: "Observable captured" },
   { value: "adjudication_ioc_drop", label: "Observable dropped" },
-  { value: "alias_collision", label: "Alias trimmed" },
+  { value: "alias_collision", label: "Alias removed" },
   { value: "normalize_name", label: "Name fixed" },
   { value: "vendor_autolink", label: "Vendor linked" },
   { value: "ttp_malformed_id,cve_malformed_id,cve_withdrawn", label: "ID fixed" },
@@ -146,62 +167,19 @@ const HISTORY_FILTERS = [
   { value: "ai_enrich_filled,ai_enrich_unknown", label: "AI enrich" },
   { value: "adjudication_restored", label: "Verdict restored" },
 ];
-// History rows read in the past tense; the proposal codes keep their names after they run.
-const APPLIED_LABEL: Record<string, string> = {
-  adjudication_unlink: "Link removed",
-  adjudication_held_link: "Held match linked",
-  adjudication_veto: "Entity vetoed",
-  adjudication_merge: "Merged",
-  adjudication_reclassify: "Reclassified",
-  adjudication_edge_demote: "Edge demoted",
-  adjudication_ioc_drop: "Observable dropped",
-  adjudication_ioc_capture: "Observable captured",
-  alias_collision: "Alias trimmed",
-  normalize_name: "Name fixed",
-  vendor_autolink: "Vendor linked",
-  ttp_malformed_id: "ID fixed",
-  cve_malformed_id: "ID fixed",
-  cve_withdrawn: "CVE deleted",
-};
 const SORTS: { value: ReviewSort; label: string }[] = [
   { value: "newest", label: "Newest" },
   { value: "count", label: "Most proposals" },
   { value: "oldest", label: "Oldest" },
   { value: "confidence", label: "Highest confidence" },
 ];
-const CONF_CLS: Record<Confidence, string> = { high: styles.confHigh, medium: styles.confMed, low: styles.confLow };
-
-function ConfidenceChip({ value }: { value: Confidence | null | undefined }) {
-  if (!value) return null;
-  return (
-    <span className={`${styles.conf} ${CONF_CLS[value]}`} title="The adjudicator's confidence in this verdict">
-      {value}
-    </span>
-  );
-}
-type OriginFacet = "" | ProposalOrigin | "orphaned";
-const ORIGINS: { value: OriginFacet; label: string; title: string; queueOnly?: boolean }[] = [
-  { value: "", label: "All", title: "Every proposal" },
-  {
-    value: "adjudicator",
-    label: "Adjudicator",
-    title: "Filed by the post-analysis review, with the article in hand (including the link verdicts the retired link validator left)",
-  },
-  {
-    value: "merge_review",
-    label: "Duplicate review",
-    title: "Filed by the catalogue-wide duplicate review, from the two profiles side by side",
-  },
-  { value: "scan", label: "Scans", title: "Filed by the on-demand scans (Generate proposals)" },
-  {
-    value: "orphaned",
-    label: "Orphaned",
-    title: "Proposals the retired jobs left with no article to re-judge them against — yours to dismiss or apply by hand",
-    queueOnly: true,
-  },
+// History's time window.
+const WINDOWS: { value: string; label: string; hours: number | null }[] = [
+  { value: "24h", label: "Last 24 hours", hours: 24 },
+  { value: "7d", label: "Last 7 days", hours: 24 * 7 },
+  { value: "30d", label: "Last 30 days", hours: 24 * 30 },
+  { value: "all", label: "All time", hours: null },
 ];
-const ORPHANED_NOTE =
-  "Left by the retired jobs with no entry to re-judge them against. Dismiss or apply by hand; nothing automatic touches them.";
 
 // Row-action code → button label + tone.
 const ACTION_BTN: Record<string, { label: string; cls: string }> = {
@@ -217,6 +195,8 @@ const UNLINK_KINDS = new Set(["shadow_remove", "adjudication_unlink"]);
 // Rows about something the entity menu cannot act on (an edge, an article, a ledger row).
 const NO_ENTITY_MENU = new Set(["relationship", "entry", "observable"]);
 const RECLASSIFY_KINDS = new Set(["needs_reclassification", "adjudication_reclassify"]);
+const MERGE_KINDS = new Set(["adjudication_merge"]);
+const ALIAS_KINDS = new Set(["alias_collision"]);
 
 function feedLinkHref(link: FeedLink): string | null {
   if (link.kind === "entry") return typeof link.entity_id === "string" ? `/?entry=${link.entity_id}` : null;
@@ -225,33 +205,82 @@ function feedLinkHref(link: FeedLink): string | null {
   return slug && link.entity_id ? `/workbench/${slug}/${link.entity_id}` : null;
 }
 
-function LinkChips({ links }: { links: FeedLink[] }) {
-  const extra = links.filter((l) => l.kind !== "entity" || l.role === "target" || l.role === "b");
-  if (extra.length === 0) return null;
+/** What a History row names: the person, the stage, or the duplicate review. */
+function appliedByLabel(row: FeedRow): string {
+  if (row.applied_by === "adjudicator") return "Adjudicator";
+  if (row.applied_by === "merge_review") return "Duplicate review";
+  if (row.applied_by === "person") return row.applied_by_name ?? "Analyst";
+  return "—";
+}
+
+function whyMeta(origin: string | null | undefined, articles: number): string {
+  if (origin === "merge_review") return "from both profiles side by side";
+  return `from ${articles.toLocaleString()} article${articles === 1 ? "" : "s"}`;
+}
+
+/** The "⋯" menu of a row with no one entity: open either end, open the graph, open the article. */
+function rowMenuItems(links: FeedLink[], navigate: (to: string) => void): RowMenuItem[] {
+  const items: RowMenuItem[] = [];
+  const ends = links.filter((l) => l.kind === "entity" && l.entity_type && l.entity_id);
+  for (const l of ends) items.push({ label: `Open ${l.label}`, onClick: () => navigate(feedLinkHref(l) ?? "/") });
+  if (ends[0]) {
+    const first = ends[0];
+    items.push({
+      label: "Open in graph",
+      onClick: () => navigate(`/workbench/${first.entity_type}/${first.entity_id}?tab=relationships`),
+    });
+  }
+  const entry = links.find((l) => l.kind === "entry" && l.entity_id);
+  if (entry) items.push({ label: "Open article", onClick: () => navigate(feedLinkHref(entry) ?? "/") });
+  return items;
+}
+
+function EntityCell({
+  entityType,
+  entityId,
+  name,
+  meta,
+}: {
+  entityType: string | null;
+  entityId: string | null;
+  name: string;
+  meta: string;
+}) {
+  const navigate = useNavigate();
+  const linkable = !!entityType && !!entityId && !NO_ENTITY_MENU.has(entityType);
   return (
-    <span className={styles.linkChips}>
-      {extra.map((l, i) => {
-        const href = feedLinkHref(l);
-        if (!href) return null;
-        const external = l.kind === "external";
-        return (
-          <a
-            key={`${l.kind}-${i}`}
-            className={styles.linkChip}
-            href={href}
-            target={external ? "_blank" : undefined}
-            rel={external ? "noopener noreferrer" : undefined}
-          >
-            {l.role ? `${l.role}: ` : ""}
-            {l.label}
-          </a>
-        );
-      })}
-    </span>
+    <>
+      {linkable ? (
+        <button
+          className={styles.ent}
+          onClick={() => navigate(`/workbench/${entityType}/${entityId}`)}
+          title={getEntityLabel(entityType)}
+        >
+          <span className={styles.entDot} style={{ background: getEntityCssVar(entityType) }} />
+          {name}
+        </button>
+      ) : (
+        <span className={styles.entPlain}>{name}</span>
+      )}
+      {meta && <span className={cg.entMeta}>{meta}</span>}
+    </>
   );
 }
 
-/** One proposal: the History lens's rows and an entity row's expanded articles. */
+function entityMeta(entityType: string | null, entityId: string | null, linked?: number | null): string {
+  const kind =
+    entityType === "relationship"
+      ? "Relationship"
+      : entityType === "entry"
+        ? "Article"
+        : entityId && entityType
+          ? getEntityLabel(entityType)
+          : "";
+  const n = linked !== null && linked !== undefined ? ` · ${linked.toLocaleString()} article${linked === 1 ? "" : "s"}` : "";
+  return `${kind}${n}`;
+}
+
+/** One proposal: a History row, or one of the articles behind an entity's queue row. */
 function ProposalRow({
   row,
   hist,
@@ -267,78 +296,94 @@ function ProposalRow({
 }) {
   const navigate = useNavigate();
   const [showEvidence, setShowEvidence] = useState(false);
-  const base = CHANGE_META[row.action] ?? { label: row.action, cls: styles.tName };
-  const meta = hist && row.applied ? { ...base, label: APPLIED_LABEL[row.action] ?? base.label } : base;
-  const slug = row.entity_type;
+  const label =
+    hist && row.applied ? (APPLIED_LABEL[row.action] ?? CHANGE_LABEL[row.action] ?? row.action) : (CHANGE_LABEL[row.action] ?? row.action);
   const acts = [...row.actions].sort((a, b) => ACTION_ORDER.indexOf(a) - ACTION_ORDER.indexOf(b));
+  const entityMenu = !sub && row.entity_type && row.entity_id && !NO_ENTITY_MENU.has(row.entity_type);
+  const span = hist ? 6 : 7;
+  const evidence = (
+    <button className={cg.expand} onClick={() => setShowEvidence((v) => !v)}>
+      {showEvidence ? "▾ hide evidence" : "▸ evidence"}
+    </button>
+  );
+  const why = (
+    <td className={styles.why}>
+      <div className={styles.whyBox}>
+        {(sub || !row.entity_name) && row.subject && <span className={styles.subject}>{row.subject}</span>}
+        {row.reason && <span className={styles.reason}>{row.reason}</span>}
+        {row.context && <span className={styles.reason}>“{row.context}”</span>}
+        <span className={styles.whyMeta}>
+          {whyMeta(row.origin, 1)} · {evidence}
+        </span>
+      </div>
+    </td>
+  );
+  const actions = (
+    <td>
+      <div className={hist ? styles.actsHist : styles.acts}>
+        {hist && <span />}
+        {acts.map((a) => {
+          const b = ACTION_BTN[a];
+          if (!b) return null;
+          return (
+            <button key={a} className={`${styles.rowBtn} ${b.cls}`} disabled={busy} onClick={() => onAction(row, a)}>
+              {b.label}
+            </button>
+          );
+        })}
+        {!sub && (
+          entityMenu ? (
+            <EntityRowActions
+              entityType={row.entity_type as string}
+              entityId={row.entity_id as string}
+              name={row.entity_name ?? row.subject ?? "entity"}
+              disabled={busy}
+            />
+          ) : (
+            <RowMenu items={rowMenuItems(row.links ?? [], navigate)} name={row.subject ?? "this row"} disabled={busy} />
+          )
+        )}
+      </div>
+    </td>
+  );
   return (
     <>
       <tr className={sub ? cg.subRow : undefined}>
-        <td>
-          <span className={`${styles.tag} ${meta.cls}`}>{meta.label}</span>
-          <ConfidenceChip value={row.confidence} />
-          {row.origin === "adjudicator" && !sub && (
-            <span className={styles.originTag} title="Filed by the post-analysis review, with the article in hand">
-              adjudicator
-            </span>
-          )}
-          {row.origin === "merge_review" && !sub && (
-            <span className={styles.originTag} title="Filed by the catalogue-wide duplicate review, from the two profiles side by side">
-              duplicate review
-            </span>
-          )}
-        </td>
-        <td className={styles.muted}>{sub ? "" : (DOMAIN_LABELS[row.domain] ?? row.domain)}</td>
-        <td>
-          {row.entity_name && !sub ? (
-            <button
-              className={styles.ent}
-              disabled={!slug || !row.entity_id}
-              onClick={() => slug && row.entity_id && navigate(`/workbench/${slug}/${row.entity_id}`)}
-              title={row.entity_type ? getEntityLabel(row.entity_type) : ""}
-            >
-              <span className={styles.entDot} style={{ background: row.entity_type ? getEntityCssVar(row.entity_type) : "var(--border)" }} />
-              {row.entity_name}
-            </button>
-          ) : (
-            <span className={styles.muted}>{sub ? "" : "—"}</span>
-          )}
-        </td>
-        <td className={styles.detail}>
-          <span className={styles.subject}>{row.subject ?? "—"}</span>
-          {row.reason && <span className={styles.reason}>{row.reason}</span>}
-          {row.context && <span className={styles.reason}>“{row.context}”</span>}
-          <LinkChips links={row.links ?? []} />
-          <button className={cg.expand} onClick={() => setShowEvidence((v) => !v)}>
-            {showEvidence ? "▾ hide evidence" : "▸ evidence"}
-          </button>
-        </td>
-        <td className={styles.when}>{formatDateTime(row.when)}</td>
-        <td>
-          <div className={styles.acts}>
-            {acts.map((a) => {
-              const b = ACTION_BTN[a];
-              if (!b) return null;
-              return (
-                <button key={a} className={`${styles.rowBtn} ${b.cls}`} disabled={busy} onClick={() => onAction(row, a)}>
-                  {b.label}
-                </button>
-              );
-            })}
-            {!hist && !sub && row.entity_type && row.entity_id && (
-              <EntityRowActions
+        {hist ? (
+          <>
+            <td>
+              <EntityCell
                 entityType={row.entity_type}
                 entityId={row.entity_id}
-                name={row.entity_name ?? row.subject ?? "entity"}
-                disabled={busy}
+                name={row.entity_name ?? row.subject ?? "—"}
+                meta={entityMeta(row.entity_type, row.entity_id)}
               />
-            )}
-          </div>
-        </td>
+            </td>
+            <td className={styles.changeCol}>
+              <span className={styles.tag}>{label}</span>
+            </td>
+            <td className={styles.plain}>{appliedByLabel(row)}</td>
+            {why}
+            <td className={styles.when} title={formatDateTime(row.when)}>{formatShortDateTime(row.when)}</td>
+            {actions}
+          </>
+        ) : (
+          <>
+            <td />
+            <td className={styles.proposedCol}>
+              <span className={styles.tag}>{label}</span>
+            </td>
+            <td className={styles.plain}>{row.origin ? SOURCE_LABEL[row.origin] : "—"}</td>
+            <td className={styles.plain}>{row.confidence ?? "—"}</td>
+            {why}
+            <td className={styles.when} title={formatDateTime(row.when)}>{formatShortDateTime(row.when)}</td>
+            {actions}
+          </>
+        )}
       </tr>
       {showEvidence && (
         <tr className={cg.subRow}>
-          <td colSpan={6}>
+          <td colSpan={span}>
             <RowEvidencePanel id={row.id} names={row.entity_name ? [row.entity_name] : []} />
           </td>
         </tr>
@@ -362,7 +407,6 @@ function GroupRows({
   const feed = useHygieneFeed({
     pending: true,
     action: scope.action,
-    origin: scope.origin,
     domain: scope.domain,
     entity_type: group.entity_type,
     entity_id: group.entity_id ?? undefined,
@@ -371,7 +415,7 @@ function GroupRows({
   if (feed.isLoading)
     return (
       <tr className={cg.subRow}>
-        <td colSpan={6} className={styles.muted}>
+        <td colSpan={7} className={styles.muted}>
           Loading articles…
         </td>
       </tr>
@@ -384,7 +428,7 @@ function GroupRows({
       ))}
       {feed.data?.has_more && (
         <tr className={cg.subRow}>
-          <td colSpan={6} className={styles.muted}>
+          <td colSpan={7} className={styles.muted}>
             Showing the newest {rows.length} of {group.proposals.toLocaleString()} — the row's buttons settle all of them.
           </td>
         </tr>
@@ -393,67 +437,77 @@ function GroupRows({
   );
 }
 
+/** Every change a queue row proposes, one plain label each. */
+function proposedLabels(g: ReviewGroup): string[] {
+  const out: string[] = [];
+  for (const k of g.kinds) {
+    if (RECLASSIFY_KINDS.has(k.action)) continue; // named by its targets below
+    if (MERGE_KINDS.has(k.action) && g.merge_into.length) continue;
+    if (ALIAS_KINDS.has(k.action) && g.trim_aliases.length) continue;
+    out.push(CHANGE_LABEL[k.action] ?? k.action);
+  }
+  for (const t of g.reclassify_to) out.push(`Reclassify as ${getEntityLabel(t.type).toLowerCase()}`);
+  if (g.reclassify_to.length === 0 && g.kinds.some((k) => RECLASSIFY_KINDS.has(k.action))) out.push("Reclassify");
+  for (const m of g.merge_into) out.push(`Merge into ${m.name ?? "?"} (${getEntityLabel(m.target_type).toLowerCase()})`);
+  if (g.trim_aliases.length) out.push(`Remove alias${g.trim_aliases.length > 1 ? "es" : ""} ${g.trim_aliases.map((a) => `“${a}”`).join(", ")}`);
+  return [...new Set(out)];
+}
+
 export function ProposalsQueue({
   lens,
-  initialAction,
-  initialOrigin,
-  initialDomain,
-  settingsOpen,
-  onToggleSettings,
 }: {
   /** queue: pending proposals with Apply / Dismiss. history: what ran, with Restore. */
-  lens: ReviewLens;
-  initialAction?: string;
-  initialOrigin?: ProposalOrigin;
-  initialDomain?: ProposalDomain;
-  /** The adjudicate stage's settings panel is open above the table. */
-  settingsOpen?: boolean;
-  /** Open or close that panel (the console owns it). */
-  onToggleSettings?: () => void;
+  lens: ProposalsLens;
 }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const hist = lens === "history";
-  const [actionFilter, setActionFilterRaw] = useState(initialAction ?? "");
-  const [originFilter, setOriginFilterRaw] = useState<OriginFacet>(initialOrigin ?? "");
-  const [domainFilter, setDomainFilterRaw] = useState<ProposalDomain | "">(initialDomain ?? "");
+  const [actionFilter, setActionFilterRaw] = useState("");
+  const [domainFilter, setDomainFilterRaw] = useState<ProposalDomain | "">("");
   const [sort, setSortRaw] = useState<ReviewSort>("newest");
+  const [appliedBy, setAppliedByRaw] = useState("");
+  const [window_, setWindowRaw] = useState("7d");
   const [search, setSearch] = useState("");
   const q = useDebouncedValue(search, 250);
   const [offset, setOffset] = useState(0);
   // A new filter starts at the first page.
   const setActionFilter = (v: string) => (setActionFilterRaw(v), setOffset(0));
-  const setOriginFilter = (v: OriginFacet) => (setOriginFilterRaw(v), setOffset(0));
   const setDomainFilter = (v: ProposalDomain | "") => (setDomainFilterRaw(v), setOffset(0));
   const setSort = (v: ReviewSort) => (setSortRaw(v), setOffset(0));
-  const [modePending, setModePending] = useState(false);
+  const setAppliedBy = (v: string) => (setAppliedByRaw(v), setOffset(0));
+  const setWindow = (v: string) => (setWindowRaw(v), setOffset(0));
   const [busyRow, setBusyRow] = useState<string | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
 
-  // "Orphaned" is its own feed switch, not an origin value.
-  const orphaned = !hist && originFilter === "orphaned";
-  const origin = orphaned || !originFilter ? undefined : (originFilter as ProposalOrigin);
   const domain = domainFilter || undefined;
   // What the table shows, and so what every button here acts on.
-  const scope: ReviewScope = { q: q || undefined, action: actionFilter || undefined, origin, domain };
-  const stats = useHygieneStats();
-  // History and the orphaned switch are flat rows; the queue is per entity,
-  // so the flat query only runs when one of those is showing.
-  const flat = hist || orphaned;
+  const scope: ReviewScope = { q: q || undefined, action: actionFilter || undefined, domain };
+  // History's window, fixed per pick so the query key stays put between renders.
+  const since = useMemo(() => {
+    const hours = WINDOWS.find((w) => w.value === window_)?.hours ?? null;
+    return hours === null ? undefined : new Date(Date.now() - hours * 3600 * 1000).toISOString();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [window_]);
   const PAGE = 100;
   const feed = useHygieneFeed(
-    hist
-      ? { mode: "apply", action: actionFilter || undefined, origin, domain, limit: PAGE, offset }
-      : { pending: true, action: actionFilter || undefined, origin, domain, orphaned: true, limit: PAGE, offset },
-    { enabled: flat },
+    {
+      mode: "apply",
+      action: actionFilter || undefined,
+      applied_by: appliedBy || undefined,
+      since,
+      q: q || undefined,
+      limit: PAGE,
+      offset,
+    },
+    { enabled: hist },
   );
-  const groups = useReviewGroups({ ...scope, sort, limit: PAGE, offset });
+  const groups = useReviewGroups({ ...scope, sort, limit: PAGE, offset }, { enabled: !hist });
   useEffect(() => setOffset(0), [q]);
   const total = groups.data?.total ?? 0;
   // A page emptied by its own actions steps back to the last page that has rows.
   useEffect(() => {
-    if (!flat && groups.data && offset > 0 && offset >= total) setOffset(Math.max(0, Math.floor((total - 1) / PAGE) * PAGE));
-  }, [flat, groups.data, offset, total]);
+    if (!hist && groups.data && offset > 0 && offset >= total) setOffset(Math.max(0, Math.floor((total - 1) / PAGE) * PAGE));
+  }, [hist, groups.data, offset, total]);
 
   const runRowAction = useHygieneRowAction();
   const dismissReview = useDismissReview();
@@ -486,10 +540,7 @@ export function ProposalsQueue({
   }, [bulkJobId, bulkProgress, qc]);
   // While a job runs, keep the table moving with it.
   useEffect(() => {
-    if (bulkJobId && bulkProgress?.status === "running") {
-      if (flat) feed.refetch();
-      else groups.refetch();
-    }
+    if (bulkJobId && bulkProgress?.status === "running") groups.refetch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bulkProgress?.processed]);
 
@@ -501,96 +552,67 @@ export function ProposalsQueue({
 
   // Scans that mint fresh entity proposals into the queue (link verdicts
   // come from the adjudicate stage at ingest, so there is nothing to scan for).
-  const scans =
-    hist || (domainFilter && domainFilter !== "entities")
-      ? []
-      : [
-          {
-            label: "Review duplicates (AI)",
-            title:
-              "Put the most likely duplicate pairs of actors, malware and tools in front of the model on the AI worker; each pair it calls the same thing lands here as a Merge proposal. Runs daily on its own too.",
-            busy: scanDupes.isPending,
-            run: () =>
-              scanDupes
-                .mutateAsync()
-                .then((r) =>
-                  r.dispatched
-                    ? toast.success("Duplicate review started on the AI worker — Merge rows appear as it finishes")
-                    : toast.message("The duplicate review is already running"),
-                )
-                .catch((e) => toast.error(`Review failed: ${(e as Error).message}`)),
-          },
-          {
-            label: "Propose name fixes",
-            busy: scanNames.isPending,
-            run: () =>
-              scanNames
-                .mutateAsync({})
-                .then((r) => toast.success(`Proposed ${r.proposed ?? 0} name fixes`))
-                .catch((e) => toast.error(`Scan failed: ${(e as Error).message}`)),
-          },
-          {
-            label: "Scan aliases",
-            busy: scanAliases.isPending,
-            run: () =>
-              scanAliases
-                .mutateAsync()
-                .then((r) => toast.success(`Proposed ${r.proposed ?? 0} alias trims`))
-                .catch((e) => toast.error(`Scan failed: ${(e as Error).message}`)),
-          },
-          {
-            label: "Auto-link vendors",
-            busy: scanVendors.isPending,
-            run: () =>
-              scanVendors
-                .mutateAsync()
-                .then((r) => toast.success(`Proposed ${r.proposed ?? 0} vendor links`))
-                .catch((e) => toast.error(`Scan failed: ${(e as Error).message}`)),
-          },
-          {
-            label: "Scan TTP/CVE ids",
-            busy: scanIds.isPending,
-            run: () =>
-              scanIds
-                .mutateAsync()
-                .then((r) => toast.success(`Proposed ${r.ttp_malformed + r.cve_malformed + r.cve_withdrawn} id fixes`))
-                .catch((e) => toast.error(`Scan failed: ${(e as Error).message}`)),
-          },
-        ];
+  const scans = [
+    {
+      label: "Review duplicates (AI)",
+      title:
+        "Put the most likely duplicate pairs of actors, malware and tools in front of the model on the AI worker; each pair it calls the same thing lands here as a Merge proposal. Runs daily on its own too.",
+      busy: scanDupes.isPending,
+      run: () =>
+        scanDupes
+          .mutateAsync()
+          .then((r) =>
+            r.dispatched
+              ? toast.success("Duplicate review started on the AI worker — Merge rows appear as it finishes")
+              : toast.message("The duplicate review is already running"),
+          )
+          .catch((e) => toast.error(`Review failed: ${(e as Error).message}`)),
+    },
+    {
+      label: "Propose name fixes",
+      busy: scanNames.isPending,
+      run: () =>
+        scanNames
+          .mutateAsync({})
+          .then((r) => toast.success(`Proposed ${r.proposed ?? 0} name fixes`))
+          .catch((e) => toast.error(`Scan failed: ${(e as Error).message}`)),
+    },
+    {
+      label: "Scan aliases",
+      busy: scanAliases.isPending,
+      run: () =>
+        scanAliases
+          .mutateAsync()
+          .then((r) => toast.success(`Proposed ${r.proposed ?? 0} alias removals`))
+          .catch((e) => toast.error(`Scan failed: ${(e as Error).message}`)),
+    },
+    {
+      label: "Auto-link vendors",
+      busy: scanVendors.isPending,
+      run: () =>
+        scanVendors
+          .mutateAsync()
+          .then((r) => toast.success(`Proposed ${r.proposed ?? 0} vendor links`))
+          .catch((e) => toast.error(`Scan failed: ${(e as Error).message}`)),
+    },
+    {
+      label: "Scan TTP/CVE ids",
+      busy: scanIds.isPending,
+      run: () =>
+        scanIds
+          .mutateAsync()
+          .then((r) => toast.success(`Proposed ${r.ttp_malformed + r.cve_malformed + r.cve_withdrawn} id fixes`))
+          .catch((e) => toast.error(`Scan failed: ${(e as Error).message}`)),
+    },
+  ];
 
   const rows = useMemo(() => feed.data?.rows ?? [], [feed.data]);
   const groupRows = useMemo(() => groups.data?.groups ?? [], [groups.data]);
-
-  // The Proposed / Applied switch is the adjudicate stage's mode: shadow files
-  // proposals, apply acts on high-confidence verdicts at ingest.
-  const modeKey = "adjudication_mode";
-  const mode: "off" | "shadow" | "apply" =
-    stats.data?.adjudication_mode === "apply" ? "apply" : stats.data?.adjudication_mode === "shadow" ? "shadow" : "off";
-  const setMode = async (next: "shadow" | "apply") => {
-    if (next === mode || modePending) return;
-    setModePending(true);
-    // Optimistically patch cached stats and DON'T refetch them right away — the
-    // per-worker settings cache can return the stale value for a moment, which
-    // would otherwise snap the toggle back and read as "the button does nothing".
-    qc.setQueryData(["hygiene", "stats"], (prev: unknown) =>
-      prev && typeof prev === "object" ? { ...(prev as Record<string, unknown>), [modeKey]: next } : prev,
-    );
-    try {
-      await api.patch("/system-settings", { settings: { [modeKey]: next } });
-      toast.success(
-        next === "apply"
-          ? "Applied mode — the review now applies high-confidence verdicts at ingest"
-          : "Proposed mode — verdicts filed as suggestions for review",
-      );
-    } catch (e) {
-      qc.setQueryData(["hygiene", "stats"], (prev: unknown) =>
-        prev && typeof prev === "object" ? { ...(prev as Record<string, unknown>), [modeKey]: mode } : prev,
-      );
-      toast.error(`Failed to change mode: ${(e as Error).message}`);
-    } finally {
-      setModePending(false);
-    }
-  };
+  // The people History knows, kept from the last answer so the select doesn't flicker.
+  const [people, setPeople] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    if (feed.data?.people) setPeople(feed.data.people);
+  }, [feed.data?.people]);
 
   const FILTERS = hist ? HISTORY_FILTERS : QUEUE_FILTERS;
   const scopeLabel = () => {
@@ -598,10 +620,8 @@ export function ProposalsQueue({
       ? (FILTERS.find((f) => f.value === actionFilter)?.label ?? "these").toLowerCase()
       : "every pending";
     const where = domainFilter ? ` ${DOMAIN_LABELS[domainFilter].toLowerCase()}` : "";
-    const who =
-      origin === "adjudicator" ? " adjudicator" : origin === "merge_review" ? " duplicate-review" : origin === "scan" ? " scan" : "";
     const named = q ? ` matching “${q}”` : "";
-    return `${what}${who}${where}${named}`;
+    return `${what}${where}${named}`;
   };
 
   const doRow = async (row: FeedRow, action: string) => {
@@ -616,7 +636,7 @@ export function ProposalsQueue({
   const groupRef = (g: ReviewGroup) => ({ entity_type: g.entity_type, entity_id: g.entity_id, row_ids: g.row_ids });
 
   /** Apply what this row shows under the filters, except its type changes
-   *  (those need a target: the chips). One server loop, one toast. */
+   *  (those go through Convert). One server loop, one toast. */
   const applyGroup = async (g: ReviewGroup) => {
     setBusyRow(g.key);
     try {
@@ -638,10 +658,10 @@ export function ProposalsQueue({
     setBusyRow(g.key);
     try {
       const r = await applyReclassify.mutateAsync([{ entity_type: g.entity_type, entity_id: g.entity_id, target_type: target }]);
-      if (r.failed) toast.error(`Apply failed: ${r.errors[0]?.error ?? "unknown error"}`);
-      else toast.success(`Reclassified ${g.name} → ${getEntityLabel(target).toLowerCase()} · ${r.cleared_rows.toLocaleString()} proposals cleared`);
+      if (r.failed) toast.error(`Convert failed: ${r.errors[0]?.error ?? "unknown error"}`);
+      else toast.success(`Converted ${g.name} to ${getEntityLabel(target).toLowerCase()} · ${r.cleared_rows.toLocaleString()} proposals settled`);
     } catch (e) {
-      toast.error(`Apply failed: ${(e as Error).message}`);
+      toast.error(`Convert failed: ${(e as Error).message}`);
     } finally {
       setBusyRow(null);
     }
@@ -659,7 +679,7 @@ export function ProposalsQueue({
     }
   };
 
-  // What the table shows: the action, origin and domain filters and the search.
+  // What the table shows: the action and domain filters and the search.
   const clearAll = async () => {
     if (
       !(await confirmDialog({
@@ -685,7 +705,7 @@ export function ProposalsQueue({
     if (
       !(await confirmDialog({
         title: "Apply proposals",
-        message: `Apply ${scopeLabel()} proposals now? Each one is applied the way the stage would in apply mode (type changes to their proposed type), and each stays undoable from History. This runs in the background; the queue updates as it goes.`,
+        message: `Apply ${scopeLabel()} proposals now? Each one is applied the way the stage would in Applied mode (type changes to their proposed type), and each stays undoable from History. This runs in the background; the queue updates as it goes.`,
         confirmLabel: "Apply all",
         destructive: true,
       }))
@@ -707,10 +727,11 @@ export function ProposalsQueue({
       : "Applying…"
     : "Apply all";
   const byDomain = groups.data?.facets.domains ?? {};
-  const byOrigin = groups.data?.facets.origins ?? {};
   const pendingTotal = groups.data?.proposals ?? 0;
+  const allCount = PROPOSAL_DOMAINS.reduce((n, d) => n + (byDomain[d] ?? 0), 0);
 
-  const applyLabel = (g: ReviewGroup) => {
+  /** The primary button of a queue row, from what its proposals want. */
+  const primaryLabel = (g: ReviewGroup) => {
     const kinds = g.kinds.filter((k) => !RECLASSIFY_KINDS.has(k.action) && k.action !== "adjudication_assessment").map((k) => k.action);
     if (kinds.length === 0) return null;
     if (kinds.every((k) => UNLINK_KINDS.has(k))) return "Remove links";
@@ -723,128 +744,87 @@ export function ProposalsQueue({
 
   return (
     <div className={styles.wrap}>
-      {/* toolbar */}
+      {/* one filter row */}
       <div className={styles.toolbar}>
-        <span className={styles.system}>Adjudicator</span>
-        <div
-          className={styles.modeSeg}
-          title={
-            mode === "off"
-              ? "The adjudicate stage is off — pick a mode here, or turn it on from the Adjudicate stage panel (Engine → Entries → adjudicate column)"
-              : "Proposed: the review files suggestions · Applied: high-confidence verdicts applied at ingest"
-          }
-        >
-          <button className={mode === "shadow" ? styles.modeOn : ""} disabled={modePending} onClick={() => setMode("shadow")}>
-            Proposed
-          </button>
-          <button className={mode === "apply" ? styles.modeOn : ""} disabled={modePending} onClick={() => setMode("apply")}>
-            Applied
-          </button>
-        </div>
-        {onToggleSettings && (
-          <button
-            className={`${styles.rowBtn} ${settingsOpen ? styles.segOn : styles.bGhost}`}
-            title="The adjudicator's settings: what is applied at ingest and what lands here instead"
-            aria-expanded={settingsOpen}
-            onClick={onToggleSettings}
-          >
-            <IconSettings size="1em" stroke={1.75} aria-hidden /> Settings
-          </button>
-        )}
-        {scans.length > 0 && (
-          <ToolbarDropdown
-            label="Generate proposals"
-            triggerClassName={`${styles.rowBtn} ${styles.bGhost}`}
-            title="Scans that file fresh proposals into this queue"
-          >
-            {scans.map((s) => (
-              <DropdownItem
-                key={s.label}
-                label={s.busy ? `${s.label} — working…` : s.label}
-                title={s.title}
-                disabled={s.busy}
-                onClick={s.run}
-              />
-            ))}
-          </ToolbarDropdown>
-        )}
-
         {!hist && (
-          <input
-            className={cg.search}
-            placeholder="Find an entity…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        )}
-
-      </div>
-
-      {/* filters — each label stays with its control when the row wraps */}
-      <div className={styles.toolbar}>
-        <span className={styles.facet}>
-          <span className={styles.facetLabel}>Domain</span>
           <span className={styles.seg} title="What applying the proposal changes">
             <button className={domainFilter === "" ? styles.segOn : ""} onClick={() => setDomainFilter("")}>
-              All
+              All{allCount ? <span className={styles.segCnt}>{allCount.toLocaleString()}</span> : null}
             </button>
             {PROPOSAL_DOMAINS.map((d) => (
               <button key={d} className={domainFilter === d ? styles.segOn : ""} onClick={() => setDomainFilter(d)}>
                 {DOMAIN_LABELS[d]}
-                {!flat && byDomain[d] ? <span className={styles.segCnt}>{byDomain[d]?.toLocaleString()}</span> : null}
+                {byDomain[d] ? <span className={styles.segCnt}>{byDomain[d]?.toLocaleString()}</span> : null}
               </button>
             ))}
           </span>
-        </span>
+        )}
 
-        <span className={styles.facet}>
-          <span className={styles.facetLabel}>Origin</span>
-          <span className={styles.seg} title="Who proposed it">
-            {ORIGINS.filter((o) => !hist || !o.queueOnly).map((o) => {
-              const n = o.value && o.value !== "orphaned" ? byOrigin[o.value] : undefined;
-              return (
-                <button
-                  key={o.value || "all"}
-                  className={originFilter === o.value ? styles.segOn : ""}
-                  title={o.title}
-                  onClick={() => setOriginFilter(o.value)}
-                >
-                  {o.label}
-                  {!flat && n ? <span className={styles.segCnt}>{n.toLocaleString()}</span> : null}
-                </button>
-              );
-            })}
-          </span>
-        </span>
+        <select className={styles.sel} aria-label="Change" value={actionFilter} onChange={(e) => setActionFilter(e.target.value)}>
+          {FILTERS.map((f) => (
+            <option key={f.value || "all"} value={f.value}>
+              {f.label}
+            </option>
+          ))}
+        </select>
 
-        <label className={styles.facet}>
-          <span className={styles.facetLabel}>Action</span>
-          <select className={styles.sel} value={actionFilter} onChange={(e) => setActionFilter(e.target.value)}>
-            {FILTERS.map((f) => (
-              <option key={f.value || "all"} value={f.value}>
-                {f.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {!flat && (
-          <label className={styles.facet}>
-            <span className={styles.facetLabel}>Sort</span>
-            <select className={styles.sel} value={sort} onChange={(e) => setSort(e.target.value as ReviewSort)}>
-              {SORTS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
+        {hist ? (
+          <>
+            <select className={styles.sel} aria-label="Applied by" value={appliedBy} onChange={(e) => setAppliedBy(e.target.value)}>
+              <option value="">Anyone</option>
+              <option value="adjudicator">Adjudicator</option>
+              <option value="merge_review">Duplicate review</option>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
                 </option>
               ))}
             </select>
-          </label>
+            <select className={styles.sel} aria-label="Time window" value={window_} onChange={(e) => setWindow(e.target.value)}>
+              {WINDOWS.map((w) => (
+                <option key={w.value} value={w.value}>
+                  {w.label}
+                </option>
+              ))}
+            </select>
+          </>
+        ) : (
+          <select className={styles.sel} aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as ReviewSort)}>
+            {SORTS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
         )}
+
+        <label className={styles.search}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <circle cx="11" cy="11" r="7" />
+            <path d="M20 20l-3.5-3.5" />
+          </svg>
+          <input aria-label="Find an entity" placeholder="Find an entity…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </label>
 
         <span className={styles.grow} />
 
-        {!hist && !orphaned && (
+        {!hist && (
           <>
+            <ToolbarDropdown
+              label="Run scan"
+              triggerClassName={`${styles.btn} ${styles.btnGhost}`}
+              title="Scans that file fresh proposals into this queue"
+            >
+              {scans.map((s) => (
+                <DropdownItem
+                  key={s.label}
+                  label={s.busy ? `${s.label} — working…` : s.label}
+                  title={s.title}
+                  disabled={s.busy}
+                  onClick={s.run}
+                />
+              ))}
+            </ToolbarDropdown>
             <button
               className={styles.btn}
               disabled={bulkRunning || pendingTotal === 0}
@@ -865,18 +845,16 @@ export function ProposalsQueue({
         )}
       </div>
 
-      {orphaned && <p className={styles.note}>{ORPHANED_NOTE}</p>}
-
       {/* table */}
       <div className={styles.tableWrap}>
         <table className={styles.table}>
           <thead>
-            {flat ? (
+            {hist ? (
               <tr>
-                <th>{hist ? "Change" : "Proposed change"}</th>
-                <th>Domain</th>
                 <th>Entity</th>
-                <th>Detail</th>
+                <th className={styles.changeCol}>Change</th>
+                <th>Applied by</th>
+                <th>Why</th>
                 <th>When</th>
                 <th className={styles.actCol} />
               </tr>
@@ -884,6 +862,8 @@ export function ProposalsQueue({
               <tr>
                 <th>Entity</th>
                 <th className={styles.proposedCol}>Proposed</th>
+                <th>Source</th>
+                <th>Confidence</th>
                 <th>Why</th>
                 <th>Latest</th>
                 <th className={styles.actCol} />
@@ -891,151 +871,102 @@ export function ProposalsQueue({
             )}
           </thead>
           <tbody>
-            {flat &&
-              rows.map((row) => <ProposalRow key={row.id} row={row} hist={hist} busy={busyRow === row.id} onAction={doRow} />)}
-            {!flat &&
+            {hist && rows.map((row) => <ProposalRow key={row.id} row={row} hist busy={busyRow === row.id} onAction={doRow} />)}
+            {!hist &&
               groupRows.map((g) => {
                 const k = g.key;
                 const busy = busyRow === k;
                 const isOpen = open.has(k);
-                const label = applyLabel(g);
-                const kindChips = g.kinds.filter((kd) => !RECLASSIFY_KINDS.has(kd.action));
-                const reclassifyN = g.kinds.filter((kd) => RECLASSIFY_KINDS.has(kd.action)).reduce((n, kd) => n + kd.count, 0);
+                const label = primaryLabel(g);
                 // Every row opens to its newest proposal's evidence; one
                 // with several proposals also lists them.
                 const manyRows = g.entity_id !== null && g.proposals > 1;
                 const expandable = manyRows || g.latest_row_id !== null;
-                const mergeTargets = new Set(g.merge_into.map((m) => m.target_id));
+                const convertTargets = g.entity_id ? g.reclassify_to : [];
+                const entityMenu = !!g.entity_id && !NO_ENTITY_MENU.has(g.entity_type);
+                const toggle = () => {
+                  const next = new Set(open);
+                  if (next.has(k)) next.delete(k);
+                  else next.add(k);
+                  setOpen(next);
+                };
                 return (
                   <Fragment key={k}>
                     <tr>
                       <td>
-                        {g.entity_id && !NO_ENTITY_MENU.has(g.entity_type) ? (
-                          <button
-                            className={styles.ent}
-                            onClick={() => navigate(`/workbench/${g.entity_type}/${g.entity_id}`)}
-                            title={getEntityLabel(g.entity_type)}
-                          >
-                            <span className={styles.entDot} style={{ background: getEntityCssVar(g.entity_type) }} />
-                            {g.name}
-                          </button>
-                        ) : (
-                          <span className={styles.muted}>{g.name || g.entity_type}</span>
-                        )}
-                        <span className={cg.entMeta}>
-                          {g.entity_type === "relationship"
-                            ? "Relationship"
-                            : g.entity_type === "entry"
-                              ? "Article"
-                              : g.entity_id
-                                ? getEntityLabel(g.entity_type)
-                                : ""}
-                          {g.linked !== null && g.linked !== undefined ? ` · ${g.linked.toLocaleString()} article${g.linked === 1 ? "" : "s"}` : ""}
-                        </span>
+                        <EntityCell
+                          entityType={g.entity_type}
+                          entityId={g.entity_id}
+                          name={g.name || g.entity_type}
+                          meta={entityMeta(g.entity_type, g.entity_id, g.linked)}
+                        />
                       </td>
                       <td className={styles.proposedCol}>
                         <div className={cg.chips}>
-                          {kindChips.map((kd) => {
-                            const meta = CHANGE_META[kd.action] ?? { label: kd.action, cls: styles.tName };
-                            const label =
-                              kd.action === "alias_collision" && g.trim_aliases?.length
-                                ? `Remove alias${g.trim_aliases.length > 1 ? "es" : ""} ${g.trim_aliases.map((a) => `“${a}”`).join(", ")}`
-                                : meta.label;
-                            return (
-                              <span key={kd.action} className={`${styles.tag} ${meta.cls}`}>
-                                {label}
-                                {kd.count > 1 && <span className={cg.cnt}>{kd.count.toLocaleString()}</span>}
-                              </span>
-                            );
-                          })}
-                          {g.merge_into.map((m) => (
-                            <Link
-                              key={m.target_id}
-                              className={styles.linkChip}
-                              to={`/workbench/${m.target_type}/${m.target_id}`}
-                            >
-                              into {m.name ?? "?"}
-                            </Link>
-                          ))}
-                          {g.reclassify_to.map((s) => (
-                            <button
-                              key={s.type}
-                              className={cg.target}
-                              disabled={busy}
-                              onClick={() => reclassifyGroup(g, s.type)}
-                              title={`Convert ${g.name} to a ${getEntityLabel(s.type).toLowerCase()} — proposed by ${s.count} article${s.count === 1 ? "" : "s"}`}
-                            >
-                              <span className={styles.entDot} style={{ background: getEntityCssVar(s.type) }} />
-                              → {getEntityLabel(s.type)}
-                              <span className={cg.cnt}>{s.count.toLocaleString()}</span>
-                            </button>
-                          ))}
-                          <ConfidenceChip value={g.confidence} />
-                          {g.origin === "adjudicator" && (
-                            <span className={styles.originTag} title="Filed by the post-analysis review, with the article in hand">
-                              adjudicator
+                          {proposedLabels(g).map((text) => (
+                            <span key={text} className={styles.tag}>
+                              {text}
                             </span>
-                          )}
-                          {g.origin === "merge_review" && (
-                            <span className={styles.originTag} title="Filed by the catalogue-wide duplicate review, from the two profiles side by side">
-                              duplicate review
-                            </span>
-                          )}
+                          ))}
                         </div>
                       </td>
-                      <td className={styles.detail}>
-                        {(g.entity_id === null || NO_ENTITY_MENU.has(g.entity_type)) && g.subject && (
-                          <span className={styles.subject}>{g.subject}</span>
-                        )}
-                        {g.reason && <span className={styles.reason}>{g.reason}</span>}
-                        {/* the merge target is already the "into …" chip in Proposed */}
-                        <LinkChips links={g.links.filter((l) => !(l.role === "target" && mergeTargets.has(l.entity_id ?? "")))} />
-                        <span className={cg.meta}>
-                          {g.proposals.toLocaleString()} proposal{g.proposals === 1 ? "" : "s"}
-                          {reclassifyN > 0 && kindChips.length > 0 ? ` (${reclassifyN.toLocaleString()} to reclassify)` : ""}
-                          {g.matched_names.length > 0 && ` · matched as ${g.matched_names.map((f) => `“${f}”`).join(", ")}`}
-                          {g.sample_entry_id && (
-                            <>
-                              {" · "}
-                              <a className={styles.linkChip} href={`/?entry=${g.sample_entry_id}`}>
-                                example article
-                              </a>
-                            </>
-                          )}
-                          {expandable && (
-                            <>
-                              {" · "}
-                              <button
-                                className={cg.expand}
-                                onClick={() => {
-                                  const next = new Set(open);
-                                  if (next.has(k)) next.delete(k);
-                                  else next.add(k);
-                                  setOpen(next);
-                                }}
-                              >
-                                {isOpen
-                                  ? "▾ hide evidence"
-                                  : manyRows
-                                    ? `▸ evidence and all ${g.proposals.toLocaleString()} articles`
-                                    : "▸ evidence"}
-                              </button>
-                            </>
-                          )}
-                        </span>
+                      <td className={styles.plain}>{SOURCE_LABEL[g.origin] ?? "—"}</td>
+                      <td className={styles.plain}>{g.confidence ?? "—"}</td>
+                      <td className={styles.why}>
+                        <div className={styles.whyBox}>
+                          {!entityMenu && g.subject && <span className={styles.subject}>{g.subject}</span>}
+                          {g.reason && <span className={styles.reason}>{g.reason}</span>}
+                          <span className={styles.whyMeta}>
+                            {whyMeta(g.origin, g.proposals)}
+                            {expandable && (
+                              <>
+                                {" · "}
+                                <button className={cg.expand} onClick={toggle}>
+                                  {isOpen ? "▾ hide evidence" : manyRows ? "▸ evidence and the articles" : "▸ evidence"}
+                                </button>
+                              </>
+                            )}
+                          </span>
+                        </div>
                       </td>
-                      <td className={styles.when}>{formatDateTime(g.latest_at)}</td>
+                      <td className={styles.when} title={formatDateTime(g.latest_at)}>{formatShortDateTime(g.latest_at)}</td>
                       <td>
                         <div className={styles.acts}>
-                          {label && (
+                          {convertTargets.length > 1 ? (
+                            <ToolbarDropdown
+                              label="Convert"
+                              triggerClassName={`${styles.rowBtn} ${styles.bGood}`}
+                              title="The articles disagree on the type — pick one; every article's copy settles at once"
+                            >
+                              {convertTargets.map((t) => (
+                                <DropdownItem
+                                  key={t.type}
+                                  label={`${getEntityLabel(t.type)} · ${t.count.toLocaleString()} article${t.count === 1 ? "" : "s"}`}
+                                  disabled={busy || bulkRunning}
+                                  onClick={() => void reclassifyGroup(g, t.type)}
+                                />
+                              ))}
+                            </ToolbarDropdown>
+                          ) : convertTargets.length === 1 ? (
+                            <button
+                              className={`${styles.rowBtn} ${styles.bGood}`}
+                              disabled={busy || bulkRunning}
+                              onClick={() => reclassifyGroup(g, convertTargets[0].type)}
+                              title={`Convert ${g.name} to a ${getEntityLabel(convertTargets[0].type).toLowerCase()}; every article's copy settles at once`}
+                            >
+                              Convert
+                            </button>
+                          ) : label ? (
                             <button
                               className={`${styles.rowBtn} ${label === "Remove links" || label === "Delete" ? styles.bWarn : styles.bGood}`}
                               disabled={busy || bulkRunning}
                               onClick={() => applyGroup(g)}
-                              title="Apply what this row shows under the filters (type changes use the chips)"
+                              title="Apply what this row shows under the filters"
                             >
                               {label}
                             </button>
+                          ) : (
+                            <span />
                           )}
                           <button
                             className={`${styles.rowBtn} ${styles.bGhost}`}
@@ -1049,15 +980,17 @@ export function ProposalsQueue({
                           >
                             Dismiss
                           </button>
-                          {g.entity_id && !NO_ENTITY_MENU.has(g.entity_type) && (
-                            <EntityRowActions entityType={g.entity_type} entityId={g.entity_id} name={g.name} disabled={busy} />
+                          {entityMenu ? (
+                            <EntityRowActions entityType={g.entity_type} entityId={g.entity_id as string} name={g.name} disabled={busy} />
+                          ) : (
+                            <RowMenu items={rowMenuItems(g.links, navigate)} name={g.name || g.subject || "this row"} disabled={busy} />
                           )}
                         </div>
                       </td>
                     </tr>
                     {isOpen && g.latest_row_id && (
                       <tr className={cg.subRow}>
-                        <td colSpan={5}>
+                        <td colSpan={7}>
                           <RowEvidencePanel id={g.latest_row_id} names={[g.name, ...g.matched_names]} />
                         </td>
                       </tr>
@@ -1066,27 +999,23 @@ export function ProposalsQueue({
                   </Fragment>
                 );
               })}
-            {!flat && !groups.isLoading && groupRows.length === 0 && (
+            {!hist && !groups.isLoading && groupRows.length === 0 && (
               <tr>
-                <td colSpan={5} className={styles.empty}>
-                  {q
-                    ? "No pending proposals match."
-                    : `No pending proposals — nothing waiting for review.${scans.length ? " Generate proposals runs the scans that file more." : ""}`}
+                <td colSpan={7} className={styles.empty}>
+                  {q ? "No pending proposals match." : "No pending proposals — nothing waiting for review. Run scan files more."}
                 </td>
               </tr>
             )}
-            {flat && !feed.isLoading && rows.length === 0 && (
+            {hist && !feed.isLoading && rows.length === 0 && (
               <tr>
                 <td colSpan={6} className={styles.empty}>
-                  {hist
-                    ? "No applied changes match — nothing has run yet."
-                    : "No orphaned proposals — every pending scan proposal has an entry the stage can re-judge it against."}
+                  No applied changes match.
                 </td>
               </tr>
             )}
-            {(flat ? feed.isLoading : groups.isLoading) && (
+            {(hist ? feed.isLoading : groups.isLoading) && (
               <tr>
-                <td colSpan={6} className={styles.empty}>
+                <td colSpan={7} className={styles.empty}>
                   Loading {hist ? "history" : "proposals"}…
                 </td>
               </tr>
@@ -1094,7 +1023,7 @@ export function ProposalsQueue({
           </tbody>
         </table>
       </div>
-      {!flat && (total > PAGE || offset > 0) && (
+      {!hist && (total > PAGE || offset > 0) && (
         <div className={cg.pager}>
           <button className={styles.rowBtn} disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>
             ← Prev
@@ -1107,7 +1036,7 @@ export function ProposalsQueue({
           </button>
         </div>
       )}
-      {flat && (feed.data?.has_more || offset > 0) && (
+      {hist && (feed.data?.has_more || offset > 0) && (
         <div className={cg.pager}>
           <button className={styles.rowBtn} disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>
             ← Newer

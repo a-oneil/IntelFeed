@@ -13,6 +13,7 @@ from app.config import settings
 from app.core.public_access import set_viewer_anonymous
 from app.database import get_db
 from app.models.user import User
+from app.services.acting_user import set_acting_user
 
 security_scheme = HTTPBearer()
 
@@ -131,7 +132,9 @@ async def get_current_user(
     if payload.get("type") != "access":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
     set_viewer_anonymous(False)
-    return await _user_from_payload(payload, db)
+    user = await _user_from_payload(payload, db)
+    set_acting_user(user.id)
+    return user
 
 
 # ── Public read-only mode ─────────────────────────────────────────────
@@ -201,7 +204,9 @@ async def get_viewer(
         if payload.get("type") != "access":
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
         set_viewer_anonymous(False)
-        return await _user_from_payload(payload, db)
+        user = await _user_from_payload(payload, db)
+        set_acting_user(user.id)
+        return user
     if public_read_only_enabled():
         set_viewer_anonymous(True)
         return AnonymousViewer()
