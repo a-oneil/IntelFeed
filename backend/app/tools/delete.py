@@ -108,12 +108,11 @@ def _load_model(model_path: str):
         "malware, CVE, TTP, country, tool, vendor, product, mitigation, observable), by id or, for an "
         "intelligence entity, by name. Intelligence entities get "
         "the same cleanup as the API delete endpoints: entry links, entity relationships and pending Review "
-        "proposals are removed and the search-index document is dropped. No tombstone is written — the autolinker/"
-        "extraction pipeline may re-create the entity from future articles; use the false-positive "
-        "workflow if the name must stay gone (an observable's equivalent is the never-capture tombstone). "
-        "REQUIRES user confirmation. First call returns a "
-        "confirmation prompt — present it to the user. Only call again with the confirmation_token "
-        "after the user explicitly approves."
+        "proposals are removed and the search-index document is dropped. No tombstone is written, so the "
+        "autolinker or extraction pipeline may create the entity again from future articles. Use the "
+        "false-positive workflow if the name must not come back. For an observable, use the never-capture "
+        "tombstone (deny_observable). REQUIRES user confirmation. The first call returns a confirmation prompt: "
+        "show it to the user. Only call again with the confirmation_token after the user explicitly approves."
     ),
     input_schema={
         "properties": {
@@ -151,7 +150,7 @@ async def _delete_entity(
         return {"error": f"Cannot delete entity type: {entity_type}"}
     if not entity_id:
         if not name or entity_type not in _INTEL_ENTITY_TYPES or entity_type == "mitigation":
-            return {"error": "give entity_id (name lookup covers intelligence entities except mitigations)"}
+            return {"error": "Give entity_id. Lookup by name works for intelligence entities except mitigations."}
         from app.tools.write import resolve_entity_ref
 
         found, err = await resolve_entity_ref(db, entity_type, name)

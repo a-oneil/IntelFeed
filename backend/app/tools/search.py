@@ -134,7 +134,7 @@ async def _run_search_plan(
         "Supports the full query language: AND/OR/NOT, quoted phrases, entry fields "
         "(feed:, tag:, type:, date:, is:, media:, lang:, title:, author:), entity filters "
         "(threat_actor:APT29, malware:, cve:, ttp:, tool:, vendor:, product:, country:, campaign:, rule:), "
-        "and sort: — all filters are executed, not just the text terms. "
+        "and sort:. Every filter is applied, not only the text terms. "
         "Supports pagination via offset for pulling large result sets."
     ),
     input_schema={
@@ -181,12 +181,12 @@ async def _search_entries(
 @_tool(
     name="search_entities",
     description=(
-        "Search across all 13 intelligence entity types — TTPs, CVEs, CWEs (weaknesses), threat "
-        "actors, malware, detection rules, tools, vendors, products, countries, mitigations, "
-        "campaigns, intel reports — plus the analyst notes stored on the instance. Returns matching entities with "
-        "type and key details. Note results use type 'note' and carry note_source ('note' for a "
-        "note on an article or a standalone one, 'entity_note' for one attached to an entity), "
-        "with a description snippet centred on the match rather than the note's opening line."
+        "Search all 13 intelligence entity types and the analyst notes stored on the instance. "
+        "The types are TTPs, CVEs, CWEs (weaknesses), threat actors, malware, detection rules, tools, "
+        "vendors, products, countries, mitigations, campaigns and intel reports. Returns matching entities "
+        "with type and key details. Note results use type 'note' and carry note_source: 'note' for a "
+        "note on an article or a standalone note, 'entity_note' for a note attached to an entity. "
+        "Their description snippet is centred on the match, not the note's opening line."
     ),
     input_schema={
         "properties": {
@@ -250,8 +250,8 @@ async def _search_unified(db: AsyncSession, user_id: uuid.UUID, query: str, limi
     name="get_search_facets",
     description=(
         "Get available search facets: feed types (feed count per type), categories "
-        "(feed count per category), and top tags (by entry usage). Useful for "
-        "understanding what's in the system before searching."
+        "(feed count per category), and top tags (by entry usage). Use it to see "
+        "what the system holds before searching."
     ),
     input_schema={"properties": {}},
 )

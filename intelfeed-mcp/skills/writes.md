@@ -1,6 +1,6 @@
 ---
 name: writes
-description: change data — notes, tags, stars, bookmarks, read state, watches, campaigns, saved searches
+description: change data (notes, tags, stars, bookmarks, read state, watches, campaigns, saved searches)
 writes: true
 tools: create_note, create_entity_note, add_tag, star_entry, bookmark_entry, mark_entry_read, watch_entity, unwatch_entity, create_campaign, add_to_campaign, create_saved_search
 ---

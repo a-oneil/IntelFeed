@@ -51,11 +51,11 @@ async def _index(obs) -> None:
 @_tool(
     name="promote_observable",
     description=(
-        "The analyst door into the observables ledger: turn a staged candidate (or any value the article "
-        "prints) into a ledger row sighted in that entry, with role and evidence. Use kind from: ipv4, ipv6, "
+        "Add an observable as an analyst. Turns a staged candidate, or any value the article prints, into a row "
+        "in the observables list with a sighting in that entry, a role and evidence. Use kind from: ipv4, ipv6, "
         "domain, url, uri_path, email, md5, sha1, sha256, ja3, ja4, cert_fingerprint, cmdline, path, registry, "
-        "scheduled_task, service_name, mutex, named_pipe, user_agent, http_header. Defanged input is normalized; "
-        "values that fail the kind's plausibility check are rejected with the reason."
+        "scheduled_task, service_name, mutex, named_pipe, user_agent, http_header. Defanged input is normalized. "
+        "A value that fails the plausibility check for its kind is rejected with the reason."
     ),
     input_schema={
         "properties": {
@@ -138,8 +138,8 @@ async def _promote_observable(
 @_tool(
     name="update_observable",
     description=(
-        "Correct a ledger row: set or change its role, label or description, or pin its confidence so decay "
-        "stops. Fields left out are untouched."
+        "Correct an observable: set or change its role, label or description, or pin its confidence so it stops "
+        "decaying. Fields left out are not changed."
     ),
     input_schema={
         "properties": {
@@ -187,9 +187,10 @@ async def _update_observable(
 @_tool(
     name="deny_observable",
     description=(
-        "Admin: tombstone a value so it is never captured, sighted or exported again (false positive, benign "
-        "infrastructure, your own domain). Works on an existing row by UUID or on any (kind, value) — denying a "
-        "value that is not in the ledger creates the tombstone so future doors refuse it. Reversible via the API."
+        "Admin: add a value to the never-capture list so it is never captured, sighted or exported again (a false "
+        "positive, benign infrastructure, or a domain that belongs to an intel profile). Works on an existing "
+        "observable by UUID or on any kind and value. Denying a value that is not in the observables list creates "
+        "a tombstone row, so no capture path can add it later. Can be reversed through the API."
     ),
     input_schema={
         "properties": {
@@ -240,10 +241,10 @@ async def _deny_observable(
 @_tool(
     name="get_entity_infrastructure",
     description=(
-        "Pivot from a threat actor, malware family, campaign or tool to its observables, in two tiers: "
-        "'claimed' (attribution edges with evidence — uses / communicates_with / controls, with trust tier) "
-        "and 'reported_alongside' (observables a reporting article that names the entity also carried; "
-        "indicator-list files and newsletters excluded). Answers 'what infrastructure does X use?'."
+        "Pivot from a threat actor, malware family, campaign or tool to its observables, in two tiers. "
+        "'claimed': attribution edges with evidence (uses, communicates_with, controls), each with a trust tier. "
+        "'reported_alongside': observables in articles that name the entity, excluding indicator-list files and "
+        "newsletters. Answers 'what infrastructure does X use?'."
     ),
     input_schema={
         "properties": {
@@ -268,10 +269,10 @@ async def _get_entity_infrastructure(
 @_tool(
     name="export_observables",
     description=(
-        "Export a filtered slice of the ledger as lines (EDL), CSV rows, or JSON — the same filters as "
-        "search_observables plus a minimum report count and an 'exclude dual-use infrastructure' switch. "
-        "Values are returned refanged (operational form). Denied rows and, by default, infra-tagged rows are "
-        "excluded."
+        "Export a filtered set of observables as lines (EDL), CSV rows or JSON. Takes the same filters as "
+        "search_observables, plus a minimum report count and a switch to include dual-use infrastructure. "
+        "Values are returned refanged (usable form). Denied rows are always excluded, and infra-tagged rows are "
+        "excluded by default."
     ),
     input_schema={
         "properties": {

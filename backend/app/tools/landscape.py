@@ -60,8 +60,8 @@ def _watch_dict(w: UserEntityWatch, entity_name: str | None) -> dict:
     name="list_watches",
     description=(
         "List the current user's entity watchlist rows with resolved display names. "
-        "Each row has mode 'watch' (priority boost), 'mute' (suppressed), or 'stack' "
-        "('I run this' — vendors/products feeding My Stack exposure scoring)."
+        "Each row has mode 'watch' (priority boost), 'mute' (hidden), or 'stack' "
+        "(the user runs this vendor or product; used for My Stack exposure scoring)."
     ),
     input_schema={
         "properties": {
@@ -93,9 +93,9 @@ async def _list_watches(db: AsyncSession, user_id: uuid.UUID, mode: str | None =
     name="watch_entity",
     description=(
         "Create or update the current user's watch on an entity (upsert on entity type + id). "
-        "mode 'watch' boosts the entity in priority scoring, 'mute' suppresses its entries, "
-        "'stack' declares 'I run this' and is only valid for vendors and products (feeds My Stack "
-        "exposure scoring). boost weights priority scoring (0-5, default 1.0)."
+        "mode 'watch' boosts the entity in priority scoring. 'mute' hides its entries. 'stack' marks "
+        "a vendor or product the user runs (vendors and products only), and is used for My Stack "
+        "exposure scoring. boost is the weight in priority scoring (0-5, default 1.0)."
     ),
     input_schema={
         "properties": {
@@ -176,7 +176,7 @@ async def _watch_entity(
     name="unwatch_entity",
     description=(
         "Remove the current user's watch/mute/stack row on an entity. "
-        "Reversible (re-add with watch_entity); no confirmation required."
+        "Can be undone by calling watch_entity again. No confirmation required."
     ),
     input_schema={
         "properties": {
@@ -217,11 +217,10 @@ async def _unwatch_entity(db: AsyncSession, user_id: uuid.UUID, entity_type: str
 @_tool(
     name="get_ransomware_disclosures",
     description=(
-        "Reverse-chronological feed of ransomware leak-site victim disclosures (Leak Watch), with "
-        "filters for group name, canonical sector slug, country (ISO code or name), posting recency, "
-        "substring search, and the user's watched victims/groups. sort is 'recent', 'group', or "
-        "'sector' (newest-first tiebreak). Returns a paginated list; empty when the ransomware "
-        "tracker has not synced yet."
+        "Ransomware leak-site victim disclosures (Leak Watch), newest first. Filters: group name, "
+        "canonical sector slug, country (ISO code or name), posting age, substring search, and the "
+        "user's watched victims and groups. sort is 'recent', 'group' or 'sector' (ties sorted newest "
+        "first). Returns a paginated list. Empty when the ransomware tracker has not synced yet."
     ),
     input_schema={
         "properties": {
@@ -242,7 +241,7 @@ async def _unwatch_entity(db: AsyncSession, user_id: uuid.UUID, entity_type: str
             },
             "watched_only": {
                 "type": "boolean",
-                "description": "Only disclosures hitting the user's watched victims/groups",
+                "description": "Only disclosures that involve the user's watched victims or groups",
             },
             "since": {"type": "integer", "description": "Only postings newer than N days"},
             "q": {"type": "string", "description": "Substring search on victim name/domain or raw group name"},
@@ -301,10 +300,10 @@ async def _get_ransomware_disclosures(
 @_tool(
     name="get_ransomware_stats",
     description=(
-        "Ransomware Landscape aggregates over a trailing window: victim totals with week-over-week "
-        "change, weekly timeseries, top groups (with WoW trend), top sectors, top countries, and the "
-        "user's watchlist exposure (watched groups/orgs/sectors vs new disclosures). All-zero when "
-        "the ransomware tracker has not synced yet."
+        "Ransomware Landscape totals for the last N days: victim totals with week-over-week change, a "
+        "weekly time series, top groups (with week-over-week trend), top sectors, top countries, and "
+        "new disclosures that involve the user's watched groups, organizations and sectors. All zero "
+        "when the ransomware tracker has not synced yet."
     ),
     input_schema={
         "properties": {
@@ -327,8 +326,8 @@ async def _get_ransomware_stats(db: AsyncSession, user_id: uuid.UUID, days: int 
 @_tool(
     name="get_ransomware_victim",
     description=(
-        "Fetch one ransomware victim organization by UUID: name/domain/aliases, sector, country, "
-        "first/last seen, whether the user watches it, the groups that listed it, and every "
+        "Fetch one ransomware victim organization by UUID: name, domain, aliases, sector, country, "
+        "first and last seen, whether the user watches it, the groups that listed it, and every "
         "leak-site disclosure."
     ),
     input_schema={
@@ -400,11 +399,11 @@ async def _get_ransomware_group_victims(
 @_tool(
     name="get_stack_exposure",
     description=(
-        "My Stack exposure board: every CVE affecting the vendors/products the user has declared "
-        "as their stack (watchlist mode='stack'), ranked by exposure lift (KEV/EPSS/weaponization "
-        "multipliers), each with a detection posture (defended / blind / no_rule) from the org's "
-        "telemetry inventory, plus per-asset CVE tallies and the urgency x posture matrix counts. "
-        "Empty if the user has no stack entities declared."
+        "My Stack exposure board: every CVE that affects the vendors and products in the user's stack "
+        "(watchlist mode='stack'). CVEs are ranked by exposure lift (KEV, EPSS and weaponization "
+        "multipliers). Each has a detection state (defended, blind or no_rule) based on the configured "
+        "telemetry sources. Also returns CVE counts per asset and counts for each urgency and detection "
+        "state pair. Empty if the user has no vendors or products in their stack."
     ),
     input_schema={"properties": {}, "required": []},
     mutating=False,
@@ -427,7 +426,7 @@ async def _get_stack_exposure(db: AsyncSession, user_id: uuid.UUID) -> dict:
     description=(
         "List security glossary terms alphabetically with optional filters: exact category (e.g. a "
         "NIST CSF function like 'detect'), case-insensitive name substring search, and built-in vs "
-        "user-created (is_system). Each term carries maturity, descriptions, technologies, and "
+        "user-created (is_system). Each term has a maturity, descriptions, technologies, and "
         "search-term aliases."
     ),
     input_schema={
@@ -472,8 +471,8 @@ async def _list_glossary_terms(
 @_tool(
     name="create_glossary_term",
     description=(
-        "Create a user glossary term. Requires name, category (free-form; NIST CSF functions govern/"
-        "identify/protect/detect/respond/recover get special coloring), and description. Optional: "
+        "Create a user glossary term. Requires name, category (free text; the NIST CSF functions govern, "
+        "identify, protect, detect, respond and recover get their own colors), and description. Optional: "
         "maturity ('emerging', 'trending', or 'mature'), long_description, technologies (name + "
         "optional url), and search_terms aliases used for detection. Fails if a term with the same "
         "name already exists."
@@ -560,7 +559,7 @@ async def _create_glossary_term(
     name="delete_glossary_term",
     description=(
         "Delete a user-created glossary term by UUID. Built-in system terms cannot be deleted. "
-        "Single-row removal; no confirmation required."
+        "Deletes one row. No confirmation required."
     ),
     input_schema={
         "properties": {
@@ -591,7 +590,7 @@ async def _delete_glossary_term(db: AsyncSession, user_id: uuid.UUID, term_id: s
     description=(
         "Detect which glossary terms appear in an entry's text (word-boundary matching over each "
         "term's name and search-term aliases). Returns matched terms with per-term match counts, "
-        "highest first. Note: takes an entry UUID, not raw text — that is what the API supports."
+        "highest first. Takes an entry UUID, not raw text, because the API only accepts an entry."
     ),
     input_schema={
         "properties": {

@@ -340,7 +340,7 @@ async def preview_call(db: AsyncSession, tool_name: str, args: dict, user_id: uu
     if not isinstance(first, dict):
         return None
     if first.get("error"):
-        return f"Can't be done as proposed: {first['error']}"
+        return f"Cannot be run as proposed: {first['error']}"
     skip = {CONFIRMATION_TOKEN_PARAM, "status", "message", "warning"}
     facts = [
         f"{k.replace('_', ' ')}: {v}"
@@ -505,7 +505,7 @@ class ToolGate:
                 except json.JSONDecodeError:
                     return json.dumps({"error": "args must be a JSON object"})
             if inner in (FIND_TOOLS, CALL_TOOL):
-                return json.dumps({"error": f"call {inner} directly"})
+                return json.dumps({"error": f"Call {inner} directly, not through call_tool."})
             return await self._run(inner, inner_args if isinstance(inner_args, dict) else {}, self.reachable_names)
         return await self._run(name, args, self.offered)
 

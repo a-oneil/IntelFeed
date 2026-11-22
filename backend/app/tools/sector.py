@@ -25,9 +25,9 @@ _SECTOR_REF = {
 @_tool(
     name="list_sectors",
     description=(
-        "List the victim-sector vocabulary (21 closed, seeded industries) with per-sector counts: linked "
-        "articles, actors and malware asserted to target it, and leak-site victims in the last 90 days. "
-        "Use the slug from here with get_sector / who_targets_sector / sector_victims / pivot_entity."
+        "List the victim sectors (a fixed, seeded list of 21 industries) with counts per sector: linked articles, "
+        "actors and malware with a claim that they target it, and leak-site victims in the last 90 days. Pass a "
+        "slug from this list to get_sector, who_targets_sector, sector_victims or pivot_entity."
     ),
     input_schema={
         "properties": {
@@ -71,9 +71,9 @@ async def _list_sectors(
 @_tool(
     name="get_sector",
     description=(
-        "Get a sector's victimology profile: description and aliases, who targets it (reported from articles vs "
-        "asserted claims), campaigns scoped to it, leak-site victim totals and top ransomware groups, the "
-        "country cross-tab, the intel profiles that include it, and recent articles."
+        "Get a sector's victimology profile: description and aliases, who targets it (found in articles, and "
+        "explicit targets-sector claims), campaigns scoped to it, leak-site victim totals and top ransomware "
+        "groups, victims by country, the intel profiles that include it, and recent articles."
     ),
     input_schema={
         "properties": {
@@ -98,9 +98,9 @@ async def _get_sector(db: AsyncSession, user_id: uuid.UUID, sector: str, window_
 @_tool(
     name="who_targets_sector",
     description=(
-        "Rank the threat actors and malware families targeting a sector. 'reported' rows are ranked by how many "
-        "articles describe both the actor/family and the sector being hit; 'asserted' rows carry an explicit "
-        "targets-sector claim with its source (rollup, enrichment, seed, analyst) and evidence count."
+        "Rank the threat actors and malware families that target a sector. 'reported' rows are ranked by how many "
+        "articles describe both the actor or family and an attack on the sector. 'asserted' rows have an explicit "
+        "targets-sector claim, with its source (rollup, enrichment, seed, analyst) and evidence count."
     ),
     input_schema={
         "properties": {
@@ -125,10 +125,10 @@ async def _who_targets_sector(db: AsyncSession, user_id: uuid.UUID, sector: str,
 @_tool(
     name="set_target_sector",
     description=(
-        "Assert or withdraw that a threat actor or malware family targets a sector (an analyst claim on the "
-        "target-sector junction; the profile's sector chips are rebuilt from it). action='add' upgrades an "
-        "existing rolled-up or enriched claim to the analyst's; action='remove' withdraws the claim — the "
-        "nightly rollup re-asserts it if the entity's own articles still carry the evidence."
+        "Add or remove an analyst claim that a threat actor or malware family targets a sector. The claim is "
+        "stored on the target-sector junction, and the profile's sector chips are rebuilt from it. action='add' "
+        "turns an existing rollup or enrichment claim into an analyst claim. action='remove' removes the claim. "
+        "The nightly rollup adds it again if the entity's own articles still contain the evidence."
     ),
     input_schema={
         "properties": {
@@ -197,9 +197,9 @@ async def _set_target_sector(
 @_tool(
     name="sector_victims",
     description=(
-        "Leak-site ransomware victims in a sector: totals (all time and in the window), a 12-month monthly "
-        "series, the top ransomware groups posting victims in that sector, the victim-country breakdown and "
-        "the most recent disclosures."
+        "Leak-site ransomware victims in a sector: totals (all time and in the window), monthly counts for 12 "
+        "months, the ransomware groups posting the most victims in that sector, victims by country and the "
+        "most recent disclosures."
     ),
     input_schema={
         "properties": {

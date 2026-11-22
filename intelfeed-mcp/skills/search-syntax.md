@@ -16,7 +16,7 @@ Entity filters (article must be linked to it):
 - country:"North Korea" (.region:Asia) · vendor:Cisco · product:Exchange
 - campaign:"Volt Typhoon" · rule:backdoor (.type:sigma) · pir:"ransomware" · observable:evil.com (.kind:sha256)
 - ransomware_victim:Acme (.group:lockbit .sector:healthcare)
-- sector:healthcare / sector:banks (name, slug or alias — articles the analysis judged to describe the industry as *targeted*; also .slug:financial-services). threat_actor.sector: / malware.sector: read the entity's asserted target-sector claims instead.
+- sector:healthcare / sector:banks (name, slug or alias; matches articles the analysis judged to describe the industry as *targeted*; also .slug:financial-services). threat_actor.sector: / malware.sector: read the target-sector claims recorded on the entity instead.
 Sort (sort argument or sort: in the query): relevance (default), newest, oldest, radar (IntelFeed's priority score).
 
 Examples:
@@ -25,4 +25,4 @@ Examples:
 - (phishing OR "device code") NOT type:youtube
 - ransomware AND sector:healthcare date:>2026-09-01
 
-Tips: dates are YYYY-MM-DD. Prefer an entity filter (actor:, malware:) over a bare name: it matches aliases. If a filter returns nothing, retry with plain words.
+Tips: dates are YYYY-MM-DD. Prefer an entity filter (threat_actor:, malware:) over a bare name: it matches aliases. If a filter returns nothing, retry with plain words.

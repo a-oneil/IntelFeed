@@ -31,8 +31,8 @@ def _entry_to_dict(entry: Entry) -> dict:
 @_tool(
     name="extract_ttps",
     description=(
-        "Extract MITRE ATT&CK techniques (TTPs) from an entry. Always runs regex matching; use_ai adds the "
-        "ttp_mapping AI task (its result is cached per entry — reruns reuse the current AIResult). Stores links."
+        "Extract MITRE ATT&CK techniques (TTPs) from an entry. Always runs regex matching. use_ai also runs the "
+        "ttp_mapping AI task, whose result is cached per entry: a rerun reuses the current AIResult. Stores links."
     ),
     input_schema={
         "properties": {
@@ -106,8 +106,8 @@ async def _extract_cves(db: AsyncSession, user_id: uuid.UUID, entry_id: str) -> 
 @_tool(
     name="extract_threat_actors",
     description=(
-        "Identify threat actors in an entry via the consolidated entry_analysis AI task (may return the cached "
-        "ingest-time analysis instead of a fresh AI call). Creates or links threat actor entities."
+        "Identify threat actors in an entry with the entry_analysis AI task. May return the cached analysis from "
+        "ingest instead of making a new AI call. Creates or links threat actor entities."
     ),
     input_schema={
         "properties": {"entry_id": {"type": "string", "description": "Entry UUID"}},
@@ -140,8 +140,8 @@ async def _extract_threat_actors(db: AsyncSession, user_id: uuid.UUID, entry_id:
 @_tool(
     name="extract_malware",
     description=(
-        "Identify malware families in an entry via the consolidated entry_analysis AI task (may return the cached "
-        "ingest-time analysis instead of a fresh AI call). Creates or links malware entities."
+        "Identify malware families in an entry with the entry_analysis AI task. May return the cached analysis "
+        "from ingest instead of making a new AI call. Creates or links malware entities."
     ),
     input_schema={
         "properties": {"entry_id": {"type": "string", "description": "Entry UUID"}},
@@ -175,8 +175,8 @@ async def _extract_malware(db: AsyncSession, user_id: uuid.UUID, entry_id: str) 
     name="run_ai_task",
     description=(
         "Run a registered AI task against an entry (e.g. article_summary, threat_assessment, detection_rules, "
-        "entry_analysis). Returns the current cached AIResult when one exists for this entry+task; pass force=true "
-        "to re-run and replace it. The 'cached' field reports which happened."
+        "entry_analysis). Returns the current cached AIResult when one exists for this entry and task. Pass "
+        "force=true to re-run and replace it. The 'cached' field says which happened."
     ),
     input_schema={
         "properties": {

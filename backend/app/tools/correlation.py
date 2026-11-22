@@ -16,9 +16,9 @@ from app.tools import _tool
 @_tool(
     name="pivot_entity",
     description=(
-        "Find all entities related to a given entity via co-occurrence in entries. One-hop pivot. Related lists "
-        "carry strength tiers (weak/moderate/strong) and are ranked, tier-filterable, window-filterable and "
-        "paginated; related_counts reports pre-slice totals."
+        "Find the entities related to a given entity because they appear in the same entries (one hop). Each "
+        "related entity has a strength tier (weak, moderate or strong). Lists are ranked and paginated, and can be "
+        "filtered by tier and by time window. related_counts gives the totals before pagination."
     ),
     input_schema={
         "properties": {
@@ -31,7 +31,10 @@ from app.tools import _tool
             "min_tier": {
                 "type": "string",
                 "enum": ["weak", "moderate", "strong"],
-                "description": "Minimum strength tier; omitted uses the system default (confirmed rels always pass)",
+                "description": (
+                    "Minimum strength tier. If omitted, the system default applies. "
+                    "Confirmed relationships are always included."
+                ),
             },
         },
         "required": ["entity_type", "entity_id"],
@@ -65,9 +68,9 @@ async def _pivot_entity(
 @_tool(
     name="get_entity_graph",
     description=(
-        "Build a relationship graph centered on an entity. Claims-only: edges are typed relationship records "
-        "(verb, direction, confidence, provenance) at confirmed/reported confidence — pure co-occurrence pairs "
-        "are excluded; co-occurrence data only enriches edges with proximity and evidence articles."
+        "Build a relationship graph centered on an entity. Edges are typed relationship records (verb, direction, "
+        "confidence, provenance) at confirmed or reported confidence. Entities that only appear in the same "
+        "articles are not connected. Co-occurrence data only adds proximity and evidence articles to edges."
     ),
     input_schema={
         "properties": {
@@ -96,7 +99,7 @@ async def _get_entity_graph(
 
 @_tool(
     name="get_entity_timeline",
-    description="Get chronological timeline of when an entity appeared in articles.",
+    description="Get a chronological timeline of the articles an entity appeared in.",
     input_schema={
         "properties": {
             "entity_type": {"type": "string", "enum": sorted(entity_types.CORRELATABLE)},
@@ -115,8 +118,8 @@ async def _get_entity_timeline(db: AsyncSession, user_id: uuid.UUID, entity_type
 @_tool(
     name="check_detection_gaps",
     description=(
-        "ATT&CK coverage analysis: observed TTPs vs non-draft detection rules, with per-tactic summary and the "
-        "list of uncovered techniques. TTP-only — CVEs are not part of this analysis."
+        "ATT&CK coverage analysis: observed TTPs compared with non-draft detection rules, with a summary per "
+        "tactic and the list of uncovered techniques. Covers TTPs only, not CVEs."
     ),
     input_schema={"properties": {}},
 )
@@ -129,9 +132,10 @@ async def _check_detection_gaps(db: AsyncSession, user_id: uuid.UUID) -> dict:
 @_tool(
     name="check_requirement_match",
     description=(
-        "Check an entry against all active intelligence requirements using the real matching engine (linked-entity "
-        "hits, then title/body keyword hits, gated by each requirement's min_relevance and feed filter). Read-only: "
-        "persists nothing; also returns matches the automated pipeline already persisted for this entry."
+        "Check an entry against all active intelligence requirements with the matching code the pipeline uses: "
+        "linked-entity matches first, then keyword matches in the title and body, filtered by each requirement's "
+        "min_relevance and feed filter. Read-only: stores nothing. Also returns the matches the pipeline already "
+        "stored for this entry."
     ),
     input_schema={
         "properties": {"entry_id": {"type": "string", "description": "Entry UUID to check"}},
@@ -218,8 +222,8 @@ async def _check_requirement_match(db: AsyncSession, user_id: uuid.UUID, entry_i
 @_tool(
     name="check_telemetry_feasibility",
     description=(
-        "Check if detection rules are feasible given configured telemetry sources. Identifies what log sources "
-        "are needed vs available."
+        "Check whether detection rules can run on the configured telemetry sources. Lists the log sources a rule "
+        "needs and which of them are available."
     ),
     input_schema={
         "properties": {
@@ -270,7 +274,7 @@ async def _check_telemetry_feasibility(db: AsyncSession, user_id: uuid.UUID, rul
 
 @_tool(
     name="get_temporal_clusters",
-    description="Find entries sharing entities within time windows — useful for detecting emerging campaigns.",
+    description="Find entries that share entities within a time window. Useful for spotting emerging campaigns.",
     input_schema={
         "properties": {
             "days": {"type": "integer", "default": 14, "description": "Lookback window in days"},
@@ -292,7 +296,7 @@ async def _get_temporal_clusters(
 
 @_tool(
     name="get_entry_graph",
-    description="Get relationship graph for all entities linked to a single entry.",
+    description="Get the relationship graph for all entities linked to one entry.",
     input_schema={
         "properties": {
             "entry_id": {"type": "string", "description": "Entry UUID"},

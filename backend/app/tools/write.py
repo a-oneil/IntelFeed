@@ -107,9 +107,9 @@ def _merge_aliases(entity_type: str, entity, name: str, aliases: list[str] | Non
     name="create_threat_actor",
     description=(
         "Create a new threat actor entity. Runs the entity resolver first: if the name or an alias "
-        "matches an existing actor, that entity is returned (created: false) with new aliases folded in; "
-        "if the creation gates reject the name (tombstone, dictionary word, etc.) the result is "
-        "blocked: true with a reason instead of a new entity."
+        "matches an existing actor, that entity is returned (created: false) and the new aliases are added "
+        "to it. If the creation gates reject the name (tombstone, dictionary word, etc.), the result is "
+        "blocked: true with a reason, and no entity is created."
     ),
     input_schema={
         "properties": {
@@ -170,9 +170,9 @@ async def _create_threat_actor(
     name="create_malware",
     description=(
         "Create a new malware family entity. Runs the entity resolver first: if the name or an alias "
-        "matches an existing family, that entity is returned (created: false) with new aliases folded in; "
-        "if the creation gates reject the name the result is blocked: true with a reason. "
-        "malware_type is coerced onto the controlled vocabulary (raw value kept in metadata)."
+        "matches an existing family, that entity is returned (created: false) and the new aliases are added "
+        "to it. If the creation gates reject the name, the result is blocked: true with a reason. "
+        "malware_type is mapped onto the controlled vocabulary. The raw value is kept in metadata."
     ),
     input_schema={
         "properties": {
@@ -235,9 +235,9 @@ async def _create_malware(
 @_tool(
     name="create_detection_rule",
     description=(
-        "Save a detection rule to the library. The rule is stored as a DRAFT (is_draft=true) — an "
+        "Save a detection rule to the library. The rule is stored as a draft (is_draft=true). An "
         "analyst promotes it from the Detection workbench. Optional provenance: tags, reference URLs, "
-        "and source entry UUIDs the rule was derived from."
+        "and the UUIDs of the source entries the rule was derived from."
     ),
     input_schema={
         "properties": {
@@ -366,9 +366,9 @@ async def _create_campaign(
     description=(
         "Subscribe to a new feed. feed_type covers every registered adapter (rss, atom, youtube, "
         "podcast, reddit, github_releases, github_advisories, github_repo, nvd, mastodon, web_scraper, "
-        "telegram, bluesky — for telegram prefer add_telegram_feed). Rejects duplicate URLs with a "
+        "telegram, bluesky). For telegram, prefer add_telegram_feed. Rejects duplicate URLs with a "
         "structured error and queues an initial fetch via Celery. Extended adapter types usually need "
-        "an adapter_config (see the adapter's expected keys). If a named category does not exist the "
+        "an adapter_config (see the adapter's expected keys). If the named category does not exist, the "
         "feed is still created and a warning is returned."
     ),
     input_schema={
@@ -491,9 +491,9 @@ async def _create_feed(
         "Subscribe to a Telegram channel feed. Requires server-side Telegram setup "
         "(scripts/telegram/telegram_login.py). The channel must be public OR the IntelFeed account "
         "must already be a member. Accepts @handle, t.me/https://t.me URLs (including /s/ preview "
-        "URLs), or a numeric channel id; invite links (+hash / joinchat) are rejected — join first, "
-        "then subscribe by handle or id. Queues an initial fetch on creation. Optionally "
-        "auto-attribute every message to a threat actor or campaign — use this for ransomware leak "
+        "URLs), or a numeric channel id. Invite links (+hash / joinchat) are rejected: join the channel "
+        "first, then subscribe by handle or id. Queues an initial fetch on creation. Can optionally "
+        "attribute every message to a threat actor or campaign. Use this for ransomware leak "
         "channels, hacktivist channels, and broker channels that are themselves the actor."
     ),
     input_schema={
@@ -529,15 +529,15 @@ async def _create_feed(
             "fetch_interval_minutes": {
                 "type": "integer",
                 "default": 30,
-                "description": "Polling cadence (lower = higher flood-wait risk)",
+                "description": "Minutes between polls (a lower value raises the risk of Telegram flood-wait limits)",
             },
             "threat_actor_id": {
                 "type": "string",
-                "description": "Optional UUID — auto-attribute every message to this actor",
+                "description": "Optional UUID. Every message is attributed to this actor",
             },
             "campaign_id": {
                 "type": "string",
-                "description": "Optional UUID — auto-link every message to this campaign",
+                "description": "Optional UUID. Every message is linked to this campaign",
             },
             "session_name": {
                 "type": "string",
@@ -586,7 +586,7 @@ async def _add_telegram_feed(
     if raw.startswith("+") or raw.lower().startswith("joinchat"):
         return {
             "error": (
-                "invite links are not supported — join the channel with the IntelFeed Telegram "
+                "invite links are not supported. Join the channel with the IntelFeed Telegram "
                 "account first, then subscribe using the channel's @handle or numeric id"
             )
         }
@@ -769,7 +769,7 @@ async def _create_entity_note(
             "entry_id": {"type": "string", "description": "Entry UUID"},
             "tag_name": {
                 "type": "string",
-                "description": "Tag name (creates if doesn't exist)",
+                "description": "Tag name (created if it does not exist)",
             },
         },
         "required": ["entry_id", "tag_name"],
@@ -802,10 +802,10 @@ async def _add_tag(db: AsyncSession, user_id: uuid.UUID, entry_id: str, tag_name
 @_tool(
     name="add_to_campaign",
     description=(
-        "Link an entry or entity to a campaign. Re-linking an already-linked entry/entity returns "
-        "already_linked instead of an error. Note: the campaign UI and reports resolve names only for "
-        "threat_actor, malware, cve, ttp and ransomware_victim links — other entity types are stored "
-        "but render as bare IDs in campaign views."
+        "Link an entry or entity to a campaign. Linking an entry or entity that is already linked returns "
+        "already_linked instead of an error. The campaign UI and reports show names only for "
+        "threat_actor, malware, cve, ttp and ransomware_victim links. Other entity types are stored "
+        "but show as bare IDs in campaign views."
     ),
     input_schema={
         "properties": {
@@ -891,12 +891,12 @@ async def _add_to_campaign(
 @_tool(
     name="link_entities",
     description=(
-        "Assert an analyst-grade relationship between two intelligence entities. The (source, verb, "
-        "target) triple is validated against the semantic relationship matrix and auto-flipped into "
-        "its canonical orientation (e.g. 'cve exploited-by actor' is stored as 'actor exploits cve'). "
+        "Create an analyst relationship between two intelligence entities. The (source, verb, "
+        "target) triple is checked against the relationship matrix and flipped automatically into "
+        "its canonical direction (e.g. 'cve exploited-by actor' is stored as 'actor exploits cve'). "
         f"Valid verbs (per-pair restrictions apply): {', '.join(_RELATIONSHIP_VERBS)}. Written with "
-        "source=analyst_created; re-asserting an existing triple promotes it to analyst_created and "
-        "merges confidence/description/evidence instead of erroring."
+        "source=analyst_created. If the triple already exists, it is promoted to analyst_created and "
+        "its confidence, description and evidence are merged instead of returning an error."
     ),
     input_schema={
         "properties": {
@@ -1098,7 +1098,7 @@ async def _create_automation_rule(
     name="create_intel_report",
     description=(
         "Create a draft intelligence report from a template with linked entities and entries. "
-        f"Templates: {', '.join(_REPORT_TEMPLATE_TYPES)}. TLP 2.0 markings; the legacy TLP:WHITE "
+        f"Templates: {', '.join(_REPORT_TEMPLATE_TYPES)}. Uses TLP 2.0 markings. The legacy TLP:WHITE "
         "is accepted and normalized to TLP:CLEAR."
     ),
     input_schema={
@@ -1319,10 +1319,10 @@ async def _remove_entity_aliases(
 @_tool(
     name="merge_threat_actors",
     description=(
-        "Merge a duplicate threat actor into another. Moves all entries and country links from source → target, "
-        "unions aliases (source.name + source.aliases get added to target.aliases), optionally updates the "
+        "Merge a duplicate threat actor into another. Moves all entries and country links from the source to the "
+        "target, adds source.name and source.aliases to target.aliases, optionally updates the "
         "description, then deletes the source actor. Set mode='shadow' to log what would happen without making "
-        "changes. ALWAYS supply 'reasoning' so the maintenance log can be audited."
+        "changes. Always supply 'reasoning' so the maintenance log can be audited."
     ),
     input_schema={
         "properties": {
@@ -1343,7 +1343,7 @@ async def _remove_entity_aliases(
             },
             "reasoning": {
                 "type": "string",
-                "description": "Why this merge — recorded in the maintenance log.",
+                "description": "Why the actors are being merged. Recorded in the maintenance log.",
             },
         },
         "required": ["target_id", "source_id"],
@@ -1376,16 +1376,16 @@ async def _merge_threat_actors(
 @_tool(
     name="reclassify_entity",
     description=(
-        "Move an entity from one type to another (cross-type) when it was filed under the wrong type — e.g. a "
-        "malware that's actually a tool, or a product mistakenly stored as a vendor. "
+        "Move an entity from one type to another when it was filed under the wrong type. For example, a "
+        "malware family that is a tool, or a product stored as a vendor. "
         "Supports " + " / ".join(sorted(entity_types.RECLASSIFIABLE)) + ". If target_id is given, the "
-        "source is merged into that existing entity in the target type; if omitted, a new entity is created in "
+        "source is merged into that existing entity in the target type. If it is omitted, a new entity is created in "
         "target_type by copying name/aliases/description, unless target_type already has an entity of the same "
         "name, which it is merged into. Name the source by source_id or source_name (and the target by "
         "target_id or target_name). Type-specific fields (motivation, malware_type, "
-        "vendor_id, tool_type, etc.) are NOT carried across — fix them after with update_entity_profile. "
+        "vendor_id, tool_type, etc.) are not copied. Set them afterwards with update_entity_profile. "
         "The source's pending Review proposals are closed. "
-        "Use mode='shadow' to log without acting; always include reasoning."
+        "Use mode='shadow' to log without making changes. Always include reasoning."
     ),
     input_schema={
         "properties": {
@@ -1474,8 +1474,8 @@ async def _reclassify_entity(
 @_tool(
     name="merge_vendors",
     description=(
-        "Merge a duplicate vendor into another. Same semantics as merge_threat_actors. Moves all entries, unions "
-        "aliases, optionally rewrites description, then deletes the source. Always include reasoning."
+        "Merge a duplicate vendor into another. Works like merge_threat_actors: moves all entries, combines "
+        "aliases, optionally replaces the description, then deletes the source. Always include reasoning."
     ),
     input_schema={
         "properties": {
@@ -1524,7 +1524,7 @@ async def _merge_vendors(
 
 @_tool(
     name="merge_products",
-    description="Merge a duplicate product into another. Same semantics as merge_vendors.",
+    description="Merge a duplicate product into another. Works like merge_vendors.",
     input_schema={
         "properties": {
             "target_id": {"type": "string"},
@@ -1569,7 +1569,7 @@ async def _merge_products(
 
 @_tool(
     name="merge_tools",
-    description="Merge a duplicate tool into another. Same semantics as merge_vendors.",
+    description="Merge a duplicate tool into another. Works like merge_vendors.",
     input_schema={
         "properties": {
             "target_id": {"type": "string"},
@@ -1615,8 +1615,8 @@ async def _merge_tools(
 @_tool(
     name="merge_malware",
     description=(
-        "Merge a duplicate malware family into another. Same semantics as merge_threat_actors but for malware. "
-        "Use mode='shadow' for dry-run; always include 'reasoning'."
+        "Merge a duplicate malware family into another. Works like merge_threat_actors. "
+        "Use mode='shadow' for a dry run. Always include 'reasoning'."
     ),
     input_schema={
         "properties": {
@@ -1690,8 +1690,8 @@ _NAME_GUARDED_TYPES = frozenset({"threat_actor", "malware", "country", "tool", "
         "description/tool_type/malpedia_url/github_url), vendor (name/aliases/description/website/"
         "vendor_type), product (name/aliases/description/product_type/website/vendor_id), campaign "
         "(name/description/status/"
-        "tags/tlp_marking). Renames are checked for name clashes; removing aliases unlinks entries "
-        "matched only via those aliases; new aliases queue a retro-scan of existing entries; the "
+        "tags/tlp_marking). Renames are checked for name clashes. Removing aliases unlinks entries "
+        "matched only through those aliases. New aliases queue a scan of existing entries. The "
         "search-index document is refreshed."
     ),
     input_schema={
@@ -1949,10 +1949,10 @@ async def _test_automation_rule(db: AsyncSession, user_id: uuid.UUID, rule_id: s
     name="run_automation_rule",
     description=(
         "Execute an automation rule immediately, once per matching recent entry. Trigger-level "
-        "filters (keyword pattern, CVE severity) and rule conditions are applied first; only "
-        "entries whose actions actually ran count as matched. WARNING: this executes actions "
-        "PER ENTRY — never use it to test batch/briefing rules (it will flood one briefing per "
-        "entry); use test_automation_rule (dry-run) or the rule's schedule instead."
+        "filters (keyword pattern, CVE severity) and rule conditions are applied first. Only "
+        "entries whose actions ran count as matched. WARNING: this executes the actions once "
+        "PER ENTRY. Never use it to test batch or briefing rules: it creates one briefing per "
+        "entry. Use test_automation_rule (dry run) or the rule's schedule instead."
     ),
     input_schema={
         "properties": {
@@ -2026,7 +2026,7 @@ async def _run_automation_rule(db: AsyncSession, user_id: uuid.UUID, rule_id: st
 
 @_tool(
     name="publish_report",
-    description="Publish an intelligence report — saves current version and sets status to published.",
+    description="Publish an intelligence report. Saves the current version and sets the status to published.",
     input_schema={
         "properties": {
             "report_id": {"type": "string", "description": "Report UUID"},
@@ -2063,9 +2063,9 @@ async def _publish_report(db: AsyncSession, user_id: uuid.UUID, report_id: str) 
 @_tool(
     name="generate_full_report",
     description=(
-        "Generate an AI-powered intelligence report from source entries (created as a draft, then "
-        f"AI generation is queued via Celery). Templates: {', '.join(_REPORT_TEMPLATE_TYPES)}. "
-        "TLP 2.0 markings; legacy TLP:WHITE is normalized to TLP:CLEAR."
+        "Generate an intelligence report with AI from source entries. The report is created as a draft, "
+        f"then AI generation is queued via Celery. Templates: {', '.join(_REPORT_TEMPLATE_TYPES)}. "
+        "Uses TLP 2.0 markings. The legacy TLP:WHITE is normalized to TLP:CLEAR."
     ),
     input_schema={
         "properties": {
@@ -2151,9 +2151,9 @@ async def _generate_full_report(
 @_tool(
     name="generate_campaign_report",
     description=(
-        "Generate an intelligence report from a campaign's linked entries and entities (draft + "
-        f"queued AI generation). Templates: {', '.join(_REPORT_TEMPLATE_TYPES)} (default "
-        "campaign_tracker). TLP 2.0 markings; legacy TLP:WHITE is normalized to TLP:CLEAR."
+        "Generate an intelligence report from a campaign's linked entries and entities. The report is "
+        f"created as a draft and AI generation is queued. Templates: {', '.join(_REPORT_TEMPLATE_TYPES)} (default "
+        "campaign_tracker). Uses TLP 2.0 markings. The legacy TLP:WHITE is normalized to TLP:CLEAR."
     ),
     input_schema={
         "properties": {

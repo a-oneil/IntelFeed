@@ -50,12 +50,13 @@ def _clamp(value: int, low: int, high: int) -> int:
 @_tool(
     name="get_threat_board",
     description=(
-        "The Threats board: actors/malware and exploited CVEs ranked over a recency window by how many "
-        "distinct stories carried them (not raw article or outlet counts). Each row leads with its lead "
-        "headline, the cached AI brief when present, source hosts, story/echo counts, the analyst's handled "
-        "state, prior-rule inventory and, for CVEs, exposure lift (KEV/EPSS/weaponized) and detection "
-        "posture. Rows with is_story are story threads that resolved to no entity. Use it for 'what is "
-        "happening right now' and to choose what to research next."
+        "The Threats board: actors, malware and exploited CVEs over a recency window, ranked by how many "
+        "distinct stories mentioned them (not by raw article or outlet counts). Each row has its lead "
+        "headline, the cached AI brief when present, source hosts, story and echo counts, the analyst's "
+        "handled state, and the count of existing library rules (prior_rules). CVE rows also rank by an "
+        "exposure multiplier (KEV, EPSS, weaponized) and carry their detection status (posture). Rows "
+        "with is_story are story threads not linked to any entity. Use it for 'what is happening right "
+        "now' and to choose what to research next."
     ),
     input_schema={
         "properties": {
@@ -137,8 +138,8 @@ async def _get_intel_profile(db: AsyncSession, user_id: uuid.UUID, profile_id: s
 @_tool(
     name="get_profile_threat_surface",
     description=(
-        "The threat surface for one intel profile: actors and malware active against its regions x "
-        "verticals, each with why-matched evidence (which region/sector, how many articles)."
+        "The threats to one intel profile: actors and malware active against its regions and "
+        "verticals. Each has the evidence for the match (which region or sector, how many articles)."
     ),
     input_schema={
         "properties": {
@@ -203,7 +204,7 @@ async def _list_tags(db: AsyncSession, user_id: uuid.UUID) -> dict:
     name="get_entity_whats_new",
     description=(
         "Latest developments for one entity: recent novelty and severity signals (first mention, new "
-        "technique, new victim sector, exploitation news...) on articles linked to it. scoped=true keeps "
+        "technique, new victim sector, exploitation news, ...) on articles linked to it. scoped=true keeps "
         "only signals whose subject is this entity, as the profile page does."
     ),
     input_schema={
