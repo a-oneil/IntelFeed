@@ -63,7 +63,7 @@ export default function AttackHeatmap({ config }: Props) {
                     key={t.technique_id}
                     className={styles.heatmapCell}
                     style={{ backgroundColor: `rgb(${r},${g},${b})`, cursor: "pointer" }}
-                    title={`${t.technique_id} ${t.name}: ${t.count} articles — click to view`}
+                    title={`${t.technique_id} ${t.name}: ${t.count} articles. Click to view.`}
                     onClick={() => navigate(`/workbench/ttp/${t.technique_id}`)}
                   >
                     <span className={styles.heatmapCellId}>{t.technique_id}</span>

@@ -352,7 +352,7 @@ export const ConditionNode = memo(function ConditionNode({
         {conditionType === "has_observable" && (
           <div className={styles.fieldGroup}>
             <span className={styles.hint}>
-              Entry carries an observable a reporting door captured (blocklist feeds excluded)
+              The entry has an observable captured by AI analysis, the article&apos;s IOC table or analyst promotion. Blocklist feeds are excluded.
             </span>
             <label className={styles.fieldLabel}>Kinds (comma-separated, blank = any)</label>
             <input

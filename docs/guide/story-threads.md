@@ -11,7 +11,7 @@ reachable Ollama server. See [Check that threading is on](#check-that-threading-
 The same story often arrives many times: the first report, a follow-up with a
 new indicator, then a dozen outlets repeating the first one. A **story
 thread** holds all of that together: the story, its articles, and a short
-**spine** that lists what changed in each wave of coverage.
+**timeline** that lists what changed in each update.
 
 ## Check that threading is on
 
@@ -26,14 +26,14 @@ appear over the first few runs, not all at once. Setup details and tuning are
 in the developer page [Story Threads](../story-threads.md).
 
 Threading runs on a timer and can be up to about half an hour behind. A story
-that broke a few minutes ago may show as separate articles first, then fold
-into a thread.
+reported a few minutes ago may show as separate articles first, then be
+grouped into a thread.
 
 ## Where you'll see one
 
 - **The Priority Queue.** A thread is one row in place of its articles. It
   ranks by the score of its best *unread* article, in the same highest-first
-  list as single articles. Once you've read the whole thread, it leaves the
+  list as single articles. Once you have read the whole thread, it leaves the
   queue.
 - **The reader.** Open a thread row and the reader shows the thread (see
   below).
@@ -44,7 +44,7 @@ into a thread.
 - **More like this.** Similar articles in the reader come from the same
   matching, or from shared keywords for articles not yet processed.
 - **Briefings and scoring.** Daily briefings count each story once, so eight
-  outlets covering one zero-day read as one development. An article folded in
+  outlets covering one zero-day count as one development. An article grouped
   as a repeat is scored as one too (the *feed echo* signal in
   [Priority Queue and watching](priority-queue.md)).
 
@@ -56,28 +56,29 @@ opens it directly, so you can bookmark it or paste it into a note.
 **The header** shows the date range, the number of outlets, which outlet
 reported it **first**, and the **yield**: how many techniques, CVEs and
 detection rules came out of the thread's articles, and how many repeats were
-folded in. Key entities are listed underneath and link to their profiles.
+grouped. Key entities are listed underneath and link to their profiles.
 
-**The spine** is the main part. It has one line per *wave* of coverage, not
-one per article. Each line has a tag:
+**The timeline** is the main part. It has one line per update to the story,
+not one per article. Each line has a tag:
 
 | Tag | Meaning |
 | --- | --- |
 | **First disclosure** | The first article on the story |
-| **New tradecraft** | A technique, tool or payload not reported earlier in the thread. Only an AI-written spine uses this tag |
+| **New technique** | A technique, tool or payload not reported earlier in the thread. Only an AI-written timeline uses this tag |
 | **Peak coverage** | The day with the most coverage |
 | **Update** | A later development |
 
-Repeats are not listed on the spine. Each wave says how many it folded in.
+Repeats are not listed on the timeline. Each line says how many repeats it
+groups.
 
-You may see **"Spine grouped by day — not yet written."** Every thread starts
-with a simple spine that groups articles by day and uses the top-scoring
-article as each day's headline. If an AI provider is set up, a nightly pass
-replaces it with a written title, a one-line summary and one line per wave.
-The simple spine is still accurate, just shorter.
+You may see **"Timeline grouped by day. Summary not written yet."** Every
+thread starts with a simple timeline that groups articles by day and uses the
+top-scoring article as each day's headline. If an AI provider is set up, a
+nightly pass replaces it with a written title, a one-line summary and one line
+per update. The simple timeline is accurate but shorter.
 
 **Coverage** lists the thread's articles. The one that reported first is
-tagged **first**. Repeats are tucked behind "*N* re-reports folded".
+tagged **first**. Repeats are collapsed under "*N* re-reports grouped".
 
 **Nearest threads**, at the bottom, are similar stories. They open in the same
 pane.
@@ -92,18 +93,18 @@ Opening the thread resets the count.
 
 ## Why an article isn't in a thread
 
-- It hasn't been processed yet (see the delay above).
-- It's very short, or it's a templated bulletin, such as Linux distribution
+- It has not been processed yet (see the delay above).
+- It is very short, or it is a templated bulletin, such as Linux distribution
   errata or CVSS bulletins. Feeds like these publish hundreds of near-identical
   posts, so they are kept out on purpose.
-- It's a roundup. "CISA adds three flaws to KEV" names different products each
-  time, so linking roundups would invent a story that isn't there.
-- It's the only article on its story so far. By default a thread needs at
+- It is a roundup. "CISA adds three flaws to KEV" names different products
+  each time, so grouping roundups would create a false story.
+- It is the only article on its story so far. By default a thread needs at
   least three similar articles from at least two different outlets. One outlet
   posting four times still counts as one outlet.
 
-If threads group things that don't belong together, or miss ones that do, an
-admin can tune them. The settings are in the developer page
+If threads group articles that do not belong together, or miss ones that do,
+an admin can tune them. The settings are in the developer page
 [Story Threads](../story-threads.md).
 
 Next: [The Workbench](workbench.md)

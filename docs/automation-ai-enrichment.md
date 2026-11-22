@@ -87,7 +87,7 @@ The API accepts eight trigger types (`backend/app/schemas/automation.py`):
 | `on_keyword_match` | Title, content or summary matches a pattern | `pattern`, `is_regex` (default `true`, case-insensitive) |
 | `on_cve_detected` | The entry has linked CVEs | `min_severity`: `low` / `medium` / `high` / `critical` (CVSS ≥ 0.1 / 4.0 / 7.0 / 9.0). Empty = any linked CVE |
 | `on_entry_scored` | The signal engine has scored the entry | — |
-| `on_observable_captured` | A judgment door (one-pass AI, a publisher's IOC table, an analyst promote) wrote observables for the entry. The indicator-feed door never fires it | Same shape as the `has_observable` condition: `kinds`, `roles`, `min_confidence`, `exclude_infra_tagged`, `sources` |
+| `on_observable_captured` | AI analysis, a TTP observable, a publisher's IOC table or an analyst promoting an indicator wrote observables for the entry. An indicator-list feed never fires it | Same shape as the `has_observable` condition: `kinds`, `roles`, `min_confidence`, `exclude_infra_tagged`, `sources` |
 | `on_correlation_event` | The correlation engine records an event | `event_types`, `entity_filters` (`threat_actor_names`, `malware_names`) |
 | `on_schedule` | A cron time arrives | `cron` (5 fields, UTC), `entry_filter`, `max_entries` (default 200), `execution_mode` |
 | `on_manual` | Only when someone presses **Run now** | Same as `on_schedule`, minus `cron` |
@@ -96,9 +96,9 @@ How each one is dispatched:
 
 - **`on_new_entry`, `on_keyword_match`, `on_cve_detected`**: the fetch loop queues `run_entry_automations` for each new entry. That calls `run_automations_for_entry` (`backend/app/automation/engine.py:242`). This runs alongside the rest of the pipeline, so CVE links and the priority score may not exist yet.
 - **`on_entry_scored`**: `score_entry_task` queues `run_scored_entry_automations` after it saves the score, so `priority_score_above` and `has_signal` see real values. It fires on the first scoring only, never on rescores or backfills.
-- **`on_observable_captured`**: the door that captured observables queues `dispatch_observable_capture_automations` after its commit. It fires **once per rule per entry**: a rule that already has a non-skipped log for the entry is skipped (`run_automations_for_observable_capture`, `backend/app/automation/engine.py:322`). The replay backfill script never fires it.
+- **`on_observable_captured`**: the path that captured the observables queues `dispatch_observable_capture_automations` after its commit. It fires **once per rule per entry**: a rule that already has a non-skipped log for the entry is skipped (`run_automations_for_observable_capture`, `backend/app/automation/engine.py:322`). The replay backfill script never fires it.
 - **`on_correlation_event`**: runs from `run_correlation_automations` (`run_automations_for_correlation_event`, `backend/app/automation/engine.py:412`). An event with no entry is logged as `skipped`.
-- **`on_schedule`**: the `run-scheduled-automations` beat job checks every 60 seconds. A rule fires once for the latest cron slot it has not run yet, looking back up to 48 hours, so a late worker catches up once instead of skipping. A brand-new rule fires only if its slot was within the last 10 minutes. The slot is claimed before the actions run, so two workers never fire the same slot, and a failed run does not retry.
+- **`on_schedule`**: the `run-scheduled-automations` beat job checks every 60 seconds. A rule fires once for the latest cron slot it has not run yet, looking back up to 48 hours, so a late worker catches up once instead of skipping. A brand-new rule fires only if its slot is within the last 10 minutes. The slot is claimed before the actions run, so two workers never fire the same slot, and a failed run does not retry.
 
 ### Condition Language
 
@@ -116,7 +116,7 @@ Conditions filter entries after the trigger matches (`evaluate_conditions`, `bac
 | `priority_score_above` | `min` (default 1.0) | The 0–10 priority score is ≥ `min` |
 | `has_signal` | `types[]` (empty = any) | The entry carries one of these signals (`kev_added`, `novel_entity`, `under_reported`, ...) |
 | `entity_watchlisted` | — | The entry links an entity the owner watches |
-| `has_observable` | `kinds`, `roles`, `min_confidence`, `exclude_infra_tagged` (default `true`), `sources` | The entry has a matching captured observable. `sources` defaults to every door except the indicator feed, so "new C2" means reporting, not a blocklist mirror |
+| `has_observable` | `kinds`, `roles`, `min_confidence`, `exclude_infra_tagged` (default `true`), `sources` | The entry has a matching captured observable. `sources` defaults to every capture path except an indicator-list feed, so a "new C2" rule fires on reporting, not on a blocklist mirror |
 
 An unknown condition type, or one that raises an error, evaluates to `false`.
 
@@ -156,7 +156,7 @@ Actions run in order (`execute_action`, `backend/app/automation/actions.py:221`)
 | `extract_cves` | — | Extracts CVE IDs and links them |
 | `extract_threat_actors`, `extract_malware` | — | AI extraction, routed through the one-pass `entry_analysis` task |
 | `generate_detection_rules` | `rule_types` (default `["sigma"]`) | Builds rules from the TTPs in context, or the entry's stored TTPs |
-| `add_to_campaign` | `campaign_id`, `notes`, `link_observables`, `observable_kinds`, `observable_roles` | Links the entry to a campaign. With `link_observables`, also attaches the entry's reporting-door observables (dual-use infrastructure excluded) |
+| `add_to_campaign` | `campaign_id`, `notes`, `link_observables`, `observable_kinds`, `observable_roles` | Links the entry to a campaign. With `link_observables`, also attaches the entry's reported observables (not ones from an indicator-list feed; dual-use infrastructure excluded) |
 | `create_intel_report` | `title`, `template_type` (default `flash_alert`), `tlp_marking` (default `TLP:GREEN`), `summary` | Creates a report from the entry and the context |
 | `track_on_threat_board` | — | Pins the entry's linked actors and malware onto the Threats board as tracked. It never overrides a threat a person already handled or muted |
 | `chain_rule` | `rule_id` | Runs another rule on the same entry. The other rule must have the same owner (or the owner is an admin). Loops are refused and chains stop at 5 deep (`MAX_CHAIN_DEPTH`, `backend/app/automation/actions.py:1560`) |
@@ -186,7 +186,7 @@ There are two separate variable systems. `backend/app/automation/variables.py` d
 
 **Message templates** use single braces: `{title}`. They work in `send_notification`, `send_email`, `run_webhook`, `create_note` and `create_intel_report`:
 
-`{title}`, `{url}`, `{app_url}` (the article's IntelFeed link), `{author}`, `{summary}` (the AI summary if one exists, else the first 500 characters of the entry summary), `{published_at}`, `{ai_summary}`, `{feed_name}`, `{observables_count}`, `{observables}` (the entry's reporting-door observables, defanged, one per line as `kind value (role)`), `{entry_count}` (entries in a batch run; `1` per entry).
+`{title}`, `{url}`, `{app_url}` (the article's IntelFeed link), `{author}`, `{summary}` (the AI summary if one exists, else the first 500 characters of the entry summary), `{published_at}`, `{ai_summary}`, `{feed_name}`, `{observables_count}`, `{observables}` (the entry's reported observables, not ones from an indicator-list feed, defanged, one per line as `kind value (role)`), `{entry_count}` (entries in a batch run; `1` per entry).
 
 **AI prompt templates** use Jinja2 double braces: `{{ entry.title }}`. They are used by `run_ai_task`:
 
@@ -234,23 +234,23 @@ In a dry run, both branches are listed and neither runs.
 
 ### One article per story
 
-A morning briefing over 30 articles where 8 cover the same story would spend most of the model's attention, and the reader's, on that one story. So both briefing paths fold their input through [story threads](story-threads.md) first (`fold_by_thread`, `backend/app/intelligence/story_threads.py:1004`): one article per story, keeping the **strongest** one, and dropping the rest.
+A morning briefing over 30 articles where 8 cover the same story would spend most of its space on that one story. Both briefing paths therefore reduce their input to one article per story using [story threads](story-threads.md) (`fold_by_thread`, `backend/app/intelligence/story_threads.py:1004`), keeping the **strongest** article and dropping the rest.
 
-- **`run_ai_task` in batch mode** folds the matched entries. Set `fold_threads: false` in the action config to send every article.
-- **The daily briefing** (`_fetch_day_entries`, `backend/app/api/entries.py:1662`) folds the day's articles. This is what `use_daily_summary` and the in-app day-divider summaries read.
+- **`run_ai_task` in batch mode** reduces the matched entries this way. Set `fold_threads: false` in the action config to send every article.
+- **The daily briefing** (`_fetch_day_entries`, `backend/app/api/entries.py:1662`) reduces the day's articles the same way. This is what `use_daily_summary` and the in-app day-divider summaries read.
 
-Each kept item carries what was folded into it:
+Each kept item records what is grouped under it:
 
 | Field | Meaning |
 |---|---|
 | `entry.thread_title` | The story's name (empty when no thread holds the article) |
 | `entry.outlet_count` | Independent outlets covering the story |
-| `entry.also_reported_by` | Articles in this batch folded into this one |
-| `article_count` | How many articles the batch had before folding (next to the post-fold `entry_count`) |
+| `entry.also_reported_by` | Articles in this batch grouped under this one |
+| `article_count` | How many articles the batch had before grouping (next to `entry_count`, the count after) |
 
-The daily-briefing prompt shows `outlet_count` as a **Corroboration** line. The action result reports `stories` and `folded` next to `entries_processed`, so the automation log shows how much was collapsed.
+The daily-briefing prompt shows `outlet_count` as a **Corroboration** line. The action result reports `stories` and `folded` next to `entries_processed`, so the automation log shows how many articles were grouped.
 
-Folding only reaches articles the thread sweeper can place. An article shorter than `thread_min_body_chars` (default 400), such as a Reddit link post or an NVD stub, is never threaded, so it never folds.
+Grouping only reaches articles the thread sweeper can place. An article shorter than `thread_min_body_chars` (default 400), such as a Reddit link post or an NVD stub, is never threaded, so it is never grouped.
 
 ### Logging & Audit
 
@@ -356,11 +356,11 @@ Built-in tasks are seeded at startup from `backend/app/ai/prompts/defaults.py`:
 | `article_summary` | analysis | Summary of one entry |
 | `threat_assessment` | analysis | Quick assessment and recommended actions |
 | `daily_summary`, `intelligence_briefing`, `detection_engineering_summary` | analysis | Briefings over many entries |
-| `threat_brief`, `cve_brief` | analysis | The two-sentence story lines on the Threats board |
+| `threat_brief`, `cve_brief` | analysis | The two-sentence summaries on the Threats board |
 | `hunt_pack` | generation | The Threats board's hunt pack: one to three hunt hypotheses with queries in the user's preferred query language, drafted on request from the row's window only (`backend/app/services/hunt_pack.py`) |
 
-Every task's templates also receive `query_language` and `query_language_name` — the calling user's preferred query language (Settings › Reading, stored as `query_language` in `users.settings`; the vocabulary and the default rule formats it implies live in `backend/app/ai/query_language.py`). `run_task` adds them to whatever variables the caller passed, so a prompt that writes queries or detection logic says `{{ query_language_name }}` and nothing else changes; `detection_engineering_summary`, `entry_qa`, `copilot`, `report_section` and `hunt_pack` do. The copilot route adds the same two keys itself.
-| `story_thread_spine` | analysis | The narrative spine of a story thread ([story-threads.md](story-threads.md)) |
+Every task's templates also receive `query_language` and `query_language_name`: the calling user's preferred query language (Settings › Reading, stored as `query_language` in `users.settings`; the vocabulary and the default rule formats it implies are in `backend/app/ai/query_language.py`). `run_task` adds them to the variables the caller passed, so a prompt that writes queries or detection logic uses `{{ query_language_name }}` and nothing else changes; `detection_engineering_summary`, `entry_qa`, `copilot`, `report_section` and `hunt_pack` do. The copilot route adds the same two keys itself.
+| `story_thread_spine` | analysis | The written timeline of a story thread ([story-threads.md](story-threads.md)) |
 | `video_transcript_summary`, `reddit_digest` | analysis | Source-specific summaries |
 | `entry_qa` | analysis | The per-entry "Ask Agent" chat |
 | `copilot` | analysis | The global copilot ([copilot.md](copilot.md)) |
@@ -379,13 +379,13 @@ An assignment links one task to one provider and model (`ai_task_assignments`, `
 Two functions decide who answers:
 
 - `get_task_assignment()` (`backend/app/ai/engine.py:839`) returns the site's enabled assignment whose provider is active and not paused. Background work uses this.
-- `resolve_assignment(db, caller, task_name)` (`backend/app/ai/engine.py:627`) is what everything else calls. It returns a `Resolved` (task, provider, model, merged config, and `source`: `"site"` or `"user"`), or `None` when nothing can answer. For any caller that is not a signed-in person, or while personal keys are off, it is just the site assignment. For a person with personal keys on, it adds their own key on top ([Personal Keys](#personal-keys--the-lookup)).
+- `resolve_assignment(db, caller, task_name)` (`backend/app/ai/engine.py:627`) is what everything else calls. It returns a `Resolved` (task, provider, model, merged config, and `source`: `"site"` or `"user"`), or `None` when nothing can answer. For any caller that is not a signed-in person, or while personal keys are off, it is the site assignment. For a person with personal keys on, it adds their own key on top ([Personal Keys](#personal-keys--the-lookup)).
 
 `run_task()` resolves first, then checks for a cached answer, then calls the provider. Code that streams (copilot, rule chat) or calls a provider directly (the shared Ask Agent, rule conversion, the workspace tool) resolves the same way. Report generation runs the lookup when the report is queued (`preflight_report`, `backend/app/ai/engine.py:745`), so a refusal comes back as the request's error before anything is written.
 
 ### The `ai` queue
 
-Every Celery task that calls an AI provider is routed to the `ai` queue (`task_routes` in `backend/app/workers/celery_app.py`): entry analysis, adjudication and its backfill, actor profile refresh, name normalization, AI gap enrichment, duplicate review, thread spines, the written products (threat briefs, daily summaries, the Reddit digest, full reports), copilot turns, and the two Claude sign-in tasks. Only the `celery-worker-ai` service reads that queue, at concurrency 1 (`CLAUDE_CODE_CONCURRENCY`). This keeps AI calls one at a time, which paces a single Ollama GPU and protects the Claude CLI's OAuth session. It is also the only container that mounts the CLI credentials.
+Every Celery task that calls an AI provider is routed to the `ai` queue (`task_routes` in `backend/app/workers/celery_app.py`): entry analysis, adjudication and its backfill, actor profile refresh, name normalization, AI gap enrichment, duplicate review, thread timelines, the written products (threat briefs, daily summaries, the Reddit digest, full reports), copilot turns, and the two Claude sign-in tasks. Only the `celery-worker-ai` service reads that queue, at concurrency 1 (`CLAUDE_CODE_CONCURRENCY`). This keeps AI calls one at a time, which paces a single Ollama GPU and protects the Claude CLI's OAuth session. It is also the only container that mounts the CLI credentials.
 
 **A new task that calls a provider must be added to `task_routes`.** Left on the default queue, a slow AI call can fill the default worker and stop feed polling.
 
@@ -398,7 +398,7 @@ Every AI call runs for a `Caller` (`backend/app/ai/caller.py:41`): a *kind* plus
 | Kind | Used by | `user_id` means | Personal key? | Site allowance? |
 |---|---|---|---|---|
 | `user` | An API route a signed-in person called | That person | Yes | Yes, when the site's provider answers |
-| `system` | Pipeline stages, maintenance jobs, shared output (daily summary, thread spines, briefs) | The `system` account, or nothing | No | No |
+| `system` | Pipeline stages, maintenance jobs, shared output (daily summary, thread timelines, briefs) | The `system` account, or nothing | No | No |
 | `automation` | The automation engine | The rule's owner | No | No |
 | `share` | The public share routes | The person who shared | No | No (the link has its own limit) |
 
@@ -425,7 +425,7 @@ A person's routing lives in two tables (`backend/app/models/user_ai_route.py`):
 - `user_ai_routes`: one row per `(user, task)`, plus at most one default row (`task_id` NULL). A route names one of the person's own keys, a model, and optional config. A per-task row with no provider sends that task back to the instance's provider even when a default key exists (the picker calls it "Instance default").
 - `user_ai_preferences`: `fallback_to_site` (default `true`) and `monthly_cap_usd` (the person's own dollar cap; NULL = none).
 
-**Which tasks may use a personal key** is a per-task flag, `ai_tasks.allows_user_provider`. The rule: does the result belong to the person who clicked? Copilot turns, rule drafts, summaries and report sections do. Entity links, adjudication verdicts, briefs and thread spines are read by everyone, so they always use the instance's providers. `USER_PROVIDER_ELIGIBLE_TASKS` (`backend/app/ai/capabilities.py:73`) lists the 14 tasks that may use one. The admin can turn the flag off for any of them, or on for a custom task, but not on for a task outside that set (`PATCH /api/ai/tasks/{id}` answers 400 `task_site_only`; the task API shows the lock as `user_provider_locked`).
+**Which tasks may use a personal key** is a per-task flag, `ai_tasks.allows_user_provider`. The rule: does the result belong to the person who clicked? Copilot turns, rule drafts, summaries and report sections do. Entity links, adjudication verdicts, briefs and thread timelines are read by everyone, so they always use the instance's providers. `USER_PROVIDER_ELIGIBLE_TASKS` (`backend/app/ai/capabilities.py:73`) lists the 14 tasks that may use one. The admin can turn the flag off for any of them, or on for a custom task, but not on for a task outside that set (`PATCH /api/ai/tasks/{id}` answers 400 `task_site_only`; the task API shows the lock as `user_provider_locked`).
 
 **The lookup**, for a `user` caller with the switch on (`resolve_assignment`, `backend/app/ai/engine.py:627`):
 
@@ -442,10 +442,10 @@ The person-facing API is `/api/ai/me` (`backend/app/api/user_ai.py`): `GET /poli
 
 ### Allowances & Caps
 
-Three limits, each counting something different. All read from `ai_results`, so there is no second ledger. Days reset at midnight UTC.
+Three limits, each counting something different. All read from `ai_results`; there is no separate counter table. Days reset at midnight UTC.
 
 - **Site allowance** (`site_ai_user_daily_requests`; `enforce_site_allowance`, `backend/app/ai/engine.py:384`): how many requests one *person* may make per day on the *instance's* providers. It counts rows with `caller_kind = user` and no `key_owner_id`. Failed calls count, so a broken provider cannot be retried for free. A cached answer costs nothing: `run_task` enforces the allowance after its cache check. Over the limit is HTTP 429 `ai_allowance_exceeded`. A report checks its whole section count up front; if the allowance still runs out between sections, the worker stops at that section, keeps the earlier ones, and says why. The pipeline, automation and share links are never counted here, and neither is a person's own key.
-- **Personal caps**: the person's own `monthly_cap_usd` (the admin sets no ceiling, since it is the person's money) and the operator's `user_ai_daily_request_cap` (how hard this server will drive a personal key). Both count rows with `key_owner_id = that person`. A capped key falls back or refuses as above. The dollar figure is whatever the provider reports or its `config.pricing` says. Because a person sets their own OpenAI-compatible pricing, the request cap is the one limit they cannot price away.
+- **Personal caps**: the person's own `monthly_cap_usd` (the admin sets no ceiling, since it is the person's money) and the operator's `user_ai_daily_request_cap` (how many calls per day this server makes on a personal key). Both count rows with `key_owner_id = that person`. A capped key falls back or refuses as above. The dollar figure is whatever the provider reports or its `config.pricing` says. Because a person sets their own OpenAI-compatible pricing, the request cap is the one limit a person cannot change by setting their own prices.
 - **Share limit** (`share_ai_daily_requests`): one budget per share link per day, across `POST /api/shared/{token}/run-ai-task` and `.../ask-agent`. Both report `remaining_today`. Both also sit under the per-minute `ai` rate-limit bucket, keyed on the client IP behind the proxy (the first `X-Forwarded-For` hop, or the header named in `TRUSTED_CLIENT_IP_HEADER` when an edge such as Cloudflare fronts the origin). Share traffic always uses the instance's providers.
 
 Prompts run on a personal key are still the instance's templates. The result records `_prompt_version` so the "Who answered" card can say which version ran.
@@ -491,11 +491,11 @@ Results live in `ai_results` (`backend/app/models/ai_result.py`):
 | `entry_id`, `target_type`, `target_id` | What the result is about. `(target, task, is_current)` is indexed |
 | `is_current` | Only the newest result for a target and task is current |
 | `task_id`, `provider_id` (SET NULL on delete), `provider_name`, `model_name` | Who answered. `provider_name` survives a deleted provider |
-| `prompt_used`, `raw_response`, `parsed_result` | What was sent and what came back |
+| `prompt_used`, `raw_response`, `parsed_result` | The prompt sent and the response received |
 | `tokens_input`, `tokens_output`, `cost_estimate`, `processing_time_ms` | Usage |
 | `caller_kind`, `user_id`, `key_owner_id` | Who asked, and whose key paid (`key_owner_id` set = a personal key) |
 
-`attribution_fields()` (`backend/app/ai/engine.py:90`) fills the last group on every row, error rows included. Calls made outside `run_task` (copilot, rule chat, rule conversion, the shared Ask Agent, the workspace tool) write their own ledger row; most use `record_direct_result()` (`backend/app/ai/engine.py:284`), which writes a spend record that is never current and never served as a cached answer. Two keys may ride in `parsed_result`: `_fallback_reason` (the person's key could not answer and the site did) and `_prompt_version` (an override ran).
+`attribution_fields()` (`backend/app/ai/engine.py:90`) fills the last group on every row, error rows included. Calls made outside `run_task` (copilot, rule chat, rule conversion, the shared Ask Agent, the workspace tool) write their own `ai_results` row; most use `record_direct_result()` (`backend/app/ai/engine.py:284`), which writes a spend record that is never current and never served as a cached answer. Two keys may appear in `parsed_result`: `_fallback_reason` (the person's key could not answer and the site did) and `_prompt_version` (an override ran).
 
 **Cost.** When the provider reports a dollar figure (the Claude Code CLI's `total_cost_usd`, an OpenAI-compatible `pricing` block), that is saved. Otherwise the cost comes from `COST_TABLE` (`backend/app/ai/engine.py:54`), dollars per million tokens:
 
@@ -543,11 +543,11 @@ How an article gets analyzed (switch: `ai_one_pass_enabled`, default on):
 1. `score_entry_task` calls `enqueue_entry_analysis`, which checks, in order: an existing result, the feed's AI policy, the relevance junk gate, and **echo reuse** (a near-duplicate copies the original's analysis for $0). A passing entry gets a row in `ai_analysis_requests`.
 2. The `ai-analysis-batch-submit` job (every 30 minutes) picks up missed entries, orders the queue by `entries.priority_score`, and stops at the daily budget (`ai_daily_budget_usd`, default $2). On the `claude` provider with an API key and `ai_use_batches` on, it submits through the **Anthropic Message Batches API** (50% cheaper). Otherwise (Ollama, the CLI, an OAuth token, or batches off) it queues `run_entry_analysis_task` per entry on the `ai` queue.
 3. `ai-analysis-batch-poll` (every 10 minutes) collects finished batches through `store_external_result`. It is safe to re-run.
-4. When the analysis lands, the `adjudicate` stage may review it ([engine.md](engine.md)).
+4. When the analysis is stored, the `adjudicate` stage may review it ([engine.md](engine.md)).
 
 Status: `GET /api/engine/extraction/status`.
 
-The same payload also confirms or rejects **pending autolinks** (dictionary-word matches the autolinker holds until the AI agrees) and asserts entity relationships. The manual per-type extraction endpoints and the `extract_threat_actors` / `extract_malware` automation actions route through `entry_analysis` too, and the result cache means several per-type calls on one entry share one AI call.
+The same payload also confirms or rejects **pending autolinks** (dictionary-word matches the autolinker holds until the AI agrees) and reports entity relationships. The manual per-type extraction endpoints and the `extract_threat_actors` / `extract_malware` automation actions route through `entry_analysis` too, and the result cache means several per-type calls on one entry share one AI call.
 
 The store path (`backend/app/intelligence/enrichment.py`) guards entity quality: it drops new aliases that `is_junk_alias()` flags, rejects new names that `is_fp_entity_name()` flags (the false-positive denylist plus `*.exe` / `*.dll` / `*.sys` file names), and sends would-be duplicates of a reclassified entity to the surviving one (see [intelligence-engine.md](intelligence-engine.md)). The daily digest gets each article's signal explanations (`priority_signals`), so a briefing can say why an article matters.
 
@@ -577,7 +577,7 @@ All six tables are in `backend/app/models/enrichment.py` (`entity_relation_claim
 
 **`user_enrichment_overrides`**: a person's own `api_key_encrypted` for a source, one row per user per source, set from the Keys view ([API Keys](#api-keys)). The pipeline uses it in place of the shared key for that person's enrichments.
 
-**`enrichment_results`**: `entity_type`, `entity_id`, `source_type`, `raw_response`, `parsed_data`, `enriched_at`, `expires_at`, `status`. Only `success` and `error` rows are stored; the other outcomes (`cached`, `skipped_low_confidence` and the gateway refusals `rate_limited`, `budget_exhausted`, `backfill_share`, `breaker_open`, `paused`, `auth_failed`, `needs_key`, `gateway_unavailable`) appear only in the list `enrich_entity()` returns. A lookup or a job adds a `success` row only when its `parsed_data` differs from the latest one; otherwise it moves that row's `enriched_at` and `expires_at` forward. The EPSS sync does the same in bulk: it writes only the CVEs whose score changed or whose percentile moved by at least one point, 0.01 (the `cves` row, the result row and its context). A percentile ranks a CVE against all the others, so it drifts a little for nearly every CVE every day; following that drift would rewrite the whole catalog daily, and its rows last 30 days, renewed in bulk once they are within two days of expiring. Its `parsed_data` uses the lookup's keys (`cve`, `epss`, `percentile`, `date`). EPSS records no claims.
+**`enrichment_results`**: `entity_type`, `entity_id`, `source_type`, `raw_response`, `parsed_data`, `enriched_at`, `expires_at`, `status`. Only `success` and `error` rows are stored; the other outcomes (`cached`, `skipped_low_confidence` and the gateway refusals `rate_limited`, `budget_exhausted`, `backfill_share`, `breaker_open`, `paused`, `auth_failed`, `needs_key`, `gateway_unavailable`) appear only in the list `enrich_entity()` returns. A lookup or a job adds a `success` row only when its `parsed_data` differs from the latest one; otherwise it moves that row's `enriched_at` and `expires_at` forward. The EPSS sync does the same in bulk: it writes only the CVEs whose score changed or whose percentile moved by at least one point, 0.01 (the `cves` row, the result row and its context). A percentile ranks a CVE against all the others, so it drifts a little for nearly every CVE every day. Following that drift would rewrite the whole catalog daily. Its rows last 30 days and are renewed in bulk once they are within two days of expiring. Its `parsed_data` uses the lookup's keys (`cve`, `epss`, `percentile`, `date`). EPSS records no claims.
 
 **`entity_context`**: what one source says about one entity, one row per declared `Context` output, keyed (`entity_type`, `entity_id`, `source_type`, `key`). `value` (JSONB, shaped for its display), `observed_at`, `expires_at`. See [Source Context](#source-context).
 
@@ -591,7 +591,7 @@ A `scope` (column → values) narrows the entities a source looks up on its own:
 
 `SOURCE_REGISTRY` (`backend/app/enrichment/registry.py`) lists them all; `ADAPTER_REGISTRY` holds the lookup sources. Generated from the manifests:
 
-- `DEFAULT_SOURCES`, the rows the API seeds at startup for any source that has none. A new row takes the quota's rate and budget and the manifest's trigger mode (`seed_trigger_mode()`); it starts on if the source has jobs or sets `default_enabled = True`, off otherwise (`seed_enabled()`). A source that is on only so its jobs run starts `manual`. A `shares_ioc` source starts `manual` unless its manifest says `auto`: Shodan and GreyNoise do, because the ledger's IPs come from published reporting and both only answer from their own scans of the internet.
+- `DEFAULT_SOURCES`, the rows the API seeds at startup for any source that has none. A new row takes the quota's rate and budget and the manifest's trigger mode (`seed_trigger_mode()`); it starts on if the source has jobs or sets `default_enabled = True`, off otherwise (`seed_enabled()`). A source that is on only so its jobs run starts `manual`. A `shares_ioc` source starts `manual` unless its manifest says `auto`: Shodan and GreyNoise do, because the observables list's IPs come from published reporting and both only answer from their own scans of the internet.
 - The source's entries in `JOB_REGISTRY` ([below](#source-jobs)).
 - Its gateway's limits when it has no row yet, and the keyed rate when an API key is in use (see the table).
 
@@ -658,7 +658,7 @@ A `filter` transforms the value first: `aliases` runs `filter_aliases()` (`backe
 - **Team Cymru**: the observable's network columns, newest wins: `asn`, `asn_org` (the AS name) and `geo_country` (`country_code`). Each fact has one home; none is kept in `reputation`.
 - **RDAP**: `registered_at` (newest wins, `timestamp`), the registration date of the registrable domain.
 - **Tranco**: `popularity_rank`, newest wins; it `clears`, so a domain that leaves the list loses it. The daily job applies each listed domain's rank, and a "not found" answer for each domain that left, through the field map ([below](#tranco)).
-- **MISP Galaxy**: actor `country` (resolved to an existing country), `motivation` (folded onto the motivation vocabulary by the `motivation` filter) and `description` rank 4, into blank columns only, and the cluster's target sectors as `threat_actor targets sector` [relations](#relations). Its synonyms stay resolution knowledge (`known_alias_map`), never profile aliases.
+- **MISP Galaxy**: actor `country` (resolved to an existing country), `motivation` (mapped onto the motivation vocabulary by the `motivation` filter) and `description` rank 4, into blank columns only, and the cluster's target sectors as `threat_actor targets sector` [relations](#relations). Its synonyms stay resolution knowledge (`known_alias_map`), never profile aliases.
 - **Metasploit modules**: CVE `metasploit_module` (newest wins) and the module list as context; its `apply_record` adds Metasploit to the CVE's `exploit_sources`. The job raises `exploit_availability` to `weaponized` itself (never over KEV's `active_exploitation` or an analyst's value) and records that claim with `source_ref = metasploit`.
 - **EPSS**: `epss_score` and `epss_percentile`, newest wins, for a single lookup. The daily job writes the same columns set-based and records no claims: a claim per changed score would grow without bound.
 - **ThreatFox, URLhaus, MalwareBazaar**: the observable's `role`, into a blank column only: ThreatFox's `threat_type` (`botnet_cc` → `c2`, `payload_delivery` → `delivery`, `payload` → `payload`), `delivery` for a URLhaus malware URL, `payload` for a MalwareBazaar sample ([below](#abusech)).
@@ -677,7 +677,7 @@ A `Relation` (key, relation, target types, and an optional `item` naming each ro
 
 ### Source Context
 
-Each lookup in `enrich_entity()`, fresh or cached, writes the source's `Context` outputs for the entity into `entity_context` (`store_context`, `backend/app/enrichment/context.py`): one row per output that has a value, `observed_at` the result's time and `expires_at` its expiry. A key the new result lacks is deleted, so a source that stops reporting something stops showing it. Scheduled jobs store each entity's answer the same way (`apply_source_result`, `backend/app/enrichment/pipeline.py`): the result row (a new one only when the answer changed), its context, the source's `apply_record` writes, then its columns and relations through the field map. It reports whether the answer `changed` and whether the entity was `written`, which the jobs count. Values are stored shaped for their display:
+Each lookup in `enrich_entity()`, fresh or cached, writes the source's `Context` outputs for the entity into `entity_context` (`store_context`, `backend/app/enrichment/context.py`): one row per output that has a value, `observed_at` the result's time and `expires_at` its expiry. A key the new result lacks is deleted, so a source that stops reporting something stops showing it. Scheduled jobs store each entity's answer the same way (`apply_source_result`, `backend/app/enrichment/pipeline.py`): the result row (a new one only when the answer changed), its context, the source's `apply_record` writes, then its columns and relations through the field map. It reports `changed` (the answer differs from the stored one) and `written` (the entity changed), which the jobs count. Values are stored shaped for their display:
 
 | Display | Stored value |
 |---|---|
@@ -709,13 +709,13 @@ The `fact`, `badge` and `chips` outputs also show as columns in the workbench en
 
 When an entity is merged into another of its type, its context rows move to the survivor with it (`rehome_context`, `backend/app/enrichment/context.py`), one source at a time: a source that already has rows on the survivor keeps its own. Reclassified into another type, the rows are dropped and the next lookup fills them.
 
-`prune-entity-context` (maintenance, daily 02:45 UTC, `prune_entity_context` in `backend/app/workers/maintenance.py`) deletes rows that expired more than 30 days ago and rows whose entity no longer exists, and withdraws relation claims whose entity no longer exists, by the same rules as a source's withdrawal, so their connections go with them. It belongs to no source, so it is a maintenance job rather than one in a manifest.
+`prune-entity-context` (maintenance, daily 02:45 UTC, `prune_entity_context` in `backend/app/workers/maintenance.py`) deletes rows that expired more than 30 days ago and rows whose entity has been deleted, and withdraws relation claims whose entity has been deleted, by the same rules as a source's withdrawal, so their connections go with them. It belongs to no source, so it is a maintenance job rather than one in a manifest.
 
 ### Trigger Modes
 
 | Mode | When it runs |
 |---|---|
-| `auto` | When an entity is created: the autolinker, TTP and CVE extraction, the KEV sync, the observables ledger and GitHub rule import add a `new`-lane [job](#enrichment-job-queue) for each such source |
+| `auto` | When an entity is created: the autolinker, TTP and CVE extraction, the KEV sync, observable capture and GitHub rule import add a `new`-lane [job](#enrichment-job-queue) for each such source |
 | `manual` | A person asks: `POST /api/enrichment/enrich`, or an "Enrich" button. It runs at once, in the `manual` lane; naming `source_types` runs those sources whatever their mode. A source the gateway refuses gets a `manual`-lane job, listed in the response's `queued` |
 
 A source that sends an observable to a third party (`shares_ioc`: VirusTotal, GreyNoise, Shodan, the abuse.ch lookups) is never queued on the automatic lanes unless its row is `auto`. Shodan and GreyNoise start `auto`; VirusTotal and the abuse.ch lookups start `manual`.
@@ -748,13 +748,13 @@ Waiting enrichment work lives in `enrichment_jobs` (`backend/app/enrichment/queu
 
 | Outcome | Row |
 |---|---|
-| `success`, `cached`, `skipped_low_confidence`, `needs_key`, or the source no longer applies | Deleted |
+| `success`, `cached`, `skipped_low_confidence`, `needs_key`, or the source does not apply to the entity | Deleted |
 | `rate_limited`, `breaker_open` | Due again after `retry_after`; attempts unchanged |
 | `budget_exhausted`, `backfill_share` | Due at the next UTC midnight |
 | `auth_failed` | Due again in an hour; attempts unchanged |
-| `source_disabled` (switched off mid-run) | Put back as it was; it waits until the source is on again |
+| `source_disabled` (switched off mid-run) | Returned to `queued` unchanged; it waits until the source is on again |
 | `paused` | Due again in 60 seconds; attempts unchanged, and the rest of the tick's batch waits the same way |
-| `gateway_unavailable` | Put back as it was, and the tick ends |
+| `gateway_unavailable` | Returned to `queued` unchanged, and the tick ends |
 | `error` | `attempts` + 1, due again after 5 minutes doubled per attempt; `failed` after 5 attempts (the row stays, and is not claimed again until it is queued anew) |
 
 When a source refuses one job (`rate_limited`, `breaker_open`, `budget_exhausted`, `auth_failed`), the tick holds that credential (the source and the job's requester) without asking the source again. One UPDATE moves all of the credential's other due rows, the rest of the batch included, past the refusal, one request interval of the source's rate apart (for VirusTotal at 4 a minute, 15 seconds), so a backlog comes due one row at a time rather than all at once. The tick claims none of the credential's rows while the hold lasts, and goes on with other sources.
@@ -765,7 +765,7 @@ A `backfill` job runs only while its source has used less than 60% of its `daily
 
 A disabled source's rows wait in the queue: the dispatcher doesn't claim them, and switching the source back on picks them up.
 
-While enrichment is [paused](#enrichment-console), a tick claims nothing. A `running` row claimed more than 10 minutes ago is claimable again, so a worker that dies mid-tick strands nothing. A row is marked `started` (`last_status`) when its run begins, so a reclaim counts an attempt (`last_status = lease_expired`) only for the row that was running; the rest of the dead worker's batch is claimed again as it was. A row whose lease expires on its fifth attempt is marked `failed`, so a job that kills or outlasts its worker stops coming back. When every row a claim took is failed that way, the tick claims again (up to five times) rather than ending with work due. A tick still waiting when the next one is due is dropped (`expires` 30 seconds), so a restarted worker does not run a backlog of ticks.
+While enrichment is [paused](#enrichment-console), a tick claims nothing. A `running` row claimed more than 10 minutes ago is claimable again, so a worker that dies mid-tick strands nothing. A row is marked `started` (`last_status`) when its run begins, so a reclaim counts an attempt (`last_status = lease_expired`) only for the row in progress; the rest of the dead worker's batch is claimed again unchanged. A row whose lease expires on its fifth attempt is marked `failed`, so a job that kills or outlasts its worker stops coming back. When every row a claim took is failed that way, the tick claims again (up to five times) rather than ending with work due. A tick still waiting when the next one is due is dropped (`expires` 30 seconds), so a restarted worker does not run a backlog of ticks.
 
 ### API Key Resolution
 
@@ -819,12 +819,12 @@ A `Relation` output says "this entity is connected to the entities this list nam
 
 For each name the source lists:
 
-1. **Resolve, never create.** The name is matched to an entity IntelFeed already has, in each target type the output names: a technique by its id, a sector through the sector vocabulary (`normalize_sector`), a country by name, alias or ISO code, and a threat actor, malware family, tool, vendor or product by its exact name or alias in the resolver's normalized form (`entity_alias_index`). Nothing is ever created.
+1. **Resolve, never create.** The name is matched to an entity IntelFeed already has, in each target type the output names: a technique by its id, a sector through the sector vocabulary (`normalize_sector`), a country by name, alias or ISO code, and a threat actor, malware family, tool, vendor or product by its exact name or alias in the resolver's normalized form (`entity_alias_index`). Nothing is created.
 2. **Check the matrix.** The triple (entity type, relation, target type) must be in the relationship matrix (`backend/app/intelligence/relationship_matrix.py`). An output with no allowed triple never runs, and a name that resolves to a type the matrix doesn't connect that way gives no claim.
 3. **Claim.** Each name is one row in `entity_relation_claims`: entity, source, output, the name, the resolved target, and the evidence. A re-run with the same list changes nothing.
-4. **Connect.** A resolved claim makes the connection exist where IntelFeed keeps that kind of fact. A target sector of an actor or malware family goes in the target-sector junction (`threat_actor_target_sectors` / `malware_target_sectors`, source `enrichment`), so the sector chips show it. Anything else goes in `entity_relationships`: a new row is source `enrichment`, confidence `probable` (reported, not corroborated), and its description is the evidence, or the source's name when there is none. A co-occurrence row for the same triple is taken over and lifted to `probable` only while it is `possible` with no adjudication verdict, and keeps its own description, so a withdrawal can hand it back exactly as it was. A co-occurrence row that corroboration or the adjudicator already raised (or ruled coincidental), and a row from any other path (AI extraction, MITRE, an analyst, a rejection), is left exactly as it is; the claim is still recorded. The adjudicate stage reviews only `co_occurrence` and `auto_extracted` rows, so it never relabels an `enrichment` row.
+4. **Connect.** A resolved claim makes the connection exist where IntelFeed keeps that kind of fact. A target sector of an actor or malware family goes in the target-sector junction (`threat_actor_target_sectors` / `malware_target_sectors`, source `enrichment`), so the sector chips show it. Anything else goes in `entity_relationships`: a new row is source `enrichment`, confidence `probable` (reported, not corroborated), and its description is the evidence, or the source's name when there is none. A co-occurrence row for the same triple is taken over and lifted to `probable` only while it is `possible` with no adjudication verdict, and keeps its own description, so a withdrawal can restore it exactly. A co-occurrence row that corroboration or the adjudicator already raised (or ruled coincidental), and a row from any other path (AI extraction, MITRE, an analyst, a rejection), is left exactly as it is; the claim is still recorded. The adjudicate stage reviews only `co_occurrence` and `auto_extracted` rows, so it never relabels an `enrichment` row.
 5. **Hold.** A name that matches nothing (`held_reason = unknown`), or more than one entity (`ambiguous`, such as a tool and a malware family with the same name), is stored with no target. The source's next answer resolves it again, so it links once the entity exists. The console's source detail counts the held claims per output.
-6. **Withdraw.** A name the source no longer lists loses its claim. Its connection goes too, but only when no other claim (from any source) still holds it and it is one this path made, still as this path left it: an `enrichment` row at `probable` is deleted, or handed back to `co_occurrence` / `possible` when articles back it. A withdrawal never lowers what someone else raised: an AI extraction that asserts an `enrichment` row makes it `auto_extracted`, and a row that reviews or MITRE raised to `confirmed` keeps its connection, losing only the claim; an `enrichment` sector row is deleted, or handed back to the rollup when the entity's own articles carry the sector. One source's withdrawal never touches another source's claim.
+6. **Withdraw.** A name missing from the source's latest answer loses its claim. Its connection goes too, but only when no other claim (from any source) still holds it and it is one this path made, still as this path left it: an `enrichment` row at `probable` is deleted, or handed back to `co_occurrence` / `possible` when articles back it. A withdrawal never lowers what someone else raised: an AI extraction that reports an `enrichment` row makes it `auto_extracted`, and a row that reviews or MITRE raised to `confirmed` keeps its connection, losing only the claim; an `enrichment` sector row is deleted, or handed back to the rollup when the entity's own articles carry the sector. One source's withdrawal never touches another source's claim.
 7. **Merge.** When an entity is merged into another of its type, its claims (made by it, or naming it) move to the survivor with their connections (`rehome_claims`, called from `_repoint_entity_relationships` in `backend/app/api/entity_merge.py`); a claim the survivor already makes is dropped. Reclassified into another type, the claims are withdrawn first, by the rules above, and the source's next answer for the survivor claims afresh.
 
 The claim always runs from the entity the source answered for; the connection runs the way the matrix stores it. The matrix keeps observables target-only, so when an observable's source names the malware family behind it (ThreatFox, URLhaus, MalwareBazaar), the connection is the family's: `malware communicates_with observable` for a C2, `malware uses observable` for delivery and payload material, `tool communicates_with observable` for a C2 framework. These show in the family's Infrastructure (claimed) and the observable's claimed-by list.
@@ -888,7 +888,7 @@ Settings → Engine → Enrichment is one admin page for every source (`frontend
 - **Keys**: see [API Keys](#api-keys).
 - **Activity**: the queue by lane, the lookups that gave up (with retry), and requests by source.
 
-A settings search that lands on the page opens the setting's home: a key in Keys, a job setting on its source's Jobs tab. `?section=enrichment&source=nvd` opens a source on its Jobs tab; `&key_for=virustotal` opens that source's key in Keys (a profile's "Add key" link). Its API (all admin) is built in `backend/app/enrichment/console.py`.
+A settings search that opens the page opens the setting's home: a key in Keys, a job setting on its source's Jobs tab. `?section=enrichment&source=nvd` opens a source on its Jobs tab; `&key_for=virustotal` opens that source's key in Keys (a profile's "Add key" link). Its API (all admin) is built in `backend/app/enrichment/console.py`.
 
 **`GET /api/enrichment/console`** lists the sources and, at the top level, `attention`. Each source has a status word, what it fills (a few words from the manifest's outputs, or the first job's description for a catalog source), its `about` sentence, `egress`, license, credential (`key`, `key_status`), `trigger_mode` (lookup sources only), today's use against its cap, and the settings its jobs read. `?entity_type=` narrows only the source list. The status is, in order:
 
@@ -900,7 +900,7 @@ A settings search that lands on the page opens the setting's home: a key in Keys
 | `off` | It is switched off |
 | `ok` | Otherwise |
 
-A source that is off is never `failing`: its old errors aren't something to act on. Each `attention` item names the problem of a source that is on, with an `action`: a rejected or missing key (`key`, with the credential id), a failing job (`source`, Jobs tab), an open breaker or missing setting (`source`), or lookups that gave up (`retry`). One key problem shared by several sources is one item, labelled with the key. A source whose row was added in the last 14 days, at least a day after the install's first sources, is marked `new`. The summary's 24-hour activity counts requests sent (from the hourly counters), lookups waiting now, lookups put off by a rate limit, cap or pause, and distinct indicators sent to `shares_ioc` sources (`record_ioc_sent`, one HyperLogLog per UTC hour in Redis).
+A source that is off is never `failing`: its old errors aren't something to act on. Each `attention` item names the problem of a source that is on, with an `action`: a rejected or missing key (`key`, with the credential id), a failing job (`source`, Jobs tab), an open breaker or missing setting (`source`), or lookups that gave up (`retry`). One key problem shared by several sources is one item, labelled with the key. A source whose row is less than 14 days old, and at least a day newer than the install's first sources, is marked `new`. The summary's 24-hour activity counts requests sent (from the hourly counters), lookups waiting now, lookups put off by a rate limit, cap or pause, and distinct indicators sent to `shares_ioc` sources (`record_ioc_sent`, one HyperLogLog per UTC hour in Redis).
 
 **`GET /api/enrichment/sources/{source_type}/detail`** gives one source's limits (the row's stored `rate`, the `effective_rate` the gateway enforces, with a `rate_note` when they differ: `"with key"` when a keyed rate stands in for the stored one, `"held to the source's limit"` when the stored rate is above the ceiling, the manifest's ceiling, budget and today's use, backfill share, `refresh_days` (how often an answer is looked up again: the row's `config.refresh_days`, else the manifest's `ttl`) and `concurrency`), 24 hourly request counts, its queue by lane and by why rows are waiting (`by_reason`: `rate_limited`, `breaker_open`, `budget_exhausted`, `backfill_share`, `paused`, `auth_failed`, `source_disabled`), the settings the limits form edits, each output with how full its column is (a `relationship` output carries its `linked` and `held` claim counts instead), the gap a backfill would close, and its jobs with their description, settings, schedule (overrides included) and last 30 days of runs from `job_runs`. A fill rate counts the entities the source can look up (for observables, its kinds). The gap is for the source's first column output: `missing` counts every entity without it, `in_scope` the ones the source can look up that aren't already waiting in its queue, and `eta_days` how long those take at the source's rate and backfill share of its budget.
 
@@ -917,7 +917,7 @@ A source that is off is never `failing`: its old errors aren't something to act 
 The popover shown when you hover or click a highlighted name in an article (`frontend/src/components/EntityPopover.tsx`) adds a few words from enrichment, read from `GET /api/entities/{type}/{id}/glance` (`backend/app/enrichment/glance.py`):
 
 - Up to two **verdict chips** beside the type chip: something you'd act on, red or amber. *Exploited* (CISA's SSVC, on a CVE not already in KEV), *No patch* (a CVE on an end-of-life product or release), *EOL* or *Security fixes only* (a product), *Benign scanner* or *Malicious scanner* (GreyNoise), *New domain* (registered in the last 30 days), *Popular site* (Tranco top 10,000), *Serving malware* (URLhaus), *Archived* (a tool's GitHub repository), *Leak site up* (ransomware.live).
-- One **Context** row at the end of the label grid: up to three short neutral facts, for example "AS10439 CariNet · US · VPN" for an IP, "Behind 3,646 CVEs, 108 in KEV" for a CWE, "State-sponsored · Active since 2008" for an actor, "15 D3FEND countermeasures" for a technique, "Targeted by 475 threat actors" for a country.
+- One **Context** row at the end of the label grid: up to three short neutral facts, for example "AS10439 CariNet · US · VPN" for an IP, "Weakness in 3,646 CVEs, 108 in KEV" for a CWE, "State-sponsored · Active since 2008" for an actor, "15 D3FEND countermeasures" for a technique, "Targeted by 475 threat actors" for a country.
 
 Every type the reader highlights has rules (`RULES`): CVE, CWE, technique, threat actor, malware, tool, country, vendor, product, mitigation and observable. A rule reads one source's stored answer (a column it writes, or its profile context) or a count its links made possible, and says nothing when nothing is stored. Rules for a source that is off are skipped, and visitors never see a source that sends indicators off the box or bars commercial use. Hovering a chip or fact names its source and date. A failed request leaves the popover as it is.
 
@@ -946,12 +946,12 @@ The bulk catch-up jobs (`cve-nvd-backfill`, `reenrich-cve-nvd`, `cvelist-backfil
 | `wikipedia-bulk-sync` | `wikipedia` | Wednesday 04:00 | Wikipedia content for entities that lack it and have no answer that still stands, as many as fit in 55 minutes. A name with no article (or an off-topic one) gets a "not found" answer for 30 days, so the next runs move on; the time left bounds each entity's whole fetch, not just its first request |
 | `sync-cybergeist-feeds` | `cybergeist` | Daily 02:30 | Threat actors and malware from the Cybergeist feeds |
 | `cymru-bulk-sync` | `cymru` | Every 6 hours at :25 | Maps up to 10,000 active IPs with no fresh Team Cymru answer to their AS over one bulk WHOIS connection |
-| `tranco-sync` | `tranco` | Daily 04:20 | Ranks the ledger's domains against the Tranco top-1M list (`popularity_rank`) and flags top-10k ones for review |
+| `tranco-sync` | `tranco` | Daily 04:20 | Ranks observable domains against the Tranco top-1M list (`popularity_rank`) and flags top-10k ones for review |
 | `sync-ransomware-victims` | `ransomware_live` | Every 30 minutes | Leak-site victim postings |
 | `ransomware-group-profiles` | `ransomware_live` | Every 4 hours at :50 | Techniques, tools and leak-site status for up to 10 tracked groups ([below](#ransomwarelive-group-profiles)) |
 | `etda-sync` | `etda` | Tuesday 04:15 | Matches ETDA Threat Group Cards to tracked actors ([below](#etda-threat-group-cards)) |
-| `threatfox-sync` | `threatfox` | Daily 04:35 | Matches the ledger's active observables against ThreatFox's IOC export ([below](#abusech)) |
-| `urlhaus-sync` | `urlhaus` | Every 6 hours at :50 | Matches the ledger's active URLs, domains and IPs against the URLhaus dump ([below](#abusech)) |
+| `threatfox-sync` | `threatfox` | Daily 04:35 | Matches active observables against ThreatFox's IOC export ([below](#abusech)) |
+| `urlhaus-sync` | `urlhaus` | Every 6 hours at :50 | Matches active URL, domain and IP observables against the URLhaus dump ([below](#abusech)) |
 | `cvelist-backfill` | `cvelist` | Hourly at :20 | The CVE record for CVEs with no current cvelist result, read from the baseline zip, as many as fit in 13 minutes |
 | `cvelist-delta-sync` | `cvelist` | Hourly at :40 | The CVE records changed since its last run, from cvelistV5's delta zips |
 | `wikidata-sync` | `wikidata` | Thursday 04:30 | Vendor websites, countries, industries and facts, product vendors, country regions, victim countries ([below](#wikidata)) |
@@ -963,8 +963,8 @@ The bulk catch-up jobs (`cve-nvd-backfill`, `reenrich-cve-nvd`, `cvelist-backfil
 
 **CVE List.** The source reads the CVE Program's records from the cvelistV5 repository on GitHub: the CNA's container and CISA's ADP container (SSVC, CVSS for CVEs the CNA left unscored, KEV date and CPEs).
 
-- `cvelist-backfill` reads the baseline zip each release carries (every record as of midnight UTC, about 650 MB) for the CVEs in `cves` with no current result. The zip is downloaded once through the source's gateway and kept on local disk (a newer one replaces it), then read front to back, one record in memory at a time. A run stops at its time budget and the next goes on with what is still due. Once a run has read the whole zip, the due CVEs it doesn't hold are stored as not found. With only a few CVEs due (under half a run's worth of requests), it fetches their records one at a time from raw.githubusercontent.com instead. A record's result lasts 90 days (30 for an id with no record), so each CVE is checked again a quarter later.
-- `cvelist-delta-sync` lists the repository's releases (one API call) and reads the delta zips released since the source row's `last_synced_at`. Each hourly zip holds every record changed since midnight UTC, and an end-of-day zip holds the whole day, so it reads one zip per day: the end-of-day one once it is out, else the newest hourly one. A zip (about 4 MB for a whole day, refused above 64 MB) streams to a temporary file, and only the records of CVEs in `cves` are read from it. On its first run it reads only the newest zip. If the listing (about four days) no longer reaches back to `last_synced_at`, its stats say `gap: true`; the backfill catches those CVEs when their results expire.
+- `cvelist-backfill` reads the baseline zip each release carries (every record at midnight UTC, about 650 MB) for the CVEs in `cves` with no current result. The zip is downloaded once through the source's gateway and kept on local disk (a newer one replaces it), then read front to back, one record in memory at a time. A run stops at its time budget and the next goes on with what is still due. Once a run has read the whole zip, the due CVEs it doesn't hold are stored as not found. With only a few CVEs due (under half a run's worth of requests), it fetches their records one at a time from raw.githubusercontent.com instead. A record's result lasts 90 days (30 for an id with no record), so each CVE is checked again a quarter later.
+- `cvelist-delta-sync` lists the repository's releases (one API call) and reads the delta zips released since the source row's `last_synced_at`. Each hourly zip holds every record changed since midnight UTC, and an end-of-day zip holds the whole day, so it reads one zip per day: the end-of-day one once it is out, else the newest hourly one. A zip (about 4 MB for a whole day, refused above 64 MB) streams to a temporary file, and only the records of CVEs in `cves` are read from it. On its first run it reads only the newest zip. If the listing (about four days) does not reach back to `last_synced_at`, its stats say `gap: true`; the backfill catches those CVEs when their results expire.
 
 Both jobs, and a lookup ("Enrich now"), store each record as the source's result, write its context and columns, link its CWE ids in `cve_weaknesses` (`source = cvelist`), and write its affected products into `cve_affected`. The stored `raw_response` is only the record's `cveMetadata`. The data is used under the [CVE Program terms of use](https://www.cve.org/Legal/TermsOfUse). The KEV columns stay with the KEV sync.
 
@@ -997,7 +997,7 @@ Every looked-up entity also gets a link to its Wikidata item. A title Wikidata h
 A leak-site victim usually comes with a domain, so three sources look victims up by it (`Match.by_value(column="domain")`). Expect little: most victims are small companies.
 
 - **RDAP** looks up the victim's registrable domain when someone presses Enrich on the victim: registrar, registration date and status as context. The registrant's country is redacted at almost every registry, so it fills no column.
-- **Tranco**'s daily job ranks victims' domains from the same list it streams for the ledger, as context only (no column, no review flag).
+- **Tranco**'s daily job ranks victims' domains from the same list it streams for observables, as context only (no column, no review flag).
 - **Wikidata**'s weekly job asks the query service (SPARQL) which items give the victim's domain as their official website (P856), 25 domains a call, and takes that item's country (P17) into `country_id`. A domain more than one item claims, or one item in two countries, gets nothing. It looks up victims with a domain and no country, the most-posted first.
 
 ### GitHub repository
@@ -1023,7 +1023,7 @@ A CVE's affected rows (`GET /api/intelligence/cves/{id}/affected`) carry `eol_re
 
 ### Tranco
 
-The Tranco sync (`_run_tranco_sync` in `backend/app/workers/enrichment_tasks.py`) asks `tranco-list.eu/api/lists/date/latest` for the day's list, then streams its CSV (about 22 MB) line by line, matching 10,000 rows at a time against the ledger's `domain` observables, so only the matches are held in memory. A match is exact: `evil.workers.dev` never takes `workers.dev`'s rank. Each matched domain's rank, and a "not found" answer for each domain that left the list, goes through the field map (`apply_source_result`): `popularity_rank`, its claim and a `rank` context row (48 hours). A domain entering the top 10,000 (`TRANCO_REVIEW_RANK`) gets `needs_review = true` once: a popular site named as an indicator is often a false positive, but nothing is deleted or denied, and a row an analyst has cleared isn't flagged again while it stays there. Denied rows are never flagged.
+The Tranco sync (`_run_tranco_sync` in `backend/app/workers/enrichment_tasks.py`) asks `tranco-list.eu/api/lists/date/latest` for the day's list, then streams its CSV (about 22 MB) line by line, matching 10,000 rows at a time against `domain` observables, so only the matches are held in memory. A match is exact: `evil.workers.dev` never takes `workers.dev`'s rank. Each matched domain's rank, and a "not found" answer for each domain that left the list, goes through the field map (`apply_source_result`): `popularity_rank`, its claim and a `rank` context row (48 hours). A domain entering the top 10,000 (`TRANCO_REVIEW_RANK`) gets `needs_review = true` once: a popular site named as an indicator is often a false positive, but nothing is deleted or denied, and a row an analyst has cleared isn't flagged again while it stays there. Denied rows are never flagged.
 
 ### CAPEC
 
@@ -1054,11 +1054,11 @@ Each technique D3FEND counters gets a "Countermeasures" table (defensive techniq
 
 `etda-sync` (`backend/app/enrichment/etda.py`) downloads ThaiCERT's Threat Group Cards in one request: the export at `apt.etda.or.th/cgi-bin/getcard.cgi?g=all&o=j`, about 2 MB of JSON for some 500 cards. The per-name card API doesn't find groups by name, so the job never uses it.
 
-A card matches an actor IntelFeed already tracks; no actor is ever created.
+A card matches an actor IntelFeed already tracks; no actor is created.
 
 - **By MITRE group id first.** A card links to its ATT&CK group (`…/groups/G0016/`); the one actor holding that `mitre_id` is its match.
 - **Else by exact name.** The card's names must resolve, in the resolver's normalized form, to exactly one actor. An actor whose `mitre_id` the card contradicts is a different group and is skipped.
-- **One to one.** A card that names several actors matches none. When several cards land on one actor, a group-id match beats name matches, and a tie skips the actor.
+- **One to one.** A card that names several actors matches none. When several cards match one actor, a group-id match wins over name matches, and a tie skips the actor.
 
 A matched card writes:
 
@@ -1066,7 +1066,7 @@ A matched card writes:
 |---|---|
 | `names` | `aliases`: the names the actor doesn't carry yet, through `gate_aliases` (a name another actor owns is dropped) and `filter_aliases` |
 | `country` | `country` and `origin_country_id`, when blank and the country exists |
-| `motivation` | `motivation`, folded onto the vocabulary, when blank |
+| `motivation` | `motivation`, mapped onto the vocabulary, when blank |
 | `mitre-attack` | `mitre_id`, when blank |
 | `observed-sectors` | Target sectors (see below) |
 | `observed-countries` | `targets` country relations |
@@ -1076,7 +1076,7 @@ A matched card writes:
 
 ETDA's sector names map onto the 21 sectors through `normalize_sector`, plus the names in `SECTORS` in the module (High-Tech → technology, Shipping and Logistics → transportation, Industrial → manufacturing, BitCoin exchanges → cryptocurrency, and so on). A name neither maps, such as Construction, Mining or Real estate, is left out rather than held.
 
-An actor that has ETDA claims or context but whose card no longer matches gets a `found: false` answer: its relation claims are withdrawn and its context removed. Columns it filled stay, as any source's fills do. An export with no cards stops the run (`stopped: "empty_export"`) before anything is withdrawn.
+An actor that has ETDA claims or context but no matching card on this run gets a `found: false` answer: its relation claims are withdrawn and its context removed. Columns it filled stay, as any source's fills do. An export with no cards stops the run (`stopped: "empty_export"`) before anything is withdrawn.
 
 The encyclopedia is published under CC BY-NC-SA 4.0 by the Electronic Transactions Development Agency, so `commercial_ok` is false and visitors in public read-only mode never see its context.
 
@@ -1102,7 +1102,7 @@ The sites' onion addresses are never stored: not in the context, not in the resu
 
 ThreatFox, URLhaus and MalwareBazaar (`backend/app/enrichment/adapters/abusech.py`) need a free abuse.ch Auth-Key (https://auth.abuse.ch/); every API call and every export needs one. Until a key is saved they show as `needs_key` and send nothing.
 
-- **Export jobs** send nothing about the ledger. `threatfox-sync` downloads ThreatFox's full export (every IOC not yet expired; ThreatFox expires IOCs after six months and builds the file hourly). `urlhaus-sync` downloads the URLhaus dump (URLs online now or added in the past 90 days, built every 5 minutes). Each zipped CSV streams to a temporary file and is read a line at a time, matched 5,000 rows at a time against the ledger, so only the matches are held in memory. A match is exact on `(kind, value)`: a ThreatFox `ip:port` matches its IP, a URLhaus URL matches the URL and its host as a domain or IP. Only `active` observables are written. An observable the export answered (`raw_response.export`) and is no longer in the export loses its context and claims; a column it filled stays. A lookup's answer is the lookup's: the exports cover only current data, so they never withdraw one, and a later lookup of an observable the export answered takes it over. An empty export stops the run (`empty_export`) and withdraws nothing. The key is part of the export's URL, so an error names only the HTTP status.
+- **Export jobs** send nothing about stored observables. `threatfox-sync` downloads ThreatFox's full export (every IOC not yet expired; ThreatFox expires IOCs after six months and builds the file hourly). `urlhaus-sync` downloads the URLhaus dump (URLs online now or added in the past 90 days, built every 5 minutes). Each zipped CSV streams to a temporary file and is read a line at a time, matched 5,000 rows at a time against the observables list, so only the matches are held in memory. A match is exact on `(kind, value)`: a ThreatFox `ip:port` matches its IP, a URLhaus URL matches the URL and its host as a domain or IP. Only `active` observables are written. An observable the export answered (`raw_response.export`) that is missing from the current export loses its context and claims; a column it filled stays. A lookup's answer is the lookup's: the exports cover only current data, so they never withdraw one, and a later lookup of an observable the export answered takes it over. An empty export stops the run (`empty_export`) and withdraws nothing. The key is part of the export's URL, so an error names only the HTTP status.
 - **Lookups** (ThreatFox `search_ioc`, URLhaus `url` / `host`, MalwareBazaar `get_info`) send the observable to abuse.ch, so the sources are `shares_ioc` and manual: they run when someone presses Enrich, or for a backfill an admin starts. MalwareBazaar is lookup-only; its only small export holds the last 48 hours of samples, and the hashes write-ups name are mostly older.
 
 What they add: the `role` when it is blank; the malware families behind the indicator as [relations](#relations) to families IntelFeed already tracks (ThreatFox's `malware_printable`, URLhaus tags that name a tracked family, MalwareBazaar's `signature`), with the threat type, confidence, first-seen date and reference as evidence; and profile context. ThreatFox shows the threat type, families, confidence, first and last seen, tags, reference and a link; URLhaus a status badge (online is red, offline and unknown are neutral: an offline URL is history), the threat, the malware URL counts for a host, tags, first seen, last online, Spamhaus DBL and SURBL listings (lookups) and a link; MalwareBazaar the signature, file type and name, first and last seen, delivery method, tags, vendor labels and a link.

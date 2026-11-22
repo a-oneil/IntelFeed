@@ -26,7 +26,7 @@ class WebhookPresetCreate(BaseModel):
                 "name": "SOC Slack channel",
                 "preset_type": "webhook",
                 "url": "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
-                "payload": '{"text": "{title} — {url}"}',
+                "payload": '{"text": "{title}: {url}"}',
                 "headers": {"Content-Type": "application/json"},
                 "config": {},
             }
@@ -46,7 +46,7 @@ class WebhookPresetUpdate(BaseModel):
         json_schema_extra={
             "example": {
                 "name": "SOC Slack channel (urgent)",
-                "payload": '{"text": ":rotating_light: {title} — {url}"}',
+                "payload": '{"text": ":rotating_light: {title}: {url}"}',
             }
         }
     )

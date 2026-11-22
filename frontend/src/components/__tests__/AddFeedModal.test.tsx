@@ -159,7 +159,7 @@ describe("AddFeedModal", () => {
     await user.upload(screen.getByTestId("opml-file-input"), file);
 
     expect(
-      await screen.findByText("This doesn't look like an OPML subscription file.")
+      await screen.findByText("This file is not an OPML subscription file.")
     ).toBeInTheDocument();
     expect(mockImportOpml).not.toHaveBeenCalled();
   });

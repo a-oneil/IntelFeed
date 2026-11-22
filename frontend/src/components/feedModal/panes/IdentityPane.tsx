@@ -82,8 +82,8 @@ export function IdentityPane({
             {!canPause
               ? "Pausing a feed is an admin setting on this instance."
               : feed.per_user
-                ? "Off, this feed stops delivering. It stays in your sidebar so you can start it again."
-                : "Off, this feed stops being fetched. It stays in your sidebar so you can start it again."}
+                ? "When off, this feed stops delivering articles to you. It stays in your sidebar so you can start it again."
+                : "When off, this feed is no longer fetched. It stays in your sidebar so you can start it again."}
           </span>
         </span>
       </label>
@@ -101,8 +101,8 @@ export function IdentityPane({
                 unchecked state and names what the rest of the app calls it —
                 the sidebar folds these under "Muted". Nothing here mentions
                 other readers: that is the Readers pane's subject. */}
-            Off, articles keep arriving and the feed still opens normally — they
-            just stop adding to your unread count. The sidebar calls this muted.
+            When off, articles keep arriving and the feed still opens normally,
+            but they stop adding to your unread count. The sidebar lists such feeds under Muted.
           </span>
         </span>
       </label>

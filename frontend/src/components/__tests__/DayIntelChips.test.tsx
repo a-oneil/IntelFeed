@@ -138,12 +138,12 @@ describe("DayIntelChips", () => {
         signals: { actively_exploited: 3, new: null },
       }),
     );
-    await userEvent.click(screen.getByRole("button", { name: "What are these chips?" }));
+    await userEvent.click(screen.getByRole("button", { name: "Explain these chips" }));
     const legend = screen.getByRole("dialog", { name: "About these chips" });
     expect(legend).toHaveTextContent("Vulnerabilities named on this day");
-    expect(legend).toHaveTextContent("The threat actor named in the most");
+    expect(legend).toHaveTextContent("The threat actor this day's articles name most often");
     // No CVE chip on this day, so no CVE line in the legend.
-    expect(legend).not.toHaveTextContent("headline vulnerability");
+    expect(legend).not.toHaveTextContent("The day's top CVE");
   });
 
   it("filters the list rather than navigating when a chip is clicked", async () => {
@@ -206,7 +206,7 @@ describe("DayIntelChips", () => {
 
   it("closes the legend on a second click", async () => {
     renderChips(makeData({ signals: { actively_exploited: 1, new: null } }));
-    const btn = screen.getByRole("button", { name: "What are these chips?" });
+    const btn = screen.getByRole("button", { name: "Explain these chips" });
     await userEvent.click(btn);
     expect(screen.getByRole("dialog", { name: "About these chips" })).toBeInTheDocument();
     await userEvent.click(btn);

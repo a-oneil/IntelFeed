@@ -67,7 +67,7 @@ export function CorrelationTuningPanel() {
   return (
     <div className={styles.sectionContent}>
       <p className={styles.sectionDesc}>
-        Tune how the correlation engine scores and stores entity relationships.
+        These settings control how the correlation engine scores and stores entity relationships.
       </p>
 
       <SystemSettings
@@ -85,16 +85,15 @@ export function CorrelationTuningPanel() {
         <div>
           <h3 className={styles.cardTitle}>Proximity Scoring</h3>
           <p className={styles.hint}>
-            Controls how the correlation engine scores entity relationships based on
-            paragraph distance. When two entities appear in the same article, their
-            proximity score is calculated as:
+            Proximity scoring rates entity relationships by paragraph distance. When two
+            entities appear in the same article, their proximity score is calculated as:
           </p>
           <pre className={styles.formula}>
             score = 1 / (1 + decay_rate × paragraph_distance)
           </pre>
           <p className={styles.hint}>
             Entities in the same paragraph (distance 0) always score 1.0.
-            Higher decay rates penalize distance more aggressively — entities further
+            Higher decay rates penalize distance more: entities further
             apart in an article get lower scores. The thresholds control how scores
             map to the "strong," "moderate," and "weak" badges on entity profiles.
           </p>
@@ -104,10 +103,10 @@ export function CorrelationTuningPanel() {
               <label className={styles.proxLabel}>
                 Decay Rate
                 <span className={styles.proxHint}>
-                  How fast scores drop with paragraph distance.
+                  The decay rate sets how fast scores drop with paragraph distance.
                   At 1.0 (default), adjacent paragraphs score 0.5.
-                  At 2.0, adjacent paragraphs score 0.33 — much stricter.
-                  At 0.5, adjacent paragraphs score 0.67 — more lenient.
+                  At 2.0, adjacent paragraphs score 0.33 (stricter).
+                  At 0.5, adjacent paragraphs score 0.67 (more lenient).
                 </span>
               </label>
               <input
@@ -127,8 +126,9 @@ export function CorrelationTuningPanel() {
               <label className={styles.proxLabel}>
                 Default Score (legacy data)
                 <span className={styles.proxHint}>
-                  Score assigned when paragraph positions are unknown (pre-backfill data).
-                  Set lower to de-emphasize unverified relationships, higher to trust them more.
+                  The score assigned when paragraph positions are unknown (data from before the
+                  proximity backfill). Set it lower to de-emphasize unverified relationships, or
+                  higher to trust them more.
                 </span>
               </label>
               <input
@@ -148,8 +148,8 @@ export function CorrelationTuningPanel() {
               <label className={styles.proxLabel}>
                 Strong Threshold
                 <span className={styles.proxHint}>
-                  Minimum score for a "strong" badge. Default 0.7 = same paragraph or
-                  adjacent with low decay.
+                  The minimum score for a "strong" badge. The default of 0.7 means the same
+                  paragraph, or adjacent paragraphs with a low decay rate.
                 </span>
               </label>
               <input
@@ -169,8 +169,8 @@ export function CorrelationTuningPanel() {
               <label className={styles.proxLabel}>
                 Moderate Threshold
                 <span className={styles.proxHint}>
-                  Minimum score for a "moderate" badge. Below this is "weak."
-                  Default 0.3 = roughly 2–3 paragraphs apart at decay 1.0.
+                  The minimum score for a "moderate" badge. Scores below it are "weak".
+                  The default of 0.3 is about 2 to 3 paragraphs apart at decay 1.0.
                 </span>
               </label>
               <input
@@ -188,7 +188,7 @@ export function CorrelationTuningPanel() {
           </div>
 
           <div className={styles.proxPreview}>
-            <h4 className={styles.proxPreviewTitle}>Live Preview — Score by Paragraph Distance</h4>
+            <h4 className={styles.proxPreviewTitle}>Live Preview: Score by Paragraph Distance</h4>
             <table className={styles.proxTable}>
               <thead>
                 <tr>
@@ -207,12 +207,12 @@ export function CorrelationTuningPanel() {
                         ? "moderate"
                         : "weak";
                   const examples: Record<number, string> = {
-                    0: "Same paragraph — \"APT29 deployed Cobalt Strike\"",
-                    1: "Adjacent paragraphs — likely same topic",
-                    2: "Two paragraphs apart — probable context",
-                    4: "Nearby section — possible relationship",
-                    8: "Different section — weak signal",
-                    15: "Distant mention — likely unrelated topics",
+                    0: "Same paragraph: \"APT29 deployed Cobalt Strike\"",
+                    1: "Adjacent paragraphs: likely the same topic",
+                    2: "Two paragraphs apart: probably related",
+                    4: "Nearby section: possible relationship",
+                    8: "Different section: unlikely to be related",
+                    15: "Distant mention: likely unrelated topics",
                   };
                   return (
                     <tr key={row.distance}>

@@ -6,7 +6,7 @@ and storing rules by hand does not.
 
 ![The Rules Library listing Sigma and Nuclei rules with severity, source, ATT&CK and telemetry columns](../assets/screenshots/detection-rules.png)
 
-*The rule library, filterable by the telemetry you actually collect.*
+*The rule library, filterable by the telemetry you collect.*
 
 ## Formats
 
@@ -24,7 +24,7 @@ IntelFeed checks the syntax of nine formats:
 | Nuclei | Vulnerability scanning templates |
 | Panther | Panther |
 
-Not sure? Use Sigma; it converts to most tools.
+If unsure, use Sigma. It converts to most tools.
 
 ## From an article to a rule
 
@@ -43,7 +43,7 @@ To draft one yourself:
   indicators, the ATT&CK techniques, and how detectable each step is with
   ordinary logs.
 
-**A draft is only a draft.** The AI doesn't know your environment. Review it.
+**Review every draft.** The AI does not know your environment.
 
 ## The editor
 
@@ -54,8 +54,7 @@ Side panels: **Details** (severity, description, tags, MITRE tactics, analyst
 notes), **AI Assist**, **Convert** (to another format), **History**, and
 **Compare**. Click **Save** to keep your changes.
 
-Write a real description: in six months it is the only record of why the rule
-exists.
+Write a full description. Later it is the only record of why the rule exists.
 
 ## Drafts and versions
 
@@ -83,7 +82,7 @@ report it and whether you have a rule for it.
 
 In **Workbench → Telemetry Sources**, tick the log sources you collect.
 IntelFeed compares each rule's required sources with your list, so you can tell
-"no rule exists" from "a rule exists but can't fire here".
+"no rule exists" from "a rule exists but cannot fire here".
 
 ## Exporting
 

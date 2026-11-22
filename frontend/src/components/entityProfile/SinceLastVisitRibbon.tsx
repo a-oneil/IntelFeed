@@ -69,7 +69,7 @@ export function SinceLastVisitRibbon({
     kevAdded ? "added to KEV" : null,
     newVictims > 0 ? `${plural(newVictims, "new victim")}` : null,
     relChanges > 0 ? `${plural(relChanges, "relationship change")}` : null,
-    newStories > 0 ? `${plural(newStories, "new story")}` : null,
+    newStories > 0 ? (newStories === 1 ? "1 new story" : `${newStories} new stories`) : null,
     otherEvents > 0 ? `${plural(otherEvents, "other event")}` : null,
   ].filter(Boolean) as string[];
 

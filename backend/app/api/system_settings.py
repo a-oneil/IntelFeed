@@ -62,7 +62,7 @@ def _refuse_key_settings(keys) -> None:
     if owned:
         raise AppError(
             code="set_in_enrichment_keys",
-            message=f"{', '.join(owned)}: set it under Settings → Engine → Enrichment → Keys",
+            message=f"{', '.join(owned)}: set it under Settings > Engine > Enrichment > Keys",
             status_code=400,
         )
 

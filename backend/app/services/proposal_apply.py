@@ -125,7 +125,9 @@ async def apply_link_removal_row(db: AsyncSession, row: EntityLinkValidationLog)
     from app.intelligence.link_validation_apply import ENTITY_TYPES
 
     if row.action != "shadow_remove":
-        raise AppError(code="invalid", message=f"can only apply shadow_remove rows (got {row.action})", status_code=400)
+        raise AppError(
+            code="invalid", message=f"This endpoint applies shadow_remove proposals, not {row.action}.", status_code=400
+        )
     spec = ENTITY_TYPES.get(row.entity_type)
     if not spec:
         raise AppError(code="invalid", message=f"unsupported entity_type: {row.entity_type}", status_code=400)
@@ -143,7 +145,7 @@ async def apply_link_removal_row(db: AsyncSession, row: EntityLinkValidationLog)
                 entity_id=row.entity_id,
                 entity_name_snapshot=row.entity_name_snapshot,
                 action="removed",
-                reason="Promoted from proposal; junction was already absent.",
+                reason="Promoted from proposal; the link was already gone.",
                 ai_result_id=row.ai_result_id,
             )
         )
@@ -189,7 +191,11 @@ async def trim_alias_row(db: AsyncSession, row: EntityMaintenanceLog) -> dict:
     # for every linkable type, countries and sectors included.
     cascade = CASCADE_SPECS.get(row.entity_type)
     if not bad_alias or not cascade:
-        raise AppError(code="invalid", message="proposal has no alias or an unsupported type", status_code=400)
+        raise AppError(
+            code="invalid",
+            message="This proposal names no alias, or its entity type does not support aliases.",
+            status_code=400,
+        )
     model = cascade["model"]
     entity = (await db.execute(select(model).where(model.id == row.entity_id))).scalar_one_or_none()
     current = list(getattr(entity, "aliases", None) or [])

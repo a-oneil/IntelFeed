@@ -155,7 +155,7 @@ async def onboarding_status(
         remedy=_seed_command(),
         consequence=(
             "Entries will ingest, but the autolinker only has what the migrations load "
-            "(countries and a baseline of ATT&CK techniques) — no weakness, vendor or "
+            "(countries and a baseline of ATT&CK techniques). No weakness, vendor or "
             "product will link to an article until the catalogs are seeded."
         ),
     )

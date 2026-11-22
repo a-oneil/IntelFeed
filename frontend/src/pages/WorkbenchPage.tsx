@@ -409,7 +409,7 @@ function PROVENANCE_COLUMNS<T extends WithProvenance>(): ColumnDef<T>[] {
       key: "created_via", label: "Source", width: 130, minWidth: 90, hideable: true, defaultHidden: true,
       hint: {
         title: "Source",
-        body: "What created this row — the autolinker, an AI extraction, or you.",
+        body: "What created this row: the autolinker, an AI extraction, or an analyst.",
         aside: "Filter to AI extraction to review what the engine has been adding.",
       },
       textValue: (e) => e.created_via ?? "",
@@ -427,7 +427,7 @@ function PROVENANCE_COLUMNS<T extends WithProvenance>(): ColumnDef<T>[] {
       hint: {
         title: "Confidence",
         body: "How sure the extractor was when it created this entity.",
-        aside: "Anything low is worth a look before you build on it.",
+        aside: "Check low-confidence rows before relying on them.",
       },
       textValue: (e) => e.created_confidence ?? "",
       render: (e) => <MetaCell value={e.created_confidence} />,
@@ -436,7 +436,7 @@ function PROVENANCE_COLUMNS<T extends WithProvenance>(): ColumnDef<T>[] {
       key: "needs_review", label: "Review", width: 80, minWidth: 64, hideable: true, defaultHidden: true,
       hint: {
         title: "Needs review",
-        body: "Flagged by the creation gates — a near-duplicate name, a thin source, or a type the resolver wasn't sure about.",
+        body: "Flagged at creation: a near-duplicate name, a single source, or an uncertain entity type.",
       },
       sortValue: (e) => (e.needs_review ? 1 : 0),
       choices: [
@@ -783,7 +783,7 @@ const CVE_COLUMNS: ColumnDef<CVE>[] = [
       { value: "true", label: "KEV" },
     ],
     render: (c) => c.is_kev
-      ? <Chip tone="toned" tint="var(--danger)" title={`CISA Known Exploited Vulnerability${c.kev_date_added ? ` — added ${c.kev_date_added}` : ""}`}>KEV</Chip>
+      ? <Chip tone="toned" tint="var(--danger)" title={`CISA Known Exploited Vulnerability${c.kev_date_added ? `, added ${c.kev_date_added}` : ""}`}>KEV</Chip>
       : <span className={table.zero}>·</span>,
   },
   {
@@ -1473,7 +1473,7 @@ const OBSERVABLE_COLUMNS: ColumnDef<ObservableResponse>[] = [
       <span
         className={table.ellipsis}
         style={{ fontFamily: "var(--font-mono)", fontSize: "12px" }}
-        title={o.label ? `${o.label} — ${o.value}` : o.value}
+        title={o.label ? `${o.label}: ${o.value}` : o.value}
       >
         {o.kind === "script" && o.label ? `“${o.label}” · ` : ""}
         {o.value}
@@ -1491,7 +1491,7 @@ const OBSERVABLE_COLUMNS: ColumnDef<ObservableResponse>[] = [
     serverChoice: true, serverParam: "infra_tag", choices: OBSERVABLE_INFRA_CHOICES,
     render: (o) =>
       o.infra_tag
-        ? <Chip truncate tone="toned" tint="var(--warning)" title="Dual-use infrastructure — excluded from publishing">{o.infra_tag.replace(/_/g, " ")}</Chip>
+        ? <Chip truncate tone="toned" tint="var(--warning)" title="Dual-use infrastructure, excluded from publishing">{o.infra_tag.replace(/_/g, " ")}</Chip>
         : <span className={table.zero}>·</span>,
   },
   {
@@ -1505,7 +1505,7 @@ const OBSERVABLE_COLUMNS: ColumnDef<ObservableResponse>[] = [
         ? "Confidence pinned"
         : o.decay_half_life_days
           ? `${o.decay_half_life_days}d half-life${o.expires_at ? ` · expires ~${new Date(o.expires_at).toLocaleDateString()} unless re-sighted` : ""}`
-          : "Never decays — behavior persists";
+          : "Never decays: this kind of behavior persists";
       return (
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }} title={decay}>
           <span style={{ width: 44, height: 5, borderRadius: 999, background: "var(--bg-tertiary)", overflow: "hidden", flex: "none" }}>
@@ -1679,7 +1679,7 @@ const CWE_COLUMNS: ColumnDef<CWEResponse>[] = [
             title={
               c.mapping_usage === "Allowed"
                 ? "MITRE accepts this id as a CVE mapping target"
-                : `MITRE mapping guidance: ${c.mapping_usage} — tagging a CVE with this id is imprecise`
+                : `MITRE mapping guidance: ${c.mapping_usage}. Tagging a CVE with this id is imprecise.`
             }
           >
             {c.mapping_usage}
@@ -1744,7 +1744,7 @@ function ObservablesSection() {
       emptyDesc={
         linkedEntity
           ? "Nothing is attributed to it or reported alongside it. IPs, domains and hashes found in articles about it will show here."
-          : "Ledger rows come from judgment: the one-pass analysis, the adjudicator, curated ioc_list feeds, TTP observables and publishers' IOC files."
+          : "Observables are added by the one-pass analysis, the adjudicator, curated ioc_list feeds, TTP observables and publishers' IOC files."
       }
       getId={(o) => o.id}
       getLabel={(o) => o.label || o.value}
@@ -1836,7 +1836,7 @@ function SectorsSection() {
       endpoint="/sectors"
       defaultSort={{ key: "article_count", dir: "desc" }}
       emptyTitle="No sectors yet"
-      emptyDesc="Sectors are a seeded vocabulary — run scripts/seed/seed_sectors.py to populate them."
+      emptyDesc="Sectors are a seeded vocabulary. Run scripts/seed/seed_sectors.py to populate them."
       getId={(s) => s.id}
       getLabel={(s) => s.name}
       noun="sector"
@@ -2325,7 +2325,7 @@ function RulesSection() {
           {rule.telemetry && rule.telemetry.coverage_pct !== null ? (
             <span
               className={lib.telemetry}
-              title={`Required: ${rule.telemetry.required.join(", ")}${rule.telemetry.missing.length ? ` — missing ${rule.telemetry.missing.join(", ")}` : ""}`}
+              title={`Required: ${rule.telemetry.required.join(", ")}${rule.telemetry.missing.length ? `; missing ${rule.telemetry.missing.join(", ")}` : ""}`}
             >
               <span
                 className={lib.telRing}
@@ -3022,7 +3022,7 @@ function ReportsSection() {
         <button className={styles.recipeCard} onClick={() => navigate("/workbench/report/exposure")}>
           <span className={styles.recipeQ}>Who&rsquo;s targeting a sector or region?</span>
           <span className={styles.recipeMaps}>
-            Exposure Report — pick verticals &times; regions, or reuse a saved intel profile
+            Exposure Report: pick verticals and regions, or reuse a saved intel profile
           </span>
         </button>
         <button
@@ -3036,7 +3036,7 @@ function ReportsSection() {
           }
         >
           <span className={styles.recipeQ}>What happened this week?</span>
-          <span className={styles.recipeMaps}>Landscape Report — trends and sector impact from a search or saved search</span>
+          <span className={styles.recipeMaps}>Landscape Report: trends and sector impact from a search or saved search</span>
         </button>
         <button
           className={styles.recipeCard}
@@ -3049,7 +3049,7 @@ function ReportsSection() {
           }
         >
           <span className={styles.recipeQ}>Brief the SOC on one threat</span>
-          <span className={styles.recipeMaps}>Flash Alert — pick the articles, get IOCs and actions in one page</span>
+          <span className={styles.recipeMaps}>Flash Alert: pick the articles, get IOCs and actions in one page</span>
         </button>
         <button
           className={styles.recipeCard}
@@ -3062,7 +3062,7 @@ function ReportsSection() {
           }
         >
           <span className={styles.recipeQ}>Profile an actor or campaign</span>
-          <span className={styles.recipeMaps}>Actor Profile / Campaign Tracker — or start from any entity&rsquo;s actions menu</span>
+          <span className={styles.recipeMaps}>Actor Profile or Campaign Tracker: pick the articles, or start from an entity&rsquo;s actions menu</span>
         </button>
         <button
           className={styles.recipeCard}
@@ -3074,8 +3074,8 @@ function ReportsSection() {
             })
           }
         >
-          <span className={styles.recipeQ}>Can we detect it?</span>
-          <span className={styles.recipeMaps}>Detection Report — TTPs to rules, coverage gaps, log source requirements</span>
+          <span className={styles.recipeQ}>Which rules cover it?</span>
+          <span className={styles.recipeMaps}>Detection Report: TTPs to rules, coverage gaps, log source requirements</span>
         </button>
       </div>
       <DataTable<IntelReport>
@@ -3093,7 +3093,7 @@ function ReportsSection() {
         fetchNextPage={fetchNextPage}
         totalCount={total}
         noun="report"
-        emptyMessage="No intelligence reports yet — create one to document findings and campaigns."
+        emptyMessage="No intelligence reports yet. Create one to document findings and campaigns."
       />
     </>
   );
@@ -3456,7 +3456,7 @@ function RequirementsSection() {
       <PageHeader
         title="Requirements"
         count={reqTotal}
-        subtitle="Priority intelligence requirements — the questions collection is meant to answer."
+        subtitle="Priority intelligence requirements: the standing questions that collection must answer."
         actions={
           <button
             className={`${styles.btn} ${styles.btnPrimary}`}
@@ -3646,7 +3646,7 @@ function RequirementsSection() {
             fetchNextPage={fetchNextReqPage}
             totalCount={reqTotal}
             noun="requirement"
-            emptyMessage="No intelligence requirements yet — create PIRs to track topics, threats, and gaps."
+            emptyMessage="No intelligence requirements yet. Create PIRs to track topics, threats, and gaps."
           />
         </div>
 
@@ -4023,7 +4023,7 @@ function RequirementDetailPanel({
                 value={fulfillReportId}
                 onChange={(e) => setFulfillReportId(e.target.value)}
               >
-                <option value="">No report (just mark fulfilled)</option>
+                <option value="">No report (mark fulfilled only)</option>
                 {(reportsData?.items ?? []).map((r) => (
                   <option key={r.id} value={r.id}>{r.title}</option>
                 ))}

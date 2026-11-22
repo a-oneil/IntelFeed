@@ -265,7 +265,7 @@ export function EntityActionsMenu({
       await exportEntityProfile(entityType, entityId);
       toast.success("Profile exported as Markdown");
     } catch {
-      toast.error("Failed to export profile");
+      toast.error("Could not export the profile");
     } finally {
       setExporting(false);
       closeMenu();
@@ -279,7 +279,7 @@ export function EntityActionsMenu({
       {
         onSuccess: () => toast.success("AI summary generated and saved"),
         onError: (err: unknown) =>
-          toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Failed to generate summary"),
+          toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Could not generate the summary"),
       },
     );
   };
@@ -443,14 +443,14 @@ export function EntityActionsMenu({
             {(entityType === "vendor" || entityType === "product") && (
               <button
                 className={styles.menuItem}
-                title="Follow this vendor/product — its vulnerabilities surface in Vendor Watch and your Radar"
+                title="Follow this vendor or product. Its vulnerabilities are listed in Vendor Watch and your Radar."
                 onClick={() => {
                   if (watchState === "stack") {
                     deleteWatch.mutate({ entity_type: entityType, entity_id: entityId });
                     toast.success(`Unfollowed ${displayName}`);
                   } else {
                     upsertWatch.mutate({ entity_type: entityType, entity_id: entityId, mode: "stack" });
-                    toast.success(`Following ${displayName} — its vulnerabilities will surface in Vendor Watch`);
+                    toast.success(`Following ${displayName}. Its vulnerabilities are listed in Vendor Watch.`);
                   }
                   closeMenu();
                 }}
@@ -477,7 +477,7 @@ export function EntityActionsMenu({
                     toast.success("Mute removed");
                   } else {
                     upsertWatch.mutate({ entity_type: entityType, entity_id: entityId, mode: "mute" });
-                    toast.success("Muted — mentions suppressed from Radar");
+                    toast.success("Muted. Mentions are hidden from Radar.");
                   }
                   closeMenu();
                 }}
@@ -494,8 +494,8 @@ export function EntityActionsMenu({
                   rescanEntity.mutate(
                     { entityType, entityId },
                     {
-                      onSuccess: () => toast.success("Re-scan queued — new links will appear shortly"),
-                      onError: () => toast.error("Failed to queue re-scan"),
+                      onSuccess: () => toast.success("Re-scan queued. New links appear shortly."),
+                      onError: () => toast.error("Could not queue the re-scan"),
                     },
                   );
                   closeMenu();
@@ -513,7 +513,7 @@ export function EntityActionsMenu({
                     toast.success("Watch removed");
                   } else {
                     upsertWatch.mutate({ entity_type: entityType, entity_id: entityId, mode: "watch" });
-                    toast.success("Watching — mentions get a priority boost");
+                    toast.success("Watching. Mentions get a priority boost.");
                   }
                   closeMenu();
                 }}
@@ -598,8 +598,8 @@ export function EntityActionsMenu({
                   {isObservable ? "Never capture it again" : "Don't re-create it"}
                   <span className={styles.deletePopoverHint}>
                     {isObservable
-                      ? "Keeps the row as a tombstone instead of deleting it, so every capture door and the outbound feeds refuse the value from now on."
-                      : "Adds the name and aliases to the do-not-recreate list, so AI extraction and the autolinker stop bringing it back."}
+                      ? "Keeps the row as a tombstone instead of deleting it. Every capture path and the outbound feeds refuse the value from now on."
+                      : "Adds the name and aliases to the do-not-recreate list. AI extraction and the autolinker no longer re-create it."}
                   </span>
                 </span>
               </label>

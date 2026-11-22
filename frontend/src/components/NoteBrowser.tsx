@@ -224,7 +224,7 @@ export function NoteBrowser() {
         <div className={styles.empty}>
           {hasActiveFilters
             ? "No notes match your search."
-            : "No notes yet. Create one to get started."}
+            : "No notes yet. Use New Note to create one."}
         </div>
       ) : (
         <div className={styles.notesList}>
@@ -293,7 +293,7 @@ export function NoteBrowser() {
                 author={item.data.username}
                 time={formatDate(item.data.updated_at)}
                 linkedLabel={`${ENTITY_TYPE_LABELS[item.data.entity_type] || item.data.entity_type}${
-                  item.data.entity_name ? ` — ${item.data.entity_name}` : ""
+                  item.data.entity_name ? `: ${item.data.entity_name}` : ""
                 }`}
                 onOpenLinked={() => {
                   const route = ENTITY_PROFILE_ROUTES[item.data.entity_type];

@@ -102,7 +102,7 @@ _MAX_MODEL_FILTER_LEN = 256
 _DEFAULT_RATE_LIMIT_PAUSE_SECONDS = 60
 
 # Leads an answer from a server that refused the ``tools`` parameter.
-_TOOLS_REJECTED_NOTE = "_[This provider didn't accept tools, so this answer has none.]_\n\n"
+_TOOLS_REJECTED_NOTE = "_[This provider did not accept tools, so this answer was written without them.]_\n\n"
 
 
 def _validate_provider_base_url(raw_url: str) -> str:
@@ -559,7 +559,7 @@ class OpenAICompatibleProvider(AIProvider):
                     elif wrap_up:
                         yield {"kind": "text", "text": TOOL_BUDGET_NOTE}
                     if choice.get("finish_reason") == "length":
-                        yield {"kind": "text", "text": "\n\n_[answer truncated — model hit its output limit]_"}
+                        yield {"kind": "text", "text": "\n\n_[Answer truncated: the model reached its output limit.]_"}
                     if wrap_up:
                         logger.warning("%s agent loop hit max_iterations=%d", self.base_url, max_iterations)
                     yield _done()

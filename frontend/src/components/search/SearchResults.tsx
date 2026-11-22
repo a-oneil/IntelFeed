@@ -365,8 +365,8 @@ export function SearchResults({
         <div className={styles.placeholderHead}>
           <h2 className={styles.placeholderTitle}>Search IntelFeed</h2>
           <p>
-            Look up an actor, malware family, CVE, technique, or search article text. Narrow the
-            answer with the filters on the left — or say it directly in the query language.
+            Look up an actor, malware family, CVE or technique, or search article text. Narrow the
+            results with the filters on the left or with the query language.
           </p>
         </div>
 
@@ -460,7 +460,7 @@ export function SearchResults({
             <code key={f}>{f}:</code>
           ))}
           <span>
-            {unknownFields.length === 1 ? "is not a search field" : "are not search fields"} — searched as plain text
+            {unknownFields.length === 1 ? "is not a search field" : "are not search fields"}. Searched as plain text
             instead.
           </span>
         </div>

@@ -49,7 +49,7 @@ export function ingestStatusTitle(status: IngestItemStatus, phase: IngestItem["p
     case "created":
       return phase === "done"
         ? "Entry created and AI analysis complete"
-        : "Entry created; autolink and extraction ran, the one-pass AI analysis is queued";
+        : "Entry created. Autolink and extraction ran. AI analysis is queued.";
     case "expanded":
       return "Expanded into one item per file";
     case "duplicate":

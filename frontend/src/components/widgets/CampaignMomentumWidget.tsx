@@ -13,13 +13,13 @@ const CAMPAIGN_COLOR = "#14b8a6";
 /** Compare the latest third of the window against the middle third. */
 function momentum(row: CampaignMomentumRow): { label: string; hot: boolean } {
   const counts = row.weeks.map((w) => w.count);
-  if (counts.length < 3 || counts.every((c) => c === 0)) return { label: "quiet", hot: false };
+  if (counts.length < 3 || counts.every((c) => c === 0)) return { label: "no activity", hot: false };
   const slice = Math.max(1, Math.floor(counts.length / 3));
   const recent = counts.slice(-slice).reduce((a, b) => a + b, 0);
   const prior = counts.slice(-slice * 2, -slice).reduce((a, b) => a + b, 0);
-  if (recent === 0) return { label: "quiet", hot: false };
-  if (recent > prior * 1.3) return { label: "accelerating", hot: true };
-  if (recent * 1.3 < prior) return { label: "cooling", hot: false };
+  if (recent === 0) return { label: "no activity", hot: false };
+  if (recent > prior * 1.3) return { label: "rising", hot: true };
+  if (recent * 1.3 < prior) return { label: "falling", hot: false };
   return { label: "steady", hot: false };
 }
 

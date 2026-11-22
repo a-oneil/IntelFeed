@@ -20,7 +20,7 @@ interface ThreadRowProps {
 
 const KIND_LABEL: Record<string, string> = {
   first_disclosure: "First",
-  new_tradecraft: "New tradecraft",
+  new_tradecraft: "New technique",
   peak: "Peak",
   update: "Update",
 };
@@ -66,8 +66,8 @@ export function ThreadRow({
         </button>
         <Hint
           title="Story thread"
-          body="A run of coverage of the same event, clustered into one timeline instead of nine separate rows."
-          aside="Open it to read the spine — what actually changed, in order."
+          body="Articles about the same event, grouped into one row with a timeline."
+          aside="Open it to see the timeline of what changed."
         >
         <button className={styles.header} onClick={onOpenThread}>
           <span className={`${styles.score} ${styles[band]}`}>◆ {score.toFixed(1)}</span>
@@ -118,7 +118,7 @@ export function ThreadRow({
 
       {expanded && (
         <div className={styles.spine}>
-          {isLoading && <div className={styles.loading}>Loading the spine…</div>}
+          {isLoading && <div className={styles.loading}>Loading timeline…</div>}
           {detail?.beats.map((beat) => (
             <button
               key={beat.id}
@@ -133,7 +133,7 @@ export function ThreadRow({
                   {KIND_LABEL[beat.kind] ?? beat.kind}
                 </span>
                 {beat.collapsed_count > 0 && (
-                  <span className={styles.folded}>{beat.collapsed_count} re-reports folded</span>
+                  <span className={styles.folded}>{beat.collapsed_count} re-reports grouped</span>
                 )}
               </span>
               <span className={styles.beatHeadline}>{beat.headline}</span>

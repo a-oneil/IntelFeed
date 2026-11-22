@@ -134,7 +134,7 @@ const PANELS: { label: string; hint: string; terms: string; dest: EngineDest }[]
   },
   {
     label: "False-positive names",
-    hint: "Curated names the autolinker refuses to match",
+    hint: "Names the autolinker never matches",
     terms: "false positive fp names blocked surface forms autolinker dictionary",
     dest: { kind: "stage", stage: "autolink" },
   },
@@ -158,7 +158,7 @@ const PANELS: { label: string; hint: string; terms: string; dest: EngineDest }[]
   },
   {
     label: "Pipeline plans",
-    hint: "Per-plan stage composition layered over the engine defaults",
+    hint: "Per-plan stage on/off settings layered over the engine defaults",
     terms: "plans pipeline stages compose enable disable layer",
     dest: { kind: "browse", browse: "plans" },
   },

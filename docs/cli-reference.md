@@ -150,7 +150,7 @@ See the [CLI read-only gating diagram](diagrams/cli-readonly-gating.md) for the 
 
 The lite CLI drops the tools the registry marks `mutating`, then the read tools in `LITE_EXCLUDE` in `scripts/dev/sync_skill_clis.py`. Those are `validate_detection_rule`, `export_attack_layer` and `export_campaign` (shown as **read, full only** below). The other names in that set are already write tools.
 
-The lite CLI is not a permission boundary on the server: it logs in as your user. It just has no write tools to call.
+The lite CLI is not a permission boundary on the server: it logs in as your user. It has no write tools to call.
 
 ---
 
@@ -208,7 +208,7 @@ These filter articles.
 
 `sort:radar` orders by the signal engine's priority score, the same ranking as the Priority Queue. It leaves out unscored articles and ignores text relevance.
 
-Things to know:
+Notes:
 
 - **Some negations are dropped.** A negated `signal:`, `url:`, `is:translated` or `is:image` only removes matches from a set that another filter already built: an entity filter, or another positive `signal:`, `url:`, `is:translated` or `is:image`. With only text or index filters around it, the negation is ignored. For example `ransomware NOT signal:kev_added` returns every ransomware article.
 - **Grades are exact letters.** `feed.reliability:>B` does not work, and feeds with no grade match no grade filter.
@@ -324,7 +324,7 @@ Source: `backend/app/tools/read.py`.
 | `get_malware` | A malware family profile. | **`malware_id`** | read |
 | `get_cve` | A CVE with scores, KEV status, exploit info, affected products and CWEs. | **`cve_id`** | read |
 | `get_observable` | One IOC by UUID or value. Accepts defanged input like `evil[.]com`. | **`observable`**, `kind` | read |
-| `search_observables` | Filter the IOC ledger. Sorted by last sighting. | `query`, `kind`, `role`, `status`, `captured_by`, `infra_tag`, `needs_review`, `min_confidence`, `min_reports`, `linked_entity_type`, `linked_entity_id`, `limit` | read |
+| `search_observables` | Filter the observables list. Sorted by last sighting. | `query`, `kind`, `role`, `status`, `captured_by`, `infra_tag`, `needs_review`, `min_confidence`, `min_reports`, `linked_entity_type`, `linked_entity_id`, `limit` | read |
 | `get_cwe` | A CWE weakness with its lineage, mitigations and CVE counts. | **`cwe_id`** | read |
 | `get_ttp` | An ATT&CK technique by UUID or ID (for example `T1059.001`). | **`ttp_id`** | read |
 | `get_campaign` | A campaign with its timeline, links and detection gaps. | **`campaign_id`** | read |
@@ -351,9 +351,9 @@ Source: `backend/app/tools/read.py`.
 | `get_trending_entities` | Most-mentioned entities of one type over a window. | **`entity_type`**, `days`, `limit` | read |
 | `get_feed_value` | A 0-100 value score per feed. | `days` | read |
 | `get_source_reliability` | Feeds ranked by how much intelligence they produce. | `limit` | read |
-| `get_entry_insights` | Insights about the entities in one article. | **`entry_id`** | read |
-| `get_triage_queue` | Scored review queue. Unlike `get_priority_queue`, it does not fold stories. | `days`, `limit` | read |
-| `get_priority_queue` | The reading queue as the Priority Queue page shows it, with stories folded into one row. | `limit`, `unread_only`, `with_threads`, `cursor` | read |
+| `get_entry_insights` | Detection gaps, campaign and requirement matches, and critical CVEs among one article's entities. | **`entry_id`** | read |
+| `get_triage_queue` | Scored review queue. Unlike `get_priority_queue`, it does not group story threads. | `days`, `limit` | read |
+| `get_priority_queue` | The reading queue as the Priority Queue page shows it, with each story thread grouped into one row. | `limit`, `unread_only`, `with_threads`, `cursor` | read |
 | `get_requirement_coverage` | Requirement counts by status, priority, category and staleness. | none | read |
 
 ### Pivots, graphs and coverage checks
@@ -377,7 +377,7 @@ Source: `backend/app/tools/boards.py`.
 
 | Tool | What it does | Arguments | Kind |
 |---|---|---|---|
-| `get_threat_board` | The Threats board: actors, malware and exploited CVEs ranked by how many stories carried them. | `window`, `facet`, `limit`, `min_attention`, `include_handled` | read |
+| `get_threat_board` | The Threats board: actors, malware and exploited CVEs ranked by how many stories mention them. | `window`, `facet`, `limit`, `min_attention`, `include_handled` | read |
 | `list_intel_profiles` | List intel profiles (named scopes such as a customer or portfolio). | `limit`, `offset` | read |
 | `get_intel_profile` | One intel profile with its countries and sectors. | **`profile_id`** | read |
 | `get_profile_threat_surface` | Actors and malware active against one intel profile, with the reason. | **`profile_id`**, `limit` | read |
@@ -387,7 +387,7 @@ Source: `backend/app/tools/boards.py`.
 
 ### Story threads
 
-A story thread groups every article about one unfolding story. Source: `backend/app/tools/threads.py`.
+A story thread groups every article that reports one story. Source: `backend/app/tools/threads.py`.
 
 | Tool | What it does | Arguments | Kind |
 |---|---|---|---|
@@ -412,7 +412,7 @@ Observables are indicators of compromise (IOCs): IPs, domains, hashes and simila
 
 | Tool | What it does | Arguments | Kind |
 |---|---|---|---|
-| `promote_observable` | Add a value from an article to the IOC ledger. | **`entry_id`**, **`kind`**, **`value`**, `role`, `evidence`, `label` | write |
+| `promote_observable` | Add a value from an article to the observables list. | **`entry_id`**, **`kind`**, **`value`**, `role`, `evidence`, `label` | write |
 | `update_observable` | Change an IOC's role, label or description, or pin its confidence. | **`observable_id`**, `role`, `label`, `description`, `confidence_pinned` | write |
 | `deny_observable` | Block a value so it is never captured, sighted or exported again. | `observable_id`, `kind`, `value`, `reason` | write, admin |
 | `get_entity_infrastructure` | The IOCs tied to an actor, malware family, campaign or tool. | **`entity_type`**, **`entity_id`**, `limit` | read |
@@ -727,7 +727,7 @@ Trigger types start with `on_`. A rule saved with any other spelling never fires
 | `Error: Unknown tool '<name>'` | Typo, a write tool in the lite CLI, or a CLI older than the server | `--list-tools \| grep <part>`. Use the full CLI for writes. Pull the latest CLI. |
 | `Error: Invalid JSON for tool '<name>'` | Shell quoting broke the JSON | Wrap the JSON in single quotes. Escape inner double quotes: `'{"query": "hello \"world\""}'`. |
 | `"error": "Invalid or expired confirmation token. …"` | The token is older than 5 to 10 minutes, or the arguments changed | Call again without a token to get a new one. |
-| A timeout or a long wait | Large `limit`, or an AI tool | Lower `limit`. AI tools can take a while; each request times out after 120 seconds. Run slow calls as separate commands rather than one batch. |
+| A timeout or a long wait | Large `limit`, or an AI tool | Lower `limit`. AI tools can be slow; each request times out after 120 seconds. Run slow calls as separate commands rather than one batch. |
 | Empty results | The data is not there yet, or the query is too narrow | Try other names (`APT29`, `Cozy Bear`). Check that the article has entities with `get_entry`. Run `get_dashboard_stats` to see what is loaded. |
 
 ---

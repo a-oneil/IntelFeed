@@ -338,12 +338,12 @@ export function Sidebar() {
                 body={
                   isVisitor
                     ? "The newest articles re-ordered by signal score instead of by time."
-                    : "The unread pile re-ordered by signal score instead of by time."
+                    : "Your unread articles re-ordered by signal score instead of by time."
                 }
                 aside={
                   isVisitor
-                    ? "Scored on source reliability and entity heat."
-                    : "Scored on source reliability, entity heat and what you've read before."
+                    ? "Scored on source reliability and entity activity."
+                    : "Scored on source reliability, entity activity and what you have read before."
                 }
               >
                 <button
@@ -362,7 +362,7 @@ export function Sidebar() {
             <div className={`${styles.toolStrip} ${styles.toolStripPair}`} role="group" aria-label="Tools">
               <Hint
                 title="Automation"
-                body="Rules that act on articles the moment they land — tag, star, summarise, add to a campaign."
+                body="Rules that act on new articles as they arrive: tag, star, summarise, add to a campaign."
                 aside="A trigger, then conditions, then actions."
               >
                 <button
@@ -401,8 +401,8 @@ export function Sidebar() {
           <div className={styles.sectionHeader}>
             <Hint
               title="Saved Searches"
-              body="Searches you've pinned, so a filter you built once is one click away."
-              aside="Run a search, then hit Save on the search bar."
+              body="Searches you saved. Click one to run it again."
+              aside="Run a search, then click Save on the search bar."
             >
               <span className={styles.sectionLabel} onClick={() => setSavedSearchesSectionCollapsed(!savedSearchesSectionCollapsed)} role="button" tabIndex={0}>
                 <svg
@@ -540,7 +540,7 @@ export function Sidebar() {
             </button>
             <Hint
               title="Ingest"
-              body="Drop a pile of files, paste links or text, or point at a GitHub repo. Each item becomes an entry under Manual Uploads and runs through the pipeline like any feed article."
+              body="Upload files, paste links or text, or add a GitHub repository. Each item becomes an entry under Manual Uploads and goes through the pipeline like a feed article."
               aside="Originals are kept and downloadable from the entry."
               align="end"
             >
@@ -782,7 +782,7 @@ export function Sidebar() {
             ) : (
               <>
                 <span>Investigate what you&rsquo;ve read: threat dossiers, CVEs, ATT&amp;CK coverage and your detection rule library.</span>
-                <em>Intelligence extracted while reading lands here.</em>
+                <em>Intelligence extracted from articles is listed here.</em>
               </>
             )}
           </div>
@@ -832,7 +832,7 @@ export function Sidebar() {
             type="button"
             className={styles.stale}
             onClick={() => window.location.reload()}
-            title={`This tab is running ${__APP_VERSION__}; the server is on ${serverVersion}. Reload to catch up.`}
+            title={`This tab is running ${__APP_VERSION__}. The server is on ${serverVersion}. Reload to update.`}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M21 12a9 9 0 1 1-2.64-6.36" />

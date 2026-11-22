@@ -180,7 +180,7 @@ describe("evidence structure", () => {
       { entries: 2, entry_ids: [], first: "2026-01-01", last: "2026-01-05", slug: null, title: null },
       { entries: 3, entry_ids: [], first: "2026-07-01", last: "2026-07-09", slug: null, title: null },
     ]);
-    expect(structurePhrase(item(es))).toEqual({ lead: "recurring", rest: "— 2 incidents over 6 months" });
+    expect(structurePhrase(item(es))).toEqual({ lead: "recurring", rest: "across 2 incidents over 6 months" });
   });
 
   it("phrases a single story by its thread title and outlet count", () => {
@@ -189,12 +189,12 @@ describe("evidence structure", () => {
     ]);
     expect(structurePhrase(item(titled))).toEqual({
       lead: "one story",
-      rest: "— “Zimbra webmail intrusion” · 6 outlets",
+      rest: "“Zimbra webmail intrusion” · 6 outlets",
     });
     const wave = structured("single_story", [
       { entries: 10, entry_ids: [], sources: 16, first: null, last: null, slug: null, title: null },
     ]);
-    expect(structurePhrase(item(wave))).toEqual({ lead: "one story", rest: "— a single 16-outlet wave" });
+    expect(structurePhrase(item(wave))).toEqual({ lead: "one story", rest: "carried by 16 outlets" });
     const untitled = structured("single_story", [
       { entries: 2, entry_ids: [], first: null, last: null, slug: null, title: null },
     ]);
@@ -204,7 +204,7 @@ describe("evidence structure", () => {
   it("says scattered plainly and stays silent on thin and missing", () => {
     expect(structurePhrase(item(structured("scattered")))).toEqual({
       lead: "no shared story",
-      rest: "— scattered co-mentions",
+      rest: "(scattered co-mentions)",
     });
     expect(structurePhrase(item(structured("thin")))).toBeNull();
     expect(structurePhrase(item({}))).toBeNull();

@@ -289,7 +289,7 @@ export default function WorkbenchPanel({
             onClick={handleGenerateRules}
             disabled={generateRules.isPending}
           >
-            {generateRules.isPending ? "Generating..." : "Gen Rules"}
+            {generateRules.isPending ? "Generating..." : "Generate Rules"}
           </button>
           <CampaignMenuButton entryId={entryId} />
 
@@ -305,7 +305,7 @@ export default function WorkbenchPanel({
           <button
             className={`${styles.actionBtn} ${styles.actionBtnAuto} ${autoOpenIntelPanel ? styles.actionBtnAutoActive : ""}`}
             onClick={toggleAutoOpenIntelPanel}
-            title={autoOpenIntelPanel ? "Auto-open enabled for high-value entries" : "Auto-open disabled"}
+            title={autoOpenIntelPanel ? "Auto-open is on. This panel opens with every article." : "Auto-open is off."}
           >
             Auto-Open
           </button>
@@ -392,7 +392,7 @@ export default function WorkbenchPanel({
                   />
                 </div>
                 <EntityRelationshipSummary nodes={graphData.nodes} edges={graphData.edges} />
-                <label className={styles.graphObsToggle} title="Ledger atoms as nodes — off by default to keep the map readable">
+                <label className={styles.graphObsToggle} title="Show observables as graph nodes. Off by default to keep the graph readable.">
                   <input
                     type="checkbox"
                     checked={graphObservables}
@@ -544,7 +544,7 @@ function InsightsSection({ entryId, expanded, onToggle }: { entryId: string; exp
 
   return (
     <AccordionSection
-      title="Intelligence Insights"
+      title="Suggested Actions"
       count={count}
       loading={isLoading}
       expanded={expanded}
@@ -651,7 +651,7 @@ function HistoryBadge({ firstSeen, articleCount, searchValue }: { firstSeen?: st
           onClick={searchValue ? handleArticleClick : undefined}
           title={searchValue ? "Search related articles" : undefined}
         >
-          {articleCount} art.
+          {articleCount} {articleCount === 1 ? "article" : "articles"}
         </span>
       )}
     </span>
@@ -778,9 +778,9 @@ function AccordionSection({
 /* ─── Extraction Status ─── */
 
 const STATUS_MESSAGES: Record<string, string> = {
-  ai_not_configured: "AI provider not configured for this task. Configure in Settings > AI.",
-  provider_error: "AI extraction failed. Check provider settings and try again.",
-  parse_error: "AI returned unexpected format. Results may be incomplete.",
+  ai_not_configured: "No AI provider is assigned to this task. Assign one in Settings > AI Configuration.",
+  provider_error: "AI extraction failed. Check the provider settings and try again.",
+  parse_error: "The AI response was in an unexpected format. Results may be incomplete.",
 };
 
 function ExtractionStatusBanner({ status, label }: { status: ExtractionStatus | undefined; label?: string }) {
@@ -788,7 +788,7 @@ function ExtractionStatusBanner({ status, label }: { status: ExtractionStatus | 
   return (
     <div className={styles.statusBanner}>
       {label && <strong>{label}: </strong>}
-      {STATUS_MESSAGES[status] || "Extraction encountered an issue."}
+      {STATUS_MESSAGES[status] || "Extraction failed."}
     </div>
   );
 }
@@ -876,7 +876,7 @@ function ObservableList({ payload, readOnly }: { payload: ObservableEntryPayload
       setCopiedAll(mode);
       setTimeout(() => setCopiedAll(null), 1500);
     } catch {
-      toast.error("Copy failed — clipboard unavailable");
+      toast.error("Could not copy. The clipboard is unavailable.");
     }
   };
 
@@ -891,7 +891,7 @@ function ObservableList({ payload, readOnly }: { payload: ObservableEntryPayload
             <div key={o.id} className={styles.entityCardRow}>
               <span
                 className={`${styles.entityValue} ${styles.obsValue}`}
-                title={[o.label, o.role && `role: ${o.role}`, o.evidence].filter(Boolean).join(" — ") || o.value}
+                title={[o.label, o.role && `role: ${o.role}`, o.evidence].filter(Boolean).join(" · ") || o.value}
                 onClick={readOnly ? undefined : () => navigate(`/workbench/observable/${o.id}`)}
               >
                 {o.kind === "script" && o.label ? `“${o.label}” · ${o.value.slice(0, 12)}…` : o.value}
@@ -929,7 +929,7 @@ function KillChainStrip({ entryId, readOnly }: { entryId: string; readOnly?: boo
   const ordered = (phases || []).filter((p) => p.tactic !== null);
   if (ordered.length < 2) return null;
   return (
-    <div className={styles.killChain} title="Attack chain — techniques ordered by ATT&CK kill-chain phase">
+    <div className={styles.killChain} title="Attack chain: techniques ordered by ATT&CK kill-chain phase">
       {ordered.map((phase, i) => (
         <div key={phase.tactic} className={styles.killChainPhase}>
           <span className={styles.killChainLabel}>{phase.label}</span>
@@ -1580,7 +1580,7 @@ function RuleList({
     return (
       <div className={styles.placeholder}>
         {hasEntities
-          ? "No detection rules yet. Use \"Gen Rules\" above."
+          ? "No detection rules yet. Use \"Generate Rules\" above."
           : hasExtracted
             ? "No entities to generate rules from."
             : "Extract intelligence first, then generate detection rules."}

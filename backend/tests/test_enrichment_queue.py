@@ -638,7 +638,7 @@ async def test_a_lease_reclaim_counts_an_attempt_then_fails(db_session):
     assert await q.claim(db_session) == []
     (row,) = await _jobs(db_session)
     assert (row.status, row.attempts, row.last_status) == ("failed", q.MAX_ATTEMPTS, "lease_expired")
-    assert "lease" in row.last_error
+    assert "did not finish within" in row.last_error
 
 
 async def test_a_lease_reclaim_charges_only_the_job_that_had_started(db_session):

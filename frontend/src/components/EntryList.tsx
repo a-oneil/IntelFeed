@@ -1252,7 +1252,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                   <DropdownItem
                     label={
                       caughtUpFallback
-                        ? "Hide read entries (paused — nothing unread)"
+                        ? "Hide read entries (paused: nothing unread)"
                         : effectiveShowUnreadOnly
                           ? "Show read entries"
                           : "Hide read entries"
@@ -1313,7 +1313,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                 onClick={toggleHideRead}
                 title={
                   caughtUpFallback
-                    ? "Nothing unread here — paused so the list isn't empty"
+                    ? "Nothing is unread here. Hide Read is paused so the list is not empty."
                     : undefined
                 }
               >
@@ -1323,8 +1323,8 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
             {!isVisitor && (
             <Hint
               title="Auto-read"
-              body="Marks articles read as they scroll past you."
-              aside="Off leaves everything unread until you say otherwise."
+              body="Marks articles as read when they scroll out of view."
+              aside="When off, articles stay unread until you mark them."
             >
               <button
                 className={`${styles.toolbarBtn} ${markReadOnScroll ? styles.toolbarBtnActive : ""}`}
@@ -1816,8 +1816,8 @@ function EmptyFolderState({ folder }: { folder: string | null }) {
       <div className={styles.emptyTeach}>
         <strong>Nothing watched yet.</strong>
         <p>
-          Watch a threat actor, malware family or CVE from its profile page, and
-          every new article that mentions it lands here.
+          Watch a threat actor, malware family or CVE from its profile page.
+          New articles that mention it are listed here.
         </p>
         <button className={styles.emptyTeachBtn} onClick={() => navigate("/workbench/explore")}>
           Browse entities to watch
@@ -1830,8 +1830,8 @@ function EmptyFolderState({ folder }: { folder: string | null }) {
       <div className={styles.emptyTeach}>
         <strong>No bookmarks yet.</strong>
         <p>
-          Press <kbd>b</kbd> on any article — or click Bookmark in the reader —
-          to save it here for later.
+          Press <kbd>b</kbd> on any article, or click Bookmark in the reader,
+          to save it here.
         </p>
       </div>
     );
@@ -1841,8 +1841,8 @@ function EmptyFolderState({ folder }: { folder: string | null }) {
       <div className={styles.emptyTeach}>
         <strong>Nothing starred yet.</strong>
         <p>
-          Press <kbd>s</kbd> on any article — or click Star in the reader — to
-          keep your best finds here.
+          Press <kbd>s</kbd> on any article, or click Star in the reader, to
+          keep it here.
         </p>
       </div>
     );

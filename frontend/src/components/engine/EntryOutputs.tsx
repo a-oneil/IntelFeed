@@ -125,7 +125,7 @@ function VerdictBadge({ verdict, entryId }: { verdict: EntryAdjudicationVerdict 
     : verdict.applied
       ? " (applied)"
       : " (proposed, not applied)";
-  const title = `AI review: ${detail}${state}${verdict.reason ? ` — ${verdict.reason}` : ""}`;
+  const title = `AI review: ${detail}${state}${verdict.reason ? `. Reason: ${verdict.reason}` : ""}`;
   return (
     <>
       <span className={`${styles.verdictPill} ${verdict.applied ? styles.verdictApplied : styles.verdictShadow}`} title={title}>
@@ -179,21 +179,21 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
   const adjSummary =
     adjStatus === "completed" && adjDetail
       ? adjDetail.skipped
-        ? `AI review: skipped — ${skipReason(adjDetail.skipped)}`
+        ? `AI review: skipped (${skipReason(adjDetail.skipped)})`
         : `AI review: ${[adjDur ? `reviewed in ${adjDur}` : "reviewed", adjMode ?? "shadow"].join(" · ")} · ${
             adjDetail.items ?? 0
           } items · ${
             Object.entries(adjDetail.verdicts ?? {})
               .filter(([k]) => k !== "keep")
               .map(([k, n]) => `${n} ${k}`)
-              .join(", ") || "all kept"
+              .join(", ") || "all items kept"
           }${adjMode === "apply" ? " · applied" : " · proposals only"}`
       : adjStatus === "pending"
         ? "AI review: queued"
         : adjStatus === "recheck"
-          ? "AI review: reviewed; queued again to check held matches settled since"
+          ? "AI review: reviewed. Queued again to check held matches that settled since."
           : adjStatus?.startsWith("skipped_")
-            ? `AI review: skipped — ${skipReason(adjStatus.replace("skipped_", ""))}`
+            ? `AI review: skipped (${skipReason(adjStatus.replace("skipped_", ""))})`
             : null;
   const iocVerdicts = (adjQ.data?.verdicts ?? []).filter((v) => v.kind === "ioc");
   const heldVerdicts = (adjQ.data?.verdicts ?? []).filter((v) => v.kind === "held");
@@ -202,7 +202,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
   return (
     <div className={styles.outputsZone}>
       {adjSummary && <p className={styles.ozAdj}>{adjSummary}</p>}
-      <p className={styles.ozSub}>Links — entry → entity ({linksQ.data?.total ?? "…"})</p>
+      <p className={styles.ozSub}>Links: entry → entity ({linksQ.data?.total ?? "…"})</p>
       {links.map((l) => (
         <div key={`${l.entity_type}|${l.entity_id}`} className={styles.orow}>
           <EntityChip type={l.entity_type} id={l.entity_id} name={l.entity_name} />
@@ -233,10 +233,10 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
       ))}
       {!loading && links.length === 0 && <div className={styles.ozEmpty}>No entity links.</div>}
       {(linksQ.data?.total ?? 0) > LIST_LIMIT && (
-        <div className={styles.ozMore}>+{(linksQ.data?.total ?? 0) - LIST_LIMIT} more — see Links browser</div>
+        <div className={styles.ozMore}>+{(linksQ.data?.total ?? 0) - LIST_LIMIT} more. Open the Links view to see all.</div>
       )}
 
-      <p className={styles.ozSub}>Relationships evidenced here ({relsQ.data?.total ?? "…"})</p>
+      <p className={styles.ozSub}>Relationships that cite this entry ({relsQ.data?.total ?? "…"})</p>
       {rels.map((r) => (
         <div key={r.id} className={styles.orow}>
           <EntityChip type={r.source_type} id={r.source_id} name={r.source_name} />
@@ -244,7 +244,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
           <EntityChip type={r.target_type} id={r.target_id} name={r.target_name} />
           <VerdictBadge verdict={verdictById.get(`edge:${r.id}`)} entryId={entryId} />
           <span className={`${styles.srcPill} ${srcClass(r.source)}`}>
-            {SOURCE_LABELS[r.source ?? ""] ?? r.source ?? "—"}
+            {SOURCE_LABELS[r.source ?? ""] ?? r.source ?? "unattributed"}
           </span>
           <span className={styles.oActs}>
             <button
@@ -322,7 +322,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
               className={`${styles.iact} ${styles.iactDanger}`}
               title={
                 e.entity_type === "observable"
-                  ? "Remove this article's sighting (the ledger row stays)"
+                  ? "Remove this article's sighting (the observable stays in the observables list)"
                   : "Delete entity and all its links"
               }
               onClick={async () => {
@@ -334,7 +334,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
                   !(await confirmDialog({
                     title: obs ? "Remove sighting" : "Delete entity",
                     message: obs
-                      ? `Remove this article's sighting of "${e.name}"? The ledger row and its other sightings stay.`
+                      ? `Remove this article's sighting of "${e.name}"? The observable and its other sightings stay in the observables list.`
                       : `Delete "${e.name}"? This removes the entity and all links. This cannot be undone.`,
                     confirmLabel: obs ? "Remove sighting" : "Delete",
                     destructive: true,
@@ -361,7 +361,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
           (Apply while proposed, Restore once applied), and the reason. */}
       {iocVerdicts.length > 0 && (
         <>
-          <p className={styles.ozSub}>Observables — review verdicts ({iocVerdicts.length})</p>
+          <p className={styles.ozSub}>Observables: review verdicts ({iocVerdicts.length})</p>
           {iocVerdicts.map((v) => {
             const { kind, value } = parseIocItemId(v.item_id);
             return (
@@ -387,7 +387,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
           its own row: the entity, the badge and the reason. */}
       {heldVerdicts.length > 0 && (
         <>
-          <p className={styles.ozSub}>Held matches — review verdicts ({heldVerdicts.length})</p>
+          <p className={styles.ozSub}>Held matches: review verdicts ({heldVerdicts.length})</p>
           {heldVerdicts.map((v) => (
             <div key={v.item_id} className={styles.orow} data-testid="held-verdict">
               {v.entity_type && v.entity_id && <EntityChip type={v.entity_type} id={v.entity_id} name={v.name} />}
@@ -406,12 +406,12 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
             <span className={styles.entName}>severity/summary</span>
             <span
               className={`${styles.verdictPill} ${assessment.verdict === "ok" ? styles.verdictOk : styles.verdictShadow}`}
-              title={`AI review: the analysis's severity/summary reads as ${assessment.verdict}`}
+              title={`AI review: the analysis severity and summary are rated ${assessment.verdict}`}
             >
               {assessment.verdict}
             </span>
             {assessment.reason && <span className={styles.popMuted}>{assessment.reason}</span>}
-            <span className={styles.loggedOnly} title="Assessment verdicts are recorded for the record; nothing is changed">
+            <span className={styles.loggedOnly} title="Assessment verdicts are recorded only. Nothing is changed.">
               logged only
             </span>
           </div>

@@ -35,7 +35,7 @@ export function ExposureBuilderPage() {
     <div className={styles.page}>
       <PageHeader
         title="Threat Exposure Report"
-        subtitle="Pick a scope — regions × verticals — and curate who the corpus says is active against it."
+        subtitle="Pick a scope of regions and verticals, then keep or drop the actors and malware reported active against it."
       />
       <div className={styles.body}>
         <section className={styles.scopeRow}>
@@ -85,8 +85,8 @@ export function ExposureBuilderPage() {
 
         {!selected && !creating && (
           <p className={styles.empty}>
-            A profile is a saved scope you report against — one per customer, portfolio, or watch
-            area. Choose one above or create your first.
+            A profile is a saved scope you report against, one per customer, portfolio, or watch
+            area. Choose one above or create one.
           </p>
         )}
       </div>
@@ -284,8 +284,8 @@ function SurfaceStep({
   if (!items.length)
     return (
       <p className={styles.empty}>
-        Nothing in the corpus matches this scope inside the window. Widen the window, add regions
-        or verticals, or check that country/sector extraction has run.
+        No actors or malware match this scope within the window. Widen the window, add regions
+        or verticals, or check that country and sector extraction has run.
       </p>
     );
 
@@ -323,8 +323,8 @@ function SurfaceStep({
         ))}
       </div>
       <p className={styles.footnote}>
-        Keep/drop is remembered on “{profileName}” for the next issue. Partial matches (one
-        dimension only) rank lower with the gap stated — you decide, not the query.
+        Keep and drop choices are saved on “{profileName}” for the next report. Partial matches
+        (region or vertical only) rank lower.
       </p>
     </section>
   );

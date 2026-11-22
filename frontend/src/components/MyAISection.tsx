@@ -71,7 +71,7 @@ export function MyAISection() {
     return (
       <div className={page.sectionContent}>
         <h2 className={page.sectionTitle}>My AI</h2>
-        <AsyncStateError title="Couldn't load your AI settings" description={apiErrorInfo(error).message} onRetry={() => void refetch()} />
+        <AsyncStateError title="Could not load your AI settings" description={apiErrorInfo(error).message} onRetry={() => void refetch()} />
       </div>
     );
   }
@@ -93,8 +93,8 @@ export function MyAISection() {
 
       {!enabled && (
         <div className={`${styles.note} ${styles.noteInfo}`}>
-          <b>Personal keys are off on this instance.</b> Your admin hasn't enabled them, so every prompt you run runs
-          on the instance's providers.
+          <b>Personal keys are off on this instance.</b> Your admin has not enabled them, so every prompt you run
+          uses the instance's providers.
         </div>
       )}
 
@@ -519,8 +519,8 @@ function AddKeyForm({
       </label>
       {isCli && (
         <div className={`${styles.note} ${styles.noteBad}`}>
-          <b>Claude Code can't be a personal key.</b> It runs one CLI sign-in shared by the whole instance, so it
-          can't be yours alone. Use a Claude API key instead.
+          <b>Claude Code cannot be a personal key.</b> It uses one CLI sign-in shared by the whole instance. Use a
+          Claude API key instead.
         </div>
       )}
       {!isCli && !typeAllowed && (
@@ -545,7 +545,7 @@ function AddKeyForm({
                 aria-label="Base URL"
               />
               {!policy.allow_private_endpoints && (
-                <span className={styles.fieldHint}>A public address. This instance doesn't allow private endpoints for personal keys.</span>
+                <span className={styles.fieldHint}>A public address. This instance does not allow private endpoints for personal keys.</span>
               )}
             </label>
           )}
@@ -700,7 +700,7 @@ function RoutesCard({
         <span className={styles.muted}>Only prompts your admin allows</span>
       </div>
       {overview.tasks.length === 0 ? (
-        <div className={styles.empty}>Your admin hasn't opened any prompt to personal keys.</div>
+        <div className={styles.empty}>Your admin has not allowed any prompt to use personal keys.</div>
       ) : (
         <div className={styles.tableWrap}>
           <table className={styles.table}>
@@ -827,7 +827,7 @@ function FallbackCard({ overview }: { overview: NonNullable<ReturnType<typeof us
 
   return (
     <div className={page.card}>
-      <h3 className={styles.cardTitle}>When my key can't answer</h3>
+      <h3 className={styles.cardTitle}>When my key cannot answer</h3>
       {!policy.require_user_ai_provider && (
         <div className={page.settingRow}>
           <div className={page.settingInfo}>

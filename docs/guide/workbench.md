@@ -8,7 +8,7 @@ and **Intelligence**.
 
 ![The Threats board listing ranked threats with story and outlet counts and draft-detection-rule actions](../assets/screenshots/threats-board.png)
 
-*The Threats board ranks recent activity by attention and new tradecraft.*
+*The Threats board ranks recent threats by how many stories report them and by new techniques.*
 
 ## Dashboard
 
@@ -50,14 +50,14 @@ profiles and more. See [Campaigns and reports](campaigns-and-reports.md).
 
 **ATT&CK Matrix**: shades each MITRE ATT&CK technique by how often your feeds
 report it and whether your rules cover it. Often-reported techniques with no
-rule are your gaps. **Export Navigator JSON** downloads the grid for MITRE's
+rule are the coverage gaps. **Export Navigator JSON** downloads the grid for MITRE's
 ATT&CK Navigator.
 
 **Rules Library**: every detection rule you have. See
 [Writing detection rules](detection-rules.md).
 
 **Telemetry Sources**: tick the log sources you collect. IntelFeed then tells
-you when a rule needs logs you don't collect, so it could never fire.
+you when a rule needs logs you do not collect, so it could never fire.
 
 **Threats**: what is active now, ranked by story rather than article, so ten
 write-ups of one breach count once. Tabs: **All**, **Actors**, **Malware** and
@@ -88,8 +88,8 @@ intelligence requirements). New articles are checked against them, and a match
 raises an article in the [Priority Queue](priority-queue.md). Write a few
 narrow ones rather than many broad ones.
 
-**Telegram Mentions**: Telegram channels your articles mention that you don't
-ingest yet, so you can add them as feeds.
+**Telegram Mentions**: Telegram channels your articles mention that are not
+feeds yet, so you can add them.
 
 **Watchlist**: the entities you watch, with their new mentions.
 

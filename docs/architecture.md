@@ -1,6 +1,6 @@
 # Architecture
 
-This is the map of how IntelFeed works, from fetching a feed to linking entities, scoring articles and building detection rules. It is for developers and operators who want the big picture before they read the detailed docs linked from each section.
+This is an overview of how IntelFeed works, from fetching a feed to linking entities, scoring articles and building detection rules. It is for developers and operators who want the whole system in one place before they read the detailed docs linked from each section.
 
 ---
 
@@ -192,7 +192,7 @@ A *junction table* links entries to one entity type, such as `EntryThreatActor`.
 | `extracted_at` | When |
 | `paragraph_indices` | Which paragraphs mention the entity |
 
-`paragraph_indices` powers proximity scoring: two entities in the same paragraph are more strongly related than two far apart.
+`paragraph_indices` is used for proximity scoring: two entities in the same paragraph are more strongly related than two far apart.
 
 Some types have extra links: `ThreatActorTargetCountry` (countries an actor targets), `TTPMitigation` (mitigations for a technique), and a `role` on `EntryCountry` (`origin`, `target`, `infrastructure` or `mentioned`).
 
@@ -273,7 +273,7 @@ Two things pull intelligence out of an article beyond autolinking:
 
 1. **The extract stage** (`extract_entry_intel_task`). Pattern matching only, no AI. It runs when the feed has `auto_extract_on_ingest` or `extract_detection_rules` on.
    - **TTPs:** ATT&CK IDs, checked against the imported ATT&CK catalog. Unknown IDs are dropped, revoked ones are mapped to their replacement, and ICS techniques are kept only when the article is about ICS/OT.
-   - **CVEs:** `CVE-` IDs. A new CVE is looked up in NVD; a known one just gets linked.
+   - **CVEs:** `CVE-` IDs. A new CVE is looked up in NVD; a known one is only linked.
    - **Mitigations:** ATT&CK mitigation IDs.
    - **Detection rules:** see below.
 2. **The one-pass AI analysis** (`entry_analysis`). After scoring, each article gets one AI call that extracts actors, malware, tools, TTPs, relationships and observables together, and confirms held autolink matches. A second AI call, the adjudicate stage, then reviews what it wrote. See [engine.md](engine.md) and [automation-ai-enrichment.md](automation-ai-enrichment.md).
@@ -397,7 +397,7 @@ A *correlation event* is a notable finding, such as a new technique for a known 
 `create_cooccurrence_relationships(entry_id)` builds links from articles:
 
 - A pair of different-type entities is linked only when both are named in the same paragraph, and that paragraph reads as one statement. It picks a verb and direction from the pair's types (for example actor → malware is `uses`); a pair with no known verb is not linked.
-- Only an article the adjudicate stage will review draws links (its feed's AI analysis is on, and its plan runs the review), because the verb is a guess the review checks against the sentence.
+- Only an article the adjudicate stage will review creates links (its feed's AI analysis is on, and its plan runs the review), because the verb is a guess the review checks against the sentence.
 - Some co-mentions never count: entities in different paragraphs, links with no recorded paragraph (most AI-sourced links), boilerplate paragraphs ("Related:", "Read more", sources, references, a detection rule's analytic stories) and paragraphs naming five or more entities (a roundup or list line).
 - An existing link gains the article as evidence. A `co_occurrence` link moves from `possible` to `probable` after `relationship_evidence_promote_count` separate articles from at least two feeds.
 - A link an analyst rejected is never recreated.
@@ -434,7 +434,7 @@ Six of them can be pulled out of articles (section 5). CrowdStrike QL, Nuclei an
 
 ### Detection Gap Analysis
 
-For campaigns and entities, IntelFeed lists the TTPs and CVEs that have no rule. The ATT&CK matrix (`/api/attack/matrix`, `backend/app/api/attack.py`) shows rule counts and recent mentions per technique. Coverage takes your configured telemetry into account, not just whether a rule exists. Gaps also raise `coverage_gap` correlation events. See [detection-engineering.md](detection-engineering.md).
+For campaigns and entities, IntelFeed lists the TTPs and CVEs that have no rule. The ATT&CK matrix (`/api/attack/matrix`, `backend/app/api/attack.py`) shows rule counts and recent mentions per technique. Coverage takes your configured telemetry into account, not only whether a rule exists. Gaps also raise `coverage_gap` correlation events. See [detection-engineering.md](detection-engineering.md).
 
 ---
 
@@ -528,7 +528,7 @@ Tool pages (Workbench, Settings, Search, Automation) use `SidebarLayout` instead
 
 The **Dashboard** (`/workbench/dashboard`, `frontend/src/pages/DashboardPage.tsx`) is the Workbench home page and shows what is happening now. `/workbench`, `/triage`, `/dashboards` and `/atlas` all go there. The entity browser is at `/workbench/explore`.
 
-The **Priority Queue** (`/priority-queue`) is the reader layout in `priorityMode`: the entry list sorted by score (`radar`), with story threads folded in as single rows, and a card in the reader explaining why the article ranked (`WhyRankedCard.tsx`). The server builds the ranking (`GET /api/entries/priority-queue`, `build_priority_queue`, `backend/app/api/entries.py:1449`). It is linked from a chip under the unread count in the sidebar.
+The **Priority Queue** (`/priority-queue`) is the reader layout in `priorityMode`: the entry list sorted by score (`radar`), with each story thread grouped into a single row, and a card in the reader explaining why the article ranked (`WhyRankedCard.tsx`). The server builds the ranking (`GET /api/entries/priority-queue`, `build_priority_queue`, `backend/app/api/entries.py:1449`). It is linked from a chip under the unread count in the sidebar.
 
 **Daily summaries** are AI recaps of each day, shown on the day dividers in the entry list and shared by all users. The `generate-daily-summaries` job (daily 06:00 UTC, `backend/app/workers/daily_summary_tasks.py`) writes yesterday's summary ahead of time.
 

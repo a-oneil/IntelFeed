@@ -272,8 +272,8 @@ async def test_a_technique_a_weakness_and_a_mitigation_from_the_links(db_session
         "1 D3FEND countermeasure",
         "2 NIST controls",
     ]
-    assert _texts(await glance(db_session, "cwe", cwe, ADMIN))[1] == ["Behind 1 CVE, 1 in KEV"]
-    assert _texts(await glance(db_session, "mitigation", mitigation, ADMIN))[1] == ["Counters 1 technique"]
+    assert _texts(await glance(db_session, "cwe", cwe, ADMIN))[1] == ["Weakness in 1 CVE, 1 in KEV"]
+    assert _texts(await glance(db_session, "mitigation", mitigation, ADMIN))[1] == ["Mitigates 1 technique"]
 
 
 async def test_a_glance_keeps_two_chips_and_three_facts_and_says_a_thing_once(db_session):

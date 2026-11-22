@@ -11,27 +11,27 @@ import styles from "../fields.module.css";
  */
 const RELIABILITY = [
   { value: "", label: "Not rated" },
-  { value: "A", label: "A — Reliable" },
-  { value: "B", label: "B — Usually reliable" },
-  { value: "C", label: "C — Fairly reliable" },
-  { value: "D", label: "D — Not usually reliable" },
-  { value: "E", label: "E — Unreliable" },
-  { value: "F", label: "F — Cannot be judged" },
+  { value: "A", label: "A: Reliable" },
+  { value: "B", label: "B: Usually reliable" },
+  { value: "C", label: "C: Fairly reliable" },
+  { value: "D", label: "D: Not usually reliable" },
+  { value: "E", label: "E: Unreliable" },
+  { value: "F", label: "F: Cannot be judged" },
 ];
 
 const TIMELINESS = [
   { value: "", label: "Not rated" },
-  { value: "excellent", label: "Excellent — often first to report" },
-  { value: "good", label: "Good — reports the same day" },
-  { value: "fair", label: "Fair — a few days behind" },
-  { value: "poor", label: "Poor — weeks behind" },
+  { value: "excellent", label: "Excellent: often first to report" },
+  { value: "good", label: "Good: reports the same day" },
+  { value: "fair", label: "Fair: a few days behind" },
+  { value: "poor", label: "Poor: weeks behind" },
 ];
 
 const RELEVANCE = [
   { value: "", label: "Not rated" },
-  { value: "high", label: "High — almost always worth reading" },
-  { value: "medium", label: "Medium — sometimes worth reading" },
-  { value: "low", label: "Low — rarely worth reading" },
+  { value: "high", label: "High: almost always worth reading" },
+  { value: "medium", label: "Medium: sometimes worth reading" },
+  { value: "low", label: "Low: rarely worth reading" },
 ];
 
 export function AssessmentPane({ form }: { form: FeedForm }) {

@@ -56,9 +56,9 @@ describe("CampaignIntake", () => {
     // that most needs to be told what to collect.
     render(<CampaignIntake campaignId="c1" />);
 
-    expect(screen.getByText("Feeding this campaign")).toBeInTheDocument();
+    expect(screen.getByText("Campaign intake")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add intake" })).toBeInTheDocument();
-    expect(screen.getByText(/Nothing arrives on its own/)).toBeInTheDocument();
+    expect(screen.getByText(/No automatic intake is set up/)).toBeInTheDocument();
   });
 
   it("opens the composer and drops the empty-state sentence", () => {
@@ -66,7 +66,7 @@ describe("CampaignIntake", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add intake" }));
 
     expect(screen.getByTestId("composer")).toBeInTheDocument();
-    expect(screen.queryByText(/Nothing arrives on its own/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No automatic intake is set up/)).not.toBeInTheDocument();
   });
 
   it("rewrites a query source in place, keeping what it already added", () => {

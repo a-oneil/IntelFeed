@@ -29,8 +29,8 @@ const SCOPE_CYCLE: SearchScope[] = ["everything", "workbench", "feeds"];
 // `in: feeds` is describing a search the user is not running.
 const SCOPE_PLACEHOLDER: Record<SearchScope, string> = {
   everything: "Search entries & intelligence... ( / )",
-  workbench: "Search intelligence — actors, malware, CVEs, TTPs... ( / )",
-  feeds: "Search entries — articles, titles, content... ( / )",
+  workbench: "Search intelligence: actors, malware, CVEs, TTPs... ( / )",
+  feeds: "Search entries: articles, titles, content... ( / )",
 };
 
 /** The shape both completion dictionaries are normalised to. */
@@ -232,7 +232,7 @@ export function HeaderSearch({ inputRef }: Props) {
               onMouseDown={(e) => e.preventDefault()}
               onClick={cycleScope}
               aria-label={`Search scope: ${scope}. Activate, or press Tab in the field, to change it.`}
-              title="Search scope — Tab to cycle"
+              title="Search scope. Press Tab to cycle."
             >
               <span className={styles.scopeChipKey}>in:</span>
               {scope}

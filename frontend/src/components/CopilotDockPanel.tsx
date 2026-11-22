@@ -483,7 +483,7 @@ export function CopilotDockPanel() {
   const handleShare = useCallback(async () => {
     const id = useUIStore.getState().copilotActiveConversationId;
     if (!id) {
-      toast.error("Ask something first — sharing needs a saved conversation");
+      toast.error("Ask something first. Sharing needs a saved conversation.");
       return;
     }
     try {
@@ -652,7 +652,7 @@ export function CopilotDockPanel() {
           {needsReauth && (
             <div className={styles.reauthBanner}>
               <span className={styles.reauthText}>
-                <IconAlertTriangle size="1em" stroke={1.75} aria-hidden /> Copilot sign-in expired — responses will fail until you re-authenticate.
+                <IconAlertTriangle size="1em" stroke={1.75} aria-hidden /> Copilot sign-in expired. Responses will fail until you re-authenticate.
               </span>
               <button className={styles.reauthBtn} onClick={() => setReauthOpen(true)}>
                 Re-authenticate
@@ -809,7 +809,7 @@ export function CopilotDockPanel() {
               placeholder={
                 hasUnresolvedConfirm
                   ? "Resolve the pending action above to continue…"
-                  : "Ask Copilot anything… (type / for commands)"
+                  : "Ask a question… (type / for commands)"
               }
               rows={1}
               disabled={streaming || hasUnresolvedConfirm}

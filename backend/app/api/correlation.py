@@ -696,7 +696,7 @@ async def generate_detection_summary(
     if result is None:
         raise AppError(
             code="bad_request",
-            message="No valid entries found or no AI task assignment configured",
+            message="No valid entries were found, or the detection summary task has no AI provider assigned.",
             status_code=400,
         )
 
@@ -737,7 +737,7 @@ async def create_detection_summary(
     if result is None:
         raise AppError(
             code="bad_request",
-            message="No valid entries found or no AI task assignment configured",
+            message="No valid entries were found, or the detection summary task has no AI provider assigned.",
             status_code=400,
         )
 

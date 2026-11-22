@@ -17,7 +17,7 @@ interface ThreadReaderProps {
 
 const KIND_LABEL: Record<string, string> = {
   first_disclosure: "First disclosure",
-  new_tradecraft: "New tradecraft",
+  new_tradecraft: "New technique",
   peak: "Peak coverage",
   update: "Update",
 };
@@ -125,7 +125,7 @@ export function ThreadReader({ slug }: ThreadReaderProps) {
         <div className={styles.kicker}>
           <span className={styles.status}>{thread.status}</span>
           <span>
-            {formatDate(thread.first_seen)} — {formatDate(thread.last_seen)}
+            {formatDate(thread.first_seen)} to {formatDate(thread.last_seen)}
           </span>
           {firstMember?.source && <span>first: {firstMember.source}</span>}
         </div>
@@ -156,13 +156,13 @@ export function ThreadReader({ slug }: ThreadReaderProps) {
           )}
           {thread.thread_yield.echoes_folded > 0 && (
             <span>
-              <b>{thread.thread_yield.echoes_folded}</b> folded
+              <b>{thread.thread_yield.echoes_folded}</b> re-reports grouped
             </span>
           )}
         </div>
 
         {!thread.narrated_at && (
-          <p className={styles.heuristicNote}>Spine grouped by day — not yet written</p>
+          <p className={styles.heuristicNote}>Timeline grouped by day. Summary not written yet.</p>
         )}
 
         {thread.key_entities.length > 0 && (
@@ -186,7 +186,7 @@ export function ThreadReader({ slug }: ThreadReaderProps) {
       </header>
 
       <section className={styles.spine}>
-        <h2 className={styles.sectionTitle}>Spine</h2>
+        <h2 className={styles.sectionTitle}>Timeline</h2>
         {thread.beats.map((beat) => (
           <div key={beat.id} className={styles.beat}>
             <div className={styles.beatMeta}>
@@ -204,7 +204,7 @@ export function ThreadReader({ slug }: ThreadReaderProps) {
             {beat.body && <p className={styles.beatBody}>{beat.body}</p>}
             {beat.collapsed_count > 0 && (
               <p className={styles.collapsed}>
-                {beat.collapsed_count} near-duplicate {beat.collapsed_count === 1 ? "re-report" : "re-reports"} folded
+                {beat.collapsed_count} near-duplicate {beat.collapsed_count === 1 ? "re-report" : "re-reports"} grouped
               </p>
             )}
           </div>
@@ -232,7 +232,7 @@ export function ThreadReader({ slug }: ThreadReaderProps) {
         {echoes.length > 0 && (
           <details className={styles.echoes}>
             <summary>
-              {echoes.length} re-{echoes.length === 1 ? "report" : "reports"} folded
+              {echoes.length} re-{echoes.length === 1 ? "report" : "reports"} grouped
             </summary>
             <ul className={styles.memberList}>
               {echoes.map((m) => (

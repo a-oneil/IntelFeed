@@ -154,7 +154,7 @@ export function TelegramMentionsPanel() {
       <PageHeader
         title="Telegram Mentions"
         count={mentions.data?.items.length}
-        subtitle="Telegram channels auto-extracted from t.me / tg:// links in ingested content."
+        subtitle="Telegram channels found in t.me and tg:// links in ingested articles."
         controls={
           <>
             <label className={styles.controlLabel}>
@@ -228,7 +228,7 @@ export function TelegramMentionsPanel() {
               </div>
               {subscribe.isError && (
                 <p className={styles.error}>
-                  Subscribe failed —{" "}
+                  Subscribe failed:{" "}
                   {(subscribe.error as Error & { response?: { data?: { detail?: { message?: string } } } })
                     ?.response?.data?.detail?.message ?? "see console"}
                 </p>

@@ -265,9 +265,9 @@ async def restore_from_log(db: AsyncSession, log_id: uuid.UUID) -> tuple[bool, s
     result = await db.execute(select(EntityLinkValidationLog).where(EntityLinkValidationLog.id == log_id))
     log_row = result.scalar_one_or_none()
     if log_row is None:
-        return False, "log entry not found"
+        return False, "Log entry not found."
     if log_row.action != "removed":
-        return False, f"cannot restore action={log_row.action}"
+        return False, f"Only removed links can be restored. This log row is a {log_row.action} action."
     spec = UNLINK_SPECS.get(log_row.entity_type)
     if spec is None:
         return False, f"unknown entity_type {log_row.entity_type}"
@@ -276,7 +276,7 @@ async def restore_from_log(db: AsyncSession, log_id: uuid.UUID) -> tuple[bool, s
     # Re-check entity still exists
     ent_result = await db.execute(select(emodel.id).where(emodel.id == log_row.entity_id))
     if ent_result.scalar_one_or_none() is None:
-        return False, "entity no longer exists"
+        return False, "The entity no longer exists."
 
     # Check we don't re-insert a duplicate (composite PK)
     fk_col = getattr(jmodel, fk_attr)
@@ -284,7 +284,7 @@ async def restore_from_log(db: AsyncSession, log_id: uuid.UUID) -> tuple[bool, s
         select(jmodel).where(jmodel.entry_id == log_row.entry_id, fk_col == log_row.entity_id)
     )
     if dup_result.scalar_one_or_none() is not None:
-        return False, "link already exists"
+        return False, "The link already exists."
 
     junction_kwargs = {
         "entry_id": log_row.entry_id,

@@ -64,7 +64,7 @@ articles about attacks on it) and *asserted* (an explicit claim, with its
 source). It also shows ransomware leak-site victims in that sector. Leak-site
 posts are the gang's claims, not confirmed breaches.
 
-**Notes** on a profile are yours to write and everyone's to read.
+Anyone can write a **note** on a profile, and everyone can read it.
 
 ## Where the facts come from
 
@@ -94,13 +94,13 @@ with when each source last answered and whether that answer is fresh or
 stale. The refresh icon fetches them again. A CVE also shows **CVSS by
 source**: each source's score, and which one the profile uses.
 
-If Wikipedia matched the wrong article, choose **None — no Wikipedia article**
-in the profile's Wikipedia picker. It won't be matched again.
+If Wikipedia matched the wrong article, choose **None: no Wikipedia article**
+in the profile's Wikipedia picker. It is not matched again.
 
 ## Observables (indicators)
 
-IntelFeed never creates an observable just because a string looks like an IP.
-One is created only when something with judgment confirms it:
+IntelFeed never creates an observable only because a string looks like an IP.
+One is created only when one of these confirms it:
 
 - the AI analysis of an article,
 - the AI review that follows it (the adjudicator),
@@ -111,16 +111,16 @@ One is created only when something with judgment confirms it:
 Anything that looks like an indicator becomes a **candidate** on the article.
 Hashes and public IPs always do. Domains, URLs and email addresses do only when
 the author defanged them (`evil[.]com`, `hxxps://`). The adjudicator captures
-each candidate as an observable or drops it. When it isn't sure enough to act
-on its own, its call waits in **Settings → Engine → Review → Proposals** for you to apply or
-dismiss.
+each candidate as an observable or drops it. When it is not confident enough
+to act on its own, its decision waits in **Settings → Engine → Review → Proposals**
+for you to apply or dismiss.
 
 Each observable records its source, the sentence behind it, and a confidence
 score. Confidence halves every 30 days for an IP, 60 for a URL and
-90 for a domain. Hashes and host artifacts never fade. A new sighting resets
-the clock.
+90 for a domain. Confidence for hashes and host artifacts does not decay. A new
+sighting resets the confidence.
 
-The **Sources** column counts separate backers: "3 reports · 1 feed" means
+The **Sources** column counts separate sources: "3 reports · 1 feed" means
 three articles or advisories and one indicator feed. A feed split across many
 files counts once.
 
@@ -137,8 +137,9 @@ also served as blocklists, SIEM lookup files and a TAXII 2.1 feed.
 ## Relationships
 
 Relationships link two entities, such as "this actor uses that malware", with
-the articles that said so and a confidence. They come from the MITRE ATT&CK catalogue, article text and analysts. One backed by
-MITRE and eleven articles shows as stronger than one backed by a single article.
+the articles that said so and a confidence. They come from the MITRE ATT&CK
+catalogue, article text and analysts. One backed by MITRE and eleven articles
+shows as stronger than one backed by a single article.
 
 In the graph view, click a cluster to filter the list to it.
 
@@ -156,10 +157,9 @@ Watching and muting are personal. They don't change what anyone else sees.
 On vendors and products, **Follow for vuln alerts** in the **⋯** menu shows
 their vulnerabilities in **Vendor watch** on the Threats board.
 
-Watch only the few things you're responsible for. Watching forty things is the
-same as watching none. Automation rules can notify you when a watched entity is
-mentioned. See
-[Automation and AI](automation-and-ai.md).
+Watch only the few entities you are responsible for. Watching too many has the
+same effect as watching none. Automation rules can notify you when a watched
+entity is mentioned. See [Automation and AI](automation-and-ai.md).
 
 **Watchlist**, under **Intelligence** in the Workbench sidebar, lists
 everything you watch.
@@ -174,8 +174,8 @@ malware also recorded as a tool. These fixes are admin-only.
   move to it. Both must be the same type.
 - **Convert type**: when the type is wrong (say, a "tool" that is really a
   product), use **Convert type** in the **⋯** menu. Converting stops extraction
-  recreating the wrong entity. Deleting doesn't, which is why deleted entities
-  can come back.
+  recreating the wrong entity. Deleting does not, so a deleted entity can come
+  back.
 - **Wrong links**: use the **Wrong?** control on the link in the reader. See
   [Reading and triage](reading-and-triage.md).
 
@@ -183,6 +183,6 @@ malware also recorded as a tool. These fixes are admin-only.
 
 Hover an unfamiliar term, such as a technique ID or acronym, to see a
 definition. Edit the glossary under **Intelligence → Glossary** in the
-Workbench sidebar to add your team's own terms.
+Workbench sidebar to add your own terms.
 
 Next: [Priority Queue and watching](priority-queue.md)

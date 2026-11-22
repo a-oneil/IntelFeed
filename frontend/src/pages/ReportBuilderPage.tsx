@@ -52,7 +52,7 @@ type SectionData = { title?: string; body?: string; items?: Record<string, unkno
  *  when the body is parsed into sections on create. */
 function sectionPlaceholder(sec: ReportTemplateSection): string {
   if (sec.type === "data") {
-    return "_(data section — fills automatically from linked articles and entities)_";
+    return "_(data section: fills automatically from linked articles and entities)_";
   }
   return sec.description ? `_${sec.description}_` : "_Write this section..._";
 }
@@ -406,7 +406,7 @@ export function ReportBuilderPage() {
       await navigator.clipboard.writeText(url);
       toast.success("Share link copied to clipboard");
     } catch {
-      toast.error("Couldn't copy — select the link and copy it");
+      toast.error("Could not copy the link. Select it and copy it by hand.");
     }
   };
   const handleCreateShare = () => {
@@ -989,8 +989,8 @@ export function ReportBuilderPage() {
                   })}
                   emptyText={(sec) =>
                     sec.type === "data"
-                      ? "No data yet — fills from linked articles and entities."
-                      : "Not written yet — open the section tab to write it or generate with AI."
+                      ? "No data yet. Fills from linked articles and entities."
+                      : "Not written yet. Open the section tab to write it or generate it with AI."
                   }
                 />
               ) : (
@@ -1118,7 +1118,7 @@ export function ReportBuilderPage() {
                 onClick={handleRegenerateAll}
                 disabled={regenerateAll.isPending}
                 type="button"
-                title="Regenerate all narrative sections with AI"
+                title="Regenerate all prose sections with AI"
               >
                 {regenerateAll.isPending ? "Regenerating..." : "Regenerate All"}
               </button>
@@ -1349,15 +1349,15 @@ export function ReportBuilderPage() {
                     onClick={handleCreateShare}
                     disabled={createShareLink.isPending || tlpBlocksSharing}
                     type="button"
-                    title={tlpBlocksSharing ? `${tlpMarking} reports can't be shared by public link` : undefined}
+                    title={tlpBlocksSharing ? `${tlpMarking} reports cannot be shared by public link` : undefined}
                   >
                     Create share link
                   </button>
                 </div>
                 <span className={styles.shareHint}>
                   {tlpBlocksSharing
-                    ? `${tlpMarking} reports can't be shared by public link. Only TLP:CLEAR and TLP:GREEN can.`
-                    : "Makes a public, read-only page — the same as sharing an article."}
+                    ? `${tlpMarking} reports cannot be shared by public link. Only TLP:CLEAR and TLP:GREEN can.`
+                    : "Makes a public, read-only page, the same as sharing an article."}
                 </span>
               </>
             )}

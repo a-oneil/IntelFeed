@@ -304,7 +304,7 @@ function SuggestionRow({
         {crossType ? (
           <span
             className={styles.crossTypeNote}
-            title="Cross-type pairs can't be merged directly — use Convert on the entity profile to reclassify one side first"
+            title="Cross-type pairs cannot be merged directly. Use Convert on the entity profile to reclassify one side first."
           >
             convert to resolve
           </span>
@@ -313,7 +313,7 @@ function SuggestionRow({
             className={styles.mergeBtn}
             disabled={busy}
             onClick={() => onMerge(suggestion)}
-            title={`Merge "${candidate.name}" into "${keeper.name}" — the merged name becomes an alias of the keeper`}
+            title={`Merge "${candidate.name}" into "${keeper.name}". The merged name becomes an alias of the kept entity.`}
           >
             Merge
           </button>
@@ -322,7 +322,7 @@ function SuggestionRow({
           className={styles.dismissBtn}
           disabled={busy}
           onClick={() => onDismiss(suggestion)}
-          title="Not a duplicate — never suggest this pair again"
+          title="Not a duplicate. This pair will not be suggested again."
         >
           Dismiss
         </button>

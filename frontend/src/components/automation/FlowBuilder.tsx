@@ -261,7 +261,7 @@ export function FlowBuilder({ rule, onClose }: FlowBuilderProps) {
       }
       onClose();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to save rule";
+      const msg = e instanceof Error ? e.message : "Could not save the rule";
       setError(msg);
     }
   };

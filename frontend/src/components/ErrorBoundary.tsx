@@ -53,7 +53,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         this.props.fallback || (
           <div style={{ padding: "2rem", textAlign: "center" }}>
-            <h2>Something went wrong</h2>
+            <h2>This page could not be displayed</h2>
             <p style={{ color: "var(--text-secondary)", marginTop: "0.5rem" }}>
               {this.state.error?.message}
             </p>
@@ -70,7 +70,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 borderRadius: "4px",
               }}
             >
-              Try Again
+              Reload
             </button>
           </div>
         )

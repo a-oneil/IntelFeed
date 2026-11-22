@@ -265,7 +265,7 @@ The steps, in order:
     Redis set `meili:failed_entry_ids` to retry later.
 16. **Update the feed**: fetch time, `etag`, `last_modified`, clear the
     failure streak. The feed's title, description and site URL are filled in
-    from the source if they are empty (or if the title is still just the
+    from the source if they are empty (or if the title is still only the
     URL).
 17. **Tell the rest of the app.** One `feed_fetched` live-update event,
     automation rules for each new entry, and the entry pipeline.
@@ -350,7 +350,7 @@ scripts, event handlers and iframes. Links get
 neighbouring elements never runs together: paragraphs, headings and other
 blocks are separated by a blank line; list items, table rows, captions and
 `<br>` by a newline; table cells by a tab. Where the source already has a
-newline there, it is kept as is. This keeps the regex scans honest: two list
+newline there, it is kept as is. This keeps the regex scans accurate: two list
 items of IPs stay two IPs, and a CVE cell stays apart from its CVSS cell.
 
 ### Image Proxying
@@ -403,7 +403,7 @@ pipeline starts, so it is searchable and the intelligence stages see it.
   the error, status, failure count, when the streak began and which client
   was used. The feed settings, the sidebar tooltip and the Feeds view show it
   as "paused automatically after HTTP 403 for 30 days", while a feed someone
-  paused by hand just says "Paused". Resuming the feed clears it.
+  paused by hand says only "Paused". Resuming the feed clears it.
 - **Reachable but empty.** An `rss`, `atom` or `podcast` feed that answers
   200 but has no items is noted in `adapter_config.fetch_health.empty` (since
   when, where a redirect ended up, the content type). The next fetch with
@@ -586,7 +586,7 @@ The title comes from the file where it can (a Sigma `title`, an Elastic
 ATT&CK badges, code in a code block, Markdown as is.
 
 **Full sync.** The `full_sync_github_feed` Celery task reads **every** file in
-the repository through the Git Trees API, not just recent changes, adds the
+the repository through the Git Trees API, not only recent changes, adds the
 ones not yet saved, and records the head commit for later fetches.
 
 **Limits:**
@@ -741,13 +741,13 @@ The session file is as sensitive as the account's password.
   (default 25) are downloaded. Videos also get a thumbnail. See
   [Telegram Operations](#telegram-operations) for storage.
 - **Flood waits:** when Telegram says "slow down", the adapter keeps what it
-  has so far and stops. `last_seen_id` only moves past messages actually
+  has so far and stops. `last_seen_id` only moves past messages that were
   read.
 - **Handles:** `t.me/s/<name>` preview links are turned into the plain
   channel name.
 - **One login per process:** the session file is read once per process, then
   Telethon runs from an in-memory copy. That stops the api, listener and
-  worker from fighting over the file ("database is locked").
+  worker from locking each other out of the file ("database is locked").
 
 **Edits and deletes.** After each fetch the worker re-reads the last
 `edit_probe_window` saved messages. An edited message gets its text updated
@@ -939,7 +939,7 @@ which could never fetch.
 
 IntelFeed adds its own attributes in the namespace
 `https://intelfeed.app/ns/opml/1`. Other readers ignore them, so the file
-still works elsewhere. On import they win over the plain attributes:
+still works elsewhere. On import they take precedence over the plain attributes:
 
 | Attribute | Feed field |
 | --- | --- |
@@ -1096,7 +1096,7 @@ worker reads the repository once with the
 [repository monitor](#github-repository-monitor)'s full-tree reader and makes
 one child item per file. No feed is created and nothing polls afterwards. The
 adapter's file types (Sigma, YARA, indicator lists for repos it knows) carry
-over; an analyst's own indicator-list mark wins.
+over; an analyst's own indicator-list mark takes precedence.
 
 **The single-item routes** answer in the same request, for the Android app
 and the `ingest_url` tool:

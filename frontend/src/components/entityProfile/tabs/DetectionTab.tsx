@@ -108,7 +108,7 @@ function RuleListFallback({
           if (created.length > 0) {
             toast.success(`Generated ${created.length} draft rule${created.length === 1 ? "" : "s"}`);
           } else {
-            toast.info("No new rules generated — matching rules may already exist");
+            toast.info("No new rules generated. Matching rules may already exist.");
           }
         },
         onError: (err) => {

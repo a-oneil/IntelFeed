@@ -26,7 +26,7 @@ SECURITY_MODES = ("starttls", "tls")
 
 _ADDRESS_RE = re.compile(r"^[^@\s<>,;\"]+@[^@\s<>,;\"]+\.[^@\s<>,;\"]+$")
 
-NOT_CONFIGURED = "Email isn't set up. An admin sets the SMTP server under Settings > System > Email."
+NOT_CONFIGURED = "Email is not set up. An admin sets the SMTP server under Settings > System > Email."
 
 
 class MailError(Exception):
@@ -146,7 +146,7 @@ async def send_mail(
     """Send one message. Raises MailError with a readable reason."""
     if cfg.security not in SECURITY_MODES:
         raise MailError(
-            f"Connection Security '{cfg.security}' isn't supported; use starttls or tls (Settings > System > Email)"
+            f"Connection Security '{cfg.security}' is not supported. Use starttls or tls (Settings > System > Email)."
         )
     if not await _reserve_send_slot(cfg.max_per_hour):
         raise MailError(
@@ -182,4 +182,4 @@ async def send_mail(
     except aiosmtplib.SMTPException as e:
         raise MailError(f"SMTP error: {e}") from e
     except OSError as e:
-        raise MailError(f"Couldn't reach {cfg.host}:{cfg.port}: {e}") from e
+        raise MailError(f"Could not reach {cfg.host}:{cfg.port}: {e}") from e

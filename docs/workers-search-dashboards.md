@@ -90,18 +90,18 @@ All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means
 | `check_requirement_expiry_task` | Daily 00:30 | Expire intelligence requirements past their date |
 | `build_telegram_forward_relationships` | Every 4 h at :20 | Add actor-to-actor `communicates_with` links from Telegram forwards |
 | `embed_pending_entries` | Every 15 min | Embed entries with no current vector, newest first. Feeds story threads and "more like this". Does nothing until `embeddings_enabled` is on |
-| `rebuild_story_threads` | Every 2 h | Group embedded entries into story threads: attach, seed, fold echoes, merge split threads, prune empty ones |
-| `narrate_story_threads` | Daily 06:10 | Write the summary ("spine") for threads that changed since they were last narrated. AI (`ai` queue) |
+| `rebuild_story_threads` | Every 2 h | Group embedded entries into story threads: attach, seed, group echoes, merge split threads, prune empty ones |
+| `narrate_story_threads` | Daily 06:10 | Write the timeline summary for threads that changed since they were last narrated. AI (`ai` queue) |
 | `kickoff_assessment_backfill` | Daily 05:45 | Draft AI assessments for entities with linked articles but no description, and refresh its own drafts once enough new reporting arrives. Never overwrites text it did not write; skips CVEs, whose descriptions come from NVD. AI (`ai` queue) |
 | `kickoff_actor_profile_refresh` | Monday 03:00 | Refresh the descriptions of the most active threat actors. AI (`ai` queue) |
 | `review_duplicate_entities` | Daily 06:30 | Show the model the likeliest duplicate actors, malware and tools, and file a Merge proposal on the Review tab for each pair it calls the same. Nothing merges until a person applies it. AI (`ai` queue) |
-| `rank_threat_board` | Daily 04:20 | Recompute the Threats board ranking; reopen handled threats that show new tradecraft |
+| `rank_threat_board` | Daily 04:20 | Recompute the Threats board ranking; reopen handled threats that show a new technique |
 | `promote_watchlist_threats` | Daily 04:30 | Pin watched actors and malware with recent activity onto the Threats board |
-| `generate_threat_briefs` | Daily 04:40 | Write the two-sentence story line for each open Threats and vulnerability row. AI (`ai` queue) |
+| `generate_threat_briefs` | Daily 04:40 | Write the two-sentence summary for each open Threats and vulnerability row. AI (`ai` queue) |
 | `submit_analysis_batches` | Every 30 min | Send pending entries to one-pass AI analysis, highest priority first, within budget |
 | `poll_analysis_batches` | Every 10 min | Collect finished analysis batches: results, entity links, costs |
 | `recompute_signal_rates` | Daily 04:20 | Recompute 30-day signal firing rates (the self-tuning weights) and re-scale priority scores to 0–10 |
-| `fit_user_signal_weights` | Daily 04:35 | Fit each analyst's Radar weights from their own thumbs up/down. Applied only when `radar_personalization_enabled` is on |
+| `fit_user_signal_weights` | Daily 04:35 | Fit each analyst's Radar weights from their own Radar votes. Applied only when `radar_personalization_enabled` is on |
 | `rescore_recent_entries` | Every 6 h at :35 | Re-score recent entries so KEV and EPSS changes reach priority scores |
 | `rescore_all_entries` | **Off by default** | Re-score every scored entry. Run it with **Run now**; the Sunday 03:00 schedule only applies if an admin turns it on |
 
@@ -136,9 +136,9 @@ All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means
 | `run_cvelist_backfill` | `cvelist` | Hourly at :20 | Apply CVE records (CNA and CISA-ADP) from the cvelistV5 baseline to CVEs not checked for 90 days. Backfill lane |
 | `run_cvelist_delta_sync` | `cvelist` | Hourly at :40 | Apply the CVE records changed since the last run, from cvelistV5's hourly delta files |
 | `run_osv_delta_sync` | `osv` | Hourly at :40 | Apply the OSV records of tracked CVEs that changed since the last run |
-| `run_cymru_bulk_sync` | `cymru` | Every 6 h at :25 | Map the ledger's active IPs to their AS through Team Cymru bulk WHOIS |
-| `run_threatfox_sync` | `threatfox` | Daily 04:35 | Match the ledger's active observables against ThreatFox's IOC export: families, role and context |
-| `run_urlhaus_sync` | `urlhaus` | Every 6 h at :50 | Match the ledger's active URLs, domains and IPs against the URLhaus dump: status, tags and families |
+| `run_cymru_bulk_sync` | `cymru` | Every 6 h at :25 | Map active IP observables to their AS through Team Cymru bulk WHOIS |
+| `run_threatfox_sync` | `threatfox` | Daily 04:35 | Match active observables against ThreatFox's IOC export: families, role and context |
+| `run_urlhaus_sync` | `urlhaus` | Every 6 h at :50 | Match active URL, domain and IP observables against the URLhaus dump: status, tags and families |
 | `run_tranco_sync` | `tranco` | Daily 04:20 | Rank tracked domains against the Tranco top-1M list and flag top-10k ones for review |
 
 Each source declares its jobs in its manifest ([Source Jobs](automation-ai-enrichment.md#source-jobs)). A job skips while its source is switched off (`{"skipped": "source disabled"}`), and sends its requests through its source's gateway ([Source Gateway](automation-ai-enrichment.md#source-gateway)). A refusal (rate limited, breaker open, budget spent, backfill share used, paused) stops the job; it keeps what it did and records `stopped` in its stats. A key the source rejects fails the run, so Engine → Jobs shows why. Jobs marked "Backfill lane" stop once their source has used 60% of its daily budget. Each source job's run details start with `fetched`, `changed` and `written`.
@@ -193,7 +193,7 @@ When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker
 
 ### Beat Schedule and Runtime Overrides
 
-`build_beat_schedule()` (`backend/app/workers/job_registry.py:675`) builds the schedule when beat starts:
+`build_beat_schedule()` (`backend/app/workers/job_registry.py:682`) builds the schedule when beat starts:
 
 1. Read overrides from the Redis key `intelfeed:job_schedule_overrides`.
 2. For each job, skip it if the override disables it, or if it has `enabled_by_default: False` and no override turns it on.
@@ -247,13 +247,13 @@ The stages come from the pipeline registry. See [Pipeline Engine](#pipeline-engi
 
 #### Enrichment Pipeline
 
-A new entity does not call its sources directly. The code that creates it (the autolinker, TTP and CVE extraction, the observables ledger, GitHub rule import) calls `enqueue()` in `backend/app/enrichment/queue.py`, which adds one `enrichment_jobs` row per enabled `trigger_mode='auto'` source that handles the entity type.
+A new entity does not call its sources directly. The code that creates it (the autolinker, TTP and CVE extraction, observables, GitHub rule import) calls `enqueue()` in `backend/app/enrichment/queue.py`, which adds one `enrichment_jobs` row per enabled `trigger_mode='auto'` source that handles the entity type.
 
 `dispatch_enrichment_jobs` (`backend/app/workers/enrichment_dispatch_tasks.py`) runs every 30 seconds on the `enrichment` queue. For up to 25 seconds it claims due rows (`FOR UPDATE SKIP LOCKED`, highest lane first, then oldest `due_at`), runs each through the pipeline for its one source, and writes the results onto the entity. A lookup the source refuses is rescheduled, not dropped. The lanes and outcomes are in [automation-ai-enrichment.md](automation-ai-enrichment.md#enrichment-job-queue).
 
 #### Report Generation
 
-`generate_full_report` (`backend/app/workers/report_tasks.py`) fills each empty narrative section of a report with AI text, one section at a time, and sends a `report_section_generated` server-sent event after each. A provider error on one section (matched by `_TRANSIENT_ERROR_PATTERNS`: 529, overloaded, rate limit, 502–504) moves on to the next section.
+`generate_full_report` (`backend/app/workers/report_tasks.py`) fills each empty text section of a report with AI text, one section at a time, and sends a `report_section_generated` server-sent event after each. A provider error on one section (matched by `_TRANSIENT_ERROR_PATTERNS`: 529, overloaded, rate limit, 502–504) moves on to the next section.
 
 ### Telegram Listener (Real-Time Push)
 
@@ -296,7 +296,7 @@ Notes:
 
 - `published_at` is a Unix timestamp, so sorting and date ranges compare numbers.
 - `id` is filterable because entity searches narrow the entry search with `id IN [...]`.
-- `user_tags` holds personal tags as `<user_id>:<name>`. It is never searched. It is folded into the `tags` facet only for the user who owns those tags.
+- `user_tags` holds personal tags as `<user_id>:<name>`. It is never searched. It is merged into the `tags` facet only for the user who owns those tags.
 - `is_read`, `is_starred` and similar fields are written for one user. Search results always get each user's real state from PostgreSQL afterwards.
 
 **Not in the index:** feed categories, signal-engine signals, URLs, feed ratings, mute, translation and image state, and `priority_score`. Searches on those are answered from PostgreSQL instead (see [Field Classification](#field-classification)).
@@ -309,7 +309,7 @@ The `rules` index settings that matter:
 
 - Every attribute the library's facet rail uses must be filterable, or that group silently gets no counts.
 - Timestamps are numbers, so range filters and sorts work.
-- `maxTotalHits` is 100,000. Meilisearch caps both the reported total and how deep you can page at this value (default 1,000).
+- `maxTotalHits` is 100,000. Meilisearch caps both the reported total and how far you can page at this value (default 1,000).
 - `maxValuesPerFacet` is 5,000 and facet values are sorted by count, so a cut-off never drops the most common values.
 
 Rule documents are built by `entity_indexer._rule_to_doc()`. See [detection-engineering.md](detection-engineering.md#search-and-filters) for the fields it adds.
@@ -361,7 +361,7 @@ Searches use IntelFeed's own query language: free text, `"quoted phrases"`, fiel
 | PostgreSQL entry | `feed`, `category`, `feed.reliability`, `feed.timeliness`, `feed.relevance`, `is:muted`, `is:archived` (feed-scoped); `signal`, `url`, `is:translated`, `is:image` (entry-scoped) | `resolve_feed_filters()` / `resolve_entry_filters()` |
 | Entity | `cve`, `cwe`, `ttp`, `threat_actor`, `malware`, `country`, `sector`, `tool`, `vendor`, `product`, `mitigation`, `campaign`, `ransomware_victim`, `observable` (alias `ioc`), `rule`, `pir`, `intel_report`, `note`, plus their sub-fields | `entity_builder.py` |
 
-How PostgreSQL filters are folded in:
+How PostgreSQL filters are combined with the search:
 
 - **Feed-scoped** filters look up a set of feed IDs. There are only a few hundred feeds, so these become ordinary Meilisearch `feed_id` filters.
 - **Entry-scoped** filters produce a set of entry IDs in `plan.db_entry_ids`. The endpoint intersects it with any entity results before searching, so a filter matching 17,000 entries is one ID list, not 17,000 filter clauses.
@@ -386,7 +386,7 @@ A query with `OR` between parts may become several **branches**. Each branch is 
 
 1. **`sort:radar`** is used. It orders by `priority_score`, which is not in the index. Entries with no score are left out, and the order matches the Priority Queue.
 2. **There is nothing for the index to search**: an ID set exists but there is no text and no indexed filter (an entity-only query, or a bare `signal:under_reported`).
-3. **There are more than 500 IDs** (`MEILI_ID_FILTER_CAP`). That is the most the `id IN [...]` filter carries, so a larger set would lose its tail.
+3. **There are more than 500 IDs** (`MEILI_ID_FILTER_CAP`). That is the most the `id IN [...]` filter carries, so a larger set would be cut off.
 
 On this path counts are exact, and `relevance` sorting falls back to newest first.
 
@@ -412,7 +412,7 @@ Files: `backend/app/models/saved_search.py`, `backend/app/workers/saved_search_t
 
 A `SavedSearch` has `created_by`, `name`, `display_name`, `query`, `filters` (JSONB) and `created_at`. Saved searches belong to one user.
 
-`refresh_saved_search_counts` runs every 15 minutes. Each distinct query is scanned once in Meilisearch (ids only, up to 5,000 hits), however many people saved it; then for each owner the job counts that user's read entries among the hits and caches the match and unread counts in Redis at `saved_search_counts:{user_id}` for 30 minutes, two runs' worth, so a slow run never leaves the saved-search list computing them inline. The saved-search list and the Saved Search Hits widget read that cache.
+`refresh_saved_search_counts` runs every 15 minutes. Each distinct query is scanned once in Meilisearch (ids only, up to 5,000 hits), however many people saved it. For each owner the job then counts that user's read entries among the hits and caches the match and unread counts in Redis at `saved_search_counts:{user_id}` for 30 minutes. That covers two runs, so a slow run never forces the saved-search list to compute the counts on request. The saved-search list and the Saved Search Hits widget read that cache.
 
 Campaigns can follow saved searches through the `CampaignSavedSearch` table. `sync_campaign_saved_searches` (every 5 minutes) adds matching entries to the campaign.
 

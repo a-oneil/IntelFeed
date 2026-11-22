@@ -7,7 +7,7 @@ For developers who want to script IntelFeed or build on its REST API. After read
 - **Base URL:** `/api` on your IntelFeed host (in the dev stack, `http://localhost:8000`).
 - **Format:** JSON in, JSON out, unless an endpoint says otherwise (file downloads, SSE streams, RSS, CSV).
 - **Full schemas:** the interactive docs at `/docs` (Swagger) and `/redoc` list every parameter and response field. They are built from the code, so they are always current. The pages themselves load for anyone, but the spec behind them (`/openapi.json`) needs a signed-in user: the docs page reads your token from the web app's local storage, so sign in to IntelFeed in the same browser first.
-- **This page** is the map: how the API behaves, plus every endpoint with its access level and a one-line purpose. The routers are mounted in `backend/app/main.py:826-908`.
+- **This page** describes how the API behaves and lists every endpoint with its access level and a one-line purpose. The routers are mounted in `backend/app/main.py:826-908`.
 
 ---
 
@@ -335,7 +335,7 @@ An entry is one article (or post, video, file) pulled from a feed.
 
 `GET /api/entries` filters: `feed_id`, `category_id`, `is_read`, `is_starred`, `is_bookmarked`, `content_type`, `change_type`, `since`, `before`, `country_id` + `country_role` (`origin`, `target`, `infrastructure`, `mentioned`), `campaign_id`, `exploited_cves`, `entity_type` + `entity_id`, `sector`, `watched`, `sort` (`newest`, `oldest`, `title_asc`, `title_desc`, `shortest`, `longest`, `radar`), `dedup` (default true: show one copy of the same article from several feeds), `limit` (default 50, max 500), `cursor`. Muted feeds are left out of the all-feeds view, but included when you pass `feed_id` or `category_id`.
 
-**Priority Queue.** Unread articles above the radar threshold, ranked by their 0-10 priority score. Open story threads are folded in as single rows: a thread ranks by its best unread article, and its members don't also appear on their own. Parameters: `unread_only` (default true), `with_threads` (default true), `exclude_thread_ids` (repeatable; those threads' members come back as normal rows), `limit` (default 50, max 200; thread rows come on top), `cursor`.
+**Priority Queue.** Unread articles above the radar threshold, ranked by their 0-10 priority score. Each open story thread is one row: a thread ranks by its best unread article, and its members do not also appear on their own. Parameters: `unread_only` (default true), `with_threads` (default true), `exclude_thread_ids` (repeatable; those threads' members come back as normal rows), `limit` (default 50, max 200; thread rows come on top), `cursor`.
 
 ```json
 {
@@ -349,7 +349,7 @@ An entry is one article (or post, video, file) pulled from a feed.
 }
 ```
 
-`radar_threshold` is null when the signal engine isn't surfacing; then the queue is every unread entry ranked by score.
+`radar_threshold` is null when the `signal_engine_surface` setting is off; then the queue is every unread entry ranked by score.
 
 #### Entry State & Bulk Actions
 
@@ -401,7 +401,7 @@ An entry is one article (or post, video, file) pulled from a feed.
 | POST | `/api/tags` | User | Create a tag (409 if the name exists) |
 | PUT | `/api/tags/{tag_id}` | User | Rename, recolour, describe, show as a chip, or switch `is_global` |
 | DELETE | `/api/tags/{tag_id}` | User | Delete a tag everywhere |
-| POST | `/api/tags/merge` | User | Fold `source_ids` into `target_id` |
+| POST | `/api/tags/merge` | User | Merge `source_ids` into `target_id` |
 | GET | `/api/tags/entries/{entry_id}` | Visitor | An article's tags as you see them |
 | POST | `/api/tags/entries/{entry_id}` | User | Tag an article |
 | DELETE | `/api/tags/entries/{entry_id}/{tag_id}` | User | Untag an article |
@@ -446,13 +446,13 @@ Manual ingest adds articles by hand. See [adapters.md](adapters.md#manual-ingest
 | DELETE | `/api/entries/ingest/batches/{batch_id}/items/{item_id}` | Owner | Remove an item and its file. The article it made stays |
 | GET | `/api/ingest-files/{file_id}` | Token in header or `?token=` | Download an upload's original file. `?inline=true` opens it in the browser. 404 `ingest_file_evicted` once retention has removed it |
 
-Item `status` is one of `queued`, `parsing`, `created`, `expanded`, `duplicate`, `no_text`, `unsupported`, `too_large`, `failed`, `cancelled`. Created items also have a `phase`: `analyzing` until the AI analysis lands, then `done`. The `ingest_item_updated` event on the SSE stream fires on each change.
+Item `status` is one of `queued`, `parsing`, `created`, `expanded`, `duplicate`, `no_text`, `unsupported`, `too_large`, `failed`, `cancelled`. Created items also have a `phase`: `analyzing` until the AI analysis finishes, then `done`. The `ingest_item_updated` event on the SSE stream fires on each change.
 
 ---
 
 ### Story Threads
 
-A story thread is one unfolding story, instead of the twenty articles that reported it. See [story-threads.md](story-threads.md) for how threads are built.
+A story thread groups every article that reports one story. See [story-threads.md](story-threads.md) for how threads are built.
 
 | Method | Path | Access | What it does |
 | --- | --- | --- | --- |
@@ -564,7 +564,7 @@ Observables are IOCs (indicators of compromise: hashes, IPs, domains, URLs and s
 
 | Method | Path | Access | What it does |
 | --- | --- | --- | --- |
-| GET | `/api/observables` | User | The ledger. `search`, `kind`, `role`, `status`, `created_via` (how it was captured), `infra_tag`, `min_confidence`, or `linked_entity=<type>:<uuid>`; sort by `report_count` or `feed_source_count` |
+| GET | `/api/observables` | User | The observables list. `search`, `kind`, `role`, `status`, `created_via` (how it was captured), `infra_tag`, `min_confidence`, or `linked_entity=<type>:<uuid>`; sort by `report_count` or `feed_source_count` |
 | GET | `/api/observables/rollup` | User | Counts by kind and state |
 | GET | `/api/observables/{observable_id}` | User | One observable |
 | PATCH | `/api/observables/{observable_id}` | User (admin to change the never-capture flag) | Edit label, role, description, confidence |
@@ -673,7 +673,7 @@ All User.
 | GET | `/api/campaigns/{campaign_id}/attack-layer` | Its TTPs as a Navigator layer |
 | GET | `/api/campaigns/{campaign_id}/detection-gaps` | Detection coverage for its techniques |
 | GET | `/api/campaigns/{campaign_id}/export` | Everything as one JSON bundle |
-| GET | `/api/campaigns/{campaign_id}/suggest` | Articles worth adding |
+| GET | `/api/campaigns/{campaign_id}/suggest` | Articles that could be added |
 | GET, POST | `/api/campaigns/{campaign_id}/saved-searches` | List or link a saved search |
 | PATCH, DELETE | `/api/campaigns/{campaign_id}/saved-searches/{css_id}` | Change or unlink it |
 | POST | `/api/campaigns/{campaign_id}/saved-searches/{css_id}/sync` | Run it now |
@@ -802,10 +802,10 @@ Proposed fixes to entity data wait in review queues. Every route here is Admin. 
 | GET | `/api/admin/hygiene/review-groups` | Every pending proposal, one row per entity, with what each kind wants done. Filters `action`, `origin`, `domain`, `entity_type`, `q`; `sort` = `newest` (default), `count`, `oldest` or `confidence`. `facets` gives proposals per domain and per origin under the other filters |
 | POST | `/api/admin/hygiene/decisions` | Decide many proposals in one call: `[{id: "<source>:<log_id>", decision: "apply" \| "dismiss" \| "reclassify:<type>"}]`, one result per row. A row an earlier decision already closed comes back `settled`; an apply with nothing left to do comes back `resolved` |
 | POST | `/api/admin/hygiene/review-groups/apply` | Apply what the filters show for the named groups (`items`), or for every group without `items`, up to `limit` rows; `has_more` says to call again, passing the `unapplied` rows back in `exclude` so nothing is tried twice. Type changes only with `include_reclassify`; assessments never |
-| POST | `/api/admin/hygiene/review-groups/dismiss` | Dismiss what the filters show for the named groups, or for every group without `items` (Dismiss all). Each dismissal sticks |
-| POST | `/api/admin/hygiene/scan-duplicates` | Run the duplicate review now; its Merge proposals land in the queue |
+| POST | `/api/admin/hygiene/review-groups/dismiss` | Dismiss what the filters show for the named groups, or for every group without `items` (Dismiss all). Each dismissal is kept |
+| POST | `/api/admin/hygiene/scan-duplicates` | Run the duplicate review now; its merge proposals go into the queue |
 | GET | `/api/admin/hygiene/stats` | Queue counts and the adjudicate stage's mode |
-| DELETE | `/api/admin/hygiene/feed/{source}/{row_id}` | Dismiss one pending proposal; the dismissal sticks |
+| DELETE | `/api/admin/hygiene/feed/{source}/{row_id}` | Dismiss one pending proposal; the dismissal is kept |
 | POST | `/api/admin/hygiene/adjudication/{log_id}/apply` | Apply one adjudicate-stage proposal |
 | POST | `/api/admin/hygiene/adjudication/{log_id}/restore` | Undo an applied one |
 | POST | `/api/admin/hygiene/bulk-apply` | Apply everything the Review filters show, in the background |
@@ -1051,9 +1051,9 @@ All User.
 | --- | --- | --- |
 | GET | `/api/threat-board` | Threats and vulnerabilities ranked over a window |
 | GET | `/api/threat-board/windows` | The windows the board offers |
-| GET | `/api/threat-board/precedent` | Past stories shaped like this one |
+| GET | `/api/threat-board/precedent` | Past stories similar to this one |
 | GET | `/api/threat-board/{entity_type}/{entity_key}/rules` | Rules that match a board row |
-| PUT | `/api/threat-board/{entity_type}/{entity_key}/state` | Mark a row `open`, `handled`, `muted` (dismissed) or `tracked` (pinned); the decision also covers the CVEs folded onto the row |
+| PUT | `/api/threat-board/{entity_type}/{entity_key}/state` | Mark a row `open`, `handled`, `muted` (dismissed) or `tracked` (pinned); the decision also covers the CVEs grouped onto the row |
 | GET | `/api/threat-board/{entity_type}/{entity_key}/hunt-pack` | The row's cached hunt pack: one to three hypotheses with queries in the user's preferred query language (`?language=` overrides it), telemetry checked at read time (`status: none` until drafted) |
 | POST | `/api/threat-board/{entity_type}/{entity_key}/hunt-pack` | Draft or redraft the hunt pack now (synchronous AI call; 409 when the window has nothing to hunt from, 422 when `hunt_pack` has no provider) |
 | GET | `/api/threat-board/{entity_type}/{entity_key}/hunt-pack.md` | The pack as an ATHF hunt file: YAML frontmatter and the LOCK body, Keep left empty. `?hunt_id=H-0042` numbers it so `athf hunt validate` passes as exported; without it the id stays the `H-XXXX` placeholder for the workspace to assign |
@@ -1309,7 +1309,7 @@ Enrichment fills in entity details from outside sources (NVD, EPSS, CISA KEV, Ma
 | POST | `/api/intel-reports/{report_id}/share` | User | Make a public link to a report, or return yours if it exists. Only TLP:CLEAR and TLP:GREEN reports can be shared; AMBER and RED are refused |
 | GET | `/api/intel-reports/{report_id}/share` | User | Your link for this report, or null |
 | DELETE | `/api/intel-reports/{report_id}/share` | User | Turn your link off (admins turn off every link for the report) |
-| GET | `/api/shared/report/{token}` | Share token | The shared report: its sections in template order with narrative bodies and data rows (timeline rows oldest first), plus `entities`, the auto-linker's matches over the text so the page highlights entities without a session. 403 while the report is marked AMBER or RED |
+| GET | `/api/shared/report/{token}` | Share token | The shared report: its sections in template order with text bodies and data rows (timeline rows oldest first), plus `entities`, the auto-linker's matches over the text so the page highlights entities without a session. 403 while the report is marked AMBER or RED |
 | GET | `/api/shared/report/{token}/export` | Share token | Download it as Markdown, HTML or PDF (`format=`) |
 | GET | `/api/shared/report/{token}/og` | Share token | An HTML page with link-preview (Open Graph) tags for the shared report |
 
@@ -1369,14 +1369,14 @@ Instance settings, stored in the database and falling back to `.env`. All Admin.
 | GET | `/api/engine/job-runs` | User | Recent scheduled job runs |
 | GET | `/api/engine/state` | User | Whether the engine is stopped, and tasks waiting on each queue |
 | PUT | `/api/engine/state` | Admin | Stop or start all background work |
-| POST | `/api/engine/state/clear-health` | Admin | Clear the header check-engine light until a new error or retry comes in |
+| POST | `/api/engine/state/clear-health` | Admin | Clear the engine warning in the header until a new error or retry comes in |
 | GET | `/api/engine/signals/stats` | User | Signal firing rates, weights and the radar threshold |
 | PUT | `/api/engine/signals/settings` | Admin | Change signal weights or the radar threshold, then rescore |
 | GET | `/api/engine/entities/{entity_type}/{entity_id}/whats-new` | Visitor | Recent signals on an entity's articles |
 | PUT | `/api/engine/radar-feedback` | User | Vote on a radar item (1 useful, -1 noise, 0 clears) |
 | GET | `/api/engine/my-radar` | User | Your learned signal weights and the votes behind them |
 | PUT | `/api/engine/my-radar` | User | Turn your learned weights on or off |
-| DELETE | `/api/engine/my-radar` | User | Throw away your learned weights |
+| DELETE | `/api/engine/my-radar` | User | Delete your learned weights |
 | GET, POST, DELETE | `/api/engine/autolink/fp-names` | Admin | Names the autolinker must not match |
 | GET, POST, DELETE | `/api/engine/autolink/blocked-names` | Admin | Words blocked for every entity type |
 
@@ -1390,7 +1390,7 @@ See [engine.md](engine.md) and [engine-settings.md](engine-settings.md).
 | GET | `/api/analytics/trending/{entity_type}` | Visitor | Most-mentioned entities of a type in a window |
 | GET | `/api/analytics/velocity` | Visitor | New entities per day |
 | GET | `/api/analytics/source-overlap` | User | Feeds that cover the same topics |
-| GET | `/api/analytics/entries/{entry_id}/insights` | User | Insights about one article's entities |
+| GET | `/api/analytics/entries/{entry_id}/insights` | User | Detection gaps, campaign and requirement matches, and critical CVEs among one article's entities |
 
 #### Feed Reliability
 

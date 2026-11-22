@@ -130,7 +130,7 @@ export function NextActions({
           : "Research bundle exported",
       );
     } catch {
-      toast.error("Failed to export bundle");
+      toast.error("Could not export the bundle");
     } finally {
       setExporting(false);
     }
@@ -161,7 +161,7 @@ export function NextActions({
       key: "story",
       tone: "hot",
       label: `${topStory.items.length} more article${topStory.items.length === 1 ? "" : "s"} in a story you track`,
-      why: `${topStory.title}${topStory.held > 0 ? ` — you have ${topStory.held} of ${topStory.total}` : ""}`,
+      why: `${topStory.title}${topStory.held > 0 ? `: ${topStory.held} of ${topStory.total} already in the campaign` : ""}`,
       button: {
         label: addEntries.isPending ? "Adding…" : `Add all ${topStory.items.length}`,
         disabled: addEntries.isPending,
@@ -170,7 +170,7 @@ export function NextActions({
             { campaignId: entityId, entryIds: topStory.items.map((i) => i.entry_id) },
             {
               onSuccess: (r) => toast.success(`Added ${r.added} articles`),
-              onError: () => toast.error("Failed to add story"),
+              onError: () => toast.error("Could not add the story's articles"),
             },
           ),
       },
@@ -185,7 +185,7 @@ export function NextActions({
       label: `${syncingSearches.length} standing search${syncingSearches.length === 1 ? "" : "es"}`,
       why:
         (syncingSearches.map((x) => x.saved_search_name).filter(Boolean).slice(0, 2).join(" · ") ||
-          "Pulling matching articles in automatically") + (added > 0 ? ` — ${added} added so far` : ""),
+          "Adds matching articles automatically") + (added > 0 ? `. ${added} added so far.` : ""),
     });
   }
 
@@ -194,16 +194,16 @@ export function NextActions({
       key: "quiet",
       tone: "warm",
       label: `No new coverage in ${campaignQuiet} days`,
-      why: `Status still says ${entity.status} — closing it stamps the end date from the last article.`,
+      why: `Status is still ${entity.status}. Closing it sets the end date from the last article.`,
       button: {
-        label: updateCampaign.isPending ? "Closing…" : "Close it",
+        label: updateCampaign.isPending ? "Closing…" : "Close campaign",
         disabled: updateCampaign.isPending,
         onClick: () =>
           updateCampaign.mutate(
             { id: entityId, status: "closed", end_date: entity.last_activity_at?.slice(0, 10) },
             {
               onSuccess: () => toast.success("Campaign closed"),
-              onError: () => toast.error("Failed to close campaign"),
+              onError: () => toast.error("Could not close the campaign"),
             },
           ),
       },
@@ -235,7 +235,7 @@ export function NextActions({
       key: "claims",
       tone: "warm",
       label: `${unconfirmed.length} claim${unconfirmed.length === 1 ? "" : "s"} to corroborate`,
-      why: "The AI adjudicator reviews these nightly — pin or reject to settle one now.",
+      why: "The AI adjudicator reviews these nightly. Pin or reject one to settle it now.",
       button: { label: "Review", onClick: onShowRelationships },
     });
   }

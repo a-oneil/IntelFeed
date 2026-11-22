@@ -169,9 +169,9 @@ export function ExtractionTab({
     let denyObservables = true;
     if (obsRows.length) {
       parts.push(
-        `${obsRows.length === 1 && rows.length === 1 ? `The ledger keeps "${obsRows[0].name}"` : `The ledger keeps ${obsRows.length} observable value${obsRows.length === 1 ? "" : "s"}`} ` +
-          `as tombstone${obsRows.length === 1 ? "" : "s"}: every capture door and the outbound feeds refuse ` +
-          `the value${obsRows.length === 1 ? "" : "s"} from now on; past sightings stay as history.`,
+        `${obsRows.length === 1 && rows.length === 1 ? `The observables list keeps "${obsRows[0].name}"` : `The observables list keeps ${obsRows.length} observable value${obsRows.length === 1 ? "" : "s"}`} ` +
+          `as tombstone${obsRows.length === 1 ? "" : "s"}. The value${obsRows.length === 1 ? " is" : "s are"} not captured ` +
+          `or published again. Past sightings stay as history.`,
       );
     }
     const label = one ? `"${one.name}"` : `${rows.length} selected`;
@@ -190,8 +190,8 @@ export function ExtractionTab({
       denyObservables = !(await confirmDialog({
         title: "Tombstone or hard-delete?",
         message:
-          "Tombstoning keeps the rows and their sightings as history, and every capture door refuses the values from now on. " +
-          "A hard delete removes the rows and sightings outright, leaving the values free to be captured again.",
+          "Tombstoning keeps the rows and their sightings as history, and the values are never captured again. " +
+          "A hard delete removes the rows and sightings, and the values can be captured again.",
         confirmLabel: "Hard-delete",
         cancelLabel: "Tombstone (recommended)",
         destructive: true,
@@ -217,7 +217,7 @@ export function ExtractionTab({
     const bits: string[] = [];
     if (entityRows.length) bits.push(`${entityRows.length} entit${entityRows.length === 1 ? "y" : "ies"} deleted + denylisted`);
     if (obsRows.length) bits.push(`${obsRows.length} observable${obsRows.length === 1 ? "" : "s"} ${denyObservables ? "tombstoned" : "hard-deleted"}`);
-    if (failed) toast.warning(`${bits.join(", ")} — ${failed} failed`);
+    if (failed) toast.warning(`${bits.join(", ")}, ${failed} failed`);
     else if (ok) toast.success(bits.join(", "));
     else toast.error("Nothing was removed");
     setSelected(new Set());
@@ -248,7 +248,7 @@ export function ExtractionTab({
     if (
       !(await confirmDialog({
         title: "Merge duplicate",
-        message: `Merge "${e.name}" into "${e.duplicate_of}"? Its aliases and article links fold into "${e.duplicate_of}".`,
+        message: `Merge "${e.name}" into "${e.duplicate_of}"? Its aliases and article links move to "${e.duplicate_of}".`,
         confirmLabel: "Merge",
       }))
     )
@@ -265,7 +265,7 @@ export function ExtractionTab({
     if (!e.duplicate_of_id) return;
     try {
       await notDupMut.mutateAsync({ entityType: e.entity_type, id: e.id, otherId: e.duplicate_of_id });
-      toast.success(`"${e.name}" and "${e.duplicate_of}" won't be flagged again`);
+      toast.success(`"${e.name}" and "${e.duplicate_of}" will not be flagged again`);
     } catch (err) {
       toast.error(`Failed: ${(err as Error).message}`);
     }
@@ -281,7 +281,7 @@ export function ExtractionTab({
     if (
       !(await confirmDialog({
         title: "Merge entities",
-        message: `Merge ${mergeIds.length} into "${keeper.name}"? Aliases and entry links fold into the keeper.`,
+        message: `Merge ${mergeIds.length} into "${keeper.name}"? Aliases and entry links move to the kept entity.`,
         confirmLabel: "Merge",
         destructive: true,
       }))
@@ -380,13 +380,13 @@ export function ExtractionTab({
       },
       merge: {
         title: "Merge all",
-        message: `Fold each of ${whatShows()} into the entity it most resembles? Aliases and article links move over. Each merge is its own change in History.`,
+        message: `Merge each of ${whatShows()} into the entity it most resembles? Aliases and article links move over. Each merge is its own change in History.`,
         label: "Merge all",
         destructive: true,
       },
       not_duplicate: {
         title: "Not duplicates",
-        message: `Mark each of ${whatShows()} as a different thing from the entity it resembles? The pairs stop being flagged.`,
+        message: `Mark each of ${whatShows()} as distinct from the entity it resembles? The pairs stop being flagged.`,
         label: "Not duplicates",
         destructive: false,
       },
@@ -412,7 +412,7 @@ export function ExtractionTab({
         ]
       : status === "dupe"
         ? [
-            { label: "Merge all", action: "merge" as const, danger: false, title: "Fold every entity the table shows into the one it resembles" },
+            { label: "Merge all", action: "merge" as const, danger: false, title: "Merge every entity the table shows into the one it resembles" },
             { label: "Not duplicates", action: "not_duplicate" as const, danger: false, title: "Stop flagging every pair the table shows" },
           ]
         : status === "orphan"
@@ -574,7 +574,7 @@ export function ExtractionTab({
                         {TYPE_LABELS[e.entity_type]}
                       </span>
                     </td>
-                    <td className={styles.mut}>{e.created_confidence ?? "—"}</td>
+                    <td className={styles.mut}>{e.created_confidence ?? "n/a"}</td>
                     <td className={styles.num}>{e.article_count}</td>
                     <td className={`${styles.hideSm} ${styles.mut} ${styles.sourceCell}`} title={e.source_entry_title ?? ""}>
                       <button
@@ -598,7 +598,7 @@ export function ExtractionTab({
                           <>
                             <button
                               className={`${styles.act} ${styles.actGood}`}
-                              title={`Fold ${e.name} into ${e.duplicate_of} — aliases and article links move over`}
+                              title={`Merge ${e.name} into ${e.duplicate_of}. Aliases and article links move over.`}
                               disabled={mergeMut.isPending}
                               onClick={() => doMergeIntoSibling(e)}
                             >
@@ -606,11 +606,11 @@ export function ExtractionTab({
                             </button>
                             <button
                               className={styles.act}
-                              title={`${e.name} and ${e.duplicate_of} are different things — stop flagging the pair`}
+                              title={`${e.name} and ${e.duplicate_of} are distinct. Stop flagging the pair.`}
                               disabled={notDupMut.isPending}
                               onClick={() => doNotDuplicate(e)}
                             >
-                              Not a dupe
+                              Not a duplicate
                             </button>
                           </>
                         ) : e.needs_review ? (
@@ -636,7 +636,7 @@ export function ExtractionTab({
                         <button
                           className={`${styles.iact} ${styles.iactDanger}`}
                           aria-label={e.entity_type === "observable" ? "Deny" : "Delete"}
-                          title={e.entity_type === "observable" ? "Deny — never capture this value again" : "Delete"}
+                          title={e.entity_type === "observable" ? "Deny: never capture this value again" : "Delete"}
                           onClick={() => doDelete([e])}
                         >
                           ✕
@@ -673,7 +673,7 @@ export function ExtractionTab({
                 {isFetching && <span className={styles.mut}> · updating…</span>}
               </>
             ) : (
-              "—"
+              "No results"
             )}
           </span>
           {pageCount > 1 && (
@@ -738,7 +738,7 @@ function StatusPill({ status, duplicateOf }: { status: ExtractionEntity["status"
     linked: { cls: styles.stLinked, text: "Linked" },
     review: { cls: styles.stReview, text: "Needs review" },
     orphan: { cls: styles.stOrphan, text: "Orphan" },
-    dupe: { cls: styles.stDupe, text: duplicateOf ? `Dup of ${duplicateOf}` : "Duplicate" },
+    dupe: { cls: styles.stDupe, text: duplicateOf ? `Duplicate of ${duplicateOf}` : "Duplicate" },
   }[status];
   return <span className={`${styles.status} ${map.cls}`}>● {map.text}</span>;
 }

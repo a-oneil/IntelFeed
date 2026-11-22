@@ -135,7 +135,7 @@ function AIResultCard({
       { entryId: targetId, data: { title: displayName.slice(0, 500), content_markdown: body } },
       {
         onSuccess: () => toast.success("Saved as note"),
-        onError: () => toast.error("Couldn't save note"),
+        onError: () => toast.error("Could not save the note"),
       },
     );
   };
@@ -162,7 +162,7 @@ function AIResultCard({
             {result.model_name && <span>{result.model_name}</span>}
             {result.provider_name && (
               <Hint
-                title="Who answered"
+                title="Provider and model"
                 body={
                   <dl className={styles.answeredBy}>
                     <dt>Provider</dt>
@@ -171,7 +171,7 @@ function AIResultCard({
                       {result.key_owner_id ? (mine ? " (yours)" : " (personal key)") : " (instance)"}
                     </dd>
                     <dt>Model</dt>
-                    <dd>{result.model_name ?? "—"}</dd>
+                    <dd>{result.model_name ?? "unknown"}</dd>
                     <dt>Prompt</dt>
                     <dd>{typeof promptVersion === "number" ? `Instance template v${promptVersion}` : "Instance default"}</dd>
                     <dt>Cost</dt>
@@ -455,7 +455,7 @@ function HistoryPanel({
             onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
           >
             {formatDate(item.created_at)}
-            {item.model_name && ` — ${item.model_name}`}
+            {item.model_name && ` · ${item.model_name}`}
             {item.is_current && " (current)"}
           </div>
           {expandedId === item.id && item.parsed_result && (

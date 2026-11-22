@@ -87,13 +87,13 @@ export function PipelinePlans() {
     <div className={styles.wrap}>
       {!overview?.pipeline_engine_enabled && (
         <p className={styles.banner}>
-          Pipeline plans are configured but inactive — enable "Pipeline Plans" under Settings → Engine
-          (Plans) to apply them. Until then the legacy per-feed extraction toggles drive behavior.
+          Pipeline plans are configured but inactive. Enable "Pipeline Plans" under Settings → Engine
+          (Plans) to apply them. Until then the per-feed extraction toggles control which stages run.
         </p>
       )}
       <p className={styles.hint}>
-        Plans layer over each feed's legacy settings: global → category → feed. A stage left untouched falls
-        through to the layer below.
+        Plans layer over each feed's own settings, in the order global, category, feed. A stage left on inherit
+        uses the layer below.
       </p>
 
       {sortedPlans.map((plan) => (
@@ -131,10 +131,10 @@ export function PipelinePlans() {
                   onClick={() => toggleStage(plan, stage)}
                   title={
                     state === "inherit"
-                      ? "Inherited — click to force off"
+                      ? "Inherited. Click to force off."
                       : state === "off"
-                        ? "Forced off — click to force on"
-                        : "Forced on — click to revert to inherit"
+                        ? "Forced off. Click to force on."
+                        : "Forced on. Click to go back to inherit."
                   }
                 >
                   {stage.replace(/_/g, " ")}

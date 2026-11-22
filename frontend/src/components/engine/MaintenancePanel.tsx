@@ -35,7 +35,7 @@ export function MaintenancePanel() {
     setRescanning(true);
     try {
       await api.post("/intelligence/rescan-all-extraction");
-      toast.success("Rescan queued — regex extraction running on all entries");
+      toast.success("Rescan queued: regex extraction will run on all entries");
     } catch {
       toast.error("Failed to queue rescan");
     } finally {
@@ -89,7 +89,7 @@ export function MaintenancePanel() {
           className={styles.btn}
           onClick={runOrphanSweep}
           disabled={pruneOrphans.isPending}
-          title="Delete entities with zero linked entries (skips watchlisted / manually curated)"
+          title="Delete entities that have no linked entries"
         >
           {pruneOrphans.isPending ? "Pruning…" : `Prune orphans (${stats.data?.orphan_count ?? 0})`}
         </button>
@@ -116,7 +116,7 @@ export function MaintenancePanel() {
 
         {confirming === "reset" ? (
           <span className={styles.confirm}>
-            <span className={styles.confirmText}>Reset correlation — cannot be undone.</span>
+            <span className={styles.confirmText}>Reset correlation. This cannot be undone.</span>
             <button type="button" className={styles.btnDanger} onClick={resetCorrelation} disabled={resetting}>
               {resetting ? "Queueing…" : "Confirm reset"}
             </button>
@@ -130,14 +130,14 @@ export function MaintenancePanel() {
             className={styles.btnDanger}
             onClick={() => setConfirming("reset")}
             disabled={resetting}
-            title="Unlink every entity from every entry and zero all article counts. Entities themselves stay; use before a clean re-extract."
+            title="Unlink every entity from every entry and set all article counts to zero. Entities stay. Use before a clean re-extract."
           >
             Reset correlation
           </button>
         )}
         {confirming === "rules" ? (
           <span className={styles.confirm}>
-            <span className={styles.confirmText}>Delete all rules — cannot be undone.</span>
+            <span className={styles.confirmText}>Delete all rules. This cannot be undone.</span>
             <button type="button" className={styles.btnDanger} onClick={deleteAllRules} disabled={deletingRules}>
               {deletingRules ? "Deleting…" : "Confirm delete"}
             </button>

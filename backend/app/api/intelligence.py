@@ -1938,7 +1938,7 @@ async def search_detection_rules(
     telemetry_token: list[str] | None = Query(
         None,
         description=(
-            "Required telemetry, across every rule format — the rail's Telemetry group (repeatable, ORed). "
+            "Required telemetry, across every rule format: the rail's Telemetry group (repeatable, ORed). "
             "Wider than `data_source`: falls back to the Sigma log_source triple and the per-format defaults."
         ),
     ),
@@ -2494,8 +2494,8 @@ async def update_detection_rule(
             raise AppError(
                 code="rename_locked",
                 message=(
-                    f"This rule is mirrored from {rule.source_repo}; its title is how the upstream sync "
-                    "tracks it. Save a copy to get a rule you can rename."
+                    f"This rule is mirrored from {rule.source_repo}, and the sync tracks it by title. "
+                    "Save a copy to get a rule you can rename."
                 ),
                 status_code=400,
             )
@@ -3095,7 +3095,7 @@ CURRENT RULE CONTEXT:
 
 CURRENT RULE CONTENT:
 ```
-{body.rule_content or "(empty — new rule)"}
+{body.rule_content or "(empty: new rule)"}
 ```
 
 GUIDELINES:
@@ -5066,7 +5066,7 @@ async def get_observable_backlinks_view(
 async def list_observables(
     search: str | None = Query(None, description="Case-insensitive substring match on value or label"),
     kind: str | None = Query(
-        None, description="Filter to one kind or a comma-separated group (ipv4,ipv6 — the browser's segments)"
+        None, description="Filter to one kind or a comma-separated group (ipv4,ipv6: the browser's segments)"
     ),
     role: str | None = Query(None, description="Filter to one network role (c2, phishing, ...)"),
     status: str | None = Query(None, pattern="^(active|aging|expired)$", description="Lifecycle state filter"),
@@ -5081,7 +5081,7 @@ async def list_observables(
         None,
         pattern=r"^(threat_actor|malware|campaign|tool):[0-9a-fA-F-]{36}$",
         description=(
-            "`<type>:<uuid>` — only the observables behind that actor/family/campaign/tool "
+            "`<type>:<uuid>`: only the observables behind that actor/family/campaign/tool "
             "(claimed attribution edges plus values reported alongside it); the profile's "
             "'Open in observables browser' pivot"
         ),
@@ -6426,7 +6426,7 @@ async def get_cwe_affected_cves(
         True,
         description=(
             "Include CVEs tagged with any weakness below this one on the abstraction ladder. "
-            "On by default so the list matches the profile's headline count — NVD tags a CVE "
+            "On by default so the list matches the profile's headline count: NVD tags a CVE "
             "wherever the assigning analyst chose, so a Class's direct list is near-empty."
         ),
     ),

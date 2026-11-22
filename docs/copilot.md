@@ -30,7 +30,7 @@ Flow diagram: [diagrams/copilot-stream-flow.md](diagrams/copilot-stream-flow.md)
 |---|---|---|
 | `POST /api/ai/copilot/stream` | user | One chat turn, streamed as SSE; saved to `ai_conversations` |
 | `POST /api/ai/copilot/confirm` | user | Run or cancel a staged write |
-| `GET /api/ai/copilot/config` | user | Who answers *your* copilot: `provider_type`, `provider_name`, `source` (`site` / `user`), `model`, `supports_tools`, `fallback_reason`, `refused` (`{reason, message}` when the turn would be refused), and the tool lists: `default_tools` (shown directly when the assignment sets none) and `enabled_tools` (the assignment's `agent_tools`, or null when the copilot reaches every tool). Reading it spends no allowance |
+| `GET /api/ai/copilot/config` | user | Which provider answers the caller's copilot: `provider_type`, `provider_name`, `source` (`site` / `user`), `model`, `supports_tools`, `fallback_reason`, `refused` (`{reason, message}` when the turn would be refused), and the tool lists: `default_tools` (shown directly when the assignment sets none) and `enabled_tools` (the assignment's `agent_tools`, or null when the copilot reaches every tool). Reading it spends no allowance |
 | `GET`/`POST /api/ai/conversations`, `GET`/`PATCH`/`DELETE /{id}` | owner | List (paginated, filterable by scope), create, read, append, delete |
 | `POST /api/ai/conversations/{id}/share`, `DELETE .../share` | owner | Create or revoke a public share link |
 | `GET /api/shared/copilot/{token}` | anyone | Read-only view of a shared conversation |
@@ -62,7 +62,7 @@ Both the assignment and the prompt are editable at **Settings → AI Configurati
 
 1. **Pick the provider**: `resolve_assignment(db, Caller.user(user.id), "copilot")`. This is where a turn can be refused before anything streams: 403 `user_ai_key_required` (personal keys are required, or the person turned off fallback and their key cannot answer; `details.reason` says why) or 429 `ai_allowance_exceeded` (the person used up today's `site_ai_user_daily_requests`).
 2. **Load or create the conversation.** A given `conversation_id` must belong to the caller (404 otherwise). A new conversation is titled from the first 60 characters of the question. Its scope comes from the context (`_scope_from_context`, `backend/app/api/copilot.py:343`): `entry`, `multi_entry`, `entity` (`scope_id = "{entity_type}:{entity_id}"`) or `global`.
-3. **Describe where the analyst is** (`_build_ambient_context`, `backend/app/api/copilot.py:288`) from the optional `CopilotContext` (`backend/app/api/copilot.py:89`). Each lookup is best effort; a failure just drops that line.
+3. **Describe where the analyst is** (`_build_ambient_context`, `backend/app/api/copilot.py:288`) from the optional `CopilotContext` (`backend/app/api/copilot.py:89`). Each lookup is best effort; a failure drops that line.
 
    | Context field | What the model gets |
    |---|---|
@@ -108,7 +108,7 @@ Each `data:` frame is one JSON object:
 {"type": "done", "conversation_id": <uuid>, "answered_by": {...}}
 ```
 
-`error` is sent only when the stream failed *and* produced no visible text. `done` is always last. Its `answered_by` feeds the reply footer: `provider_name`, `provider_type`, `source`, `model`, `cost_usd` (when usage was reported), `fallback_reason` and `supports_tools`.
+`error` is sent only when the stream failed *and* produced no visible text. `done` is always last. Its `answered_by` feeds the reply footer: `provider_name`, `provider_type`, `source`, `model`, `cost_usd` (when usage is reported), `fallback_reason` and `supports_tools`.
 
 ### In-process providers: Anthropic API, OpenAI-compatible and Ollama
 
@@ -123,11 +123,11 @@ All three get the same tools and run every call through the same `ToolGate` (see
 - **Shown directly:** the everyday reads and writes, `DEFAULT_COPILOT_TOOLS` plus `DEFAULT_COPILOT_WRITE_TOOLS` (`backend/app/tools/__init__.py`), and two helpers, `find_tools` and `call_tool`.
 - **Reachable through the helpers:** every other registry tool the user may run. `find_tools` lists or searches them and returns their arguments; `call_tool` runs one through the same checks as a directly shown tool.
 
-Sending the whole registry instead would cost about 26k tokens a round, swamp a local model, and break OpenAI, which refuses more than 128 tools in one request. The MCP server uses the same idea for the CLI. An assignment's `agent_tools` key (Prompt Workspace → Routing & Visibility tab) limits the copilot to exactly those tools, with no helpers. Tool traces stream to the dock the same way as with the CLI.
+Sending the whole registry would cost about 26k tokens a round, overload a local model, and fail on OpenAI, which refuses more than 128 tools in one request. The MCP server uses the same idea for the CLI. An assignment's `agent_tools` key (Prompt Workspace → Routing & Visibility tab) limits the copilot to exactly those tools, with no helpers. Tool traces stream to the dock the same way as with the CLI.
 
 A turn has a tool budget (`max_tool_iterations`, default 8 rounds). When it runs out, the Anthropic and OpenAI-compatible loops run one more round with tools off and ask the model to answer from what it found; Ollama ends with a note. A turn never ends blank. A provider's `tools_enabled` can be set on the provider row or on one assignment; `provider_runs_tools` (`backend/app/ai/engine.py`) reads both, like the provider does.
 
-A provider with tool calling turned off streams plain text. The dock's header says "no tools", and the footer says "tools unavailable on this key" when it was the person's own key.
+A provider with tool calling turned off streams plain text. The dock's header says "no tools", and the footer says "tools unavailable on this key" when the person's own key answered.
 
 ---
 
@@ -146,7 +146,7 @@ Either way the endpoint handles events the same way, because the worker relays `
 |---|---|---|
 | Who runs the CLI | `celery-worker-ai` | `celery-worker-ai`, or the api when dispatch is off |
 | Credentials | The `claude_cli` volume; the CLI refreshes tokens itself | The `claude_cli` volume, plus `CLAUDE_CODE_OAUTH_TOKEN` from `.env` |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Deliberately **not** passed in: it would override the credentials file and stop the silent refresh | Passed in from `.env` |
+| `CLAUDE_CODE_OAUTH_TOKEN` | **Not** passed in: it would override the credentials file and stop the automatic refresh | Passed in from `.env` |
 | MCP server mount (`/opt/intelfeed-mcp`) | `celery-worker-ai` | `celery-worker-ai` and the api |
 | Prompt and database work | Always in the api; the worker task only relays events | Same |
 
@@ -158,7 +158,7 @@ The api reads the list with BLPOP (`_iter_worker_events`, `backend/app/api/copil
 
 ### The `ai` queue
 
-All AI-calling Celery tasks are routed to the `ai` queue (`task_routes` in `backend/app/workers/celery_app.py`): copilot turns, the two sign-in tasks, one-pass entry analysis, adjudication, actor refresh, name normalization, AI gap enrichment, duplicate review, thread spines, and the written products (threat briefs, daily summaries, the Reddit digest, full reports). `celery-worker-ai` reads it with `--concurrency=${CLAUDE_CODE_CONCURRENCY:-1} --prefetch-multiplier=1`, which protects the OAuth session and the subscription's rate limits. The catch: at concurrency 1, a long copilot turn and a background AI job wait for each other.
+All AI-calling Celery tasks are routed to the `ai` queue (`task_routes` in `backend/app/workers/celery_app.py`): copilot turns, the two sign-in tasks, one-pass entry analysis, adjudication, actor refresh, name normalization, AI gap enrichment, duplicate review, thread timelines, and the written products (threat briefs, daily summaries, the Reddit digest, full reports). `celery-worker-ai` reads it with `--concurrency=${CLAUDE_CODE_CONCURRENCY:-1} --prefetch-multiplier=1`, which protects the OAuth session and the subscription's rate limits. At concurrency 1, a long copilot turn and a background AI job wait for each other.
 
 ### The CLI invocation
 
@@ -168,14 +168,14 @@ All AI-calling Celery tasks are routed to the `ai` queue (`task_routes` in `back
 
 ## The tool layer: one gate for every provider
 
-Article text reaches the model's context through pinned articles, search results and entity names. So a tool call from the model is not a request from the user: one planted instruction could name any tool. `backend/app/tools/gate.py` makes the same rules hold whichever provider answers:
+Article text reaches the model's context through pinned articles, search results and entity names. A tool call from the model is therefore not a request from the user: an instruction planted in an article could name any tool. `backend/app/tools/gate.py` makes the same rules hold whichever provider answers:
 
 - **What is offered.** `model_tool_definitions` drops every `ADMIN_TOOLS` entry for a non-admin, removes `confirmation_token` from every schema a model sees, and replaces a delete tool's "call again with the token" instructions with "the user confirms it with a click".
-- **What may run.** `check_call` refuses a tool that was not offered, an admin tool for a non-admin (checked again here, not only in the offer), and any call that carries a `confirmation_token`: that token stands for the user's yes, not the model's.
+- **What may run.** `check_call` refuses a tool not offered, an admin tool for a non-admin (checked again here, not only in the offer), and any call that carries a `confirmation_token`: that token represents the user's confirmation, not the model's.
 - **Reads** run straight away.
 - **Writes are staged, not run.** `needs_confirmation` covers every mutating tool plus the reads that store what they produce (`PERSISTING_READ_TOOLS`: extractions, `run_ai_task`, `generate_detection_rules`). The call is saved for the asking user (`stage_tool_call`) and the model gets `{"status": "awaiting_confirmation", ...}` back. Only the user's click runs it ([below](#confirmed-writes-staging-and-the-confirm-endpoint)).
 - **Skipping the click.** An admin can pick low-risk writes that run without it: **Skip Confirm for**, on the copilot's Routing & Visibility tab in the Prompt Workspace (Settings → AI Configuration → Prompts). It stores the `copilot_auto_approve_tools` setting, empty by default. Only `auto_approvable_tools()` may be picked: never an admin tool, and never a two-step delete, whose first call deletes nothing.
-- **Read-only surfaces.** The documentation page's copilot (`DocsCopilot.tsx`) shows no confirm cards, so it sends `context.read_only: true` and is offered read tools only (and the CLI gets a `read` token).
+- **Read-only pages.** The documentation page's copilot (`DocsCopilot.tsx`) shows no confirm cards, so it sends `context.read_only: true` and is offered read tools only (and the CLI gets a `read` token).
 
 The in-process loops call `ToolGate` directly. The Claude CLI reaches the registry over HTTP, so `/api/tools/execute` (`backend/app/api/tools.py`) applies the same checks to its agent token. Agentic engine tasks, which run with nobody to click, use `UnattendedGate`: the same refusals, nothing staged, and read tools only unless the assignment opts in.
 
@@ -196,27 +196,27 @@ Writes the CLI stages are saved against the conversation, so the copilot collect
 
 ## Confirmed writes: staging and the confirm endpoint
 
-A staged write is stored in Redis at `copilot:action:{action_id}` for **900 seconds** (`STAGED_TTL_SECONDS` in `backend/app/tools/gate.py`) with the user, the conversation, the tool and its arguments. Each copilot turn keeps a list of what it staged (`copilot:staged:{turn_id}`; the CLI's propose token carries the turn). After the model finishes, `copilot_stream` takes that turn's list (`take_staged`) and sends one `confirm_request` per write, oldest first, before `done`. Each carries `tool_name`, the exact `proposed` arguments, `targets`, `preview` and `destructive` (a delete with a token flow, or an admin tool). An id alone would let a planted instruction slip in a different record, so staging names them: `targets` maps each id-holding argument to the record it points at (`name_targets`, e.g. `campaign 'Operation Lantern'`; personal notes are never named), and for a delete `preview` is the tool's own harmless first step, such as how many entries go with a feed. The card shows both.
+A staged write is stored in Redis at `copilot:action:{action_id}` for **900 seconds** (`STAGED_TTL_SECONDS` in `backend/app/tools/gate.py`) with the user, the conversation, the tool and its arguments. Each copilot turn keeps a list of what it staged (`copilot:staged:{turn_id}`; the CLI's propose token carries the turn). After the model finishes, `copilot_stream` takes that turn's list (`take_staged`) and sends one `confirm_request` per write, oldest first, before `done`. Each carries `tool_name`, the exact `proposed` arguments, `targets`, `preview` and `destructive` (a delete with a token flow, or an admin tool). An id alone would let a planted instruction substitute a different record, so staging names the records: `targets` maps each id-holding argument to the record it points at (`name_targets`, e.g. `campaign 'Operation Lantern'`; personal notes are never named), and for a delete `preview` is the tool's own harmless first step, such as how many entries go with a feed. The card shows both.
 
 `POST /api/ai/copilot/confirm` (`copilot_confirm`, `backend/app/api/copilot.py`) then runs or cancels it:
 
 - The stored call must belong to the caller (404 otherwise, and 404 once it has expired).
 - `edited_params` may replace the arguments, except on a destructive call: that one is confirmed as shown or cancelled.
-- A claim key (`copilot:action:{id}:claim`, 900 s, as long as the staged call can live) lets only one approval run at a time, so a double click, two tabs or a slow tool cannot run it twice; a second approval gets 409. After claiming, the call must still exist: a click that lands just after another approval finished gets 404, not a second run.
+- A claim key (`copilot:action:{id}:claim`, 900 s, as long as the staged call can live) lets only one approval run at a time, so a double click, two tabs or a slow tool cannot run it twice; a second approval gets 409. After claiming, the call must still exist: a click that arrives after another approval finished gets 404, not a second run.
 - `run_confirmed` runs the tool as the user who clicked, re-checking `ADMIN_TOOLS` against their role at that moment. A tool with a two-step token flow (the seven deletes: `delete_entity`, `delete_feed`, `delete_campaign`, `delete_automation_rule`, `delete_detection_rule`, `delete_intel_report`, `delete_requirement`; `confirmation_token_tools` finds them by their schema) gets its token here, server-side: the click is the confirmation.
-- On success, a `✓ Done: <summary>. Result: …` message is appended to the conversation. If the tool returns an error, the staged call is kept so you can retry.
+- On success, a `✓ Done: <summary>. Result: …` message is appended to the conversation. If the tool returns an error, the staged call is kept so the user can retry.
 
 ---
 
 ## Conversation persistence and public sharing
 
-`AIConversation` (`backend/app/models/ai_conversation.py`) stores a conversation's `messages` as a JSONB list of `{role, content, created_at, meta?}`, with `scope_type` of `entry`, `multi_entry`, `entity` or `global`, and an owner. The API in `backend/app/api/ai_conversations.py` (`/api/ai/conversations`) only ever shows a user their own conversations.
+`AIConversation` (`backend/app/models/ai_conversation.py`) stores a conversation's `messages` as a JSONB list of `{role, content, created_at, meta?}`, with `scope_type` of `entry`, `multi_entry`, `entity` or `global`, and an owner. The API in `backend/app/api/ai_conversations.py` (`/api/ai/conversations`) shows a user only their own conversations.
 
 **Sharing.** `POST /{id}/share` creates (or returns) a `share_token` (`uuid4().hex`, unique) and returns `{share_token, path: "/shared/copilot/{token}"}`. `DELETE /{id}/share` clears the token. `GET /api/shared/copilot/{token}` needs no sign-in and returns `{title, scope_type, messages}`. The page `/shared/copilot/:token` (`frontend/src/pages/SharedCopilotPage.tsx`) is one of the few public routes; it calls that endpoint directly and renders the answers as Markdown. A link works until it is revoked; there is no expiry.
 
-Two things to know:
+Two details:
 
-- The shared page shows only each message's text, but the API returns the saved `meta` too. Anyone with the link can therefore see the `tool_events` (tool names, arguments and 200-character result summaries) by calling the endpoint.
+- The shared page shows only each message's text, but the API returns the saved `meta` too. Anyone with the link can see the `tool_events` (tool names, arguments and 200-character result summaries) by calling the endpoint.
 - Staged writes are not part of the saved answer; a confirmed one appears as its `✓ Done` message.
 
 ---
@@ -253,10 +253,10 @@ Other behavior:
 
 The CLI signs in with an OAuth session from a Claude subscription, not a per-token API key. There are two ways to provide it:
 
-- **Prod**: `.credentials.json` in the `claude_cli` volume, mounted only by `celery-worker-ai`. `CLAUDE_CODE_OAUTH_TOKEN` is deliberately not passed to that container (keep it out of the host's `.env` too), because it would override the file and stop the CLI refreshing tokens itself. Never delete the volume: that loses the copilot's sign-in (see [operations.md](operations.md)).
+- **Prod**: `.credentials.json` in the `claude_cli` volume, mounted only by `celery-worker-ai`. `CLAUDE_CODE_OAUTH_TOKEN` is not passed to that container (keep it out of the host's `.env` too), because it would override the file and stop the CLI refreshing tokens itself. Never delete the volume: that loses the copilot's sign-in (see [operations.md](operations.md)).
 - **Dev**: the dev worker also passes `CLAUDE_CODE_OAUTH_TOKEN` from `.env`, so a long-lived token can stand in for the file.
 
-The session expires now and then (about monthly in practice). When it does, the copilot just fails, so the sign-in is monitored and can be renewed inside the app.
+The session expires about once a month. When it does, the copilot fails, so the sign-in is monitored and can be renewed inside the app.
 
 ### Health snapshot
 
@@ -276,7 +276,7 @@ Session states, stored at `copilot:auth:session:{id}` for 15 minutes: `starting 
 ### UI surfaces
 
 - **The Claude Code provider card** at Settings → AI Configuration → Providers includes `CopilotAuthCard` (embedded by `frontend/src/components/ClaudeCodeConfigEditor.tsx`): a health badge (Authenticated / expiring within 48 h / Expired / Checking), an expiry countdown, the subscription type, and the start → open URL → paste code flow.
-- **The dock's banner**: admins see "Copilot sign-in expired — responses will fail until you re-authenticate" with a button that opens `CopilotReauthModal` (the same flow). It appears only when the copilot's provider is `claude_code`. The status is re-checked after any failed or empty turn, so the banner shows up when it matters.
+- **The dock's banner**: admins see a banner saying the Copilot sign-in has expired and responses will fail until they re-authenticate, with a button that opens `CopilotReauthModal` (the same flow). It appears only when the copilot's provider is `claude_code`. The status is re-checked after any failed or empty turn, so the banner appears when it is needed.
 
 ---
 
@@ -284,7 +284,7 @@ Session states, stored at `copilot:auth:session:{id}` for 15 minutes: `starting 
 
 **Settings → AI Configuration → Cost Dashboard** shows 30-day totals by task and model from `GET /api/ai/cost-breakdown`, which adds up `AIResult.cost_estimate`.
 
-Each copilot turn writes one `AIResult` row (`target_type="conversation"`, `target_id` = the conversation id), including turns that fail or are abandoned mid-stream. On the CLI the dollar figure is **notional**: the CLI's final `result` event reports token usage and a `total_cost_usd`, which `ClaudeCodeProvider` reads (`_extract_usage`) and passes along in the `done` event. Under a flat-rate subscription that figure is what the usage *would* cost at API prices, not a real charge. The real limit is the subscription's rate limits, which show up as `QuotaExhaustedError` pauses. `tokens_input` includes cache tokens; the raw breakdown is in `parsed_result.usage`.
+Each copilot turn writes one `AIResult` row (`target_type="conversation"`, `target_id` = the conversation id), including turns that fail or are abandoned mid-stream. On the CLI the dollar figure is **notional**: the CLI's final `result` event reports token usage and a `total_cost_usd`, which `ClaudeCodeProvider` reads (`_extract_usage`) and passes along in the `done` event. Under a flat-rate subscription that figure is what the usage *would* cost at API prices, not a real charge. The real limit is the subscription's rate limits, which appear as `QuotaExhaustedError` pauses. `tokens_input` includes cache tokens; the raw breakdown is in `parsed_result.usage`.
 
 With other providers the row is priced from the stream's reported usage (`last_stream_usage`), or from the cost table when there are tokens but no dollar figure. The Anthropic tool loop prices its own turn from that table at Anthropic's cache rates: cached input at 10% of the input rate and cache writes at 125%. Every round re-sends the cached system prompt and tool list, so pricing them as fresh input would overstate a turn several times. `tokens_input` still counts every input token. Every row records `caller_kind="user"`, the person's `user_id`, and `key_owner_id` when their own key answered. That is what the monthly cap, the site allowance and the By-user table count.
 
@@ -299,7 +299,7 @@ With other providers the row is priced from the stream's reported usage (`last_s
 | `QuotaExhaustedError` in worker logs | The subscription's usage window is full | Wait for the reset. The single worker means retries do not pile up |
 | Confirm returns 404 "expired or does not exist" | The proposal is older than 900 s, or belongs to someone else | Ask the copilot to propose it again |
 | The copilot says it can't use a tool | The tool is admin-only and the user isn't an admin, or the assignment's `agent_tools` leaves it out | Ask an admin, or widen `agent_tools` |
-| An OpenAI-compatible answer starts "This provider didn't accept tools" | The server rejected the `tools` parameter | Turn Tool calling off on that provider, or use a model that supports tools |
+| An OpenAI-compatible answer starts "This provider did not accept tools" | The server rejected the `tools` parameter | Turn Tool calling off on that provider, or use a model that supports tools |
 | Confirm returns 409 | Another approval of the same proposal is running | Wait a moment |
 | Leftover `copilot:stream:{run_id}` keys | The client left before the api read the list | They expire after 300 s |
 | A turn stops partway after about 4–6 minutes | The 240 s CLI timeout or the 300 s Celery soft limit | Raise `timeout_seconds` in the copilot assignment config, staying under the task limits |
@@ -335,7 +335,7 @@ Celery results share Redis with the copilot, so they expire after one hour (`res
 ## Test coverage
 
 - `backend/tests/test_copilot_tool_gate.py` (no database): what a model is offered and what the gate refuses, staging, `find_tools` / `call_tool`, auto-approve limits, savepoints, the claim, per-turn staging, and the Anthropic and OpenAI-compatible tool loops (tool results, web search, the last round at the tool budget, cache-aware cost).
-- `backend/tests/test_copilot_confirmed_writes.py`: the CLI's `propose` token over `/api/tools/execute`; confirm runs a call once, only for its owner, re-checks admin tools and won't edit a destructive one; a whole copilot turn with a stand-in model stages its write and keeps working after a tool fails; a staged delete names what it deletes; background tasks get read tools through the gate.
+- `backend/tests/test_copilot_confirmed_writes.py`: the CLI's `propose` token over `/api/tools/execute`; confirm runs a call once, only for its owner, re-checks admin tools and refuses edits to a destructive one; a whole copilot turn with a stand-in model stages its write and keeps working after a tool fails; a staged delete names what it deletes; background tasks get read tools through the gate.
 - `backend/tests/test_user_ai_providers.py`: `/config` reporting whose key answers, the Required refusal, and a streamed turn counting toward the person's cap.
 - `backend/tests/test_ai_allowance.py`: the site allowance on `/stream`.
 - Nearby: `test_ai_providers.py` (providers), `test_ai_tasks.py` and `test_ai_prompts.py` (task and prompt seeding, including `copilot`), `test_rate_limiter.py` (the `ai` bucket), `test_ollama_provider.py`, `test_claude_code_confinement.py` (the CLI's tool confinement and agent token).

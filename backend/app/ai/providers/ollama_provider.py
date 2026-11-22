@@ -416,7 +416,7 @@ class OllamaProvider(AIProvider):
                             payload["options"].get("num_ctx"),
                             payload["options"].get("num_predict"),
                         )
-                        yield {"kind": "text", "text": "\n\n_[answer truncated — model hit its output limit]_"}
+                        yield {"kind": "text", "text": "\n\n_[Answer truncated: the model reached its output limit.]_"}
                     yield {
                         "kind": "done",
                         "usage": {

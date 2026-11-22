@@ -404,7 +404,7 @@ In `frontend/src/pages/`:
 - **WorkbenchPage.tsx:** the entity browser. Also exports `WorkbenchLayout` and hosts the glossary and detection workbench as sections.
 - **EntityProfilePage.tsx:** one profile page for every entity type and campaigns.
 - **DashboardPage.tsx:** the Workbench dashboard (widget boards via `useDashboards`).
-- **ThreatsPage.tsx:** `/workbench/threats`, ranked by story. The tabs are filters of one ranking: All interleaves actors, malware, vulnerabilities and story rows by score, and a CVE whose window articles an actor or malware row already tells rides on that row as an `exploits CVE-…` chip rather than getting its own line. Each row's ⋯ menu moves it between the four decision states (open, tracked, handled, muted); the state filter shows each. The drawer ends in the hunt pack: `Draft hunt pack` asks the `hunt_pack` AI task for one to three hypotheses with queries in the user's preferred query language (Settings › Reading › Preferred query language, stored as `query_language` in `users.settings`; the vocabulary is `backend/app/ai/query_language.py`), each hypothesis's data sources checked against the telemetry inventory, and `Export ATHF hunt file` downloads the pack as an ATHF `H-XXXX.md`. IntelFeed stores only the drafted pack; running the hunt and recording findings happen in the SIEM and the ATHF workspace. Its Vulnerabilities tab uses `FollowView` from `ExposurePage.tsx`.
+- **ThreatsPage.tsx:** `/workbench/threats`, ranked by story. The tabs are filters of one ranking. All interleaves actors, malware, vulnerabilities and story rows by score. A CVE whose articles are already covered by an actor or malware row appears on that row as an `exploits CVE-…` chip instead of its own line. Each row's ⋯ menu moves it between the four decision states (open, tracked, handled, muted); the state filter shows each. The drawer ends in the hunt pack. `Draft hunt pack` asks the `hunt_pack` AI task for one to three hypotheses with queries in the user's preferred query language (Settings › Reading › Preferred query language, stored as `query_language` in `users.settings`; the vocabulary is `backend/app/ai/query_language.py`). Each hypothesis's data sources are checked against the telemetry inventory. `Export ATHF hunt file` downloads the pack as an ATHF `H-XXXX.md`. IntelFeed stores only the drafted pack; running the hunt and recording findings happen in the SIEM and the ATHF workspace. Its Vulnerabilities tab uses `FollowView` from `ExposurePage.tsx`.
 - **ExposureBuilderPage.tsx:** `/workbench/report/exposure`.
 - **SearchPage.tsx:** `/search`.
 - **DocumentationPage.tsx:** in-app docs (`useDocumentation.ts`, with `MermaidDiagram` for diagrams).
@@ -497,7 +497,7 @@ Example: `feed:xyz title:"New APT" is:starred date:>=2024-01-01`. Full grammar: 
 - **colorSchemes.ts:** `getTLPColor(tlp)`, `getSeverityColor(severity)`.
 - **pivotLinks.ts:** `getPivotLinks(type, value)`, links to a profile, a search, or outside references such as MITRE and NVD.
 - **dashboardTemplates.ts:** `DASHBOARD_TEMPLATES`, preset widget layouts on the Dashboard.
-- **groupEntries.ts:** `groupConsecutiveEntries()`, folds runs of entries from the same feed into one group.
+- **groupEntries.ts:** `groupConsecutiveEntries()`, groups consecutive entries from the same feed.
 - **threads.ts:** flattens Priority Queue rows and story threads for display.
 - **aiProvenance.ts:** wording for which AI key answered and why.
 

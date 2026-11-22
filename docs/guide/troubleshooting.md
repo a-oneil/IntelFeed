@@ -9,10 +9,10 @@ need an admin; those are marked.
 
 ## A feed stopped producing
 
-A dead feed looks just like a quiet week, so check rather than wait.
+A dead feed looks like a quiet week, so check rather than wait.
 
 1. On the dashboard, the **Feed Activity** and **Feed Health** widgets show
-   it. A bar that drops to zero and stays there is your answer.
+   it. A bar that drops to zero and stays there means the feed has stopped.
 2. Admins: **Settings → Engine**, **Feeds** view, shows each feed's last
    successful fetch, its errors and how reliable it has been.
 
@@ -28,7 +28,7 @@ is also an ordinary word. Open the entity's card in the reader, click
 **Wrong?**, and pick the narrowest option that's true. See
 [If something is linked wrongly](reading-and-triage.md#if-something-is-linked-wrongly).
 
-These choices change future linking, so the widest option isn't the safe
+These choices change future linking, so the widest option is not the safe
 default.
 
 ## There are two pages for the same thing
@@ -54,8 +54,8 @@ check:
 - Check that the conditions still match. A rule that names a feed breaks when
   the feed is renamed.
 
-Before you turn an edited notification rule back on, make sure it won't send
-one message per article. That can flood a channel.
+Before you turn an edited notification rule back on, make sure it will not
+send one message per article. That can flood a channel.
 
 ## The copilot isn't answering
 
@@ -67,7 +67,7 @@ one message per article. That can flood a channel.
   and model under **Settings → AI Configuration → Prompts**.
 - **Answers with no tool chips**: the copilot answered from the AI model's
   general knowledge, not from your data. Ask again more specifically. If it
-  still doesn't use tools, the provider may not support tool calling.
+  still does not use tools, the provider may not support tool calling.
 
 ## Search returns nothing for something I can see
 
@@ -75,15 +75,14 @@ one message per article. That can flood a channel.
   to articles. Press **Tab** in the box to change it.
 - Check the filter rail. Filters you picked earlier are written into the query
   and stay there.
-- If one article is truly missing from search, the search index has fallen out
-  of step. IntelFeed repairs this by itself: failed articles are retried every
-  five minutes, and a full check runs every night. Usually you only need to
-  wait. Admins can run the **reconcile-meilisearch** job straight away from
+- If one article is missing from search, the search index is out of date.
+  IntelFeed repairs this by itself: failed articles are retried every five
+  minutes, and a full check runs every night. Usually you only need to wait. Admins can run the **reconcile-meilisearch** job straight away from
   **Settings → Engine → Jobs** with **Run now**.
 
 ## A saved search shows the wrong count
 
-The number next to a saved search is worked out in the background, so it can
+The number next to a saved search is computed in the background, so it can
 lag behind new articles. It also stops counting at 5,000. Open the saved
 search to run the real query and see the right results.
 
@@ -91,8 +90,8 @@ search to run the real query and see the right results.
 
 There are two different causes:
 
-- **New instance**: profiles build up over time. They're thin on day one and
-  useful by the end of the month. Nothing is wrong.
+- **New instance**: profiles build up over time. They have little on day one
+  and more after a few weeks. Nothing is wrong.
 - **Enrichment off**: a CVE page with no severity or KEV status means the
   enrichment sources are off. An admin turns them on at
   **Settings → Engine → Enrichment**. NVD, EPSS and CISA KEV matter most.
@@ -101,15 +100,15 @@ There are two different causes:
 
 It needs steering:
 
-- **Watch** the entities you're responsible for, and **mute** the ones that
-  are noise to you (both on the entity's profile). This is the biggest lever,
-  and the least used.
+- **Watch** the entities you are responsible for, and **mute** the ones that
+  are noise to you (both on the entity's profile). This has the largest
+  effect.
 - **Write your intelligence requirements** (the standing questions you need
   answered) at **Workbench → Requirements**. Articles that match them rank
   higher.
 - **Vote** with ▲ and ▼ on queue items to teach the ranking what is useful.
 
-Give it a couple of weeks before deciding it's wrong. See
+Give it a couple of weeks before deciding it is wrong. See
 [Priority Queue and watching](priority-queue.md).
 
 ## Images aren't loading
@@ -121,15 +120,16 @@ copy until it expires.
 ## Enrichment says rate limited
 
 Each enrichment source has a limit on how many requests it accepts, and some
-have a daily budget. A request over the limit waits a moment for room; if
-there is none, the lookup stays queued and runs once the source has room
-again (after a spent daily budget, the next UTC day). A source that answers "too many requests", or
-keeps failing, is paused for a while (its own Retry-After time, or a minute
-and growing). Scheduled jobs wait longer for room; when a source refuses
-them they stop, keep what they did, and continue on their next run (the run's
-details in the Jobs view say `stopped`). NVD's public API is the usual cause. If it happens all the time,
-an admin can add an **NVD API Key** under **Settings → Engine → Enrichment →
-Keys** to raise the limit.
+have a daily budget. A request over the limit waits a moment for capacity. If
+there is none, the lookup stays queued and runs once the source has capacity
+again (after a spent daily budget, the next UTC day). A source that answers
+"too many requests", or keeps failing, is paused for a while (its own
+Retry-After time, or a minute and growing). Scheduled jobs wait longer for
+capacity. When a source refuses them they stop, keep what they did, and
+continue on their next run (the run's details in the Jobs view say `stopped`).
+NVD's public API is the usual cause. If it happens often, an admin can add an
+**NVD API Key** under **Settings → Engine → Enrichment → Keys** to raise the
+limit.
 
 ## Still stuck
 

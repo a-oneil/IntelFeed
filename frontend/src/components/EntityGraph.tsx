@@ -981,7 +981,7 @@ export function EntityGraph({
                     clusterDragRef.current = { id: h.cluster.id, lastX: g.x, lastY: g.y, moved: false };
                   }}
                 >
-                  <title>{`${h.cluster.heading} — drag to move · click to inspect`}</title>
+                  <title>{`${h.cluster.heading}. Drag to move, click to inspect.`}</title>
                 </ellipse>
                 <text className={styles.storyHullTitle} x={hcx} y={titleY} textAnchor="middle">
                   {truncateLabel(h.cluster.heading, 40).toUpperCase()}
@@ -1125,7 +1125,7 @@ export function EntityGraph({
                 {/* KEV: known-exploited CVEs wear a red ring */}
                 {ni?.kev && (
                   <circle cx={pos.x} cy={pos.y} r={r + 4} fill="none" stroke="var(--danger)" strokeWidth={1.5} opacity={0.85}>
-                    <title>CISA KEV — known exploited</title>
+                    <title>CISA KEV: known exploited</title>
                   </circle>
                 )}
                 {/* Seed / selection rings */}
@@ -1170,7 +1170,7 @@ export function EntityGraph({
                     stroke={ni.covered ? 'var(--success)' : 'var(--danger)'}
                     strokeWidth={1.3}
                   >
-                    <title>{ni.covered ? 'Detection rule exists' : 'No detection rule — coverage gap'}</title>
+                    <title>{ni.covered ? 'Detection rule exists' : 'No detection rule covers this'}</title>
                   </circle>
                 )}
                 {/* Label — the type sub-label is gone: shape + color already
@@ -1241,7 +1241,7 @@ export function EntityGraph({
             <button
               key={g.type}
               className={`${styles.ghostBarPill} ${g.expanded ? styles.ghostBarPillOn : ''}`}
-              title={`Story-less claims — in the list below${g.mitre ? ' and the ATT&CK tab' : ''}. Click to ${g.expanded ? 'hide' : 'show'} them on the graph.`}
+              title={`Relationships not in any story. They are in the list below${g.mitre ? ' and the ATT&CK tab' : ''}. Click to ${g.expanded ? 'hide' : 'show'} them on the graph.`}
               onClick={() =>
                 setExpandedGhostTypes((prev) => {
                   const next = new Set(prev);
@@ -1258,7 +1258,7 @@ export function EntityGraph({
           {hiddenNodes.size > 0 && (
             <button
               className={styles.ghostBarPill}
-              title="Nodes hidden from the inspector — click to bring them all back"
+              title="Nodes you hid. Click to show them all again."
               onClick={() => setHiddenNodes(new Set())}
             >
               {hiddenNodes.size} hidden · reset
@@ -1271,7 +1271,7 @@ export function EntityGraph({
               <button
                 className={layoutMode === 'story' ? styles.layoutToggleOn : ''}
                 onClick={() => setLayoutMode('story')}
-                title="Group by story (operations map)"
+                title="Group by story"
               >
                 Stories
               </button>
@@ -1338,7 +1338,7 @@ export function EntityGraph({
               {info?.phrase && <div className={styles.inspectorPhrase}>{info.phrase}</div>}
               {(info?.articles || info?.feeds) && (
                 <div className={styles.inspectorMeta}>
-                  {info.articles ? `${info.articles} art` : ''}
+                  {info.articles ? `${info.articles} article${info.articles === 1 ? '' : 's'}` : ''}
                   {info.feeds && info.feeds > 1 ? ` · ${info.feeds} feeds` : ''}
                 </div>
               )}
@@ -1455,7 +1455,7 @@ export function EntityGraph({
           <div className={styles.inspector}>
             <div className={styles.inspectorHead}>
               <span className={styles.inspectorTitle}>
-                {sourceNode ? truncateLabel(sourceNode.label, 14) : '?'} — {edge.label} —{' '}
+                {sourceNode ? truncateLabel(sourceNode.label, 14) : '?'} · {edge.label} ·{' '}
                 {targetNode ? truncateLabel(targetNode.label, 14) : '?'}
               </span>
               <button className={styles.inspectorClose} onClick={() => setSelected(null)}>&times;</button>

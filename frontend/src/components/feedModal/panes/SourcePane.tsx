@@ -64,8 +64,8 @@ export function SourcePane({ feedId, form }: { feedId: string; form: FeedForm })
           onChange={(e) => set("url", e.target.value)}
         />
         <span className={styles.hint}>
-          Where articles are fetched from. Changing it forgets what has already
-          been fetched and clears the error count.
+          Where articles are fetched from. Changing it resets the fetch history
+          and clears the error count.
         </span>
       </div>
 

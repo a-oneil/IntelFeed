@@ -18,19 +18,19 @@ const FAMILY_LABELS: Record<string, string> = {
 
 const SIGNAL_DESCRIPTIONS: Record<string, string> = {
   novel_entity: "Links an actor/malware/CVE first seen in the last 14 days or with ≤3 prior articles",
-  entity_resurgence: "A known entity resurfaces after 90+ days of silence",
-  new_pairing: "First article ever pairing two entities (actor+malware, actor+country, malware+CVE)",
-  scoop: "A reliable (A/B) feed reports a novel entity before anyone else echoes it",
+  entity_resurgence: "A known entity is mentioned again after 90+ days without articles",
+  new_pairing: "First article that pairs two entities (actor+malware, actor+country, malware+CVE)",
+  scoop: "A reliable (A/B) feed reports a new entity before any other source",
   source_convergence: "3+ independent outlets on the same story thread (or, unthreaded, sharing 2+ entities within 24h)",
-  under_reported: "Severe CVE (KEV, CVSS ≥9, or EPSS ≥0.5) that ≤2 sources have ever covered",
-  feed_echo: "A re-report its story thread folded, or a near-duplicate of a recent entry (negative — sinks repeats)",
+  under_reported: "Severe CVE (KEV, CVSS ≥9, or EPSS ≥0.5) that 2 or fewer sources have covered",
+  feed_echo: "A repeat report grouped into its story thread, or a near-duplicate of a recent entry (negative: lowers repeats)",
   kev_added: "Links a CVE added to CISA KEV within a week of publication",
   epss_jump: "A linked CVE's EPSS exploitation-probability jumped significantly this week",
   epss_high: "A linked CVE sits at the 95th+ percentile of EPSS exploitation probability",
   weaponized_poc: "A linked CVE has public PoC/weaponized exploit code on GitHub",
   critical_cvss: "Links a CVE with CVSS ≥9",
   pir_match: "Matches one of your priority intelligence requirements",
-  correlation_event: "Triggered correlation events (new TTP for actor, coverage gap, trends…)",
+  correlation_event: "Triggered correlation events (new technique for an actor, coverage gap, trends)",
   detection_content: "Article contains extractable detection rules",
   research_depth: "Long-form research (1500+ words with TTPs, rules, or code)",
 };
@@ -60,7 +60,7 @@ export function ScoreStageConfig() {
       if (!Number.isNaN(v)) body.threshold_override = v;
     }
     update.mutate(body, {
-      onSuccess: () => toast.success("Signal settings saved — recent entries rescoring"),
+      onSuccess: () => toast.success("Signal settings saved. Recent entries are being rescored."),
       onError: () => toast.error("Failed to save signal settings"),
     });
   };
@@ -89,7 +89,7 @@ export function ScoreStageConfig() {
                 <Hint
                   title="Shadow mode"
                   body="The stage runs and records what it would have done, without changing anything you see."
-                  aside="Use it to grade a config before you trust it; surfacing is the separate switch."
+                  aside="Use it to test a configuration before trusting it. Showing scores is a separate switch."
                   place="right"
                   align="center"
                 >
@@ -97,14 +97,14 @@ export function ScoreStageConfig() {
                 </Hint>
                 <td>
                   {health.surface_enabled
-                    ? "surfaced (scores drive Radar & chips)"
+                    ? "on (scores drive Radar and chips)"
                     : health.shadow_enabled
-                      ? "shadow (scoring silently)"
+                      ? "shadow (scores recorded, not shown)"
                       : "off"}
                 </td>
               </tr>
               <tr>
-                <td title="Entries published in the last 72h with no score. A handful just ingested is normal; a growing number means scoring is failing — the 6-hourly rescore sweep picks these up.">
+                <td title="Entries published in the last 72h with no score. A few that were just ingested is normal. A growing number means scoring is failing. The 6-hourly rescore sweep picks these up.">
                   Unscored recent entries (72h)
                 </td>
                 <td>{health.unscored_recent}</td>
@@ -142,10 +142,10 @@ export function ScoreStageConfig() {
       )}
 
       <p className={styles.hint}>
-        How scoring works: every new entry is checked against 15 signals (hover a signal below for
+        Every new entry is checked against 15 signals (hover a signal below for
         what it detects). An entry's priority score is the sum of its firing signals, each weighted
-        by rarity — a signal that fires on 5% of entries gets weight 1.0; rarer fires count for
-        more, common ones for less — times its family multiplier. That sum is then placed on a 0–10
+        by rarity (a signal that fires on 5% of entries gets weight 1.0, rarer signals count for
+        more, common ones for less) and by its family multiplier. That sum is then placed on a 0 to 10
         scale by ranking it against the last 30 days: 0 means nothing fired, 9 is about the top 5%,
         10 the top 1%. Entries scoring at or above the radar threshold get a signal chip and rank
         first in Triage.
@@ -153,8 +153,8 @@ export function ScoreStageConfig() {
 
       <h4 className={styles.heading}>Signal families</h4>
       <p className={styles.hint}>
-        Steer whole families without touching individual weights: 1.0× is neutral, 0× silences the
-        family, 2× doubles its influence. Saving rescores the last 7 days immediately.
+        A family multiplier scales every signal in that family without changing individual weights: 1.0× is neutral, 0× turns the
+        family off, 2× doubles its weight. Saving rescores the last 7 days immediately.
       </p>
       {Object.keys(FAMILY_LABELS).map((family) => (
         <label key={family} className={styles.sliderRow}>
@@ -173,12 +173,12 @@ export function ScoreStageConfig() {
 
       <h4 className={styles.heading}>Radar threshold</h4>
       <p className={styles.hint}>
-        The cut line for "on radar": entries scoring at or above it show signal chips and lead the
+        Entries scoring at or above this threshold show signal chips and rank first in the
         Priority Queue. Currently {stats.threshold.toFixed(1)} out of 10{" "}
         ({stats.threshold_is_auto
-          ? "auto: tracks the 95th percentile of the last 7 days' scores, so roughly the top 5% of entries make the cut"
+          ? "auto: the 95th percentile of the last 7 days' scores, so about the top 5% of entries"
           : "manual override"}).
-        Enter a value from 0 to 10 to override (lower = more entries on radar), or "auto" to
+        Enter a value from 0 to 10 to override (lower puts more entries on radar), or "auto" to
         restore self-tuning.
       </p>
       <div className={styles.thresholdRow}>
@@ -196,8 +196,8 @@ export function ScoreStageConfig() {
 
       <h4 className={styles.heading}>Watched &amp; muted entities</h4>
       <p className={styles.hint}>
-        Watches boost matching entries at read time; mutes suppress them. Add or remove from any entity profile's ⋯
-        menu.
+        Watches boost matching entries at read time, and mutes suppress them. Add or remove them from any entity
+        profile's ⋯ menu.
       </p>
       {!watches?.length ? (
         <p className={styles.hint}>No watched or muted entities yet.</p>
@@ -235,8 +235,8 @@ export function ScoreStageConfig() {
 
       <h4 className={styles.heading}>Self-tuning readout</h4>
       <p className={styles.hint}>
-        Firing rate = share of scored entries where the signal fired over the last 30 days
-        (recomputed nightly). Effective weight = rarity weight × family multiplier — what one
+        Firing rate is the share of scored entries where the signal fired over the last 30 days
+        (recomputed nightly). Effective weight is rarity weight × family multiplier: what one
         firing adds to an entry's score. ▲▼ feedback on Priority Queue items nudges family weights up to
         ±10%. Hover a signal name for what it detects.
       </p>
@@ -257,7 +257,7 @@ export function ScoreStageConfig() {
               <tr key={s.signal_type}>
                 <td title={SIGNAL_DESCRIPTIONS[s.signal_type]}>{s.signal_type.replace(/_/g, " ")}</td>
                 <td>{s.family}</td>
-                <td>{s.firing_rate != null ? `${(s.firing_rate * 100).toFixed(2)}%` : "—"}</td>
+                <td>{s.firing_rate != null ? `${(s.firing_rate * 100).toFixed(2)}%` : "n/a"}</td>
                 <td>{s.effective_weight.toFixed(2)}</td>
               </tr>
             ))}

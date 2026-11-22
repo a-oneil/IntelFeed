@@ -260,7 +260,7 @@ function SuggestedActions({
     suggestions.push({
       key: "gen-rules",
       label: ttps.length > 0 ? `${ttps.length} TTP${ttps.length === 1 ? "" : "s"} but no detection rules` : "CVEs but no detection rules",
-      action: generatingRules ? "Generating…" : "Gen Rules →",
+      action: generatingRules ? "Generating…" : "Generate rules →",
       icon: ICON_SHIELD,
       onClick: onGenerateRules,
       disabled: generatingRules,

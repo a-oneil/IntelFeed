@@ -909,7 +909,7 @@ async def search_autocomplete(
     q: str = Query(
         min_length=1,
         max_length=200,
-        description="Partial query text to complete — a field prefix (e.g. `act`) or a `field:value` pair",
+        description="Partial query text to complete: a field prefix (e.g. `act`) or a `field:value` pair",
     ),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

@@ -63,7 +63,7 @@ export function ActiveStoryCard({ entityType, entityId }: { entityType: string; 
             </div>
             {t.latest_beat && (
               <div className={styles.storyCardBeat}>
-                Latest turn: {t.latest_beat.headline}
+                Latest update: {t.latest_beat.headline}
               </div>
             )}
           </div>

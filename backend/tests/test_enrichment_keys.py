@@ -240,7 +240,7 @@ async def test_test_key_ok_rejected_and_missing(db_session, monkeypatch):
     # No answer says nothing about the key: health is left alone.
     healthy = False
     result = await keys.test_key(db_session, "abuse_ch")
-    assert result == {"status": "unreachable", "message": "Couldn't reach threatfox; try again in a moment"}
+    assert result == {"status": "unreachable", "message": "Could not reach threatfox. Try again in a moment."}
     assert {r.health_status for r in rows.values()} == {"healthy"}
 
     # The source answering 401/403 is the rejection.

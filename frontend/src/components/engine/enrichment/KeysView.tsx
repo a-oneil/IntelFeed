@@ -25,14 +25,14 @@ const STATUS: Record<EnrichmentKey["status"], [string, string]> = {
 export function KeysView({ editing, setEditing }: { editing: string | null; setEditing: (id: string | null) => void }) {
   const keysQ = useEnrichmentKeys();
   if (!keysQ.data) {
-    return <p className={s.note}>{keysQ.isError ? "Couldn't load the keys." : "Loading keys…"}</p>;
+    return <p className={s.note}>{keysQ.isError ? "Could not load the keys." : "Loading keys…"}</p>;
   }
   const open = keysQ.data.find((k) => k.id === editing) ?? null;
   return (
     <div className={s.stack}>
       <p className={s.note}>
-        Every key enrichment uses, in one place. The shared key works for every lookup and job; your own key replaces it
-        for the lookups you start. Keys are stored encrypted and never shown again.
+        API keys for the enrichment sources. The shared key is used by every lookup and scheduled job. A personal key,
+        when set, is used instead for lookups that user starts. Keys are stored encrypted and are not shown again.
       </p>
       <div className={s.scroll}>
         <table className={s.keys}>
@@ -64,7 +64,7 @@ export function KeysView({ editing, setEditing }: { editing: string | null; setE
                   </td>
                   <td className={k.mine ? s.okWord : s.muted}>
                     {!k.personal_allowed
-                      ? "—"
+                      ? "Not allowed"
                       : k.mine
                         ? "Yours is used"
                         : k.status === "set" || k.status === "rejected"
@@ -98,8 +98,8 @@ function KeyEditor({ k, onDone }: { k: EnrichmentKey; onDone: () => void }) {
     const r = await test.mutateAsync(k.id);
     if (r.status === "ok") toast.success(`${k.label} works`);
     else if (r.status === "rejected") toast.error(`${k.label} was refused${r.message ? `: ${r.message}` : ""}`);
-    else if (r.status === "unreachable") toast.warning(r.message ?? `Couldn't reach ${k.label}; try again in a moment`);
-    else if (r.status === "untestable") toast.message(r.message ?? "Saved; the next job run checks it");
+    else if (r.status === "unreachable") toast.warning(r.message ?? `Could not reach ${k.label}. Try again in a moment.`);
+    else if (r.status === "untestable") toast.message(r.message ?? "Saved. The next job run checks it.");
   };
 
   const save = async () => {
@@ -110,16 +110,16 @@ function KeyEditor({ k, onDone }: { k: EnrichmentKey; onDone: () => void }) {
       else toast.success("Saved");
       onDone();
     } catch (e) {
-      toast.error(`Couldn't save: ${(e as Error).message}`);
+      toast.error(`Could not save the key: ${(e as Error).message}`);
     }
   };
 
   const remove = async (own: boolean) => {
     try {
       await set.mutateAsync({ keyId: k.id, apiKey: null, mine: own });
-      toast.success(own ? "Your key is removed; lookups you start use the shared key" : "Shared key removed");
+      toast.success(own ? "Your key is removed. Lookups you start use the shared key." : "Shared key removed");
     } catch (e) {
-      toast.error(`Couldn't remove: ${(e as Error).message}`);
+      toast.error(`Could not remove the key: ${(e as Error).message}`);
     }
   };
 

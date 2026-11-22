@@ -129,7 +129,7 @@ def _validate_output_schema_override(task: AITask, override: dict) -> None:
         raise AppError(
             code="invalid_schema",
             message=(
-                "This task's output is parsed by pipeline code; these fields must stay "
+                "The pipeline reads these fields from this task's output, so they must stay "
                 f"required: {', '.join(sorted(dropped))}"
             ),
             status_code=400,
@@ -171,7 +171,7 @@ async def update_task(
         if task.is_system:
             raise AppError(
                 code="forbidden",
-                message="System task default schemas cannot be edited; set an override instead",
+                message="The default schema of a system task cannot be edited. Set a schema override instead.",
                 status_code=403,
             )
         schema = updates["output_schema"]
@@ -183,7 +183,7 @@ async def update_task(
             if task.output_schema is None:
                 raise AppError(
                     code="invalid_schema",
-                    message="This task returns free-form text; there is no output schema to override",
+                    message="This task returns free-form text, so it has no output schema to override.",
                     status_code=400,
                 )
             _validate_output_schema_override(task, override)
@@ -215,7 +215,7 @@ async def delete_custom_task(
     if has_results is not None:
         raise AppError(
             code="task_has_results",
-            message="This task has results. Results keep their task, so it can't be deleted; disable it instead.",
+            message="This task has results and cannot be deleted. Disable it instead.",
             status_code=409,
         )
     await db.delete(task)

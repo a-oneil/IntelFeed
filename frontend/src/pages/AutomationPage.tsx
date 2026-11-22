@@ -105,7 +105,7 @@ export function AutomationPage() {
       setShowGallery(false);
       setEditingRule(created);
       setShowEditor(true);
-      toast.success(`Created "${template.name}" — review and enable it`);
+      toast.success(`Created "${template.name}". Review and enable it.`);
     } catch {
       toast.error("Failed to create rule from template");
     }

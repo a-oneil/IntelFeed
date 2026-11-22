@@ -101,8 +101,7 @@ export default function ClaudeCodeConfigEditor({
         </tbody>
       </table>
       <p className={styles.hint}>
-        Tool access is configured per task (assignment config), not here — agentic tasks like the
-        copilot get their allowed tools from their seeded assignments.
+        Tool access is configured per task in the assignment config, not here.
       </p>
       <div className={styles.formActions}>
         <button className={styles.saveBtn} onClick={handleSave} disabled={updateProvider.isPending}>

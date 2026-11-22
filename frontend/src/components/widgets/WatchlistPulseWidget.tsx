@@ -44,7 +44,7 @@ export default function WatchlistPulseWidget({ config }: Props) {
 
   if (isLoading) return <WidgetListSkeleton />;
   if (!data || data.items.length === 0) {
-    return <div className={styles.noData}>No watched entities — add watches from any entity profile</div>;
+    return <div className={styles.noData}>No watched entities. Add watches from any entity profile.</div>;
   }
 
   const moving = data.items.filter((i) => i.total > 0);
@@ -84,7 +84,7 @@ export default function WatchlistPulseWidget({ config }: Props) {
       ))}
       {quiet.length > 0 && (
         <button className={styles.boardFootNote} onClick={() => setShowQuiet((v) => !v)} style={{ cursor: "pointer", background: "none", border: "none", borderTop: "1px solid var(--border)", textAlign: "left", width: "100%" }}>
-          {showQuiet ? "Hide" : "Show"} {quiet.length} quiet {quiet.length === 1 ? "watch" : "watches"}
+          {showQuiet ? "Hide" : "Show"} {quiet.length} {quiet.length === 1 ? "watch" : "watches"} with no mentions
         </button>
       )}
     </div>

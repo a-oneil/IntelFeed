@@ -907,15 +907,17 @@ async def backfill(db: AsyncSession, source_type: str, entity_type: str | None, 
 
     cls = ADAPTER_REGISTRY.get(source_type)
     if cls is None:
-        raise BackfillError("not_lookup", f"{source_type} has no per-entity lookup to backfill with")
+        raise BackfillError(
+            "not_lookup", f"{source_type} does not look up single entities, so there is nothing to backfill"
+        )
     if entity_type is not None and entity_type not in cls.applies_to:
-        raise BackfillError("not_applicable", f"{cls.display_name} doesn't look up {entity_type}")
+        raise BackfillError("not_applicable", f"{cls.display_name} does not look up {entity_type}")
     column = primary_column(cls, entity_type)
     if column is None:
-        raise BackfillError("no_column", f"{cls.display_name} fills no column to backfill")
+        raise BackfillError("no_column", f"{cls.display_name} fills no entity field, so there is nothing to backfill")
     row = (await _source_rows(db)).get(source_type)
     if row is None or not row.is_enabled:
-        raise BackfillError("source_disabled", f"{cls.display_name} is off")
+        raise BackfillError("source_disabled", f"{cls.display_name} is turned off. Enable it to backfill.")
 
     limit = min(max(1, limit or BACKFILL_DEFAULT), BACKFILL_MAX)
     model, where = _missing(cls, column, source_type, in_scope=True)

@@ -1058,8 +1058,8 @@ async def pipeline_overview(
         "name": "analyze",
         "kind": "analysis",
         "description": (
-            "The one-pass AI read of the article — entities, techniques, relationships, observables — "
-            "requested when scoring finishes and run from the ai queue; the adjudicate stage reviews its output"
+            "The one-pass AI read of the article (entities, techniques, relationships, observables), "
+            "requested when scoring finishes and run from the ai queue. The adjudicate stage reviews its output."
         ),
         "default_enabled": True,
         "config_schema": {"enabled": {"type": "boolean", "setting": "ai_one_pass_enabled"}},
@@ -1578,7 +1578,7 @@ class PlanUpsert(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "name": "Ransomware feeds — full extraction",
+                "name": "Ransomware feeds: full extraction",
                 "scope_type": "feed",
                 "scope_id": "d5b2f1e8-3c4a-4b6d-9e2f-7a8b9c0d1e2f",
                 "stages": {"extract": {"enabled": True, "config": {"mode": "selective"}}, "score": {"enabled": True}},

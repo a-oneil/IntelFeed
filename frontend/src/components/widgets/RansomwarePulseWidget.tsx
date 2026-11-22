@@ -79,7 +79,7 @@ export default function RansomwarePulseWidget({ config }: Props) {
           return (
             <g key={week.week_start}>
               <title>
-                {`Wk of ${week.label} — ${week.total} victims`}
+                {`Week of ${week.label}: ${week.total} victims`}
                 {stackOrder
                   .filter((g) => (week.groups[g] ?? 0) > 0)
                   .map((g) => `\n${g}: ${week.groups[g]}`)

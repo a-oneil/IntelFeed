@@ -92,8 +92,8 @@ export function GeographyTab({
       )}
 
       <div className={styles.relGroups}>
-        {renderRows("Threat Actors — Origin", originRows, "No attributed actors")}
-        {renderRows("Threat Actors — Targeting", targetingRows, "No targeting actors")}
+        {renderRows("Threat Actors: Origin", originRows, "No attributed actors")}
+        {renderRows("Threat Actors: Targeting", targetingRows, "No targeting actors")}
         {renderRows("Related Countries", relatedRows, "No related countries")}
       </div>
 

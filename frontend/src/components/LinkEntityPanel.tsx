@@ -79,7 +79,7 @@ export function LinkEntityPanel({ entryId, initialSearch, onClose }: LinkEntityP
       await linkEntity.mutateAsync({ entryId, entityId, entityType, selectedText: initialSearch });
       setSuccess({ name: displayName, type: entityType.replace("_", " ") });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to link entity";
+      const msg = err instanceof Error ? err.message : "Could not link the entity";
       if (msg.includes("409") || msg.includes("already_linked")) {
         setError(`${displayName} is already linked to this entry`);
       } else {
@@ -139,7 +139,7 @@ export function LinkEntityPanel({ entryId, initialSearch, onClose }: LinkEntityP
           ttpItems.map((t) => (
             <button key={t.id} className={styles.entityItem} onClick={() => handleLink(t.id, "ttp", `${t.technique_id} ${t.technique_name}`)} disabled={linkEntity.isPending}>
               <div className={styles.entityInfo}>
-                <div className={styles.entityName}>{t.technique_id} — {t.technique_name}</div>
+                <div className={styles.entityName}>{t.technique_id}: {t.technique_name}</div>
                 {t.tactic && <div className={styles.entityAliases}>{t.tactic}</div>}
               </div>
               <span className={styles.entityMeta}>{t.article_count} articles</span>

@@ -242,7 +242,7 @@ async def calendar_buckets(
     with_top_entities: bool = Query(
         False, description="Attach each day's 10 most-mentioned entities (range limited to 92 days)"
     ),
-    tz: str | None = Query(None, description="Accepted for API symmetry; currently unused — days bucket by UTC date"),
+    tz: str | None = Query(None, description="Accepted for API symmetry; currently unused. Days bucket by UTC date."),
     user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1428,7 +1428,7 @@ async def priority_queue(
     unread_only: bool = Query(True, description="false also returns entries already read"),
     with_threads: bool = Query(True, description="false returns entries only, without folding story threads"),
     exclude_thread_ids: list[uuid.UUID] = Query(
-        [], description="Threads to leave out entirely — their members return as standalone entries"
+        [], description="Threads to leave out entirely. Their members return as standalone entries."
     ),
     limit: int = Query(50, ge=1, le=200, description="Entries per page; thread rows are additional"),
     cursor: str | None = Query(None, description="Opaque pagination cursor from the previous page's next_cursor"),
@@ -2423,7 +2423,7 @@ async def generate_daily_summary(
     if parsed is None:
         raise AppError(
             code="ai_not_configured",
-            message="No AI provider assigned to the daily_summary task. Configure one in Settings → AI Configuration.",
+            message="No AI provider is assigned to the daily_summary task. Assign one in Settings > AI Configuration.",
             status_code=503,
         )
     if isinstance(parsed, dict) and parsed.get("_error"):

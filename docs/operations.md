@@ -41,7 +41,7 @@ Dev mounts code for live edits; prod builds it into images and adds memory limit
 - **The enrichment worker** (`celery-worker-enrichment`) drains the `enrichment` queue, one task at a time: the enrichment dispatcher, which beat queues every 30 seconds to run due lookups from `enrichment_jobs`. If it is down, lookups wait in that table and nothing is lost; ticks queued meanwhile expire after 30 seconds.
 - **LibreTranslate** is off by default, behind the `translate` profile, since its models hold about 740 MB. Start: `docker compose -f docker-compose.prod.yml --profile translate up -d libretranslate`. While off, auto-translate skips; `retry-untranslated-entries` (every 30 minutes) catches up later.
 - **Startup seeders** (AI tasks, enrichment sources) take a Postgres advisory lock so the three API workers don't collide.
-- **OOM order.** `oom_score_adj` sets what the kernel kills first: workers (+600) and piper (+300); db (−900), redis (−800), api (−700) and caddy (−500) are protected. Add host swap so spikes slow rather than kill.
+- **OOM order.** `oom_score_adj` sets what the kernel kills first: workers (+600) and piper (+300); db (−900), redis (−800), api (−700) and caddy (−500) are protected. Add host swap so a memory spike slows the host instead of killing a container.
 - **Container logs**: `json-file` driver, 3 × 20 MB per container.
 
 **Memory limits (prod):**
@@ -153,7 +153,7 @@ Also:
 
 ### System Settings (Database)
 
-Most settings live in the database and are edited in the Settings UI; saved values beat `.env` defaults.
+Most settings live in the database and are edited in the Settings UI; saved values override `.env` defaults.
 
 - **Table:** `system_settings`, one row (`id = 1`) with `settings` and `secrets` JSONB columns and `updated_at`.
 - **Keys:** `CONFIGURABLE_KEYS` in `backend/app/services/system_settings.py`, described in [engine-settings.md](engine-settings.md).
@@ -206,7 +206,7 @@ sudo ./scripts/ops/cf-origin-lockdown.sh [--dry-run]
 - Safe to re-run: it fetches and checks current ranges before touching rules.
 - It never touches port 22, so SSH stays open.
 
-Then set `TRUSTED_CLIENT_IP_HEADER=CF-Connecting-IP` in `.env` so anonymous traffic counts per visitor, not per edge node. Without lockdown, leave it unset — the header is fakeable. [Public read-only mode](public-read-only-mode.md) behind Cloudflare requires it: otherwise all visitors behind one edge node share one limit of 20 articles a minute.
+Then set `TRUSTED_CLIENT_IP_HEADER=CF-Connecting-IP` in `.env` so anonymous traffic counts per visitor, not per edge node. Without lockdown, leave it unset, because the header can be faked. [Public read-only mode](public-read-only-mode.md) behind Cloudflare requires it: otherwise all visitors behind one edge node share one limit of 20 articles a minute.
 
 ### Security Headers
 
@@ -501,7 +501,7 @@ The `cvelist-backfill` job downloads the cvelistV5 baseline zip (about 650 MB; a
 
 **One bigger server.** Add CPU and RAM, then raise `memory` limits in `docker-compose.prod.yml` and worker `--concurrency`. Keep Gunicorn's worker count (`-w 3`) small enough to fit under the api memory limit; a swapping worker is worse than one fewer.
 
-**Queues.** `celery` (everything else) is served by `celery-worker`; `ai` (every task calling an AI provider) only by `celery-worker-ai`; `enrichment` (the enrichment dispatcher) only by `celery-worker-enrichment`. New AI-calling tasks must be routed to `ai` in `task_routes` in `backend/app/workers/celery_app.py`. A second `celery-worker-enrichment` is safe (claims use `SKIP LOCKED`, and each source's allowance lives in Redis) but buys little: the sources' rate limits set the pace, not the worker.
+**Queues.** `celery` (everything else) is served by `celery-worker`; `ai` (every task calling an AI provider) only by `celery-worker-ai`; `enrichment` (the enrichment dispatcher) only by `celery-worker-enrichment`. New AI-calling tasks must be routed to `ai` in `task_routes` in `backend/app/workers/celery_app.py`. A second `celery-worker-enrichment` is safe (claims use `SKIP LOCKED`, and each source's allowance lives in Redis) but adds little: the sources' rate limits set the pace, not the worker.
 
 **Postgres tuning.** Prod `db` settings are command-line flags (`shared_buffers=320MB`, `work_mem=24MB`, `maintenance_work_mem=96MB`, `effective_cache_size=2GB`, `random_page_cost=1.1`). They override `ALTER SYSTEM`; edit the compose file and recreate:
 
@@ -521,7 +521,7 @@ Run commands on the prod host from the repo folder.
 
 #### 1. A feed stops updating
 
-**Cause:** a crashed fetch left its Redis lock, which expires after 10 minutes — wait first.
+**Cause:** a crashed fetch left its Redis lock, which expires after 10 minutes. Wait first.
 
 **Fix:**
 
@@ -682,7 +682,7 @@ grep '"rate_limited"' logs/app.log | tail
 
 ## Update & Deployment
 
-[update.sh](../update.sh) updates a prod checkout from `origin/main`. Run from cron (the script's own example is every 2 minutes), a push to `main` becomes a deploy:
+[update.sh](../update.sh) updates a prod checkout from `origin/main`. When it runs from cron (the script's own example is every 2 minutes), a push to `main` is a deploy:
 
 ```bash
 */2 * * * * /path/to/intelfeed/update.sh

@@ -86,7 +86,7 @@ export function buildNavigatorLayer(matrix: AttackMatrixData): NavigatorLayer {
       techniqueID: t.technique_id,
       tactic,
       score: t.article_count,
-      comment: `${t.article_count} article${t.article_count === 1 ? "" : "s"} (${windowLabel}); ${t.rule_count} rule${t.rule_count === 1 ? "" : "s"} — ${COVERAGE_LABELS[t.coverage]}`,
+      comment: `${t.article_count} article${t.article_count === 1 ? "" : "s"} (${windowLabel}); ${t.rule_count} rule${t.rule_count === 1 ? "" : "s"}: ${COVERAGE_LABELS[t.coverage]}`,
       metadata: [
         { name: "articles", value: String(t.article_count) },
         { name: "rules", value: String(t.rule_count) },

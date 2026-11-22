@@ -168,7 +168,7 @@ describe("CoverageWorkspace", () => {
     expect(screen.getByText(/of APT29’s/)).toHaveTextContent(
       /1 of APT29’s 2 behaviours in this window could fire against your telemetry/,
     );
-    expect(screen.getByText(/of APT29’s/)).toHaveTextContent(/1 cannot — you collect no windows events source/);
+    expect(screen.getByText(/of APT29’s/)).toHaveTextContent(/1 cannot: you collect no windows events source/);
   });
 
   it("promotes 'nothing names this threat' out of a tooltip and into the verdict", () => {
@@ -203,8 +203,8 @@ describe("CoverageWorkspace", () => {
   it("marks a low-confidence candidate as a weak match and says it cannot fire", () => {
     renderWorkspace();
     openBehaviour();
-    expect(screen.getByText("weak match")).toBeInTheDocument();
-    expect(screen.getByText(/no matching source — cannot fire here/)).toBeInTheDocument();
+    expect(screen.getByText("partial match")).toBeInTheDocument();
+    expect(screen.getByText(/no matching source, cannot fire here/)).toBeInTheDocument();
   });
 
   it("counts the articles that carried a technique against the full window", () => {

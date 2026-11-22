@@ -79,7 +79,7 @@ export function ExternalLinkModal({ info }: { info: ExternalLinkInfo }) {
       window.open(info.url, "_blank", "noopener,noreferrer");
       if (shouldRemember && canSave) {
         void trustHost(info.host).catch(() => {
-          toast.error("Couldn't save that preference — it will only last until you close this tab");
+          toast.error("Could not save that preference. It lasts until you close this tab.");
         });
       }
       return;
@@ -92,7 +92,7 @@ export function ExternalLinkModal({ info }: { info: ExternalLinkInfo }) {
       try {
         await trustHost(info.host);
       } catch {
-        toast.error("Couldn't save that preference — it will only last until you close this tab");
+        toast.error("Could not save that preference. It lasts until you close this tab.");
       }
     }
     release();

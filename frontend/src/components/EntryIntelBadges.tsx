@@ -106,7 +106,7 @@ function PirSummary({ pirs }: { pirs: PIRMatch[] }) {
           tabIndex={0}
           aria-haspopup="true"
           aria-expanded={open}
-          title={`Matches ${pirs.length} of your standing intelligence requirements (PIRs) — click for detail`}
+          title={`Matches ${pirs.length} of your intelligence requirements (PIRs). Click for detail.`}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); setOpen(!open); } }}
         >
           <span className={styles.chipNum}>{pirs.length}</span>
@@ -188,7 +188,7 @@ function PirSummary({ pirs }: { pirs: PIRMatch[] }) {
               }
             }}
           >
-            Requirements are yours to edit →
+            Edit requirements →
           </span>
         </div>,
         document.body
@@ -242,7 +242,7 @@ export function EntryIntelBadges({ counts, starred, bookmarked, echo, tags, entr
   if ((counts?.cves ?? 0) > 0) {
     const sev = counts?.cve_max_severity;
     const sevClass = sev === "critical" ? ` ${styles.cveCritical}` : sev === "high" ? ` ${styles.cveHigh}` : "";
-    stats.push({ key: "cve", label: counts!.cves !== 1 ? "CVEs" : "CVE", value: counts!.cves, className: `${styles.cve}${sevClass}`, tooltip: `${counts!.cves} CVE${counts!.cves !== 1 ? "s" : ""} referenced${sev ? ` — worst severity ${sev}` : ""}` });
+    stats.push({ key: "cve", label: counts!.cves !== 1 ? "CVEs" : "CVE", value: counts!.cves, className: `${styles.cve}${sevClass}`, tooltip: `${counts!.cves} CVE${counts!.cves !== 1 ? "s" : ""} referenced${sev ? `. Highest severity: ${sev}.` : ""}` });
   }
   if ((counts?.rules ?? 0) > 0) stats.push({ key: "rule", label: counts!.rules !== 1 ? "Rules" : "Rule", value: counts!.rules, className: styles.rule, tooltip: `${counts!.rules} detection rule${counts!.rules !== 1 ? "s" : ""}` });
 
@@ -256,8 +256,8 @@ export function EntryIntelBadges({ counts, starred, bookmarked, echo, tags, entr
       {echo && (
         <span
           className={`${styles.chip} ${styles.stateChip} ${styles.echo}`}
-          title="Echo — near-duplicate of earlier coverage"
-          aria-label="Echo — near-duplicate of earlier coverage"
+          title="Echo: near-duplicate of an earlier article"
+          aria-label="Echo: near-duplicate of an earlier article"
         >
           <EchoIcon />
         </span>
@@ -315,8 +315,8 @@ export function EntryIntelBadges({ counts, starred, bookmarked, echo, tags, entr
           className={`${styles.chip} ${counts?.has_kev_cve ? styles.kev : styles.hot}`}
           title={
             counts?.has_kev_cve
-              ? "CISA KEV CVE (actively exploited) with no detection rules — top detection engineering opportunity"
-              : "High-risk CVE (high EPSS / weaponized) with no detection rules — priority detection engineering opportunity"
+              ? "A CISA KEV CVE (actively exploited) in this article has no detection rule."
+              : "A high-risk CVE (high EPSS or weaponized) in this article has no detection rule."
           }
         >
           {counts?.has_kev_cve ? "KEV opportunity" : "high-risk opportunity"}
@@ -324,14 +324,14 @@ export function EntryIntelBadges({ counts, starred, bookmarked, echo, tags, entr
       ) : opportunity === "actionable_gap" ? (
         <span
           className={`${styles.chip} ${styles.gap}`}
-          title="No detection rule exists for the observed TTPs/CVEs — actionable detection engineering opportunity"
+          title="No detection rule covers the TTPs or CVEs in this article."
         >
           detection opportunity
         </span>
       ) : opportunity === "telemetry_gap" ? (
         <span
           className={`${styles.chip} ${styles.tel}`}
-          title="Library rules exist for the observed TTPs, but their required data sources aren't in your telemetry inventory"
+          title="Library rules exist for the TTPs in this article, but their required data sources are not in your telemetry inventory."
         >
           telemetry gap
         </span>

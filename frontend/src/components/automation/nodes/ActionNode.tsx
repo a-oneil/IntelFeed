@@ -146,7 +146,7 @@ export const ActionNode = memo(function ActionNode({ data }: NodeProps) {
               );
               return (
                 <span className={styles.hint}>
-                  <strong>{aiCtx.label} mode</strong> — prompt variables (Jinja):{" "}
+                  <strong>{aiCtx.label} mode.</strong> Prompt variables (Jinja):{" "}
                   {names.map((n) => `{{ ${n} }}`).join(", ")}. {aiCtx.note}
                 </span>
               );
@@ -172,7 +172,7 @@ export const ActionNode = memo(function ActionNode({ data }: NodeProps) {
               className={styles.select}
             >
               <option value="generate">Generate it (also fills the day divider)</option>
-              <option value="skip">Skip — send nothing</option>
+              <option value="skip">Skip (send nothing)</option>
             </select>
             <span className={styles.hint}>
               Reuses the shared day-divider briefing instead of generating a second one. Fills{" "}

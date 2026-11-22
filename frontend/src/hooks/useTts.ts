@@ -101,7 +101,7 @@ export function useTts(opts?: { shareToken?: string }) {
         // Only toast when we actually have to wait — a cache hit plays instantly.
         if (resp.status === "pending") {
           toastId = toast.loading("Generating audio…", {
-            description: "Synthesizing a natural voice for this article.",
+            description: "Audio for this article is being generated.",
           });
         }
         const startedAt = Date.now();

@@ -64,10 +64,10 @@ class CampaignResponse(BaseModel):
     entry_count: int = 0
     entity_count: int = 0
     first_activity_at: datetime | None = Field(
-        None, description="Publish date of the campaign's oldest article — when its coverage actually begins"
+        None, description="Publish date of the campaign's oldest article: when its coverage begins"
     )
     last_activity_at: datetime | None = Field(
-        None, description="Publish date of the campaign's newest article — what 'gone quiet' is measured from"
+        None, description="Publish date of the campaign's newest article: what 'gone quiet' is measured from"
     )
 
     model_config = {"from_attributes": True}
@@ -114,7 +114,10 @@ class CampaignTimelineEntry(BaseModel):
     )
     thread_slug: str | None = None
     thread_title: str | None = None
-    thread_role: str | None = Field(None, description="origin | beat | echo — the article's part in its story")
+    thread_role: str | None = Field(
+        None,
+        description="origin | beat | echo: the article's part in its story (first report, later update, or re-report)",
+    )
 
     model_config = {"from_attributes": True}
 
@@ -205,9 +208,9 @@ class CampaignEntityResponse(BaseModel):
 class CampaignSourceAdd(BaseModel):
     kind: str = Field(
         description=(
-            "entity — follow an actor/malware/CVE and take every article carrying it; "
-            "story — follow a thread and take its later waves; "
-            "query — take everything matching a query-language string, campaign-owned "
+            "entity: follow an actor/malware/CVE and take every article carrying it; "
+            "story: follow a thread and take its later updates; "
+            "query: take everything matching a query-language string, campaign-owned "
             "rather than tucked inside one analyst's saved searches"
         )
     )
@@ -277,7 +280,7 @@ class CampaignSourcePreview(BaseModel):
     query: str | None = None
     label: str = Field("", description="What the source would be called once created")
     would_add: int = Field(description="Articles it claims that the campaign does not already hold")
-    already_held: int = Field(description="Articles it claims that the campaign already has — overlap, not waste")
+    already_held: int = Field(description="Articles it claims that the campaign already has (overlap, not waste)")
     preview: list[CampaignSourcePreviewEntry] = Field(
         default_factory=list, description="The newest few it would add, by name"
     )
@@ -285,8 +288,8 @@ class CampaignSourcePreview(BaseModel):
     unknown_fields: list[str] = Field(
         default_factory=list,
         description=(
-            "Field names the query language does not have. Not fatal — they become text terms — "
-            "but on a standing source a typo'd field answers plausibly forever."
+            "Field names the query language does not have. Not fatal (they become text terms), "
+            "but on a standing source a mistyped field answers plausibly forever."
         ),
     )
 
@@ -296,7 +299,7 @@ class CampaignSourceOptions(BaseModel):
 
     kinds: list[str] = Field(description="Every source kind the API accepts")
     followable_entity_types: list[str] = Field(
-        description="Entity types that own articles — a source on anything else would never add any"
+        description="Entity types that own articles. A source on any other type would never add any."
     )
     pickable_entity_types: list[str] = Field(
         description="Followable types that are also findable by name through /api/intelligence/search"
@@ -310,7 +313,7 @@ class CampaignSourceResponse(BaseModel):
     entity_type: str | None
     ref_id: uuid.UUID | None = Field(None, description="Null for a query source, which targets no single row")
     query: str | None = Field(None, description="The query-language string, when kind is query")
-    label: str = Field(description="The target's name at link time — stays readable if it is later renamed")
+    label: str = Field(description="The target's name at link time. Stays readable if it is later renamed.")
     auto_sync: bool
     last_synced_at: datetime | None
     entries_added: int

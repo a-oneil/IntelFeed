@@ -70,20 +70,20 @@ const REVIEW_LENS_LABELS: Record<ReviewLens, string> = {
 // Each lens explains itself on its button's hover card.
 const REVIEW_LENS_HINTS: Record<ReviewLens, { body: string; aside?: string }> = {
   queue: {
-    body: "Everything the adjudicator, the duplicate review and the scans want changed, one row per entity. A row's buttons settle every article's copy at once.",
-    aside: "Every apply stays undoable from History.",
+    body: "This list holds everything the adjudicator, the duplicate review and the scans want changed, one row per entity. A row's buttons act on every article's proposal at once.",
+    aside: "Every apply can be undone from History.",
   },
   entities: {
-    body: "AI-created entities waiting on a person: unconfirmed ones, likely duplicates of another entity of the same type, and orphans whose every article link was removed.",
-    aside: "Confirm keeps one; Merge, Convert and Delete fix the rest.",
+    body: "This list holds AI-created entities waiting on a person: unconfirmed ones, likely duplicates of another entity of the same type, and orphans whose every article link was removed.",
+    aside: "Confirm keeps the entity. Merge, Convert and Delete resolve the others.",
   },
   relationships: {
-    body: "Edges the analysis or co-occurrence drew that neither an analyst nor the adjudicator has judged. Confirm or Reject them here.",
-    aside: "The adjudicator works through the rest as articles come in.",
+    body: "This list holds relationships created by the analysis or co-occurrence that no analyst or adjudicator has judged. Confirm or Reject them here.",
+    aside: "The adjudicator reviews the remaining ones as new articles arrive.",
   },
   history: {
-    body: "Everything that was applied, by a person or by the adjudicator in Applied mode.",
-    aside: "Restore puts one thing back; nothing bulk.",
+    body: "This list holds every change that was applied, by a person or by the adjudicator in Applied mode.",
+    aside: "Restore puts one change back. There is no bulk restore.",
   },
 };
 
@@ -178,18 +178,18 @@ function Sparkline({ series, className }: { series: number[]; className?: string
 const STAGE_HINTS: Record<string, { title: string; body: string; aside?: string }> = {
   extract: {
     title: "Extract",
-    body: "Pattern matching, no AI: pulls CVE, technique and mitigation IDs (and detection rules, where the feed asks for them) straight out of the text.",
+    body: "The extract stage uses pattern matching, not AI. It pulls CVE, technique and mitigation IDs (and detection rules, where the feed asks for them) out of the text.",
     aside: "Runs on ingest. The AI reads the article later, in the analysis column.",
   },
   analyze: {
     title: "AI analysis",
-    body: "The one-pass AI read: entities, techniques, relationships and observables. Requested once scoring finishes, then waits its turn on the AI worker.",
-    aside: "Skipped when it's switched off globally, when the feed turns AI off or extracts nothing, or when the article looks like non-security chatter. Near-duplicates copy an earlier analysis.",
+    body: "The one-pass AI read of the article extracts entities, techniques, relationships and observables. It is requested once scoring finishes, then waits its turn on the AI worker.",
+    aside: "Skipped when it is switched off globally, when the feed turns AI off or extracts nothing, or when the article is not security content. Near-duplicates copy an earlier analysis.",
   },
   adjudicate: {
     title: "AI review",
-    body: "A second, smaller AI call re-reads the article next to everything the analysis wrote to it — links, new entities, edges, observables — and says keep, remove, merge, demote or drop per item.",
-    aside: "Off by default. Shadow files verdicts as proposals; apply fixes high-confidence ones at ingest.",
+    body: "A second, smaller AI call re-reads the article alongside everything the analysis wrote to it (links, new entities, relationships, observables) and says keep, remove, merge, demote or drop for each item.",
+    aside: "Off by default. Shadow files verdicts as proposals. Apply applies high-confidence verdicts at ingest.",
   },
 };
 
@@ -223,7 +223,7 @@ function AdjudicateOutputCell({ cell }: { cell: ProcessingStageCell | undefined 
   if (!cell) return <span className={`${m.outCell} ${m.outZero}`}>·</span>;
   if (cell.status === "queued") {
     return (
-      <span className={`${m.outCell} ${m.outQueued}`} title={`queued — ${waitingOn(cell)}`}>
+      <span className={`${m.outCell} ${m.outQueued}`} title={`queued: ${waitingOn(cell)}`}>
         …
       </span>
     );
@@ -251,7 +251,7 @@ function AdjudicateOutputCell({ cell }: { cell: ProcessingStageCell | undefined 
   const title =
     shown.map((v) => `${verdicts[v.key]} ${v.title}`).join(" · ") +
     (shadow ? " · shadow: proposals only" : " · applied") +
-    (detail.breaker ? " · breaker tripped, downgraded to proposals" : "");
+    (detail.breaker ? " · circuit breaker tripped, downgraded to proposals" : "");
   return (
     <span className={cls} title={title}>
       {shown.map((v) => (
@@ -287,7 +287,7 @@ function OutputCell({ stage, outputs }: { stage: string; outputs: ProcessingOutp
     // The funnel, per entry: judged sightings over staged candidates.
     parts = [
       { n: outputs.observables ?? 0, cls: m.outEnts, glyph: "◎", title: "observable sightings recorded" },
-      { n: outputs.observable_candidates ?? 0, cls: m.outLinks, glyph: "cand", title: "candidates staged (unjudged nominations)" },
+      { n: outputs.observable_candidates ?? 0, cls: m.outLinks, glyph: "cand", title: "candidates staged (not yet judged)" },
     ];
   } else if (stage === "cooccurrence") {
     parts = [{ n: outputs.rels_cooc, cls: m.outRels, glyph: "⇄", title: "co-occurrence relationship edges" }];
@@ -508,13 +508,13 @@ export function EngineMatrix({
     const r = overviewByStage[st]?.runs_24h;
     switch (dotHealth(st)) {
       case "err":
-        return `failing — ${r?.error.toLocaleString()} errored in this window`;
+        return `failing: ${r?.error.toLocaleString()} errored in this window`;
       case "warn":
-        return `degraded — ${r?.retry.toLocaleString()} retried in this window`;
+        return `degraded: ${r?.retry.toLocaleString()} retried in this window`;
       case "ok":
-        return `healthy — ${r?.success.toLocaleString()} clean runs in this window`;
+        return `healthy: ${r?.success.toLocaleString()} clean runs in this window`;
       default:
-        return "idle — no runs in this window";
+        return "idle: no runs in this window";
     }
   };
 
@@ -533,7 +533,7 @@ export function EngineMatrix({
           `${impact}Set ${st} to ${nextLabel} at GLOBAL scope?\n\nThis is a live ingestion control` +
           (overview?.pipeline_engine_enabled
             ? "."
-            : " (currently staged: Pipeline Plans flag is off, so legacy per-feed toggles still drive behavior)."),
+            : " (not active yet: the Pipeline Plans flag is off, so the per-feed toggles still control which stages run)."),
         confirmLabel: `Set ${nextLabel}`,
         destructive: true,
       }))
@@ -603,7 +603,7 @@ export function EngineMatrix({
     if (
       !(await confirmDialog({
         title: "Retry every error",
-        message: `Re-run every stage still stuck on an error ${where}, for entries ingested in ${windowLabel}? Each is re-dispatched the way the per-cell retry does it; entries already re-run green are left alone.`,
+        message: `Re-run every stage still stuck on an error ${where}, for entries ingested in ${windowLabel}? Each is re-dispatched the same way as the per-cell retry. Entries that already succeeded are left alone.`,
         confirmLabel: "Retry all",
       }))
     )
@@ -612,7 +612,7 @@ export function EngineMatrix({
       const r = await retryErrors.mutateAsync({ stage, window: window_ });
       const parts = [`${r.dispatched.toLocaleString()} re-dispatched`];
       if (r.skipped) parts.push(`${r.skipped} not retryable`);
-      if (r.remaining) parts.push(`${r.remaining.toLocaleString()} more — run again`);
+      if (r.remaining) parts.push(`${r.remaining.toLocaleString()} more, run again`);
       toast.success(parts.join(" · "), {
         description: Object.entries(r.by_stage)
           .map(([st, n]) => `${labelByStage[st] ?? st}: ${n}`)
@@ -690,7 +690,7 @@ export function EngineMatrix({
       },
       hint: {
         title: "To review",
-        body: "The adjudicator's and the scans' proposals, and duplicate and orphaned AI-created entities. Unconfirmed entities and unjudged relationships are listed under Review but not counted here.",
+        body: "This count covers the adjudicator's and the scans' proposals, and duplicate and orphaned AI-created entities. Unconfirmed entities and unjudged relationships are listed under Review but not counted here.",
         aside: "The same count as the Review tab.",
       },
     },
@@ -715,7 +715,7 @@ export function EngineMatrix({
   const health = useEngineHealth(true);
   const dotCls = { err: m.hdotErr, warn: m.hdotWarn, stopped: m.hdotStopped, ok: "" }[health?.level ?? "ok"];
   const lightLabel = {
-    err: "Check engine: entries erroring",
+    err: "Check engine: entries failing",
     warn: "Check engine: runs retrying",
     stopped: "Engine stopped",
     ok: "Engine healthy",
@@ -783,7 +783,7 @@ export function EngineMatrix({
               <p className={m.popDesc}>{peekInfo?.description}</p>
               <div className={m.popRow}>
                 <span className={m.popStat}>
-                  24h: <b>{peekInfo?.runs_24h.success.toLocaleString() ?? "—"}</b> ✓
+                  24h: <b>{peekInfo?.runs_24h.success.toLocaleString() ?? "n/a"}</b> ✓
                 </span>
                 {(peekInfo?.runs_24h.error ?? 0) > 0 && (
                   <span className={`${m.popStat} ${m.popErrStat}`}>{peekInfo?.runs_24h.error} ✕</span>
@@ -843,18 +843,18 @@ export function EngineMatrix({
                 ) : (
                   <span className={m.popMuted}>
                     {peek.stage === "translate"
-                      ? "Runs for feeds with translation enabled — not plan-gated."
+                      ? "Runs for feeds with translation enabled. Not controlled by plans."
                       : peek.stage === "analyze"
-                        ? "Not plan-gated: the global switch, each feed's AI analysis toggle and the junk gate decide."
-                        : "Always on — not plan-gated."}
+                        ? "Not controlled by plans: the global switch, each feed's AI analysis toggle and the junk gate decide."
+                        : "Always on. Not controlled by plans."}
                   </span>
                 )}
               </div>
               {!overview?.pipeline_engine_enabled && TOGGLEABLE_STAGES.has(peek.stage) && (
                 <p className={m.popWarn}>
-                  Pipeline plans are configured but inactive — enable "Pipeline Plans" in the Plans view
-                  (top-right) to apply them. Until then the legacy per-feed extraction toggles
-                  drive behavior.
+                  Pipeline plans are configured but inactive. Enable "Pipeline Plans" in the Plans view
+                  (top-right) to apply them. Until then the per-feed extraction toggles control which
+                  stages run.
                 </p>
               )}
             </div>
@@ -988,16 +988,16 @@ export function EngineMatrix({
                     </span>
                   )}
                   <span>
-                    <b>{stats?.ingested?.toLocaleString() ?? "—"}</b> entries
+                    <b>{stats?.ingested?.toLocaleString() ?? "…"}</b> entries
                   </span>
                   <span>
-                    <b>{stats?.complete?.toLocaleString() ?? "—"}</b> complete
+                    <b>{stats?.complete?.toLocaleString() ?? "…"}</b> complete
                   </span>
                   <span>
-                    <b className={stats?.errored ? m.cErr : ""}>{stats?.errored?.toLocaleString() ?? "—"}</b> errored
+                    <b className={stats?.errored ? m.cErr : ""}>{stats?.errored?.toLocaleString() ?? "…"}</b> errored
                   </span>
                   <span>
-                    <b className={stats?.processing ? m.cProc : ""}>{stats?.processing?.toLocaleString() ?? "—"}</b>{" "}
+                    <b className={stats?.processing ? m.cProc : ""}>{stats?.processing?.toLocaleString() ?? "…"}</b>{" "}
                     in flight
                   </span>
                 </div>
@@ -1042,7 +1042,7 @@ export function EngineMatrix({
               <button
                 type="button"
                 className={`${m.achip} ${m.aWarn}`}
-                title={`rolling circuit breaker tripped; dispatch resumes at ${breakerUntil.toLocaleTimeString()}`}
+                title={`Circuit breaker tripped. Dispatch resumes at ${breakerUntil.toLocaleTimeString()}.`}
                 onClick={() => {
                   switchView("entries");
                   setOpenStage("adjudicate");
@@ -1053,7 +1053,7 @@ export function EngineMatrix({
               </button>
             )}
             {activeAttention.length === 0 && !breakerActive && (
-              <span className={m.attnClear}>All clear — no queues need review.</span>
+              <span className={m.attnClear}>All clear. No queues need review.</span>
             )}
           </div>
 
@@ -1162,7 +1162,7 @@ export function EngineMatrix({
                           title={
                             STAGE_HINTS[s.name]
                               ? undefined
-                              : `${info?.description ?? s.label} — ${dotLabel(s.name)}. Click for status & settings.`
+                              : `${info?.description ?? s.label}. ${dotLabel(s.name)}. Click for status and settings.`
                           }
                         >
                           <span className={m.sthName}>
@@ -1232,7 +1232,7 @@ export function EngineMatrix({
             {lens === "timing" ? (
               <>
                 <span className={styles.li}>
-                  <span className={`${styles.pip} ${styles.ok}`}>31ms</span> completed — cell shows duration
+                  <span className={`${styles.pip} ${styles.ok}`}>31ms</span> completed (cell shows duration)
                 </span>
                 <span className={styles.li}>
                   <span className={`${styles.pip} ${styles.err}`}>error</span> failed
@@ -1276,8 +1276,8 @@ export function EngineMatrix({
               </>
             )}
             <span className={styles.legendNote}>
-              Inline stages (sanitize · dedup · relevance · index) run during fetch and aren't dispatched — they
-              don't appear as columns.
+              Inline stages (sanitize, dedup, relevance, index) run during fetch and are not dispatched, so
+              they do not appear as columns.
             </span>
           </div>
 
@@ -1332,7 +1332,7 @@ function StatusCell({
   }
   if (cell.status === "error")
     return (
-      <span className={`${styles.pip} ${styles.err}`} title={`${title} · error — ${cell.error ?? ""}`}>
+      <span className={`${styles.pip} ${styles.err}`} title={`${title} · error: ${cell.error ?? ""}`}>
         error
       </span>
     );
@@ -1344,7 +1344,7 @@ function StatusCell({
     );
   if (cell.status === "queued")
     return (
-      <span className={`${styles.pip} ${styles.pend}`} title={`${title} · queued — ${waitingOn(cell)}`}>
+      <span className={`${styles.pip} ${styles.pend}`} title={`${title} · queued: ${waitingOn(cell)}`}>
         {cell.detail?.waiting_on === "analysis" ? "waits" : "queued"}
       </span>
     );
@@ -1359,7 +1359,7 @@ function StatusCell({
   const skip = cellSkipCode(cell);
   if (skip)
     return (
-      <span className={`${styles.pip} ${styles.skip}`} title={`${title} · skipped — ${skipReason(skip)}`}>
+      <span className={`${styles.pip} ${styles.skip}`} title={`${title} · skipped: ${skipReason(skip)}`}>
         —
       </span>
     );
@@ -1402,7 +1402,7 @@ function Row({
             {entry.title}
           </button>
           <span className={styles.emeta}>
-            <span className={styles.feedtag}>{entry.feed ?? "—"}</span> ·{" "}
+            <span className={styles.feedtag}>{entry.feed ?? "no feed"}</span> ·{" "}
             <span className={styles.disc}>{relTime(entry.created_at)}</span>
           </span>
         </td>
@@ -1470,9 +1470,9 @@ function Row({
                               : c.status === "retry"
                                 ? "retrying"
                                 : c.status === "queued"
-                                  ? "queued — waiting on the AI worker"
+                                  ? "queued: waiting on the AI worker"
                                   : skip
-                                    ? `skipped — ${skipReason(skip)}`
+                                    ? `skipped: ${skipReason(skip)}`
                                     : ""}
                           </span>
                           {isErr && c.retryable ? (
@@ -1497,13 +1497,13 @@ function Row({
                   <dt>Entry ID</dt>
                   <dd>{entry.id.slice(0, 8)}…</dd>
                   <dt>Feed</dt>
-                  <dd>{entry.feed ?? "—"}</dd>
+                  <dd>{entry.feed ?? "none"}</dd>
                   <dt>Category</dt>
-                  <dd>{entry.category ?? "—"}</dd>
+                  <dd>{entry.category ?? "none"}</dd>
                   <dt>Ingested</dt>
-                  <dd>{entry.created_at ? new Date(entry.created_at).toLocaleString() : "—"}</dd>
+                  <dd>{entry.created_at ? new Date(entry.created_at).toLocaleString() : "unknown"}</dd>
                   <dt>End-to-end</dt>
-                  <dd>{entry.latency_ms != null ? fmtMs(entry.latency_ms) : "—"}</dd>
+                  <dd>{entry.latency_ms != null ? fmtMs(entry.latency_ms) : "n/a"}</dd>
                   <dt>Status</dt>
                   <dd>{entry.status === "in_flight" ? "processing" : entry.status}</dd>
                   <dt>Open</dt>

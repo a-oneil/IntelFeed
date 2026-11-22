@@ -49,7 +49,7 @@ DETECTION_REPO_TEMPLATES: list[dict] = [
         "repo": "LOOBins",
         "paths": ["LOOBins/**/*.yml"],
         "label": "LOOBins (macOS)",
-        "description": "Living Off the Orchard — macOS binaries for attack",
+        "description": "Living Off the Orchard: macOS binaries used in attacks",
         "content_types": ["loobin_entry"],
     },
     {
@@ -58,7 +58,7 @@ DETECTION_REPO_TEMPLATES: list[dict] = [
         "branch": "main",
         "paths": ["yaml/**/*.yaml"],
         "label": "LOLDrivers",
-        "description": "Living Off The Land Drivers — vulnerable/malicious drivers",
+        "description": "Living Off The Land Drivers: vulnerable and malicious drivers",
         "content_types": ["loldriver_entry"],
     },
     {

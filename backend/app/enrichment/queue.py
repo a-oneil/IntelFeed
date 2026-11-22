@@ -103,7 +103,7 @@ PAUSE_DEFER = 60
 ENQUEUE_CHUNK = 1000
 #: ``last_status`` of a claimed job whose run has begun.
 STARTED = "started"
-LEASE_EXPIRED = f"The run did not finish within its {LEASE.total_seconds() / 60:.0f}-minute lease"
+LEASE_EXPIRED = f"The lookup did not finish within {LEASE.total_seconds() / 60:.0f} minutes"
 
 _DONE = frozenset({"success", "cached", "skipped_low_confidence", "needs_key", "unsupported"})
 #: Outcomes that put a row off until the source can take it: asking again

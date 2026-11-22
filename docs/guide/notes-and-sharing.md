@@ -1,6 +1,6 @@
 # Notes and sharing
 
-This page covers writing notes, who can see them, what a share link gives away,
+This page covers writing notes, who can see them, what a share link exposes,
 and how to export your work. Read [Share links](#share-links) before you send
 anything outside your team.
 
@@ -11,7 +11,7 @@ You can write a note on an article, on an entity, or on its own.
 - **On an article:** press `n` in the reader. Use it for what you thought while
   reading.
 - **On an entity:** use the notes section on the profile's Overview tab. Use it
-  for analysis that outlives the article that prompted it.
+  for analysis about the entity rather than one article.
 - **On its own:** click **Notes** in the Reading sidebar. The same panel lets you
   browse every note on the instance.
 
@@ -32,9 +32,9 @@ The app has no comment threads. Use notes for discussion as well as analysis.
 public link that works without a login. Clicking Share copies the link. Reports
 and campaigns have no share links; send them as [exports](#exports).
 
-**The link is the only lock.** Anyone who has it can open the page, and there is
-no list of who opened it. That is fine for sending a write-up to a partner, and
-wrong for anything you wouldn't send in plain email.
+**The link is the only protection.** Anyone who has it can open the page, and
+there is no list of who opened it. Do not share anything you would not send in
+plain email.
 
 ### What a shared article exposes
 
@@ -98,7 +98,7 @@ Markdown when the reader is a person or a wiki.
 ## Read-aloud audio
 
 The reader can turn an article into speech and play it in the audio player.
-Making a share link also prepares the audio in advance, so the person you send it
-to doesn't wait. Audio is stored for a while and then removed on its own.
+Making a share link also prepares the audio in advance, so the person you send
+it to does not wait. Audio is stored for a limited time and then deleted.
 
 Next: [Settings and personalising](settings.md)

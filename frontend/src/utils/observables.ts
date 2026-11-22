@@ -136,7 +136,7 @@ export function registeredLabel(iso: string, now: Date = new Date()): string {
   const age =
     days < 1 ? "today" : years >= 1 ? `${years} year${years === 1 ? "" : "s"} ago` : `${days} day${days === 1 ? "" : "s"} ago`;
   const shown = date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
-  return `${shown} — ${age}`;
+  return `${shown} (${age})`;
 }
 
 interface ObservableResponseLike {

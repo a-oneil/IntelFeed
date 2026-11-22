@@ -8,7 +8,7 @@ admin-only settings are marked.
 
 *Feed health in the Engine console: which feeds are healthy, stale or erroring.*
 
-Start small. Twelve good sources beat two hundred.
+Start small. A dozen good sources are better than two hundred.
 
 ## Adding one
 
@@ -51,8 +51,8 @@ Choose a **Mode**:
 
 - **Author**: every post from one handle.
 - **Custom feed**: a Bluesky custom feed (you can paste its bsky.app link).
-- **Search**: posts that match a query. A search for your product's name is a
-  cheap early warning.
+- **Search**: posts that match a query. A search for a product name gives
+  early warning of reports about it.
 
 ### Telegram
 
@@ -71,7 +71,7 @@ feeds by how you want to read them, not by name or vendor. For example:
 - *Ransomware*: leak sites and tracking blogs.
 - *Community*: Reddit, Mastodon, Bluesky, YouTube.
 
-A good test: when something breaks at 9am, which folder do you open first?
+Group them by which folder you would open first during an incident.
 
 Create categories before you import in bulk. A feed added without a category
 goes into the one most feeds of its type already use.
@@ -138,12 +138,12 @@ as "ISC Stormcast For" on SANS ISC Diary. Articles already saved stay.
 **Mute** hides a feed's articles from your main list and unread count. You can
 still open the feed. Its articles are still tagged, analysed by AI and scored.
 A muted feed's Overview shows its AI use over the last 30 days, and an admin can
-switch its AI off there in one click. Muted feeds sit in a **Muted** fold in the
-sidebar.
+switch its AI off there in one click. Muted feeds are listed in a **Muted**
+group in the sidebar.
 
 ## Keeping feeds healthy
 
-Feeds stop working quietly, and a silent feed looks like a quiet week. Check
+A feed that stops is easy to miss, because it looks like a quiet week. Check
 once a month in:
 
 - The **Feed Activity** and **Feed Health** widgets on the Dashboard. A bar that
@@ -173,7 +173,7 @@ channels needs a real Telegram user account, because bots can't read channels.
 **Settings → Telegram** (admins) walks through each step with the exact
 commands.
 
-Use a separate Telegram account, not your personal one; it joins every channel
+Use a separate Telegram account, not a personal one. It joins every channel
 you track.
 
 To find channels, open **Workbench → Telegram Mentions**: the channels your

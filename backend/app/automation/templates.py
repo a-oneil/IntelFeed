@@ -57,7 +57,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "name": "Notify on New C2 Infrastructure",
         "description": (
             "Notify when a reporting source (research write-up, publisher IOC file, analyst promote) captures "
-            "command-and-control infrastructure — never a blocklist mirror, never dual-use VPN/proxy exits"
+            "command-and-control infrastructure. Blocklist mirrors and dual-use VPN or proxy exits never trigger it."
         ),
         "category": "intelligence",
         "tags": ["observables", "c2", "alerting"],
@@ -187,7 +187,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "id": "watched-actor-alert",
         "name": "Alert on Watched Threat Actors",
         "description": (
-            "Auto-tag and notify when entries mention specific threat actors you're tracking. Edit the keyword pattern "
+            "Tag and notify when entries mention threat actors you follow. Edit the keyword pattern "
             "with your watched actor names."
         ),
         "category": "alerting",
@@ -318,7 +318,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
                 "config": {
                     "platform": "custom",
                     "webhook_url": "",
-                    "message_template": "Correlation detected — intel report generated: {title}\n{app_url}",
+                    "message_template": "Correlation detected, intel report generated: {title}\n{app_url}",
                 },
             },
         ],
@@ -327,7 +327,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "id": "full-pipeline-with-report",
         "name": "Full Pipeline: Extract, Detect, Report",
         "description": (
-            "Complete intelligence pipeline — extract all entities, generate detection rules, create an intel report, "
+            "Full intelligence pipeline: extract all entities, generate detection rules, create an intel report, "
             "and notify."
         ),
         "category": "reporting",
@@ -394,7 +394,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "description": (
             "Auto-read and tag entries from noisy or low-signal feeds so they stay out of your "
             "unread view without unsubscribing. Edit feed_ids to target your marketing/vendor-blog "
-            "feeds — the placeholder ID matches nothing until you set it."
+            "feeds. The placeholder ID matches nothing until you set it."
         ),
         "category": "noise",
         "tags": ["noise-reduction", "triage", "mute"],
@@ -415,7 +415,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "id": "suppress-press-release-noise",
         "name": "Suppress Press-Release Noise",
         "description": (
-            "Hide marketing fluff — press releases, webinar invites, and product announcements — "
+            "Hide press releases, webinar invites, and product announcements "
             "from your feed. Tune the keyword pattern to your sources."
         ),
         "category": "noise",
@@ -477,8 +477,8 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "id": "high-score-escalation",
         "name": "High-Score Auto-Escalation",
         "description": (
-            "When the signal engine scores an entry above your priority threshold, escalate it — "
-            "mark high priority, drop an analyst note, and notify. Tune `min`: priority_score runs 0–10, "
+            "When the signal engine scores an entry above your priority threshold, escalate it: "
+            "mark it high priority, add an analyst note, and notify. Tune `min`: priority_score runs 0–10, "
             "ranked against the last 30 days, so 9 is about the top 5% and 10 the top 1%."
         ),
         "category": "signals",
@@ -514,8 +514,8 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "id": "epss-spike-watch",
         "name": "EPSS Spike Watch",
         "description": (
-            "Catch CVEs whose exploit-probability (EPSS) just jumped — an early warning that a "
-            "vulnerability is heating up. Tags the entry and notifies."
+            "Catch CVEs whose exploit probability (EPSS) has risen sharply, an early sign that a "
+            "vulnerability is being exploited more. Tags the entry and notifies."
         ),
         "category": "signals",
         "tags": ["signals", "epss", "cve", "early-warning"],
@@ -544,7 +544,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "name": "Novel Entity Emergence",
         "description": (
             "Flag entries that introduce a brand-new threat actor or malware family the platform "
-            "hasn't seen before — useful for tracking emerging threats. Tags and notifies."
+            "has not seen before, for tracking emerging threats. Tags and notifies."
         ),
         "category": "signals",
         "tags": ["signals", "novel-entity", "emerging-threats"],
@@ -574,7 +574,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "name": "Ransomware Detection Pipeline",
         "description": (
             "End-to-end response to ransomware coverage: extract TTPs and malware, auto-generate "
-            "detection rules, and compile an intel report — all from one keyword match."
+            "detection rules, and compile an intel report, all from one keyword match."
         ),
         "category": "detection",
         "tags": ["ransomware", "detection", "pipeline", "ttp"],
@@ -629,7 +629,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "name": "Watched-Actor → Campaign Rollup",
         "description": (
             "When a correlation event involves a watchlisted entity, link the entry into a campaign "
-            "and notify — building a running dossier automatically. Set campaign_id on the action to "
+            "and notify, so the campaign builds up a running record. Set campaign_id on the action to "
             "your target campaign first."
         ),
         "category": "reporting",
@@ -712,8 +712,8 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "name": "Severity-Routed Triage",
         "description": (
             "Route each new entry down one of two paths: CVE/critical/zero-day items get "
-            "prioritized, enriched, and alerted; everything else is quietly tagged for later. "
-            "A worked example of conditional (branch) automation — edit either path to taste."
+            "prioritized, enriched, and alerted; everything else is tagged for later. "
+            "A worked example of conditional (branch) automation. Edit either path as needed."
         ),
         "category": "workflow",
         "tags": ["branch", "routing", "triage"],
@@ -807,7 +807,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "id": "breaking-story-detector",
         "name": "Breaking Story Detector",
         "description": (
-            "Fire when independent sources converge on the same story — a strong signal that "
+            "Fire when independent sources report the same story, a strong sign that "
             "something major is breaking. Prioritizes and notifies."
         ),
         "category": "signals",
@@ -827,7 +827,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
                 "config": {
                     "platform": "custom",
                     "webhook_url": "",
-                    "message_template": "Breaking — sources converging: {title}\n{app_url}",
+                    "message_template": "Breaking, several sources reporting: {title}\n{app_url}",
                 },
             },
         ],
@@ -836,8 +836,8 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "id": "dormant-actor-resurgence",
         "name": "Dormant Actor Resurgence",
         "description": (
-            "Alert when a threat actor or malware family that had gone quiet resurfaces in coverage — "
-            "often the earliest hint of a renewed campaign. Tags and notifies."
+            "Alert when a threat actor or malware family that had gone quiet is reported again, "
+            "often the earliest sign of a renewed campaign. Tags and notifies."
         ),
         "category": "signals",
         "tags": ["signals", "resurgence", "threat-actor"],
@@ -865,8 +865,8 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "id": "critical-cvss-war-room",
         "name": "Critical CVSS War Room",
         "description": (
-            "Escalate entries carrying a critical-CVSS or high-EPSS signal — the vulnerabilities most "
-            "worth dropping everything for. Prioritizes, stars, and notifies."
+            "Escalate entries carrying a critical-CVSS or high-EPSS signal, the vulnerabilities that "
+            "need attention first. Prioritizes, stars, and notifies."
         ),
         "category": "signals",
         "tags": ["signals", "cvss", "epss", "critical"],
@@ -977,7 +977,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "id": "supply-chain-compromise-watch",
         "name": "Supply-Chain Compromise Watch",
         "description": (
-            "Catch software supply-chain attacks — malicious packages, typosquats, and dependency "
+            "Catch software supply-chain attacks: malicious packages, typosquats, and dependency "
             "confusion across npm / PyPI / RubyGems / NuGet, plus third-party and build-pipeline "
             "compromises. Extracts entities, prioritizes, and notifies. Tune the pattern to your "
             "ecosystems and set the webhook."
@@ -1013,9 +1013,9 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "id": "data-breach-leak-monitor",
         "name": "Data Breach & Leak Monitor",
         "description": (
-            "Flag breach and data-exposure coverage — leaked databases, exposed buckets, credential "
+            "Flag breach and data-exposure reports: leaked databases, exposed buckets, credential "
             "dumps, and mass PII disclosures. Tags for triage and notifies. Pair with a watchlist of "
-            "your org / partners to catch mentions that matter to you."
+            "the organizations and partners in your intel profile to catch mentions that matter."
         ),
         "category": "alerting",
         "tags": ["breach", "data-leak", "exposure", "notification"],
@@ -1047,8 +1047,8 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "id": "phishing-aitm-campaign-alert",
         "name": "Phishing / AiTM Campaign Alert",
         "description": (
-            "Surface phishing, adversary-in-the-middle, and BEC coverage — credential-harvesting kits, "
-            "MFA-bypass / session-hijack tradecraft, and phishing-as-a-service toolkits. Extracts the "
+            "Flag phishing, adversary-in-the-middle, and BEC reports: credential-harvesting kits, "
+            "MFA-bypass and session-hijack techniques, and phishing-as-a-service toolkits. Extracts the "
             "actors behind them and notifies."
         ),
         "category": "alerting",
@@ -1081,7 +1081,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "name": "Sector-Targeted Threat Alert",
         "description": (
             "Get alerted when coverage targets your industry. The default pattern watches "
-            "healthcare, finance, energy, manufacturing, and government — replace it with the "
+            "healthcare, finance, energy, manufacturing, and government. Replace it with the "
             "sector keywords that describe your organization. Tags, prioritizes, and notifies."
         ),
         "category": "alerting",
@@ -1113,8 +1113,8 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "id": "cloud-identity-threat-watch",
         "name": "Cloud & Identity Threat Watch",
         "description": (
-            "Track off-host threats — cloud and identity-provider abuse, OAuth / token theft, and "
-            "container/Kubernetes attacks — that endpoint-centric feeds bury. Extracts entities and "
+            "Track off-host threats that endpoint-centric feeds bury: cloud and identity-provider abuse, "
+            "OAuth and token theft, and container and Kubernetes attacks. Extracts entities and "
             "notifies. Tune the pattern to your cloud + IdP stack."
         ),
         "category": "alerting",
@@ -1150,7 +1150,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "name": "Daily Intel Digest",
         "description": (
             "Every morning at 07:00, run an AI summary across the last 24 hours of entries and push a "
-            "single digest to your channel — the whole day in one message, written by the "
+            "single digest to your channel: the whole day in one message, written by the "
             "Intelligence Briefing task. Set the webhook. (Scheduled rules digest the whole time "
             "window; use the score-based alert templates for priority-only pings.)"
         ),
@@ -1171,7 +1171,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
                 "config": {
                     "platform": "custom",
                     "webhook_url": "",
-                    "message_template": "Daily intel digest — last 24h:\n\n{ai_summary}",
+                    "message_template": "Daily intel digest, last 24h:\n\n{ai_summary}",
                 },
             },
         ],
@@ -1180,8 +1180,8 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "id": "category-digest",
         "name": "Category Digest (scoped)",
         "description": (
-            "A focused digest of just one feed category — e.g. only your ransomware or vendor-advisory "
-            "feeds — summarized daily and pushed to a channel. Set category_ids to the category you "
+            "A digest of one feed category (for example only your ransomware or vendor-advisory "
+            "feeds), summarized daily and pushed to a channel. Set category_ids to the category you "
             "want and paste the webhook. A worked example of scoping a scheduled rule to specific feeds."
         ),
         "category": "reporting",
@@ -1204,7 +1204,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
                 "config": {
                     "platform": "custom",
                     "webhook_url": "",
-                    "message_template": "Category digest — last 24h:\n\n{ai_summary}",
+                    "message_template": "Category digest, last 24h:\n\n{ai_summary}",
                 },
             },
         ],
@@ -1215,8 +1215,8 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "name": "Tiered Channel Routing",
         "description": (
             "Split alerts across two Slack/Discord channels by priority: top-scoring entries go to a "
-            "loud war-room channel, everything else lands in a quieter firehose channel. A worked "
-            "example of branch-based fan-out — set both webhook URLs (or channels) and tune the "
+            "high-priority channel, everything else goes to a lower-priority channel. A worked "
+            "example of branch-based fan-out. Set both webhook URLs (or channels) and tune the "
             "score threshold."
         ),
         "category": "integration",
@@ -1268,7 +1268,7 @@ TEMPLATE_CATEGORIES = [
     {
         "id": "noise",
         "name": "Noise Reduction",
-        "description": "Cut clutter: mute low-value sources, hide marketing fluff",
+        "description": "Cut clutter: mute low-value sources and hide press releases",
     },
     {
         "id": "workflow",

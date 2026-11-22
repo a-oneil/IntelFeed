@@ -131,7 +131,7 @@ export function UserKeysSection() {
   const [promptError, setPromptError] = useState<string | null>(null);
 
   if (isError) {
-    return <AsyncStateError title="Couldn't load the policy" description={apiErrorInfo(error).message} onRetry={() => void refetch()} />;
+    return <AsyncStateError title="Could not load the user key policy" description={apiErrorInfo(error).message} onRetry={() => void refetch()} />;
   }
   if (isLoading || !settings) return <AsyncStateLoading label="Loading policy…" compact />;
 
@@ -172,15 +172,15 @@ export function UserKeysSection() {
 
   const policyHint =
     policy === "off"
-      ? "Every prompt runs on your providers. People can't add keys."
+      ? "Every prompt runs on the instance's providers. Users cannot add personal keys."
       : policy === "optional"
-        ? "People may add their own key. Prompts they run themselves use it, and fall back to your providers if their key is missing, failing or over its cap."
+        ? "People may add their own key. Prompts they run themselves use it. If their key is missing, failing or over its cap, the prompt falls back to your providers."
         : "People must use their own key for the prompts they run themselves. Without a working one, the prompt is refused.";
 
   return (
     <div className={ai.section}>
       <div className={ai.sectionHeader}>
-        <h3>Who pays for interactive AI</h3>
+        <h3>User keys for interactive AI</h3>
       </div>
 
       <div className={page.settingRow}>
@@ -205,7 +205,7 @@ export function UserKeysSection() {
         <div className={page.settingInfo}>
           <span className={page.settingLabel}>Allowed provider types</span>
           <span className={page.settingHint}>
-            Claude Code can't be added by users. It runs on one CLI session for the whole instance.
+            Claude Code cannot be added by users. It runs on one CLI session for the whole instance.
           </span>
         </div>
         <span className={styles.chips}>
@@ -219,7 +219,7 @@ export function UserKeysSection() {
                 tint={on ? "var(--success)" : undefined}
                 onClick={() => void toggleType(t)}
                 aria-pressed={on}
-                title={on ? "Allowed — click to disallow" : "Not allowed — click to allow"}
+                title={on ? "Allowed. Click to disallow." : "Not allowed. Click to allow."}
               >
                 {t}
               </Chip>
@@ -252,7 +252,7 @@ export function UserKeysSection() {
 
       <NumberSetting
         label="Daily request cap per user"
-        hint="How many calls this server will make on one person's own keys a day. Their key is their money, so this is not a spending limit (they set their own in My AI); it bounds a runaway loop. 0 = no cap."
+        hint="How many calls this server makes on one person's own keys per day. It is not a spending limit (they set that in My AI); it stops a runaway loop. 0 = no cap."
         value={daily}
         onSave={(n) => save({ user_ai_daily_request_cap: Math.round(n) })}
       />
@@ -327,7 +327,7 @@ export function UserKeysSection() {
         </table>
       </div>
       <p className={styles.footnote}>
-        Locked prompts write results that the whole instance reads, such as entity links, briefs and story spines. They
+        Locked prompts write results that the whole instance reads, such as entity links, briefs and story timelines. They
         always run on your providers.
       </p>
 
@@ -358,7 +358,7 @@ export function UserKeysSection() {
                     className={page.btnSmall}
                     onClick={() => resumeProvider.mutate(k.id)}
                     disabled={resumeProvider.isPending}
-                    title="Clear the pause so the owner's key answers again"
+                    title="Clear the pause so the owner's key is used again"
                   >
                     Resume
                   </button>
@@ -366,7 +366,7 @@ export function UserKeysSection() {
                 <button
                   className={page.btnSmall}
                   onClick={() => updateProvider.mutate({ id: k.id, is_active: !k.is_active })}
-                  title="Disable or enable this key without touching it"
+                  title="Disable or enable this key. The key itself is kept."
                 >
                   {k.is_active ? "Disable" : "Enable"}
                 </button>

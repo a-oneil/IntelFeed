@@ -209,12 +209,12 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
       `Daily summary${scope}`,
     );
     if (paragraphs.length === 0) return;
-    const title = `Daily summary${label ? ` — ${label}` : ""}`;
+    const title = `Daily summary${label ? `: ${label}` : ""}`;
     const speakViaBrowser = () =>
       playSpeech({
         entryId: speechEntryId,
         title,
-        feedTitle: "IntelFeed — Daily Summary",
+        feedTitle: "IntelFeed Daily Summary",
         paragraphs,
       });
     if (readAloudEngine === "piper") {
@@ -225,7 +225,7 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
         source: "summary",
         id: dayKey,
         filters: filters as unknown as Record<string, unknown>,
-        track: { entryId: speechEntryId, title, feedTitle: "IntelFeed — Daily Summary" },
+        track: { entryId: speechEntryId, title, feedTitle: "IntelFeed Daily Summary" },
       });
       if (ok !== false) return;
       if (speechSupported) speakViaBrowser();
@@ -392,7 +392,7 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
   const errorMessage = (() => {
     const err = generate.error as { response?: { data?: { message?: string } } } | null;
     if (!err) return null;
-    return err.response?.data?.message ?? (generate.error as Error)?.message ?? "Generation failed";
+    return err.response?.data?.message ?? (generate.error as Error)?.message ?? "Could not generate the summary";
   })();
 
   const handleGenerate = (force: boolean) => {
@@ -419,7 +419,7 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
             e.stopPropagation();
             handleGenerate(false);
           }}
-          title={isGenerating ? "Summarizing…" : `AI-summarize ${label === "Today" ? "today's" : "this day's"} coverage`}
+          title={isGenerating ? "Summarizing…" : `Summarize ${label === "Today" ? "today's" : "this day's"} articles with AI`}
           aria-label={isGenerating ? "Summarizing…" : "Summarize day"}
         >
           {isGenerating ? (
@@ -433,7 +433,7 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
           {/* The label is the feature's advertisement — an icon alone reads as
               decoration, and this is one of the most guest-impressive features. */}
           <span className={styles.generateLabel}>
-            {isGenerating ? "Summarizing…" : label === "Today" ? "Catch me up" : "Summarize day"}
+            {isGenerating ? "Summarizing…" : label === "Today" ? "Summarize today" : "Summarize day"}
           </span>
         </button>
         {errorMessage && <span className={styles.error}>{errorMessage}</span>}
@@ -446,8 +446,8 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
       <div className={styles.panelHeader}>
         <Hint
           title="Day summary"
-          body="What the day's articles were actually about, written from the articles themselves."
-          aside="Hover any name in it for that entity's dossier."
+          body="An AI summary of the day's articles, written from the article text."
+          aside="Hover a name to see that entity's profile."
         >
           <span className={styles.panelLabel}>AI summary</span>
         </Hint>

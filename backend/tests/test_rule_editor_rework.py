@@ -28,7 +28,7 @@ def test_unchecked_rule_types_validate_as_saved_as_written(rule_type):
     result = validate_rule(rule_type, "SELECT 1")
     assert result.valid is True
     assert result.errors == []
-    assert any("No syntax check" in s for s in result.suggestions)
+    assert any("has no syntax check" in s for s in result.suggestions)
 
 
 def test_unknown_rule_type_is_still_an_error():

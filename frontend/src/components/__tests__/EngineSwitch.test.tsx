@@ -104,8 +104,8 @@ describe("CheckEngineBanner", () => {
     mockApi(false, [stage("extract", 7), stage("enrich", 5)]);
     post.mockResolvedValue({ data: { dispatched: 12, skipped: 0, by_stage: {}, remaining: 0 } });
     renderBanner();
-    expect(await screen.findByRole("status")).toHaveTextContent("Check engine: 12 entries are erroring - retry");
-    await userEvent.click(screen.getByRole("button", { name: "retry" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Check engine: 12 entries are failing. Retry");
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(post).toHaveBeenCalledWith("/engine/pipeline/retry-errors", {});
   });
 

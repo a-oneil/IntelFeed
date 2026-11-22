@@ -275,7 +275,7 @@ class RateLimited(GatewayError):
     status = "rate_limited"
 
     def __init__(self, source_type: str, retry_after: float):
-        super().__init__(f"{source_type} rate limited, retry in {retry_after:.0f}s")
+        super().__init__(f"{source_type} is rate limited. Retry in {retry_after:.0f}s")
         self.retry_after = retry_after
 
 
@@ -294,7 +294,7 @@ class BreakerOpen(GatewayError):
     status = "breaker_open"
 
     def __init__(self, source_type: str, retry_after: float):
-        super().__init__(f"{source_type} circuit breaker open for {retry_after:.0f}s")
+        super().__init__(f"{source_type} is paused for {retry_after:.0f}s after repeated failures")
         self.retry_after = retry_after
 
 
@@ -542,7 +542,9 @@ class SourceGateway:
                     repr(CONCURRENCY_POLL),
                 )
             except (RedisError, OSError) as e:
-                raise GatewayUnavailable(f"{self.source_type}: rate limit store unavailable ({e})") from e
+                raise GatewayUnavailable(
+                    f"{self.source_type}: Redis is unreachable, so rate limits cannot be checked ({e})"
+                ) from e
             code, seconds = int(code), float(seconds)
             if code == 0:
                 if lease:
@@ -561,10 +563,11 @@ class SourceGateway:
             if code == 8:
                 raise AuthFailed(await self._auth_message(), seconds)
             if code == 2:
-                raise BudgetExhausted(f"{self.source_type} daily budget of {self.daily_budget} used up")
+                raise BudgetExhausted(f"{self.source_type} has used its daily budget of {self.daily_budget} requests")
             if code == 5:
                 raise BackfillShareUsed(
-                    f"{self.source_type}: backfill may use {BACKFILL_SHARE:.0%} of the daily budget ({cap}); used up"
+                    f"{self.source_type}: backfill has used its {BACKFILL_SHARE:.0%} share "
+                    f"of the daily budget ({cap} requests)"
                 )
             if code == 3:
                 raise BreakerOpen(self.source_type, seconds)

@@ -1119,7 +1119,7 @@ class DetectionSummaryCreateRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "entry_ids": ["d5b2f1c8-3a4e-4b6d-9c2f-8e7a1b3c5d4e"],
-                "title": "LockBit healthcare campaign — detection summary",
+                "title": "LockBit healthcare campaign: detection summary",
                 "rule_formats": ["sigma", "splunk_spl"],
                 "focus": "campaign",
             }

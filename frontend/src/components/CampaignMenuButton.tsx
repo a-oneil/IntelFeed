@@ -49,7 +49,7 @@ export function CampaignMenuButton({ entryId, buttonClassName, children, title }
           setMenuOpen(false);
         },
         onError: () => {
-          setFlash("Failed to add");
+          setFlash("Could not add to campaign");
           setTimeout(() => setFlash(null), 2000);
         },
       }

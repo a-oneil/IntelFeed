@@ -138,8 +138,8 @@ so each applies the rule itself:
 - **Story threads** (raw SQL) are rebuilt from visible articles (none →
   dropped), titled by the earliest one. Visitors get a slug alias (`t-<thread id>`, accepted by the
   thread route) since the real slug comes from the first headline. Counts, dates, ranking and entity
-  chips cover visible articles only. The stored summary and AI spine become a
-  day-by-day spine of visible articles, built per request, never stored. Title search uses rebuilt titles; related threads are left out.
+  chips cover visible articles only. The stored summary and AI timeline become a
+  day-by-day timeline of visible articles, built per request, never stored. Title search uses rebuilt titles; related threads are left out.
   Same in the priority queue, similar-article results and Active Story cards.
 - **Search index and embeddings** (similar articles, glossary term pages and
   counts) are filtered to visible feeds.
@@ -201,8 +201,8 @@ made-up ids.
 
 ## Limits and caching
 
-Visitor `/api/*` traffic is rate-limited per client IP — enough for a person,
-too little to copy the site:
+Visitor `/api/*` traffic is rate-limited per client IP. The limits are enough
+for a person and too low to copy the site:
 
 | What | Per minute | Per hour |
 | --- | --- | --- |
@@ -236,7 +236,7 @@ crawler-blocking `robots.txt`.
 `backend/tests/test_public_read_only.py` lists every visitor route
 (`VISITOR_ROUTES`) and every no-login route. It fails when a route uses
 `get_viewer` or skips login without being listed, or when a one-article
-visitor route doesn't use `get_entry_viewer` — so opening a route is always
+visitor route doesn't use `get_entry_viewer`. Opening a route is always
 deliberate. It calls every visitor route with the switch off (all must be 401)
 and on (no 401, 403 or 5xx, no database writes, no Celery tasks).
 

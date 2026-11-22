@@ -11,7 +11,7 @@ any search, add `sort:radar` to the query.
 
 ![Priority Queue article and story cards, each showing a 0–10 score, outlet and article counts, and entity chips](../assets/screenshots/priority-queue.png)
 
-*Each card is one story, not one article. Repeat coverage is folded in and counted.*
+*Each card is one story, not one article. Repeat coverage is grouped and counted.*
 
 It works like the normal article list and reader, with the same keys and
 actions, but it is sorted by priority score instead of date. Two things are
@@ -37,13 +37,13 @@ come in five families.
 **Novelty**: is this new?
 - *novel entity*: the first, or nearly first, mention of an actor, malware or
   tool
-- *entity resurgence*: something coming back after a long quiet spell
+- *entity resurgence*: an entity reported again after a long gap
 - *new pairing*: two entities named together for the first time
-- *scoop*: this source broke the story
+- *scoop*: this source reported the story first
 
 **Coverage**: who else is reporting it?
 - *source convergence*: separate outlets reporting the same story
-- *under-reported*: real substance, but little coverage
+- *under-reported*: a detailed report with little coverage
 - *feed echo*: the opposite, many outlets reprinting one piece
 
 **Severity**: how bad is it?
@@ -78,15 +78,14 @@ Watched entities raise their articles, and can bring an article into the queue
 even when its score is below the usual cut-off. Muted entities drop out of
 your queue, but still show in search and your feeds. Both are personal.
 
-This is your biggest lever. Watch your vendors, your products, the actors that
-target your sector, and the sector itself. Watching **Healthcare**, for
-example, raises every article the analysis judged to be about attacks on
-healthcare.
+This has the largest effect on the ranking. Watch the vendors and products you
+are responsible for, the sectors you cover, and the actors that target them.
+Watching **Healthcare**, for example, raises every article the analysis judged
+to be about attacks on healthcare.
 
 **Votes.** The "Why this ranked" card has **▲** (useful) and **▼** (noise)
-buttons. All
-users' votes together adjust the shared ranking by at most 10% either way, so a
-few votes can't swing what everyone sees.
+buttons. All users' votes together adjust the shared ranking by at most 10%
+either way, so a few votes cannot change what everyone sees.
 
 If an admin has turned on **Personalised Radar**, a **Your Radar** card
 appears under **Settings → Reading**. Switch it on and your own votes set a
@@ -100,8 +99,8 @@ clear the learned weights and start over.
 **Intelligence requirements.** *PIR match* is the one signal you define. Write
 your requirements under **Intelligence → Requirements** in the Workbench
 sidebar: the sectors, regions, technologies and actors you are responsible
-for. Articles that match them rank higher. If you do one piece of setup beyond
-watching entities, do this.
+for. Articles that match them rank higher. This is the most useful setup step
+after watching entities.
 
 Keep requirements narrow. Because rare signals count for more, a requirement
 so broad that most articles match it stops helping. A few narrow requirements
@@ -109,16 +108,16 @@ work better than many broad ones.
 
 ## Working it
 
-1. Open the Priority Queue and work from the top. You don't need to read the
+1. Open the Priority Queue and work from the top. You do not need to read the
    whole list.
 2. Read the "Why this ranked" card before the article. It often tells you
    enough on its own, for example "EPSS jumped from 0.04 to 0.71".
 3. Star what needs real work. Mark the rest read.
-4. Vote **▼** on anything that wasted your time, so you see less like it.
-5. When the items stop being interesting, stop. That is the point of the
-   queue; there's no prize for reaching the bottom.
+4. Vote **▼** on anything that was not useful, so you see less like it.
+5. When the items stop being relevant, stop. The list is ranked so that you
+   can stop early.
 
-Give your votes a couple of weeks to have an effect before you decide the
-ranking is wrong for you.
+Give your votes a couple of weeks to take effect before you decide the ranking
+is wrong for you.
 
 Next: [Story threads](story-threads.md)

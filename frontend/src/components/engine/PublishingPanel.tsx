@@ -78,7 +78,7 @@ export function PublishingPanel() {
     refetchInterval: 60_000,
   });
 
-  if (isError) return <div className={styles.loading}>Couldn't load publish status — is the API reachable?</div>;
+  if (isError) return <div className={styles.loading}>Could not load publish status.</div>;
   if (!status) return <div className={styles.loading}>Loading publish status…</div>;
 
   const live = status.enabled && status.token_configured;
@@ -87,8 +87,8 @@ export function PublishingPanel() {
     <div className={styles.wrap}>
       {!live && (
         <div className={styles.offNote}>
-          Publishing is {status.enabled ? "enabled but has no token" : "off"} — every feed endpoint returns 404.
-          Turn it on and set a token below; consumers then pull with{" "}
+          Publishing is {status.enabled ? "enabled but has no token" : "off"}. Every feed endpoint returns 404.
+          Turn it on and set a token below. Consumers then pull with{" "}
           <code>Authorization: Bearer &lt;token&gt;</code> (or <code>?token=</code> for appliances).
         </div>
       )}
@@ -103,8 +103,8 @@ export function PublishingPanel() {
         <div className={styles.cardBody}>
           <FeedLine row={status.feeds.taxii} />
           <div className={styles.cardNote}>
-            STIX 2.1 indicators; <code>valid_until</code> tracks confidence decay so downstream tools age
-            indicators the way the ledger does. Discovery at <code>/api/taxii2/</code>.
+            The collection serves STIX 2.1 indicators. <code>valid_until</code> follows confidence decay, so downstream tools age
+            indicators the same way the observables list does. Discovery at <code>/api/taxii2/</code>.
           </div>
         </div>
       </div>
@@ -120,7 +120,7 @@ export function PublishingPanel() {
           {status.feeds.edl.map((row) => (
             <FeedLine key={row.path} row={row} />
           ))}
-          <div className={styles.cardNote}>Network atoms only — one value per line for Palo Alto EDL / pfBlockerNG.</div>
+          <div className={styles.cardNote}>Each list holds network indicators only, one value per line, for Palo Alto EDL or pfBlockerNG.</div>
         </div>
       </div>
 
@@ -133,7 +133,7 @@ export function PublishingPanel() {
             <FeedLine key={row.path} row={row} />
           ))}
           <div className={styles.cardNote}>
-            Hashes and host artifacts (cmdlines, registry, paths) — SIEM lookups and hunting, never blocklists.
+            These tables hold hashes and host artifacts (command lines, registry keys, paths) for SIEM lookups and hunting, not for blocklists.
           </div>
         </div>
       </div>

@@ -38,18 +38,18 @@ export function WatchToggleButton({
       if (isWatching) {
         await deleteWatch.mutateAsync({ entity_type: entityType, entity_id: entityId });
         toast.success(
-          onBoard ? `Stopped watching ${displayName} — unpinned from Threats` : `Stopped watching ${displayName}`
+          onBoard ? `Stopped watching ${displayName}. Unpinned from Threats.` : `Stopped watching ${displayName}`
         );
       } else {
         await upsertWatch.mutateAsync({ entity_type: entityType, entity_id: entityId, mode: "watch" });
         toast.success(
           onBoard
-            ? `Watching ${displayName} — boosted in Triage and pinned to Threats`
-            : `Watching ${displayName} — boosted in Triage`
+            ? `Watching ${displayName}. Boosted in the Priority Queue and pinned to Threats.`
+            : `Watching ${displayName}. Boosted in the Priority Queue.`
         );
       }
     } catch {
-      toast.error("Failed to update watch state");
+      toast.error("Could not update the watch");
     }
   };
 
@@ -60,10 +60,10 @@ export function WatchToggleButton({
       disabled={isMuted || upsertWatch.isPending || deleteWatch.isPending}
       title={
         isMuted
-          ? "Muted — remove the mute in the ⋯ menu to watch"
+          ? "Muted. Remove the mute in the ⋯ menu to watch."
           : isWatching
             ? "Stop watching (removes the boost and the Threats pin)"
-            : "Watch this entity (boosts it in the Priority Queue and pins threats to the Threats board)"
+            : "Watch this entity. It is boosted in the Priority Queue and pinned to the Threats board."
       }
     >
       {isWatching ? "Watching" : "Watch"}

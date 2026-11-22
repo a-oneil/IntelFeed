@@ -20,7 +20,7 @@ const SEVERITY_ICONS: Record<string, string> = {
 
 const TYPE_LABELS: Record<string, string> = {
   entity_overlap_actor: "Actor Overlap",
-  detection_gap: "Detection Opportunity",
+  detection_gap: "Detection Gap",
   campaign_match: "Campaign Match",
   requirement_match: "PIR Match",
   critical_cve: "Critical CVE",

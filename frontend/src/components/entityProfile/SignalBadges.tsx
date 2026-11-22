@@ -85,7 +85,7 @@ export function SignalBadges({
               <span key={key} className={styles.badgeWithSources}>
                 <button
                   className={`${cls} ${styles.signalBadgeLink}`}
-                  title={`${b.title || "Country"} — open profile`}
+                  title={`${b.title || "Country"}: open profile`}
                   onClick={() => onOpenEntity("country", countryId, b.label)}
                 >
                   {b.label}
@@ -105,7 +105,7 @@ export function SignalBadges({
             <span key={key} className={styles.badgeWithSources}>
               <button
                 className={`${cls} ${styles.signalBadgeLink}`}
-                title={`${b.title || "Targeted sector"} — open profile`}
+                title={`${b.title || "Targeted sector"}: open profile`}
                 onClick={() => onOpenEntity("sector", b.label, b.label)}
               >
                 {b.label}

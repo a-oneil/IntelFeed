@@ -13,15 +13,15 @@ AI drafting in reports needs an AI provider. Everything else works without one.
 ## Campaigns
 
 A campaign groups articles, entities and detection rules under one name, such as
-"LockBit Q3" or "the Fortinet thing".
+"LockBit Q3".
 
 ### Creating one
 
 Go to **Workbench → Campaigns** and click **+ New**. Fill in:
 
-- **Name**: what you'd call it out loud.
-- **Description**: why you're tracking it. Write it now; you won't remember in
-  three weeks.
+- **Name**: a short name.
+- **Description**: why you are tracking it. Write it when you create the
+  campaign, while the reason is clear.
 - **Status**: active, monitoring, closed or historical.
 - **TLP Marking**: the Traffic Light Protocol label that tells readers how far
   they may pass it on: CLEAR, GREEN, AMBER, AMBER+STRICT or RED. The default
@@ -92,7 +92,7 @@ the number of articles.
 
 Something that matched only regions or only sectors is marked **partial match**
 and ranked lower. Click **Keep** or **Drop** on each. Your choices are saved on
-the profile, so next time you aren't asked again about what you dropped.
+the profile, so you are not asked again about what you dropped.
 
 ### Writing one
 
@@ -105,19 +105,18 @@ entry list's selection toolbar (**Report**), the AI panel in the reader
 (**Report**), an entity profile's menu, and the Threats board. It adds the
 material to a draft without leaving the page.
 
-Read every AI-written sentence with care. AI is good at structure, and also
-states guesses with confidence. Treat it like a first draft from a junior
-analyst in a hurry.
+Read every AI-written sentence with care. AI writes good structure, but it
+also states guesses as facts.
 
 Each save that changes the text keeps the earlier version. **Version History**
 lists them, and you can open one to read it.
 
 ### TLP
 
-Set TLP on purpose. It is a promise to whoever gave you the information.
-Marking everything AMBER "to be safe" makes the label meaningless. IntelFeed
+Set the TLP marking deliberately. It is a commitment to whoever gave you the
+information. Marking everything AMBER makes the label meaningless. IntelFeed
 shows the marking on the report and its exports, but it does not stop you from
-sharing anything: that is up to you.
+sharing anything.
 
 ### Exporting
 

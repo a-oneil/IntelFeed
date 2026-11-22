@@ -148,7 +148,7 @@ async def _check_detection_gaps(
                     "type": "detection_gap",
                     "tier": "actionable_gap",
                     "severity": "medium",
-                    "message": f"{ttp['technique_id']} ({ttp['name']}) has no detection rule — actionable gap",
+                    "message": f"No detection rule covers {ttp['technique_id']} ({ttp['name']}).",
                     "entity_id": str(ttp["id"]),
                     "entity_type": "ttp",
                     "action": "generate_rule",
@@ -163,7 +163,8 @@ async def _check_detection_gaps(
                     "severity": "low",
                     "message": (
                         f"{ttp['technique_id']} ({ttp['name']}) has {info['rule_count']} library "
-                        f"rule{'s' if info['rule_count'] != 1 else ''} blocked by missing telemetry: {missing}"
+                        f"rule{'s' if info['rule_count'] != 1 else ''} that cannot run "
+                        f"without this telemetry: {missing}"
                     ),
                     "entity_id": str(ttp["id"]),
                     "entity_type": "ttp",
@@ -184,7 +185,7 @@ async def _check_detection_gaps(
                     "type": "detection_gap",
                     "tier": "actionable_gap",
                     "severity": "high" if cvss >= 9.0 else "medium",
-                    "message": f"{cve['cve_id']} (CVSS {cvss}) has no detection rule — actionable gap",
+                    "message": f"No detection rule covers {cve['cve_id']} (CVSS {cvss}).",
                     "entity_id": str(cve["id"]),
                     "entity_type": "cve",
                     "action": "generate_rule",
@@ -198,7 +199,8 @@ async def _check_detection_gaps(
                     "tier": "telemetry_gap",
                     "severity": "medium" if cvss >= 9.0 else "low",
                     "message": (
-                        f"{cve['cve_id']} (CVSS {cvss}) has library rules blocked by missing telemetry: {missing}"
+                        f"{cve['cve_id']} (CVSS {cvss}) has library rules that cannot run "
+                        f"without this telemetry: {missing}"
                     ),
                     "entity_id": str(cve["id"]),
                     "entity_type": "cve",

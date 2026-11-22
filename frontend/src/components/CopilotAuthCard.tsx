@@ -19,7 +19,7 @@ type Health = "authenticated" | "expiring" | "expired" | "unknown";
 function classifyHealth(status: CopilotAuthStatus | undefined): { health: Health; label: string } {
   if (!status || status.state === "unknown") return { health: "unknown", label: "Checking…" };
   if (!status.exists) return { health: "expired", label: "Not authenticated" };
-  if (!status.valid) return { health: "expired", label: "Expired — re-authenticate" };
+  if (!status.valid) return { health: "expired", label: "Expired. Re-authenticate." };
 
   if (status.expires_at) {
     const msLeft = status.expires_at - Date.now();
@@ -71,7 +71,7 @@ export default function CopilotAuthCard({ embedded = false }: { embedded?: boole
     } catch (err) {
       const msg =
         (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
-        "Couldn't start re-authentication";
+        "Could not start re-authentication";
       toast.error(msg);
     }
   };
@@ -81,7 +81,7 @@ export default function CopilotAuthCard({ embedded = false }: { embedded?: boole
     try {
       await submitCode.mutateAsync({ sessionId, code: code.trim() });
     } catch {
-      toast.error("Couldn't submit code");
+      toast.error("Could not submit the code");
     }
   };
 
@@ -105,8 +105,8 @@ export default function CopilotAuthCard({ embedded = false }: { embedded?: boole
         <div>
           <h3 className={styles.title}>Copilot authentication</h3>
           <p className={styles.subtitle}>
-            The Ask&nbsp;IntelFeed copilot signs in to Claude with a Max-plan OAuth session that
-            expires periodically. Re-authenticate here when it lapses.
+            The copilot signs in to Claude with a Max-plan OAuth session that expires periodically.
+            Re-authenticate here when it expires.
           </p>
         </div>
         {!active && (

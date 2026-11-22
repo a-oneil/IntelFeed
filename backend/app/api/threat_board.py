@@ -272,7 +272,7 @@ async def set_threat_state(
 @router.get("/{entity_type}/{entity_key}/rules")
 async def get_row_rules(
     entity_type: str = Path(..., description="threat_actor, malware or cve"),
-    entity_key: str = Path(..., description="Entity uuid or CVE id — the rule_coverage key"),
+    entity_key: str = Path(..., description="Entity uuid or CVE id, the rule_coverage key"),
     limit: int = Query(50, ge=1, le=200, description="Maximum rules returned"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -396,7 +396,7 @@ def _hunt_row_type(entity_type: str) -> None:
     if entity_type not in HUNT_ROW_TYPES:
         raise AppError(
             code="bad_request",
-            message="Hunt packs exist for threat_actor, malware and cve rows",
+            message="Hunt packs can be drafted only for threat actor, malware and CVE rows.",
             status_code=400,
         )
 
@@ -404,7 +404,7 @@ def _hunt_row_type(entity_type: str) -> None:
 @router.get("/{entity_type}/{entity_key}/hunt-pack", response_model=HuntPackResponse)
 async def get_hunt_pack(
     entity_type: str = Path(..., description="threat_actor, malware or cve"),
-    entity_key: str = Path(..., description="Entity uuid or CVE id — the board row's key"),
+    entity_key: str = Path(..., description="Entity uuid or CVE id, the board row's key"),
     window: str = Query("14d", pattern="^(7d|14d|30d)$", description="The board view's window"),
     language: str | None = Query(None, description=_LANGUAGE_DESC),
     user: User = Depends(get_current_user),
@@ -433,7 +433,7 @@ async def get_hunt_pack(
 @router.post("/{entity_type}/{entity_key}/hunt-pack", response_model=HuntPackResponse)
 async def draft_hunt_pack(
     entity_type: str = Path(..., description="threat_actor, malware or cve"),
-    entity_key: str = Path(..., description="Entity uuid or CVE id — the board row's key"),
+    entity_key: str = Path(..., description="Entity uuid or CVE id, the board row's key"),
     window: str = Query("14d", pattern="^(7d|14d|30d)$", description="The board view's window"),
     language: str | None = Query(None, description=_LANGUAGE_DESC),
     user: User = Depends(get_current_user),
@@ -463,7 +463,7 @@ async def draft_hunt_pack(
     if pack is None:
         raise AppError(
             code="not_configured",
-            message="The hunt_pack AI task has no provider assigned, or the model returned no usable hypotheses",
+            message="The hunt_pack AI task has no provider assigned, or the model returned no usable hypotheses.",
             status_code=422,
         )
     await db.commit()
@@ -478,7 +478,7 @@ async def draft_hunt_pack(
 @router.get("/{entity_type}/{entity_key}/hunt-pack.md", response_class=PlainTextResponse)
 async def export_hunt_file(
     entity_type: str = Path(..., description="threat_actor, malware or cve"),
-    entity_key: str = Path(..., description="Entity uuid or CVE id — the board row's key"),
+    entity_key: str = Path(..., description="Entity uuid or CVE id, the board row's key"),
     window: str = Query("14d", pattern="^(7d|14d|30d)$", description="The board view's window"),
     language: str | None = Query(None, description=_LANGUAGE_DESC),
     hunt_id: str = Query(

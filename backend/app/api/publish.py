@@ -198,7 +198,7 @@ async def _stamp_pull(feed: str, consumer: str = "default") -> None:
 async def publish_edl(
     filename: str,
     authorization: str | None = Header(None),
-    token: str | None = Query(None, description="Publish token (for pullers that can't set headers)"),
+    token: str | None = Query(None, description="Publish token (for pullers that cannot set headers)"),
     db: AsyncSession = Depends(get_db),
 ):
     """Plain-text blocklist: one value per line, comments carry provenance."""
@@ -208,7 +208,7 @@ async def publish_edl(
         raise AppError(code="not_found", message=f"Unknown EDL file (have: {', '.join(_EDL_FILES)})", status_code=404)
     items = await _policy_rows(db, kinds)
     lines = [
-        f"# IntelFeed observables — {filename} — {len(items)} entries — generated {datetime.now(UTC):%Y-%m-%d %H:%M}Z"
+        f"# IntelFeed observables: {filename}, {len(items)} entries, generated {datetime.now(UTC):%Y-%m-%d %H:%M}Z"
     ]
     lines += [o.value for o in items]
     await _stamp_pull(f"edl/{filename}", consumer)

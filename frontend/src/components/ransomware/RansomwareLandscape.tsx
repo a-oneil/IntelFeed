@@ -132,7 +132,7 @@ export function RansomwareLandscape({
           <div className={styles.two}>
             <Panel
               title="Most active groups"
-              subtitle="Victim count · share · week-over-week"
+              subtitle="Victims, share of the total, and change from the previous week"
               surface="card"
               padding="lg"
               divider={false}
@@ -235,7 +235,7 @@ export function RansomwareLandscape({
 
             <Panel
               title="Your watchlist exposure"
-              subtitle={`Watched entities against ${days}d disclosures`}
+              subtitle={`Watched entities with victims disclosed in the last ${days} days`}
               surface="card"
               padding="lg"
               divider={false}

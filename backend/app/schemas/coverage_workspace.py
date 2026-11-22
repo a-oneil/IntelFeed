@@ -8,13 +8,13 @@ from pydantic import BaseModel, ConfigDict, Field
 class WorkspaceQuote(BaseModel):
     entry_id: str
     entry_title: str
-    text: str = Field(description="entry_ttps.source_text — the sentence the technique was read from")
+    text: str = Field(description="entry_ttps.source_text: the sentence the technique was read from")
     paragraph_indices: list[int] = Field(description="Paragraph offsets in the article body, where recorded")
     observable_type: str | None = Field(
         None, description="domain_pattern | path | cmdline | registry | client_id | header | hash | other"
     )
     observable_value: str | None = Field(
-        None, description="The concrete artefact, verbatim — what a rule draft compiles into a selection clause"
+        None, description="The concrete artefact, verbatim: what a rule draft compiles into a selection clause"
     )
 
 
@@ -48,7 +48,7 @@ class WorkspaceBehaviour(BaseModel):
     missing_channels: list[str]
     missing_categories: list[str]
     below_line: bool = Field(
-        description="No required channel matches the inventory — a sourcing item, not a detection gap"
+        description="No required channel matches the inventory: a sourcing item, not a detection gap"
     )
     prior_rules: int
     prior_rules_strong: int
@@ -94,7 +94,7 @@ class CoverageWorkspaceResponse(BaseModel):
     missing_categories: list[str] = Field(description="Categories the below-line behaviours need")
     below_line_count: int
     threat_prior_rules: int = Field(
-        0, description="Rules resolving to the threat itself — candidates for every behaviour"
+        0, description="Rules resolving to the threat itself: candidates for every behaviour"
     )
     threat_prior_rules_strong: int = Field(0, description="Of those, high or medium confidence")
     cve: dict | None = Field(
@@ -114,7 +114,7 @@ class PriorRuleItem(BaseModel):
     license: str | None
     is_draft: bool
     scope: str = Field(description="technique (tagged with this behaviour) | threat (names the threat itself)")
-    via: str = Field(description="tag | meta | text — which resolver writer produced the match")
+    via: str = Field(description="tag | meta | text: which resolver writer produced the match")
     confidence: str = Field(description="high | medium | low; low is a story-tag or body-text hit")
     matched_on: str | None = Field(description="The literal that matched, so a text row stays auditable")
     tier: str | None = Field(description="Strongest telemetry tier the rule's required sources reach")
@@ -122,7 +122,9 @@ class PriorRuleItem(BaseModel):
     missing: list[str]
     maintained_at: str | None = Field(
         None,
-        description="Upstream commit date where recorded, else our row's — ranks a live rule above an abandoned one",
+        description=(
+            "Upstream commit date where recorded, else the local row's. Ranks a live rule above an abandoned one"
+        ),
     )
 
     model_config = ConfigDict(
@@ -152,7 +154,7 @@ class PriorRulesResponse(BaseModel):
     total: int = Field(description="Rows on this page")
     total_candidates: int = Field(description="Candidates before the page limit")
     strong: int = Field(description="Of all candidates, resolved at high or medium confidence")
-    weak: int = Field(description="Of all candidates, low — a story tag or body-text hit")
+    weak: int = Field(description="Of all candidates, the partial matches: a story tag or body-text hit")
     technique_scope: int
     threat_scope: int
 
@@ -169,10 +171,10 @@ class SetItem(BaseModel):
     technique_id: str | None = Field(None, description="Behaviour this item answers")
     title: str | None = Field(None, description="Overrides the library title; server fills it in when omitted")
     rule_type: str | None = None
-    note: str | None = Field(None, description="Why this item is in the set — e.g. the clause an extend adds")
+    note: str | None = Field(None, description="Why this item is in the set, e.g. the clause an extend adds")
     reason: str | None = Field(
         None,
-        description="skip only: cannot fire here | duplicate | low quality | other — renders as a known gap in exports",
+        description="skip only: cannot fire here | duplicate | low quality | other. Rendered as a known gap in exports",
     )
 
 
@@ -186,7 +188,7 @@ class SetSaveRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "title": "APT29 — device-code flow",
+                "title": "APT29 device-code flow",
                 "window": "14d",
                 "items": [{"op": "adopt", "rule_id": "3f2a...", "technique_id": "T1078.004"}],
                 "entry_ids": [],
@@ -206,8 +208,8 @@ class SavedSet(BaseModel):
     upstream_moved: list[str] = Field(
         default_factory=list,
         description=(
-            "Rules in this set whose upstream_updated_at postdates the save — "
-            "the community changed a rule you adopted; worth a re-read"
+            "Rules in this set whose upstream_updated_at postdates the save: "
+            "the community changed a rule you adopted, so it is worth a re-read"
         ),
     )
 

@@ -4205,7 +4205,7 @@ async def restore_adjudication_row(db: AsyncSession, row) -> dict:
                     paragraph_indices=sighting.get("paragraph_indices") or None,
                 )
     elif row.action in (ACTION_MERGE, ACTION_RECLASSIFY):
-        return {"restored": False, "reason": "merges and reclassifies are undone from the merge engine's tombstone"}
+        return {"restored": False, "reason": "merges and reclassifies are undone from the merge engine's undo record"}
     else:
         return {"restored": False, "reason": f"nothing to restore for {row.action}"}
 

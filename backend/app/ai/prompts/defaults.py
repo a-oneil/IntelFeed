@@ -284,7 +284,7 @@ Respond with JSON:
     {
         "name": "intelligence_briefing",
         "display_name": "Intelligence Briefing",
-        "description": "Produce a combined intelligence briefing from multiple articles — designed for scheduled automation digests",
+        "description": "Produce a combined intelligence briefing from several articles. Built for scheduled automation digests",
         "category": "analysis",
         # Batch/automation output (scheduled digests), not an action on a
         # single article or entity.
@@ -395,8 +395,8 @@ Write the briefing now per the structure and rules in your instructions. Remembe
     },
     {
         "name": "threat_brief",
-        "display_name": "Threat Board Story Line",
-        "description": "Two-to-three sentence story line for one threat-board row, built only from the window's articles",
+        "display_name": "Threat Board Summary",
+        "description": "Two or three sentence summary for one Threats board row, written only from the articles in its window",
         "category": "analysis",
         "variables": ["threat_name", "entity_type", "window", "entries", "entry_count"],
         # Nightly board job over a window of articles; not a per-article or
@@ -437,8 +437,8 @@ Write the story line now, under the contract in your instructions.""",
     },
     {
         "name": "cve_brief",
-        "display_name": "Threat Board Story Line (CVE)",
-        "description": "Two-to-three sentence story line for one vulnerability row, built only from the window's articles",
+        "display_name": "Threat Board Summary (CVE)",
+        "description": "Two or three sentence summary for one vulnerability row, written only from the articles in its window",
         "category": "analysis",
         "variables": ["threat_name", "entity_type", "window", "entries", "entry_count", "facts"],
         "show_in_entry_actions": False,
@@ -583,8 +583,8 @@ Draft the hunt pack now, under the contract in your instructions. Queries in {{ 
     },
     {
         "name": "story_thread_spine",
-        "display_name": "Story Thread Spine",
-        "description": "Names an unfolding story and writes one beat per wave — what broke, what each wave added",
+        "display_name": "Story Thread Timeline",
+        "description": "Names an unfolding story and writes one update per wave of reporting: what happened first and what each wave added",
         "category": "analysis",
         "variables": ["thread_title", "entries", "entry_count", "outlet_count"],
         "show_in_entry_actions": False,
@@ -1662,7 +1662,7 @@ When you write a query or detection logic, write it in {{ query_language_name }}
     {
         "name": "copilot",
         "display_name": "Copilot",
-        "description": "IntelFeed's in-app global copilot — a streaming, tool-calling chat assistant that answers analyst questions using the platform's data and proposes changes the user confirms.",
+        "description": "The in-app copilot: a streaming chat assistant with tools that answers analyst questions from the platform's data and proposes changes the user confirms.",
         "category": "analysis",
         "variables": [
             "question",
@@ -1771,7 +1771,7 @@ MODE: {{ mode }}""",
     {
         "name": "entity_name_normalization",
         "display_name": "Entity Name Normalization",
-        "description": "AI-driven per-entity correctness check on threat actor / malware / vendor / product / tool names. Proposes a canonical form when the current name has casing, spelling, or formatting issues. Does NOT propose merges — pure renames only.",
+        "description": "Per-entity check of threat actor, malware, vendor, product and tool names. Proposes a canonical form when the current name has casing, spelling or formatting problems. Renames only; never proposes merges.",
         "category": "maintenance",
         "variables": ["entity_type", "entities_block"],
         "default_system_template": """You are a senior cyber-threat-intelligence editor responsible for keeping IntelFeed's entity catalog clean. You judge entity NAMES for cosmetic and conventional correctness — not for merges. Two entities with similar but distinct meanings are out of scope: you only care about how a single entity's name should be spelled / cased / formatted.
@@ -1842,7 +1842,7 @@ Return one decision per entity in the input order. Strict JSON matching the prov
     {
         "name": "entity_enrichment_research",
         "display_name": "Entity Enrichment Research",
-        "description": "AI researcher that uses WebFetch / WebSearch to fill missing fields on entities (description, mitre_id, country, motivation, malware_type, cvss, vendor). Returns one decision per entity in the batch with cited source URLs and a confidence rating.",
+        "description": "Uses WebFetch and WebSearch to fill missing fields on entities (description, mitre_id, country, motivation, malware_type, cvss, vendor). Returns one decision per entity in the batch with cited source URLs and a confidence rating.",
         "category": "maintenance",
         "variables": ["entity_type", "field", "field_guidance", "entities_block"],
         "default_system_template": """You are a senior cyber-threat-intelligence researcher filling missing fields in IntelFeed's entity catalog. You have access to WebFetch and WebSearch — use them to find authoritative information before answering.
@@ -1912,10 +1912,9 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
         "name": "entry_analysis",
         "display_name": "One-Pass Entry Analysis",
         "description": (
-            "Single consolidated extraction call per entry: summary, TTPs, actors, "
-            "malware, tools, countries, sectors, mitigations, severity. Runs broadly "
-            "at ingest via the batch queue (engine phase 4); replaces the per-task "
-            "extraction calls."
+            "One extraction call per entry: summary, TTPs, actors, malware, tools, "
+            "countries, sectors, mitigations, severity. Runs at ingest from the batch "
+            "queue and replaces the per-task extraction calls."
         ),
         "category": "extraction",
         "variables": ["entry.title", "entry.content_text", "entry.feed_title"],
@@ -2363,11 +2362,11 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
         "name": "entry_adjudication",
         "display_name": "Entry Adjudication (post-analysis review)",
         "description": (
-            "The adjudicate stage: after the one-pass analysis lands, re-reads the article next to a "
-            "manifest of everything the analysis wrote to the entry — links of every source, entities "
-            "it minted, pending-tier promotions, held matches it rejected, relationship claims, AI "
-            "observables, observable candidates nothing has captured — and returns a verdict for each "
-            "record it would change, and capture or drop for each candidate."
+            "The adjudicate stage. After the one-pass analysis lands, it re-reads the article next to a "
+            "list of everything the analysis wrote to the entry: links from every source, entities it "
+            "created, pending-tier promotions, held matches it rejected, relationship claims, AI "
+            "observables and uncaptured observable candidates. It returns a verdict for each record it "
+            "would change, and capture or drop for each candidate."
         ),
         "category": "extraction",
         "variables": ["entry.title", "entry.feed_title", "entry.content_text", "manifest_block", "item_count"],
@@ -2495,10 +2494,11 @@ Return strict JSON matching the provided schema: the verdicts list first, one ob
         "name": "relationship_review",
         "display_name": "Relationship Review (edge sweep)",
         "description": (
-            "The edge sweep: one relationship claim the per-article review left unsettled (unanswered, "
+            "The edge sweep. Judges one relationship the per-article review left unsettled (unanswered, "
             "unsure, or kept by one article and demoted by another), with the passages from up to four "
-            "of its articles. The model says whether any article states the claim as printed, states it "
-            "with another verb or the other way round, or does not state it, and quotes the sentence."
+            "of its articles. The model says whether any article states the relationship as written, "
+            "states it with another verb or the other way round, or does not state it, and quotes the "
+            "sentence."
         ),
         "category": "extraction",
         "variables": ["claim_block"],
@@ -2563,10 +2563,10 @@ Return strict JSON matching the provided schema: decision, suggested_verb ("" un
         "name": "entity_merge_review",
         "display_name": "Duplicate Entity Review (merge candidates)",
         "description": (
-            "The daily duplicate review: pairs of existing threat actors, malware families or tools "
-            "that look like the same thing (similar names or a shared alias) are put "
-            "side by side and the model says whether they are one entity. A 'same' verdict becomes a "
-            "Merge proposal on the Engine Review tab for a person to apply."
+            "The daily duplicate review. Pairs of existing threat actors, malware families or tools "
+            "that look like duplicates (similar names or a shared alias) are shown side by side and "
+            "the model says whether they are one entity. A 'same' verdict becomes a Merge proposal on "
+            "the Engine Review tab for a person to apply."
         ),
         "category": "extraction",
         "variables": ["pairs_block", "pair_count"],
@@ -2680,8 +2680,8 @@ verticals: {{ t.matched_sectors | join(', ') or 'none' }}; {{ t.entry_count }} e
 _REPORT_FAMILY_TASKS: list[dict] = [
     {
         "key": "exposure",
-        "display_name": "Report Sections — Exposure",
-        "description": "Narrative sections for Threat Exposure Reports (intel profile scopes: regions × verticals)",
+        "display_name": "Report Sections: Exposure",
+        "description": "Prose sections for Threat Exposure Reports (intel profile scopes: regions and verticals)",
         "extra_context": _EXPOSURE_SCOPE_CONTEXT,
         "extra_variables": ["profile_name", "scope", "threat_surface"],
         "system": """You are a senior threat intelligence analyst writing a section of a Threat Exposure Report.
@@ -2720,8 +2720,8 @@ Respond with valid JSON:
     },
     {
         "key": "flash_alert",
-        "display_name": "Report Sections — Flash Alert",
-        "description": "Narrative sections for Flash Alerts — rapid notification of emerging threats",
+        "display_name": "Report Sections: Flash Alert",
+        "description": "Prose sections for Flash Alerts: short notices of emerging threats",
         "extra_context": "",
         "extra_variables": [],
         "system": """You are a senior threat intelligence analyst writing a section of a Flash Alert.
@@ -2753,8 +2753,8 @@ Respond with valid JSON:
     },
     {
         "key": "actor_profile",
-        "display_name": "Report Sections — Actor Profile",
-        "description": "Narrative sections for Threat Actor Profiles — dossier-style actor documentation",
+        "display_name": "Report Sections: Actor Profile",
+        "description": "Prose sections for Threat Actor Profiles: dossier-style actor documentation",
         "extra_context": "",
         "extra_variables": [],
         "system": """You are a senior threat intelligence analyst writing a section of a Threat Actor Profile — a \
@@ -2792,8 +2792,8 @@ Respond with valid JSON:
     },
     {
         "key": "campaign_tracker",
-        "display_name": "Report Sections — Campaign Tracker",
-        "description": "Narrative sections for Campaign Trackers — living documents on active campaigns",
+        "display_name": "Report Sections: Campaign Tracker",
+        "description": "Prose sections for Campaign Trackers: documents on active campaigns that are updated over time",
         "extra_context": "",
         "extra_variables": [],
         "system": """You are a senior threat intelligence analyst updating a Campaign Tracker — a living document on \
@@ -2826,8 +2826,8 @@ Respond with valid JSON:
     },
     {
         "key": "landscape",
-        "display_name": "Report Sections — Landscape",
-        "description": "Narrative sections for Threat Landscape Reports — periodic strategic overviews",
+        "display_name": "Report Sections: Landscape",
+        "description": "Prose sections for Threat Landscape Reports: periodic strategic overviews",
         "extra_context": "",
         "extra_variables": [],
         "system": """You are a senior threat intelligence analyst writing a section of a periodic Threat Landscape \
@@ -2860,8 +2860,8 @@ Respond with valid JSON:
     },
     {
         "key": "detection",
-        "display_name": "Report Sections — Detection",
-        "description": "Narrative sections for Detection Engineering Reports — coverage, gaps, log sources",
+        "display_name": "Report Sections: Detection",
+        "description": "Prose sections for Detection Engineering Reports: coverage, gaps and log sources",
         "extra_context": "",
         "extra_variables": [],
         "system": """You are a senior detection engineer writing a section of a Detection Engineering Report.

@@ -176,7 +176,7 @@ zero day exploit
 
 - Every word must match. `ransomware attack APT29` is the same as `ransomware AND attack AND APT29`.
 - Results are ranked by relevance.
-- Small typos are forgiven: one typo in words of 4 or more letters, two in words of 8 or more.
+- Small typos are allowed: one typo in words of 4 or more letters, two in words of 8 or more.
 - The last word also matches as a prefix, so `ransom` finds "ransomware".
 - There is no stemming: `run` does not match `running`.
 - Matches are highlighted in the results.
@@ -273,7 +273,7 @@ Without `*`, `url:` matches anywhere in the link. With `*`, the pattern must mat
 | `new_pairing` | Two entities appear together for the first time |
 | `scoop` | First source to report it |
 | `source_convergence` | Independent sources are reporting the same thing |
-| `under_reported` | Few sources carried it, given how important it is |
+| `under_reported` | Few sources reported it, given how important it is |
 | `feed_echo` | Repeats something already covered |
 | `kev_added` | A CVE in the article joined CISA KEV |
 | `epss_jump` | A CVE's EPSS score rose sharply |
@@ -291,7 +291,7 @@ Use it with `sort:radar` to read the queue in the engine's order:
 signal:under_reported sort:radar
 ```
 
-`sector:` returns articles where the AI analysis judged that industry to be a *target*, not articles that just use the word. It matches the sector's name, slug or aliases (`banks`, `hospitals`).
+`sector:` returns articles where the AI analysis judged that industry to be a *target*, not articles that only use the word. It matches the sector's name, slug or aliases (`banks`, `hospitals`).
 
 `threat_actor.sector:` and `malware.sector:` are different: they match the sectors an actor or malware family is recorded as targeting.
 
@@ -359,7 +359,7 @@ sort:radar       # signal engine score, highest first
 
 Any other value is ignored.
 
-`sort:radar` uses the same score and order as the Priority Queue. That score lives in the database, not the search index, so a `sort:radar` query is answered from the database:
+`sort:radar` uses the same score and order as the Priority Queue. That score is stored in the database, not the search index, so a `sort:radar` query is answered from the database:
 
 - Articles with no score are left out.
 - Plain words and index filters (`tag:`, `type:`, `feed:`, `date:`, `is:starred` and the like) are ignored. Only entity filters, `signal:`, `url:`, `is:translated` and `is:image` apply.
@@ -446,7 +446,7 @@ ioc.reports:>0               # number of articles reporting it (indicator lists 
 ioc.feeds:>=2                # number of indicator feeds listing it
 ```
 
-`status` comes from confidence that fades over time since the last sighting. `aging` or `expired` is normal for an IP address that changes hands. Hashes and host artifacts never fade, so they stay `active`.
+`status` comes from confidence, which falls over time since the last sighting. `aging` or `expired` is normal for an IP address that changes hands. Hashes and host artifacts never lose confidence, so they stay `active`.
 
 **ATT&CK**
 
@@ -727,7 +727,7 @@ On this path:
 ### Result Limits & Pagination
 
 - Articles: 20 per page by default, up to 500 per request.
-- Entity records: `entity_limit` defaults to 200, maximum 500. The records with the most articles come first. The linked articles come from every match, not just the records returned.
+- Entity records: `entity_limit` defaults to 200, maximum 500. The records with the most articles come first. The linked articles come from every match, not only the records returned.
 - `entity_group_limit` defaults to 25, maximum 500: how many records of each type the response carries.
 - `entities.counts` is counted before that per-type cut, so the facet rail can say "Threat Actors 57" while showing 25.
 - Article totals from Meilisearch are estimates. From PostgreSQL they are exact.
@@ -760,7 +760,7 @@ Every note result also has `title`, `tags` and `match_field`.
 - For plain-word searches, a title match is `direct` and a body or tag match is `mention`.
 - Notes are listed after all other entity types.
 
-**Anyone on the instance can find any note.** Search shows every note, the same as the notes browser. Only the author or an admin can edit or delete one. Don't write anything in a note you wouldn't want a colleague to read.
+**Anyone on the instance can find any note.** Search shows every note, the same as the notes browser. Only the author or an admin can edit or delete one. Notes are not private.
 
 ---
 
@@ -802,7 +802,7 @@ On a phone, the rail opens from a **Filters** button.
 
 ### Did You Mean
 
-`country:North Korea` searches `country:North` plus the word `Korea`, and returns a plausible but wrong answer. When a value followed by the next word is a real value for that field, the results page offers the quoted version: `country:"North Korea"`. `threat_actor:APT29 ransomware` gets no suggestion, because no actor is called "APT29 ransomware".
+`country:North Korea` searches `country:North` plus the word `Korea`, and returns wrong results without an error. When a value followed by the next word is a real value for that field, the results page offers the quoted version: `country:"North Korea"`. `threat_actor:APT29 ransomware` gets no suggestion, because no actor is called "APT29 ransomware".
 
 Picking a value from the autocomplete adds the quotes for you.
 
@@ -943,7 +943,7 @@ Manufacturing victims posted by LockBit.
 threat_actor.via:ai_extraction threat_actor.articles:>10
 ```
 
-AI-created actors with more than 10 articles, worth reviewing.
+AI-created actors with more than 10 articles. These need review.
 
 ### Example 17: Some Feeds, One Quarter
 
@@ -1051,7 +1051,7 @@ Link to `/search?q=` with a URL-encoded query to open the results page with that
 9. **Feed grades are exact.** `feed.reliability:B` matches B only.
 10. **Some OR combinations don't work.** See [OR](#or-disjunction).
 11. **`note:` covers two tables.** Some note properties only apply to one kind of note (see [Notes](#entity-properties)).
-12. **`is:starred` and friends are shared.** The starred, read, bookmarked and noted flags in the search index show the last change anyone made.
+12. **`is:starred` and the other state flags are shared.** The starred, read, bookmarked and noted flags in the search index show the last change anyone made.
 13. **Search history stays in your browser.** The last 10 searches are kept in this browser and shown when the box is empty. Save a search to keep it on the server.
 
 ### Debugging Queries

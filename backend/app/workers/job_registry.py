@@ -129,7 +129,7 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "task": "app.workers.thread_tasks.rebuild_story_threads",
         "description": (
             "Group embedded entries into story threads: attach new articles to the story they "
-            "continue, seed threads for stories that just broke, and fold near-duplicate re-reports."
+            "continue, start threads for new stories, and group near-duplicate re-reports."
         ),
         "category": "intelligence",
         "default_schedule": {"type": "interval", "seconds": 7200},
@@ -138,8 +138,8 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "settings_keys": ["thread_narrate_limit"],
         "task": "app.workers.thread_tasks.narrate_story_threads",
         "description": (
-            "Write the AI spine for threads that changed since their last narration — title, "
-            "summary and one beat per wave. Threads render a heuristic spine without it."
+            "Write the AI timeline for threads that changed since the last run: title, summary and "
+            "one update per wave of reporting. Without it, threads show a timeline built without AI."
         ),
         "category": "intelligence",
         "uses_ai": True,
@@ -160,7 +160,7 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
             "Draft AI assessments for entities that have linked reporting but no description yet "
             "(same output as the profile AI-refresh button; never overwrites text it did not "
             "write itself). Also re-writes its own assessments once enough new reporting has "
-            "landed to make them stale. Skips CVEs \u2014 their descriptions come from NVD."
+            "landed to make them stale. Skips CVEs, whose descriptions come from NVD."
         ),
         "category": "intelligence",
         "uses_ai": True,
@@ -179,10 +179,10 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         ],
         "task": "app.workers.relationship_sweep_tasks.sweep_relationships",
         "description": (
-            "Judge the relationship claims the per-article review left open, one claim at a time with "
-            "passages from up to four of its articles. In shadow mode the answers are only recorded; in "
-            "apply mode a stated claim is kept, a wrong verb or direction corrected, and an unstated "
-            "claim hidden. Waits while the AI queue is deep."
+            "Judge the relationships the per-article review left open, one at a time, with passages "
+            "from up to four of their articles. In shadow mode the answers are only recorded. In apply "
+            "mode a relationship an article states is kept, a wrong verb or direction is corrected, and "
+            "one no article states is hidden. Waits while the AI queue is deep."
         ),
         "category": "intelligence",
         "uses_ai": True,
@@ -198,10 +198,10 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         ],
         "task": "app.workers.entity_maintenance_tasks.review_duplicate_entities",
         "description": (
-            "Put the catalogue's most likely duplicate pairs of actors, malware and tools in front of "
-            "the model (similar names, a shared alias, or the same articles) and file a Merge proposal "
-            "on the Review tab for each pair it calls the same thing. Nothing is merged until a person "
-            "applies it; a pair judged different is not asked again for the retry window."
+            "Send the catalogue's most likely duplicate pairs of actors, malware and tools to the model "
+            "(similar names, a shared alias, or the same articles) and file a Merge proposal on the "
+            "Review tab for each pair it calls the same. Nothing is merged until a person applies it. "
+            "A pair judged different is not asked again until the retry window passes."
         ),
         "category": "intelligence",
         "uses_ai": True,
@@ -235,14 +235,14 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "retro-sight-observables": {
         "task": "app.workers.maintenance.retro_sight_observables",
-        "description": "Exact-string retro-sighting of recently confirmed observables across the corpus",
+        "description": "Find exact-string sightings of recently confirmed observables in earlier entries",
         "category": "maintenance",
         "default_schedule": {"type": "crontab", "minute": "40", "hour": "*/6"},
     },
     "decay-observable-confidence": {
         "settings_keys": ["observables_decay_enabled"],
         "task": "app.workers.maintenance.decay_observable_confidence",
-        "description": "Nightly confidence decay and lifecycle transitions for the observables ledger",
+        "description": "Nightly confidence decay and lifecycle transitions for the observables list",
         "category": "maintenance",
         "default_schedule": {"type": "crontab", "minute": "20", "hour": "2"},
     },
@@ -378,7 +378,7 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "enrichment-pause-sync": {
         "task": "app.workers.enrichment_dispatch_tasks.sync_enrichment_pause",
-        "description": "Re-assert the enrichment pause flag in Redis from the database",
+        "description": "Re-apply the enrichment pause flag in Redis from the database",
         "category": "enrichment",
         "default_schedule": {"type": "interval", "seconds": 60},
         "options": {"expires": 60},
@@ -409,7 +409,7 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
     # than alongside it.
     "rank-threat-board": {
         "task": "app.workers.maintenance.rank_threat_board",
-        "description": "Recompute the Threats ranking, reopen handled threats with new tradecraft",
+        "description": "Recompute the Threats ranking and reopen handled threats that show a new technique",
         "category": "intelligence",
         "default_schedule": {"type": "crontab", "minute": "20", "hour": "4"},
     },
@@ -424,7 +424,7 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "settings_keys": ["threat_brief_limit"],
         "task": "app.workers.maintenance.generate_threat_briefs",
         "description": (
-            "Write the two-sentence story line for each open Threats and vulnerability row from its window's articles"
+            "Write the two-sentence summary for each open Threats and vulnerability row from the articles in its window"
         ),
         "category": "intelligence",
         "uses_ai": True,
@@ -539,7 +539,7 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
             "signal_engine_surface",
         ],
         "task": "app.workers.signal_tasks.rescore_all_entries",
-        "description": "Full rescore of every scored entry — heals stored signals/explanations (run on demand)",
+        "description": "Full rescore of every scored entry. Repairs stored signals and explanations (run on demand)",
         "category": "intelligence",
         # Manual-only: disabled in beat by default so a corpus-wide sweep never
         # fires automatically. Use the Run now button. The schedule is only a
@@ -554,7 +554,7 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
             "reddit_digest_max_entries",
         ],
         "task": "app.workers.reddit_digest_tasks.generate_reddit_digest",
-        "description": "Generate daily AI-powered digest of top Reddit security posts",
+        "description": "Generate the daily AI digest of top Reddit security posts",
         "category": "content",
         "uses_ai": True,
         "default_schedule": {"type": "crontab", "minute": "0", "hour": "7"},
@@ -564,8 +564,8 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "task": "app.workers.daily_summary_tasks.generate_daily_summaries",
         "description": (
             "Pre-generate yesterday's shared Triage daily-divider summary (all users), then record "
-            "the briefing's own `### Theme` grouping of the day's articles (free — it re-reads "
-            "cached markdown, no extra AI call)"
+            "the briefing's own `### Theme` grouping of the day's articles (re-reads the cached "
+            "markdown; no extra AI call)"
         ),
         "category": "content",
         "uses_ai": True,
@@ -581,7 +581,10 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
     "prune-engine-tables": {
         "settings_keys": ["engine_run_retention_days"],
         "task": "app.workers.maintenance.prune_engine_tables",
-        "description": "Delete engine bookkeeping rows older than 30 days (job_runs, …)",
+        "description": (
+            "Delete engine bookkeeping rows past the Engine Run Retention window (job runs, pipeline runs, "
+            "AI request rows)"
+        ),
         "category": "maintenance",
         "default_schedule": {"type": "crontab", "minute": "40", "hour": "2"},
     },

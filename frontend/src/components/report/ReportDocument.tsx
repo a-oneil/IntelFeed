@@ -133,7 +133,7 @@ export function SectionItemsTable({ items }: { items: Record<string, unknown>[] 
       <ul className={styles.docList}>
         {items.map((it, i) => (
           <li key={i}>
-            <span className={styles.docMono}>{cell(it.date)?.slice(0, 10) || "?"}</span> — {cell(it.title)}
+            <span className={styles.docMono}>{cell(it.date)?.slice(0, 10) || "?"}</span>: {cell(it.title)}
           </li>
         ))}
       </ul>
@@ -164,7 +164,7 @@ export function SectionItemsTable({ items }: { items: Record<string, unknown>[] 
         <li key={i}>
           <b>{cell(it.name)}</b>
           {it.aliases ? ` (${cell(it.aliases)})` : ""}
-          {it.malware_type ? ` — ${cell(it.malware_type)}` : ""}
+          {it.malware_type ? ` (${cell(it.malware_type)})` : ""}
         </li>
       ))}
     </ul>

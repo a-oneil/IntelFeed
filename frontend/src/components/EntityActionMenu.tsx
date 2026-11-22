@@ -217,7 +217,7 @@ export default function EntityActionMenu({
 
           <button className={styles.menuItem} onClick={handleCopy}>
             <span className={styles.menuIcon}>&#x2398;</span>
-            {copied ? "Copied!" : "Copy"}
+            {copied ? "Copied" : "Copy"}
           </button>
 
           {entity.entryId && (

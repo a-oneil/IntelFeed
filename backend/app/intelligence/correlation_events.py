@@ -494,7 +494,7 @@ async def create_new_exploit_discovered_event(
         related_entity_type="cve",
         related_entity_id=cve_uuid,
         related_entity_label=cve_id_str,
-        context=f"{cve_id_str}: {poc_count} public exploit(s) found — {urls_summary}",
+        context=f"{cve_id_str}: {poc_count} public exploit(s) found: {urls_summary}",
     )
     return await _persist_single_event(db, event)
 

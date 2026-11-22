@@ -124,7 +124,7 @@ class MergeRequest(BaseModel):
     reasoning: str | None = Field(
         default=None,
         max_length=2000,
-        description="Why this merge — recorded in the maintenance log.",
+        description="Why this merge. Recorded in the maintenance log.",
     )
 
     model_config = ConfigDict(
@@ -891,7 +891,10 @@ async def perform_reclassify(
     if body.source_type == body.target_type:
         raise AppError(
             code="invalid",
-            message="reclassify is for cross-type moves — use merge endpoints for same-type",
+            message=(
+                "Source and target are the same type. Reclassify moves an entity to another type; "
+                "use merge for two entities of one type."
+            ),
             status_code=400,
         )
     src_spec = _get_type_spec(body.source_type)
@@ -925,8 +928,8 @@ async def perform_reclassify(
             raise AppError(
                 code="invalid",
                 message=(
-                    f"entity name {source.name!r} already exists in {body.target_type} "
-                    f"(id={name_conflict}); pass target_id to merge into it instead of creating a duplicate"
+                    f"An entity named {source.name!r} already exists in {body.target_type} "
+                    f"(id={name_conflict}). Pass target_id to merge into it instead of creating a duplicate."
                 ),
                 status_code=409,
             )
@@ -955,8 +958,8 @@ async def perform_reclassify(
         else (target.description if target else source.description),
         "dropped_source_id": str(body.source_id),
         "fields_dropped_on_reclassify": (
-            "type-specific (motivation, malware_type, vendor_id, tool_type, etc.) — "
-            "set via update_entity_profile if needed"
+            "type-specific (motivation, malware_type, vendor_id, tool_type, etc.). "
+            "Set them with update_entity_profile if needed."
         ),
     }
 

@@ -82,7 +82,7 @@ export function SendToReportModal() {
               }}
             >
               <span className={styles.itemTitle}>AI report from this</span>
-              <span className={styles.itemMeta}>Pick a template — sections draft from the selected sources</span>
+              <span className={styles.itemMeta}>Pick a template. Sections are drafted from the selected sources.</span>
             </button>
           )}
           <button
@@ -93,7 +93,7 @@ export function SendToReportModal() {
             }}
           >
             <span className={styles.itemTitle}>Threat Exposure Report</span>
-            <span className={styles.itemMeta}>From an intel profile — regions × verticals</span>
+            <span className={styles.itemMeta}>From an intel profile, by region and vertical.</span>
           </button>
         </div>
 

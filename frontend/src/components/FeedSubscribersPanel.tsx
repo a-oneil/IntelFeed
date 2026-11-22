@@ -43,7 +43,7 @@ export function FeedSubscribersPanel({
         res.added === 0
           ? "Everyone was already subscribed"
           : `Added ${res.added} ${res.added === 1 ? "reader" : "readers"}${
-              res.is_active ? "" : " — feed is paused"
+              res.is_active ? "" : " (feed is paused)"
             }`
       );
     } catch {
@@ -90,15 +90,14 @@ export function FeedSubscribersPanel({
         // Without the flag the sidebar ignores this table entirely, so an admin
         // staring at a roster that doesn't match what people see needs telling.
         <p className={styles.flagNote}>
-          Per-user subscriptions are off, so everyone currently sees every feed.
-          These rows are kept up to date and become each analyst's real list the
-          moment the setting is turned on.
+          Per-user subscriptions are off, so every user sees every feed. These
+          rows are kept current and take effect when the setting is turned on.
         </p>
       )}
 
       {subscribers.length === 0 ? (
         <p className={styles.muted}>
-          Nobody reads {feedTitle ? `“${feedTitle}”` : "this feed"} yet.
+          No one is subscribed to {feedTitle ? `“${feedTitle}”` : "this feed"} yet.
         </p>
       ) : (
         <ul className={styles.list}>

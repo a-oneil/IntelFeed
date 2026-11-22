@@ -35,7 +35,7 @@ When a code is set, **Copy Invite Link** copies a register link with the code
 filled in. Send that instead of the bare code.
 
 The code is one shared secret, valid until you change it or turn registration
-off. Send it like a password and change it after a group has joined.
+off. Treat it like a password and change it after a group has joined.
 
 ## Managing accounts
 
@@ -47,11 +47,11 @@ or Inactive), **Feeds** (how many it subscribes to), **Last Login** and
   (at least six characters).
 - **Delete**: removes the account for good, after you confirm.
 
-An inactive account can't sign in, and an open session stops working on its
+An inactive account cannot sign in, and an open session stops working on its
 next request. Make someone **Inactive** when they leave to keep their name on
 their notes.
 
-An admin can't remove their own admin role, or deactivate or delete their own
+An admin cannot remove their own admin role, or deactivate or delete their own
 account. Ask another admin.
 
 ## Letting people browse without an account
@@ -83,7 +83,7 @@ Full details: [Public read-only mode](../public-read-only-mode.md).
 
 ## One feed list, or one per person
 
-By default there's one shared feed list: a feed anyone adds is read by
+By default there is one shared feed list: a feed anyone adds is read by
 everyone, and **muting** a feed hides it for everyone.
 
 To give each analyst their own list from the shared pool, an admin turns on
@@ -99,7 +99,8 @@ To give each analyst their own list from the shared pool, an admin turns on
 - **New accounts** start with the same subscriptions as the earliest admin.
 
 **Check your muted feeds before you turn it on.** Mutes made while the setting
-is off aren't recorded on anyone's personal list, so those feeds show up again
-for everyone. Note which feeds are muted first, and mute them again afterwards.
+is off are not recorded on anyone's personal list, so those feeds show up
+again for everyone. Note which feeds are muted first, and mute them again
+afterwards.
 
 Next: [When something isn't working](troubleshooting.md)

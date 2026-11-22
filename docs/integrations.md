@@ -96,7 +96,7 @@ Custom payload values are JSON-escaped; other fields (such as article ID) are on
 **Network safety.** Webhook URLs are checked and the connection pinned to the checked address, so DNS changes can't redirect it; redirects aren't followed.
 
 - Webhooks may reach private ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) unless `WEBHOOK_ALLOW_PRIVATE_NETWORKS=false` in `.env`.
-- Loopback (127.0.0.0/8, `::1`, `localhost`) and link-local (169.254.0.0/16 — cloud metadata — plus `fe80::/10` and `fd00:ec2::254`) are always refused.
+- Loopback (127.0.0.0/8, `::1`, `localhost`) and link-local (169.254.0.0/16, used for cloud metadata, plus `fe80::/10` and `fd00:ec2::254`) are always refused.
 - Feeds, linked articles, transcripts, manual ingest, feed discovery and the image proxy share the guard (`backend/app/core/safe_http.py`) but refuse private ranges unless `OUTBOUND_ALLOW_PRIVATE_NETWORKS=true`.
 
 ### 1. Slack Notifications
@@ -132,7 +132,7 @@ Custom payload values are JSON-escaped; other fields (such as article ID) are on
 
 `channel` is sent only if set; long AI summaries split across blocks.
 
-Batch mode sends the AI summary or your template, else a list of matched articles under "IntelFeed Digest — N entries", split if long.
+Batch mode sends the AI summary or your template, else a list of matched articles under "IntelFeed Digest: N entries", split if long.
 
 ---
 
@@ -329,7 +329,7 @@ curl -X POST "https://YOUR_WORKSPACE.ods.opinsights.azure.com/api/logs?api-versi
 
 #### 6d. Indicator Feeds (EDL, Lookup CSV, TAXII 2.1)
 
-Firewalls, SIEMs and TIPs can pull the indicator (observable) ledger: active, recently seen indicators above a confidence floor, minus shared infrastructure (CDNs, VPN exits). Off by default; enable in **Settings → Engine → Publishing**:
+Firewalls, SIEMs and TIPs can pull the observables list: active, recently seen indicators above a confidence floor, minus shared infrastructure (CDNs, VPN exits). Off by default; enable in **Settings → Engine → Publishing**:
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
@@ -731,7 +731,7 @@ With an OpenAI API key that has credit:
 
 ### 16. Configure Local Ollama
 
-**Pick a model.** A ~9B tool-calling model is a good start, such as `qwen3.5:9b` on an 8 GB GPU. Model plus context must fit in GPU memory, or Ollama spills to CPU and slows sharply.
+**Pick a model.** A ~9B tool-calling model is a good start, such as `qwen3.5:9b` on an 8 GB GPU. Model plus context must fit in GPU memory, or Ollama moves part of the model to the CPU and runs much slower.
 
 ```bash
 # On the Ollama host
@@ -739,7 +739,7 @@ ollama pull qwen3.5:9b
 ollama ps            # while a request runs: PROCESSOR should say 100% GPU
 ```
 
-**Keep the context small.** Context is sized per prompt, up to 32,768 tokens by default — too much for 9B on 8 GB. Either:
+**Keep the context small.** Context is sized per prompt, up to 32,768 tokens by default, which is too much for a 9B model on 8 GB. Either:
 
 - set **Context cap** `16384` in **Configure**, or
 - start Ollama with `OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q8_0`, roughly halving context memory.
@@ -983,6 +983,6 @@ For email, add a **Send Email** action, or a **Run Webhook** to an email relay (
 - [automation-ai-enrichment.md](automation-ai-enrichment.md): AI tasks, prompts and enrichment in depth.
 - [api-reference.md](api-reference.md): all endpoints.
 - [query-language.md](query-language.md): search syntax for `search_entries` and `/api/search/unified`.
-- [observables.md](observables.md): the indicator ledger behind published feeds.
+- [observables.md](observables.md): the observables list behind published feeds.
 - [guide/automation-and-ai.md](guide/automation-and-ai.md): building automation rules.
 - [guide/searching.md](guide/searching.md): searching.

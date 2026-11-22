@@ -51,8 +51,8 @@ export function statusOf(x: EnrichmentConsoleSource): { word: string; tone: Tone
 }
 
 export const SENDS: Record<EnrichmentEgress, string> = {
-  none: "nothing (downloads a file)",
-  low: "public ids (a CVE, a name)",
+  none: "nothing (the source is downloaded as a file)",
+  low: "public identifiers only, such as a CVE id or a name",
   shares_ioc: "your indicators",
 };
 

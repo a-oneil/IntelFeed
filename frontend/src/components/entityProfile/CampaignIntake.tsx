@@ -114,7 +114,7 @@ export function CampaignIntake({
       label: group.title,
       why:
         group.held > 0
-          ? `you hold ${group.held} of ${group.total}`
+          ? `${group.held} of ${group.total} already in the campaign`
           : `${group.items.length} articles, one story`,
       count: group.items.length,
       preview: group.items.slice(0, 5),
@@ -146,7 +146,7 @@ export function CampaignIntake({
   return (
     <div className={`${styles.panel} ${styles.intakePanel}`}>
       <div className={styles.intakeHead}>
-        <div className={styles.panelTitle}>Feeding this campaign</div>
+        <div className={styles.panelTitle}>Campaign intake</div>
         {!composing && (
           <button className={styles.intakeBtn} onClick={() => setComposing(true)}>
             Add intake
@@ -156,8 +156,8 @@ export function CampaignIntake({
 
       {nothingFeeding && !composing && (
         <p className={styles.intakeEmpty}>
-          Nothing arrives on its own — every article here was added by hand. Add intake to follow a query, an
-          entity or a story, and the next wave arrives without being asked for.
+          No automatic intake is set up. Every article here was added by hand. Add intake to follow a query, an
+          entity or a story, and new matching articles are added automatically.
         </p>
       )}
 
@@ -202,7 +202,7 @@ export function CampaignIntake({
                     onError: (err) =>
                       toast.error(
                         (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data
-                          ?.error?.message || "Failed to rewrite",
+                          ?.error?.message || "Could not save the query",
                       ),
                   },
                 );
@@ -248,7 +248,7 @@ export function CampaignIntake({
                   {
                     onSuccess: (r) =>
                       toast.success(r.entries_added > 0 ? `Added ${r.entries_added}` : "Nothing new"),
-                    onError: () => toast.error("Sync failed"),
+                    onError: () => toast.error("Could not run the source"),
                   },
                 )
               }
@@ -303,7 +303,7 @@ export function CampaignIntake({
                       toast.success(
                         r.new_entries_added > 0 ? `Added ${r.new_entries_added}` : "Nothing new matched",
                       ),
-                    onError: () => toast.error("Sync failed"),
+                    onError: () => toast.error("Could not run the source"),
                   },
                 )
               }
@@ -333,7 +333,7 @@ export function CampaignIntake({
           {/* Linking a saved search moved into the composer's own tab — it is
               one of four ways to add intake, not a verb belonging to offers. */}
           <div className={styles.intakeOffersHead}>
-            <span>Could take</span>
+            <span>Suggested intake</span>
           </div>
 
           {offers.map((offer) => {
@@ -363,7 +363,7 @@ export function CampaignIntake({
                             { campaignId, entryIds: offer.entryIds! },
                             {
                               onSuccess: (r) => toast.success(`Added ${r.added} articles`),
-                              onError: () => toast.error("Failed to add"),
+                              onError: () => toast.error("Could not add the articles"),
                             },
                           )
                         }
@@ -375,7 +375,7 @@ export function CampaignIntake({
                       <button
                         className={styles.intakeBtn}
                         disabled={addSource.isPending}
-                        title="Take these and every later one, without being asked again"
+                        title="Add these articles and every later match automatically"
                         onClick={() =>
                           addSource.mutate(
                             {
@@ -386,7 +386,7 @@ export function CampaignIntake({
                             },
                             {
                               onSuccess: (s) => toast.success(`Following ${s.label}`),
-                              onError: () => toast.error("Failed to follow"),
+                              onError: () => toast.error("Could not follow"),
                             },
                           )
                         }
@@ -398,7 +398,7 @@ export function CampaignIntake({
                       className={styles.intakeBtn}
                       onClick={() => setOpen(isOpen ? null : offer.key)}
                     >
-                      {isOpen ? "Hide" : "What?"}
+                      {isOpen ? "Hide" : "Articles"}
                     </button>
                   </span>
                 </div>
@@ -430,8 +430,8 @@ export function CampaignIntake({
 
           {looseCount > 0 && (
             <div className={`${styles.intakePreviewNote} ${styles.intakeFootnote}`}>
-              {looseCount} further article{looseCount === 1 ? "" : "s"} match this campaign's entities but
-              never clustered into a story.
+              {looseCount} more article{looseCount === 1 ? "" : "s"} match this campaign's entities but
+              are not part of a story.
             </div>
           )}
         </div>

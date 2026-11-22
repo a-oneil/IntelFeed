@@ -31,7 +31,7 @@ export default function MorningBriefingWidget({ config }: Props) {
   if (!data?.summary) {
     return (
       <div className={styles.noData}>
-        No briefing yet — daily summaries generate overnight, or run one from the reader&apos;s day divider
+        No briefing yet. Daily summaries are generated overnight, or run one from the reader&apos;s day divider.
       </div>
     );
   }

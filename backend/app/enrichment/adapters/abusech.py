@@ -339,7 +339,7 @@ class ThreatFoxAdapter(_AbuseCh):
             "threatfox-sync",
             "app.workers.enrichment_tasks.run_threatfox_sync",
             {"type": "crontab", "minute": "35", "hour": "4"},
-            "Match the ledger's active observables against ThreatFox's IOC export: families, role and context",
+            "Match active observables against ThreatFox's IOC export: families, role and context",
         ),
     )
     outputs = (
@@ -478,7 +478,7 @@ class URLhausAdapter(_AbuseCh):
             "urlhaus-sync",
             "app.workers.enrichment_tasks.run_urlhaus_sync",
             {"type": "crontab", "minute": "50", "hour": "*/6"},
-            "Match the ledger's active URLs, domains and IPs against the URLhaus dump: status, tags and families",
+            "Match active URL, domain and IP observables against the URLhaus dump: status, tags and families",
         ),
     )
     outputs = (

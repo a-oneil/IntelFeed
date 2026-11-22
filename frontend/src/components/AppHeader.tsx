@@ -69,8 +69,8 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
       <div className={styles.actions}>
         {!isMobile && !isVisitor && (
           <Hint
-            title="Jump to anything"
-            body="Find any article, entity, feed or rule by name — and run actions like Add feed or New report."
+            title="Command palette"
+            body="Find any article, entity, feed or rule by name, or run actions like Add feed or New report."
             aside={<>Press <kbd>{isMac ? "⌘K" : "Ctrl K"}</kbd> from anywhere.</>}
             align="end"
           >
@@ -129,7 +129,7 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
             )}
             <Hint
               title="Documentation"
-              body="Guides for every part of IntelFeed, with a copilot that answers out of them."
+              body="Guides for every part of IntelFeed, with a copilot that answers from them."
               align="end"
             >
               <button
@@ -199,7 +199,7 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
                 if (
                   !(await confirmDialog({
                     title: "Log out?",
-                    message: "You'll need to sign in again to get back to your feeds.",
+                    message: "You will need to sign in again.",
                     confirmLabel: "Log out",
                   }))
                 )

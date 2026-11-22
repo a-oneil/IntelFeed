@@ -8,7 +8,7 @@ import styles from "./NodeStyles.module.css";
 const TRIGGER_TYPES = [
   { value: "on_new_entry", label: "New Entry" },
   { value: "on_entry_scored", label: "Entry Scored (Signal Engine)" },
-  { value: "on_observable_captured", label: "Observable Captured (IOC Ledger)" },
+  { value: "on_observable_captured", label: "Observable Captured (IOC)" },
   { value: "on_schedule", label: "Schedule (Cron)" },
   { value: "on_keyword_match", label: "Keyword Match" },
   { value: "on_cve_detected", label: "CVE Detected" },
@@ -196,8 +196,8 @@ export const TriggerNode = memo(function TriggerNode({ data }: NodeProps) {
           }
           className={styles.select}
         >
-          <option value="per_entry">Per entry — actions run on each entry individually</option>
-          <option value="batch">Batch — all entries processed together (digest/briefing)</option>
+          <option value="per_entry">Per entry: actions run on each entry separately</option>
+          <option value="batch">Batch: all entries processed together (digest or briefing)</option>
         </select>
         <span className={styles.hint}>
           {(triggerConfig?.execution_mode as string) === "batch"
@@ -377,8 +377,8 @@ export const TriggerNode = memo(function TriggerNode({ data }: NodeProps) {
         {triggerType === "on_observable_captured" && (
           <div className={styles.fieldGroup}>
             <span className={styles.hint}>
-              Fires once per article when a reporting door (one-pass AI, the article's IOC table, analyst promote)
-              captures an observable. Blocklist feeds never fire it.
+              Fires once per article when an observable is captured by AI analysis, the article&apos;s IOC table
+              or analyst promotion. Blocklist feeds never fire it.
             </span>
             <label className={styles.fieldLabel}>Kinds (comma-separated, blank = any)</label>
             <input

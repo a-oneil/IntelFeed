@@ -270,13 +270,13 @@ function spanLabel(es: NonNullable<EntitySearchResult["evidence_structure"]>): s
 export interface StructurePhrase {
   /** The bold shape word ("recurring", "one story"). */
   lead: string;
-  /** The muted remainder ("— 4 incidents over 6 months"). */
+  /** The muted remainder ("across 4 incidents over 6 months"). */
   rest: string;
 }
 
 /**
  * Evidence phrase for a row, split so the row can bold the shape word and
- * mute the rest ("**recurring** — 2 incidents over 6 months"). Null for thin
+ * mute the rest ("**recurring** across 2 incidents over 6 months"). Null for thin
  * rows (their fold label already says it) and when no structure is available.
  */
 export function structurePhrase(item: EntitySearchResult): StructurePhrase | null {
@@ -287,7 +287,7 @@ export function structurePhrase(item: EntitySearchResult): StructurePhrase | nul
       const span = spanLabel(es);
       return {
         lead: "recurring",
-        rest: `— ${es.stories.length} incidents${span ? ` over ${span}` : ""}`,
+        rest: `across ${es.stories.length} incidents${span ? ` over ${span}` : ""}`,
       };
     }
     case "single_story": {
@@ -296,11 +296,11 @@ export function structurePhrase(item: EntitySearchResult): StructurePhrase | nul
       if (st.title) {
         return {
           lead: "one story",
-          rest: `— “${st.title}”${st.sources && st.sources > 1 ? ` · ${st.sources} outlets` : ""}`,
+          rest: `“${st.title}”${st.sources && st.sources > 1 ? ` · ${st.sources} outlets` : ""}`,
         };
       }
       if (st.sources && st.sources >= 10) {
-        return { lead: "one story", rest: `— a single ${st.sources}-outlet wave` };
+        return { lead: "one story", rest: `carried by ${st.sources} outlets` };
       }
       if (st.sources && st.sources > 1) {
         return { lead: "one story", rest: `· ${st.sources} outlets` };
@@ -308,7 +308,7 @@ export function structurePhrase(item: EntitySearchResult): StructurePhrase | nul
       return { lead: "one story", rest: `· ${st.entries} of ${es.sampled} articles` };
     }
     case "scattered":
-      return { lead: "no shared story", rest: "— scattered co-mentions" };
+      return { lead: "no shared story", rest: "(scattered co-mentions)" };
     case "thin":
       return null;
   }

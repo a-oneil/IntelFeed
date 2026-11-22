@@ -683,7 +683,7 @@ class ClaudeCodeProvider(AIProvider):
             # Auth failures vs other binary errors for operator clarity.
             if "login" in lower or "auth" in lower or "credentials" in lower:
                 raise RuntimeError(
-                    "claude CLI auth failed — re-run `claude /login` or `claude setup-token` "
+                    "claude CLI auth failed. Re-run `claude /login` or `claude setup-token` "
                     f"inside celery-worker-ai. stderr: {err[:500]}"
                 )
             raise RuntimeError(f"claude CLI exited {proc.returncode}: {err[:500] or '(no stderr)'}")

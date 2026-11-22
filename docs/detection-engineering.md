@@ -534,7 +534,7 @@ See [DetectionRuleVersion](#detectionruleversion) for how versions are made and 
 
 Related endpoints on the rule page:
 
-- `GET /detection-rules/{id}/fresh-intel`: articles about the rule's CVEs or techniques that arrived **after** the rule was last edited. A sign the rule may be going stale.
+- `GET /detection-rules/{id}/fresh-intel`: articles about the rule's CVEs or techniques that arrived **after** the rule was last edited. This suggests the rule may be out of date.
 - `GET /detection-rules/{id}/related`: rules that share a CVE or technique, other formats of the same rule, and near-duplicates.
 - `GET /detection-rules/{id}/commits`: the upstream GitHub commit history, for mirrored rules. The sync (`backend/app/services/github_rule_import.py`) appends each new commit here and, when the body changes, saves the body it replaces as a version (`Upstream <sha>: <message>`), so the History tab can diff one upstream state against the next.
 

@@ -440,7 +440,7 @@ def render_athf_markdown(
         f"- **Hunter:** {hunter}",
         "- **Status:** Planning",
         f"- **MITRE ATT&CK:** {', '.join(techniques) if techniques else 'n/a'}",
-        f"- **Source:** IntelFeed threat board — {label} ({pack['window']} window, exported {day})",
+        f"- **Source:** IntelFeed threat board, {label} ({pack['window']} window, exported {day})",
         "",
         "## LEARN: Prepare the Hunt",
         "",
@@ -505,7 +505,7 @@ def render_athf_markdown(
         "### What Normal Looks Like",
     ]
     for h in hyps:
-        normal = h.get("false_positives") or "Not described — establish the baseline before the hunt."
+        normal = h.get("false_positives") or "Not described. Establish the baseline before the hunt."
         lines.append(f"- {h['id']}: {normal}")
     lines += ["", "### What Suspicious Looks Like"]
     for h in hyps:

@@ -104,7 +104,7 @@ Useful for attaching a debugger or running pytest from your editor. Start only t
 docker compose -f docker-compose.dev.yml up db redis meilisearch
 ```
 
-The backend reads `.env` from the folder it starts in, so give `backend/` its own copy and point it at the ports Docker publishes. `backend/.env` is gitignored. Inside the containers the compose `env_file` values still win, so this copy does not affect the Docker stack.
+The backend reads `.env` from the folder it starts in, so give `backend/` its own copy and point it at the ports Docker publishes. `backend/.env` is gitignored. Inside the containers the compose `env_file` values still take precedence, so this copy does not affect the Docker stack.
 
 ```bash
 cd backend
@@ -162,7 +162,7 @@ This installs the app's dependencies plus the test tools (pytest, pytest-asyncio
 
 Commit the lockfiles with your change. CI re-runs `./lock.sh` and fails if the output differs. The production image installs only `requirements.lock`, so test tools never ship.
 
-**Only Python 3.14 is supported.** `backend/Dockerfile` is `python:3.14.9`, every container that runs app code is built from it, and CI tests only that version (`requires-python = ">=3.14"`). Two places depend on standard-library details that changed between versions, and work them out at run time instead of assuming: `urllib.robotparser` group handling (`app/services/robots.py`) and `fnmatch.translate` output (`app/adapters/github_content_types.py`). Keep them that way.
+**Only Python 3.14 is supported.** `backend/Dockerfile` is `python:3.14.9`, every container that runs app code is built from it, and CI tests only that version (`requires-python = ">=3.14"`). Two places depend on standard-library details that differ between Python versions and detect them at run time: `urllib.robotparser` group handling (`app/services/robots.py`) and `fnmatch.translate` output (`app/adapters/github_content_types.py`). Keep them that way.
 
 ### Code Quality
 

@@ -2187,8 +2187,8 @@ async def gate_aliases(
                 before={"entity": canonical_name, "alias": form, "source": source},
                 after={"reason": "cve_id"},
                 reasoning=(
-                    f"Alias '{form}' for {entity_type} '{canonical_name}' is a CVE identifier — "
-                    f"not written (belongs in entity_relationships, not the alias list)"
+                    f"Alias '{form}' for {entity_type} '{canonical_name}' was not written: it is a CVE id, "
+                    f"which belongs in relationships, not in the alias list"
                 ),
             )
             continue
@@ -2226,8 +2226,8 @@ async def gate_aliases(
                     before={"entity": canonical_name, "alias": form, "source": source},
                     after={"owners": [{"entity_id": str(r.entity_id), "surface": r.surface} for r in conflicts]},
                     reasoning=(
-                        f"Alias '{form}' for {entity_type} '{canonical_name}' already belongs to another "
-                        f"entity — not written (cross-entity collision)"
+                        f"Alias '{form}' for {entity_type} '{canonical_name}' was not written: it already "
+                        f"belongs to another entity"
                     ),
                 )
                 continue  # collisions are dropped even in shadow
@@ -2268,8 +2268,8 @@ async def gate_aliases(
                         }
                     },
                     reasoning=(
-                        f"Alias '{form}' for {entity_type} '{canonical_name}' is the canonical name of "
-                        f"{owner.entity_type} '{owner.surface}' — not written (cross-type collision)"
+                        f"Alias '{form}' for {entity_type} '{canonical_name}' was not written: it is the "
+                        f"canonical name of {owner.entity_type} '{owner.surface}'"
                     ),
                 )
                 continue

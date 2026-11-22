@@ -87,7 +87,7 @@ describe("ThreadRow", () => {
     renderRow();
 
     expect(screen.getByText("BlueMoon exploit kit")).toBeInTheDocument();
-    expect(screen.getByText("7 outlets · 11 articles · 4 new · 2 folded")).toBeInTheDocument();
+    expect(screen.getByText("7 outlets · 11 articles · 4 new · 2 grouped")).toBeInTheDocument();
     expect(screen.getByText("Chrome")).toBeInTheDocument();
     expect(screen.getByText("◆ 9.2")).toBeInTheDocument();
   });
@@ -98,7 +98,7 @@ describe("ThreadRow", () => {
 
     expect(screen.getByText("Volexity documents the chain")).toBeInTheDocument();
     expect(screen.getByText("First")).toBeInTheDocument();
-    expect(screen.getByText("2 re-reports folded")).toBeInTheDocument();
+    expect(screen.getByText("2 re-reports grouped")).toBeInTheDocument();
   });
 
   it("opens the thread on the title and the entry on a beat", () => {

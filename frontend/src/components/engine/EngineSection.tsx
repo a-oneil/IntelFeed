@@ -165,7 +165,7 @@ export function EngineSection() {
           {browse === "plans" && (
             <>
               <PipelinePlans />
-              <p className={styles.browseHint}>Engine-wide switches for plan-based stage composition.</p>
+              <p className={styles.browseHint}>These settings apply to pipeline plans engine-wide.</p>
               <SystemSettings filterGroups={["plans"]} hideGroupTitle />
             </>
           )}
@@ -179,10 +179,10 @@ export function EngineSection() {
           {browse === "publishing" && <PublishingPanel />}
           {browse === "maintenance" && (
             <>
-              <p className={styles.browseHint}>Global sweeps and destructive resets — run rarely.</p>
+              <p className={styles.browseHint}>These are global sweeps and destructive resets. Run them rarely.</p>
               <MaintenancePanel />
               <p className={styles.browseHint}>
-                Actor-refresh, assessment-backfill and narrative-theme settings.
+                These settings control actor refresh, assessment backfill and briefing themes.
               </p>
               {/* Two blocks, not one call with both groups: the "Maintenance" group
                   title would just repeat this view's own heading, so it stays

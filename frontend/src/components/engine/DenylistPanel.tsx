@@ -57,11 +57,11 @@ export function DenylistPanel() {
       setNewName("");
       toast.success(
         newType === "any"
-          ? `"${name}" won't be created as any entity type`
-          : `"${name}" won't be created as ${TYPE_LABEL[newType].toLowerCase()}`,
+          ? `"${name}" will not be created as any entity type`
+          : `"${name}" will not be created as ${TYPE_LABEL[newType].toLowerCase()}`,
       );
     } catch {
-      toast.error("Couldn't add that name");
+      toast.error("Could not add the name");
     }
   };
 
@@ -71,9 +71,9 @@ export function DenylistPanel() {
         Do-not-recreate list <span className={styles.count}>{total}</span>
       </h4>
       <p className={styles.sub}>
-        Names the extract stage won&apos;t mint, whatever an article says. Deleting an entity from{" "}
-        <strong>Engine › Entities</strong> or its profile adds it here (with its aliases) and to{" "}
-        <strong>Autolink → False Positive Names</strong>. Removing a row lifts both.
+        This list holds names the extract stage never creates as entities, whatever an article says. Deleting an
+        entity from <strong>Engine › Entities</strong> or its profile adds it here (with its aliases) and
+        to <strong>Autolink → False Positive Names</strong>. Removing a row removes it from both lists.
       </p>
 
       <div className={styles.filters}>

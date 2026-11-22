@@ -17,10 +17,10 @@ const COPY: Record<AutolinkNameList, { heading: string; sub: React.ReactNode; ad
     heading: "False positive names",
     sub: (
       <>
-        Surface forms the autolinker never matches — they&apos;re dropped when the vocabulary is built, so
-        no entry links to an entity through them. Deleting an entity with <strong>don&apos;t re-create it</strong>{" "}
-        adds its names here as well. Vendors, products, tools and mitigations deliberately ignore this
-        list, since their real names are common brand words.
+        This list holds names the autolinker never matches. They are dropped when the vocabulary is built, so no entry
+        links to an entity through them. Deleting an entity with <strong>don&apos;t re-create it</strong>{" "}
+        adds its names here too. Vendors, products, tools and mitigations ignore this list, since their
+        real names are often common words.
       </>
     ),
     addPlaceholder: "Name to never match…",
@@ -29,12 +29,13 @@ const COPY: Record<AutolinkNameList, { heading: string; sub: React.ReactNode; ad
     heading: "Blocked everywhere",
     sub: (
       <>
-        Written when an analyst picks <strong>Never match &ldquo;…&rdquo; anywhere</strong> from a
-        highlighted entity in the reader. Unlike the list above, these bind for <em>every</em> entity
-        type — including vendors and products. Remove one to let it match again.
+        This list holds names blocked for every entity type. A name is added when an analyst picks{" "}
+        <strong>Never match &ldquo;…&rdquo; anywhere</strong> on a highlighted entity in the reader. Unlike the
+        list above, these apply to <em>every</em> entity type, including vendors and products. Remove one to
+        let it match again.
       </>
     ),
-    addPlaceholder: "Form to block everywhere…",
+    addPlaceholder: "Name to block everywhere…",
   },
 };
 
@@ -60,9 +61,9 @@ export function FpNamesPanel({ list = "fp" }: { list?: AutolinkNameList }) {
     try {
       await addName.mutateAsync(name);
       setNewName("");
-      toast.success(`"${name}" won't be autolinked`);
+      toast.success(`"${name}" will not be autolinked`);
     } catch {
-      toast.error("Couldn't add that name");
+      toast.error("Could not add the name");
     }
   };
 

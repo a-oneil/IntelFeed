@@ -84,7 +84,7 @@ export function OverviewPane({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }
 
       <MutedAIUsage feed={feed} isAdmin={isAdmin} />
 
-      {value.isLoading && <p className={styles.note}>Working out what this feed has produced…</p>}
+      {value.isLoading && <p className={styles.note}>Loading what this feed has produced…</p>}
 
       {v?.scored && (
         <>
@@ -108,7 +108,7 @@ export function OverviewPane({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }
 
       {value.data && !value.data.scored && (
         <p className={styles.note}>
-          Nothing to grade yet — this feed has not produced any intelligence in
+          Nothing to grade yet. This feed has not produced any intelligence in
           the last 90 days.
         </p>
       )}
@@ -186,7 +186,7 @@ export function OverviewPane({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }
         <span className={styles.hint}>
           {feed.last_reviewed_at
             ? formatDateTime(feed.last_reviewed_at)
-            : "Never rated. The Assessment tab is where you record what you make of it."}
+            : "Never rated. Record a rating under Assessment."}
         </span>
       </div>
     </div>

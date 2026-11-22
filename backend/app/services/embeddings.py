@@ -113,9 +113,9 @@ async def resolve_provider(db: AsyncSession) -> tuple[AIProvider, str]:
         # Ollama host to embed with. Say so once per sweep rather than
         # dialling http://ollama:11434 and logging a connection error.
         raise EmbeddingsNotConfigured(
-            "no Ollama provider and no embedding_base_url — add an Ollama provider "
-            "under Settings → AI Configuration (serving the embedding model) or set "
-            "embedding_base_url, or turn embeddings_enabled off"
+            "No Ollama provider and no embedding_base_url is configured. Add an Ollama provider "
+            "under Settings > AI Configuration (serving the embedding model), set "
+            "embedding_base_url, or turn embeddings_enabled off."
         )
 
     return OllamaProvider(base_url=base_url or DEFAULT_BASE_URL, api_key=api_key), model

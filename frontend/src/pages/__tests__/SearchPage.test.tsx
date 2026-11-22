@@ -393,7 +393,7 @@ describe("SearchPage unknown fields", () => {
 
     expect(screen.getByText("titel:")).toBeInTheDocument();
     expect(screen.getByText(/is not a search field/)).toBeInTheDocument();
-    expect(screen.getByText(/searched as plain text instead/)).toBeInTheDocument();
+    expect(screen.getByText(/Searched as plain text instead/)).toBeInTheDocument();
   });
 
   it("pluralises when several fields are unrecognised", () => {

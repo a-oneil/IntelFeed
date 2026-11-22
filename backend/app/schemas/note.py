@@ -13,7 +13,7 @@ class NoteCreate(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "title": "APT29 phishing wave — tracking",
+                "title": "APT29 phishing wave: tracking",
                 "content_markdown": "Spearphishing (T1566.001) against EU ministries. Watch for **LockBit** follow-on.",
                 "tags": ["apt29", "phishing"],
                 "is_pinned": False,
@@ -31,7 +31,7 @@ class NoteUpdate(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "title": "APT29 phishing wave — confirmed",
+                "title": "APT29 phishing wave: confirmed",
                 "content_markdown": "Campaign confirmed by two sources; CVE-2024-3400 exploited for initial access.",
                 "is_pinned": True,
             }

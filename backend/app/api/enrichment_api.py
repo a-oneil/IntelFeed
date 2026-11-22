@@ -421,7 +421,11 @@ async def enrich_entity(
         entity, "name", None
     )
     if not entity_value:
-        raise AppError(code="no_lookup_value", message="Entity has nothing to look up by", status_code=400)
+        raise AppError(
+            code="no_lookup_value",
+            message="This entity has no value to look up: no identifier and no name.",
+            status_code=400,
+        )
     adapter_entity_type = body.entity_type
 
     results = await pipeline_enrich(

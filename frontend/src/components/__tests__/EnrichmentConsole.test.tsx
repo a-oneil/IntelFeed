@@ -174,7 +174,7 @@ const keys: EnrichmentKey[] = [
   {
     id: "abuse_ch",
     label: "abuse.ch Auth-Key",
-    note: "Needed. One key for all 3 sources.",
+    note: "Required. One key covers all 3 sources.",
     required: true,
     sources: [
       { source_type: "threatfox", label: "abuse.ch ThreatFox" },

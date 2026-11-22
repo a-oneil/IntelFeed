@@ -138,7 +138,7 @@ function windowPhrase(window: string): string {
 }
 
 function tierNote(rule: PriorRuleItem): string {
-  if (!rule.tier) return "no matching source — cannot fire here";
+  if (!rule.tier) return "no matching source, cannot fire here";
   if (rule.missing.length > 0) return `needs ${rule.missing.slice(0, 2).join(", ")}`;
   return "fires against your telemetry";
 }
@@ -173,7 +173,7 @@ function VerdictLine({
       {counts.inert > 0 && (
         <>
           {" "}
-          <b className={styles.numInert}>{counts.inert}</b> {counts.inert === 1 ? "cannot" : "cannot"} — you collect
+          <b className={styles.numInert}>{counts.inert}</b> {counts.inert === 1 ? "cannot" : "cannot"}: you collect
           no {cats || "matching"} source for {counts.inert === 1 ? "it" : "them"}.
         </>
       )}
@@ -425,7 +425,7 @@ export function CoverageWorkspace({
     if (items.length === 0) return;
     saveSet.mutate(
       {
-        title: `${label} — ${window}`,
+        title: `${label} (${window})`,
         window,
         items: items.map((i) => ({
           op: i.op,
@@ -451,7 +451,7 @@ export function CoverageWorkspace({
 
   const requireSaved = (): string | null => {
     if (!summaryId) {
-      toast.info("Save the set first — export reads the stored set");
+      toast.info("Save the set first. Export reads the saved set.");
       return null;
     }
     return summaryId;
@@ -500,8 +500,8 @@ export function CoverageWorkspace({
     if (bucket) entityIds[bucket] = [entityKey];
 
     const gaps = skipped.length
-      ? `Known gaps — ${skipped.length} rule${skipped.length === 1 ? "" : "s"} considered and not adopted:\n\n` +
-        skipped.map((i) => `- ${i.title}${i.reason ? ` — ${i.reason}` : ""}`).join("\n")
+      ? `Known gaps: ${skipped.length} rule${skipped.length === 1 ? "" : "s"} considered and not adopted:\n\n` +
+        skipped.map((i) => `- ${i.title}${i.reason ? `: ${i.reason}` : ""}`).join("\n")
       : undefined;
 
     const entryIds = (data?.articles ?? []).filter((a) => a.contributed).map((a) => a.entry_id);
@@ -510,7 +510,7 @@ export function CoverageWorkspace({
       entryIds,
       entityIds: Object.keys(entityIds).length > 0 ? entityIds : undefined,
       note: gaps,
-      label: `${label} — ${adopted.length} rule${adopted.length === 1 ? "" : "s"}`,
+      label: `${label}: ${adopted.length} rule${adopted.length === 1 ? "" : "s"}`,
       // The wizard is entry-seeded and carries no entity evidence, so a set
       // started this way arrives without its rules; sending again once the
       // draft exists attaches them. Offered anyway because without it the modal
@@ -531,7 +531,7 @@ export function CoverageWorkspace({
     setOpenId((prev) => (prev === techniqueId ? null : techniqueId));
   };
 
-  if (isLoading) return <AsyncStateLoading label="Reading coverage" />;
+  if (isLoading) return <AsyncStateLoading label="Loading coverage" />;
   if (!data) return <div className={styles.empty}>No workspace for this entity.</div>;
 
   const ribbon = (["ok", "warn", "bad", "inert"] as VerdictKey[])
@@ -568,7 +568,7 @@ export function CoverageWorkspace({
               {counts.ok > 0 && (
                 <span>
                   <i style={{ background: "var(--success, #3fb950)" }} />
-                  {counts.ok} adoptable today
+                  {counts.ok} adoptable
                 </span>
               )}
               {counts.warn > 0 && (
@@ -580,13 +580,13 @@ export function CoverageWorkspace({
               {counts.bad > 0 && (
                 <span>
                   <i style={{ background: "var(--danger, #f85149)" }} />
-                  {counts.bad} nothing in the library
+                  {counts.bad} no library rule
                 </span>
               )}
               {counts.inert > 0 && (
                 <span>
                   <i style={{ background: "var(--text-muted)" }} />
-                  {counts.inert} no log source — a collection job
+                  {counts.inert} no log source
                 </span>
               )}
             </div>
@@ -642,8 +642,8 @@ export function CoverageWorkspace({
           size="sm"
         />
         <span className={styles.controlsNote}>
-          ordered by what to do next
-          {belowLine.length > 0 && ` · ${belowLine.length} held below`}
+          ordered by next action
+          {belowLine.length > 0 && ` · ${belowLine.length} without a log source`}
         </span>
       </div>
 
@@ -682,15 +682,15 @@ export function CoverageWorkspace({
                 </div>
               ) : (
                 <div className={styles.evidenceNone}>
-                  No sentence was captured for {behaviour.technique_id} — it was carried by a tag, not by prose.
+                  No sentence was captured for {behaviour.technique_id}. It came from a tag, not article text.
                 </div>
               )}
 
-              {rulesLoading && <AsyncStateLoading label="Reading the library" />}
+              {rulesLoading && <AsyncStateLoading label="Loading candidate rules" />}
 
               {!rulesLoading && candidates.length === 0 && (
                 <div className={styles.evidenceNone}>
-                  Nothing in the library resolves to this behaviour — this is one to write.
+                  No library rule matches this technique. Write a new one.
                 </div>
               )}
 
@@ -718,7 +718,7 @@ export function CoverageWorkspace({
                           {rule.scope === "threat" ? ` · names ${label}` : ""}
                           {rule.confidence === "low" && (
                             <Chip size="sm" tone="quiet" tint="var(--severity-medium, #d29922)">
-                              weak match
+                              partial match
                             </Chip>
                           )}
                         </span>
@@ -745,7 +745,7 @@ export function CoverageWorkspace({
                         <button
                           type="button"
                           className={styles.btnQuiet}
-                          title="Persisted with the set — exports render skips as known gaps"
+                          title="Saved with the set. Exports list skipped rules as known gaps."
                           onClick={() =>
                             addItem(
                               "skip",
@@ -796,7 +796,7 @@ export function CoverageWorkspace({
             <Chip size="sm" tone="quiet">
               {belowLine.length}
             </Chip>
-            <b>Below the line</b> — no matching source in your inventory
+            <b>No log source</b>: no matching source in your inventory
           </summary>
           <div className={styles.foldBody}>
             <p>
@@ -830,13 +830,13 @@ export function CoverageWorkspace({
             <Chip size="sm" tone="quiet">
               {articleTotal}
             </Chip>
-            <b>Where this came from</b> — {contributed} carried a technique
+            <b>Source articles</b>: {contributed} carried a technique
           </summary>
           <div className={styles.foldBody}>
             <p>
               {contributed} of {articleTotal} {articleTotal === 1 ? "article" : "articles"} {windowPhrase(window)}{" "}
-              carried a technique. The rest are recaps and leak-site notices — real activity, no tradecraft. They are
-              counted, not listed.
+              carried a technique. The rest are recaps and leak-site notices with no techniques. They are counted,
+              not listed.
             </p>
             <div className={styles.articles}>
               {(data.articles ?? [])
@@ -887,7 +887,7 @@ export function CoverageWorkspace({
                     tint="var(--warning, #d29922)"
                     title={`${saved.upstream_moved.length} adopted rule${
                       saved.upstream_moved.length === 1 ? "" : "s"
-                    } changed upstream since this set was saved — worth a re-read`}
+                    } changed upstream since this set was saved. Review them.`}
                   >
                     upstream moved
                   </Chip>
@@ -918,7 +918,7 @@ export function CoverageWorkspace({
         <span className={styles.trayLabel}>Set</span>
         <div className={styles.trayItems}>
           {items.length === 0 ? (
-            <span className={styles.trayEmpty}>Empty — adopt, extend or draft from a behaviour to start one.</span>
+            <span className={styles.trayEmpty}>Empty. Adopt, extend or draft a rule from a technique to start one.</span>
           ) : (
             items.map((item, index) => (
               <span key={`${item.op}-${item.rule_id ?? item.technique_id}-${index}`} className={styles.trayChip}>

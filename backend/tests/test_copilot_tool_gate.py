@@ -417,7 +417,7 @@ async def test_openai_server_that_rejects_tools_answers_without_them(monkeypatch
 
     events = [e async for e in provider.stream_agent(prompt="q", tools=tools, tool_executor=never)]
     text = "".join(e["text"] for e in events if e["kind"] == "text")
-    assert "didn't accept tools" in text and text.endswith("plain answer")
+    assert "did not accept tools" in text and text.endswith("plain answer")
     assert "tools" not in bodies[-1]
 
 

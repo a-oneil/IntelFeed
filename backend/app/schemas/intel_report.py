@@ -162,7 +162,7 @@ class IntelReportExposureGenerate(BaseModel):
         json_schema_extra={
             "example": {
                 "profile_id": "d5b2f1c8-3a4e-4b6d-9c2f-8e7a1b3c5d4e",
-                "title": "Exposure — FinServ & Healthcare portfolio · Sep",
+                "title": "Exposure: FinServ & Healthcare portfolio, September",
                 "tlp_marking": "TLP:AMBER",
                 "actor_ids": ["0b9a4c2d-1e3f-4a5b-8c7d-9e0f1a2b3c4d"],
             }
@@ -179,7 +179,7 @@ class IntelReportAttach(BaseModel):
         None,
         max_length=4000,
         description=(
-            "Prose to seed the detections section body — the sender's commentary on the "
+            "Prose to seed the detections section body: the sender's commentary on the "
             "evidence, e.g. a coverage set's skipped rules rendered as known gaps. "
             "Never overwrites a body an analyst has already written."
         ),
@@ -193,7 +193,7 @@ class IntelReportAttach(BaseModel):
                     "actors": ["0b9a4c2d-1e3f-4a5b-8c7d-9e0f1a2b3c4d"],
                     "detection_rules": ["3421400a-30cb-4f0c-b05e-86289a2e5fcc"],
                 },
-                "note": "Known gaps: 4 rules skipped — no scanner in the inventory.",
+                "note": "Known gaps: 4 rules skipped, no scanner in the inventory.",
             }
         }
     )

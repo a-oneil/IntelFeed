@@ -303,7 +303,7 @@ async def upsert_my_route(
     elif body.task_id is None:
         raise AppError(
             code="validation_error",
-            message="The default route needs a key; remove it to go back to the instance's providers.",
+            message="The default route needs a key. Remove the route to go back to the instance's providers.",
             status_code=400,
         )
 

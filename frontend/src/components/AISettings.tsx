@@ -137,7 +137,7 @@ function ProviderHealthBanner({ onGoToProviders }: { onGoToProviders?: () => voi
               {paused.length === 1
                 ? `${paused[0].name} is auto-paused`
                 : `${paused.length} providers are auto-paused`}
-              {paused[0]?.paused_reason ? ` — ${paused[0].paused_reason}` : ""}
+              {paused[0]?.paused_reason ? `: ${paused[0].paused_reason}` : ""}
               {paused.length === 1 && paused[0].paused_until
                 ? ` (until ${formatDate(paused[0].paused_until)})`
                 : ""}
@@ -286,17 +286,17 @@ function OllamaConfigEditor({ provider, onClose }: { provider: AIProvider; onClo
         <thead>
           <tr>
             <th>Model</th>
-            <th title="Reasoning models (qwen, deepseek-r1) think before answering — better judgment, much slower, and the thinking eats the output budget. Off by default.">
+            <th title="Reasoning models (qwen, deepseek-r1) think before answering. Better judgment, much slower, and the thinking counts against the output budget. Off by default.">
               Thinking
             </th>
-            <th title="Cap for the auto-sized context window. Prompts are fitted automatically; this bounds how large a window can be requested. Bigger = more RAM.">
+            <th title="Upper limit for the auto-sized context window. Prompts are fitted automatically; this bounds how large a window can be requested. Larger windows use more RAM.">
               Context cap
             </th>
             <th title="Pin an exact context window and disable auto-sizing. Usually leave empty.">
               Fixed context
             </th>
             <th title="Per-request timeout in seconds.">Timeout (s)</th>
-            <th title="How long the model stays loaded in memory after a request — e.g. 30m, 1h, or -1 to never unload. Avoids the cold-load penalty on the first request after idle. Ollama's server default is 5m.">
+            <th title="How long the model stays loaded in memory after a request, e.g. 30m, 1h, or -1 to never unload. Avoids a cold load on the first request after idle. Ollama's server default is 5m.">
               Keep alive
             </th>
           </tr>
@@ -309,29 +309,29 @@ function OllamaConfigEditor({ provider, onClose }: { provider: AIProvider; onClo
         </tbody>
       </table>
       {!provider.models.length && (
-        <p className={styles.hint}>No models cached yet — run Test on this provider to load them.</p>
+        <p className={styles.hint}>No models cached yet. Run Test on this provider to load them.</p>
       )}
       <details className={styles.serverTuning}>
         <summary>Server-side tuning (set on the Ollama host, not here)</summary>
         <p>
-          These are environment variables on the Ollama server process itself — IntelFeed cannot set
-          them over the API. Add them to the Ollama container/service env and restart it:
+          These are environment variables on the Ollama server process. IntelFeed cannot set them
+          over the API. Add them to the Ollama container or service environment and restart it:
         </p>
         <ul>
           <li>
-            <code>OLLAMA_FLASH_ATTENTION=1</code> — enables flash attention; prerequisite for KV cache
+            <code>OLLAMA_FLASH_ATTENTION=1</code>:enables flash attention; prerequisite for KV cache
             quantization and faster long-context prompts.
           </li>
           <li>
-            <code>OLLAMA_KV_CACHE_TYPE=q8_0</code> — halves context-window memory with negligible
+            <code>OLLAMA_KV_CACHE_TYPE=q8_0</code>:halves context-window memory with negligible
             quality loss, so large context caps fit on the GPU instead of spilling to CPU.
           </li>
           <li>
-            <code>OLLAMA_KEEP_ALIVE=1h</code> — server-wide default for the Keep alive column (a value
+            <code>OLLAMA_KEEP_ALIVE=1h</code>:server-wide default for the Keep alive column (a value
             set here in the panel overrides it per request).
           </li>
           <li>
-            <code>OLLAMA_NUM_PARALLEL=1</code> — concurrent requests per model. Leave at 1 on small
+            <code>OLLAMA_NUM_PARALLEL=1</code>:concurrent requests per model. Leave at 1 on small
             GPUs: each parallel slot multiplies context-window memory.
           </li>
         </ul>
@@ -452,7 +452,7 @@ function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider;
   return (
     <div className={styles.configPanel}>
       <div className={styles.formActions} style={{ flexWrap: "wrap", gap: "0.75rem" }}>
-        <label title="The model used when a task assignment doesn't name one, and the one onboarding routes every task at. Must be an id the server lists.">
+        <label title="The model used when a task assignment does not name one, and the one onboarding routes every task at. Must be an id the server lists.">
           Default model
           <input
             type="text"
@@ -491,7 +491,7 @@ function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider;
             <option value="false">no</option>
           </select>
         </label>
-        <label title="Lets the copilot and agentic tasks call IntelFeed tools on this server. Hosted APIs (OpenAI, OpenRouter, Groq) handle this well. Turn it off for a local server that doesn't; a server that refuses tools also gets a text-only answer on its own.">
+        <label title="Lets the copilot and agentic tasks call IntelFeed tools on this server. Hosted APIs (OpenAI, OpenRouter, Groq) handle this well. Turn it off for a local server that does not; a server that refuses tools also gets a text-only answer on its own.">
           Tool calling
           <select value={toolsEnabled ? "" : "false"} onChange={(e) => setToolsEnabled(e.target.value !== "false")}>
             <option value="">on (default)</option>
@@ -507,7 +507,7 @@ function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider;
             onChange={(e) => set("timeout_seconds", e.target.value)}
           />
         </label>
-        <label title="Floor applied to the engine's temperature. Local grammar-constrained decoding at 0.0 can loop on long extraction prompts — try 0.2 if a task hangs or returns truncated JSON. Hosted APIs don't usually need this.">
+        <label title="Floor applied to the engine's temperature. Local grammar-constrained decoding at 0.0 can loop on long extraction prompts. Try 0.2 if a task hangs or returns truncated JSON. Hosted APIs do not usually need this.">
           Min temperature
           <input
             type="number"
@@ -519,7 +519,7 @@ function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider;
         </label>
       </div>
       <div className={styles.formActions} style={{ flexWrap: "wrap", gap: "0.75rem" }}>
-        <label title="Dollar rate per 1M input tokens — used to compute cost on the Cost Dashboard. Leave both blank for a free/local endpoint.">
+        <label title="Dollar rate per 1M input tokens, used to compute cost on the Cost Dashboard. Leave both blank for a free or local endpoint.">
           Input $/1M tok
           <input
             type="number"
@@ -547,7 +547,7 @@ function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider;
           </select>
         </label>
       </div>
-      <label title="Merged into the request payload last — the escape hatch for vendor options such as chat_template_kwargs (Qwen3 thinking toggle on vLLM/llama.cpp) or OpenRouter's provider routing block. Must be a JSON object.">
+      <label title="Merged into the request payload last. Use it for vendor options such as chat_template_kwargs (Qwen3 thinking toggle on vLLM/llama.cpp) or OpenRouter's provider routing block. Must be a JSON object.">
         Extra body (JSON)
         <textarea
           rows={4}
@@ -629,7 +629,7 @@ function ProvidersSection() {
       </div>
 
       <p className={styles.hint}>
-        Add a provider to enable AI features — an API key provider (Claude), a self-hosted
+        Add a provider to enable AI features: an API key provider (Claude), a self-hosted
         server (Ollama), or any OpenAI-compatible endpoint (OpenAI, LM Studio, vLLM, llama.cpp,
         OpenRouter, LiteLLM, Groq).
       </p>
@@ -905,7 +905,7 @@ function ByUserTable({ breakdown }: { breakdown: AICostBreakdown }) {
     if (r.caller_kind === "system") return "pipeline work";
     if (r.caller_kind === "automation") return "counted as pipeline";
     if (r.caller_kind === "share") return "always instance";
-    if (r.caller_kind === "unattributed") return "history can't be rebuilt";
+    if (r.caller_kind === "unattributed") return "caller not recorded";
     return null;
   };
 
@@ -947,7 +947,7 @@ function ByUserTable({ breakdown }: { breakdown: AICostBreakdown }) {
                   </td>
                   <td className={styles.num}>{r.requests.toLocaleString()}</td>
                   <td className={styles.num}>{formatUsd(r.instance_cost)}</td>
-                  <td className={styles.num}>{Number(r.own_key_cost) > 0 ? formatUsd(r.own_key_cost) : "—"}</td>
+                  <td className={styles.num}>{Number(r.own_key_cost) > 0 ? formatUsd(r.own_key_cost) : "$0"}</td>
                   <td>
                     {r.caller_kind === "user" ? (
                       allowance > 0 ? (
@@ -1023,9 +1023,9 @@ function CostSection() {
           </div>
           <div className={styles.costCard}>
             <span className={styles.costLabel}>User keys</span>
-            <span className={styles.costValue}>{breakdown ? formatUsd(breakdown.user_key_cost_30d) : "—"}</span>
+            <span className={styles.costValue}>{breakdown ? formatUsd(breakdown.user_key_cost_30d) : "n/a"}</span>
             <span className={styles.costSub}>
-              {people} {people === 1 ? "person" : "people"} · not billed to you
+              {people} {people === 1 ? "person" : "people"} · paid by the key owners
             </span>
           </div>
           <div className={styles.costCard}>
@@ -1038,7 +1038,7 @@ function CostSection() {
           </div>
           <div className={styles.costCard}>
             <span className={styles.costLabel}>Unpriced</span>
-            <span className={styles.costValue}>{breakdown ? compactCount(breakdown.unpriced_requests_30d) : "—"}</span>
+            <span className={styles.costValue}>{breakdown ? compactCount(breakdown.unpriced_requests_30d) : "n/a"}</span>
             <span className={styles.costSub}>requests at $0 (Ollama, unpriced models)</span>
           </div>
         </div>
@@ -1062,11 +1062,11 @@ function CostSection() {
                   background: "var(--bg-secondary)",
                 }}
               >
-                <strong>{b.display_name}</strong> — ${Number(b.spend_30d).toFixed(2)}
+                <strong>{b.display_name}</strong>: ${Number(b.spend_30d).toFixed(2)}
                 {b.max_budget_usd != null && (
                   <> of ${Number(b.max_budget_usd).toFixed(2)} ({pct}%)</>
                 )}
-                {over && " — over budget"}
+                {over && " (over budget)"}
               </div>
             );
           })}
