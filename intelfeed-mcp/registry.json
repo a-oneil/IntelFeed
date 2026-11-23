@@ -2402,13 +2402,23 @@
  },
  {
   "name": "get_entry",
-  "description": "Fetch a single RSS entry by ID with full content and all extracted intelligence: TTPs, CVEs, CWEs, threat actors, malware, tools, vendors, products, countries, and mitigations.",
+  "description": "Fetch a single RSS entry by ID with its content and all extracted intelligence: TTPs, CVEs, CWEs, threat actors, malware, tools, vendors, products, countries, and mitigations. The body comes back one window at a time, but the entities cover the whole article — when `truncated` is true, call again with `offset` set to `next_offset` to read the rest.",
   "input_schema": {
    "type": "object",
    "properties": {
     "entry_id": {
      "type": "string",
      "description": "Entry UUID"
+    },
+    "offset": {
+     "type": "integer",
+     "default": 0,
+     "description": "Character offset into the body"
+    },
+    "max_chars": {
+     "type": "integer",
+     "default": 8000,
+     "description": "Body characters to return (1–20000)"
     }
    },
    "required": [

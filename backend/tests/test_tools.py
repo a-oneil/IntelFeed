@@ -124,3 +124,59 @@ async def test_get_cve_includes_article_count(client: AsyncClient, auth_headers:
     assert "error" not in result
     assert result["cve_id"] == "CVE-2024-99999"
     assert result["article_count"] == 1
+
+
+async def _get_entry(client: AsyncClient, auth_headers: dict, **args) -> dict:
+    import json
+
+    resp = await client.post("/api/tools/execute", json={"tool_name": "get_entry", "args": args}, headers=auth_headers)
+    assert resp.status_code == 200
+    return json.loads(resp.json()["result"])
+
+
+@pytest.mark.asyncio
+async def test_get_entry_short_body_is_whole(client: AsyncClient, auth_headers: dict, test_entry):
+    result = await _get_entry(client, auth_headers, entry_id=str(test_entry.id))
+    assert result["content"] == test_entry.content_text
+    assert result["content_length"] == len(test_entry.content_text)
+    assert result["truncated"] is False
+    assert result["next_offset"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_entry_pages_a_long_body(client: AsyncClient, auth_headers: dict, db_session, test_entry):
+    """Regression: a long newsletter's body was cut at 8,000 characters with no way to read on,
+    while its entity links pointed at paragraphs past the cut."""
+    body = "a" * 8000 + "Qilin dox counter-claims" + "b" * 5000
+    test_entry.content_text = body
+    await db_session.flush()
+
+    first = await _get_entry(client, auth_headers, entry_id=str(test_entry.id))
+    assert first["content_length"] == len(body)
+    assert first["truncated"] is True
+    assert first["next_offset"] == 8000
+    assert "Qilin" not in first["content"]
+    assert "continue with offset=8000" in first["content"]
+
+    rest = await _get_entry(client, auth_headers, entry_id=str(test_entry.id), offset=first["next_offset"])
+    assert rest["content_offset"] == 8000
+    assert rest["content"].startswith("Qilin dox counter-claims")
+    assert rest["truncated"] is False
+    assert rest["next_offset"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_entry_clamps_window(client: AsyncClient, auth_headers: dict, db_session, test_entry):
+    test_entry.content_text = "x" * 30000
+    await db_session.flush()
+
+    capped = await _get_entry(client, auth_headers, entry_id=str(test_entry.id), max_chars=10**6)
+    assert capped["next_offset"] == 20000
+
+    tiny = await _get_entry(client, auth_headers, entry_id=str(test_entry.id), max_chars=0, offset=-5)
+    assert tiny["content_offset"] == 0
+    assert tiny["next_offset"] == 1
+
+    past_end = await _get_entry(client, auth_headers, entry_id=str(test_entry.id), offset=99999)
+    assert past_end["content"] == ""
+    assert past_end["truncated"] is False

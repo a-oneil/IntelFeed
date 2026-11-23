@@ -28,6 +28,10 @@ _RULE_TYPES = sorted(RULE_TYPE_PATTERN.strip("^$()").split("|"))
 # All registered feed adapter types, derived from the adapter registry.
 _FEED_TYPES = sorted({*_ADAPTERS, *_EXTENDED_ADAPTERS})
 
+# get_entry returns the body in windows: the default size, and the most one call may ask for.
+_ENTRY_WINDOW = 8000
+_ENTRY_WINDOW_CAP = 20000
+
 # Response key per entity type for entry-level intelligence payloads
 # (ENTITY_CONFIG in app.intelligence.correlation is the canonical junction map).
 _ENTITY_RESULT_KEYS = {
@@ -65,26 +69,46 @@ def _brief_entity(entity_type: str, ent) -> dict:
 @_tool(
     name="get_entry",
     description=(
-        "Fetch a single RSS entry by ID with full content and all extracted intelligence: "
-        "TTPs, CVEs, CWEs, threat actors, malware, tools, vendors, products, countries, and mitigations."
+        "Fetch a single RSS entry by ID with its content and all extracted intelligence: "
+        "TTPs, CVEs, CWEs, threat actors, malware, tools, vendors, products, countries, and mitigations. "
+        "The body comes back one window at a time, but the entities cover the whole article — when "
+        "`truncated` is true, call again with `offset` set to `next_offset` to read the rest."
     ),
     input_schema={
         "properties": {
             "entry_id": {"type": "string", "description": "Entry UUID"},
+            "offset": {"type": "integer", "default": 0, "description": "Character offset into the body"},
+            "max_chars": {
+                "type": "integer",
+                "default": _ENTRY_WINDOW,
+                "description": f"Body characters to return (1–{_ENTRY_WINDOW_CAP})",
+            },
         },
         "required": ["entry_id"],
     },
 )
-async def _get_entry(db: AsyncSession, user_id: uuid.UUID, entry_id: str) -> dict:
+async def _get_entry(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    entry_id: str,
+    offset: int = 0,
+    max_chars: int = _ENTRY_WINDOW,
+) -> dict:
     eid = uuid.UUID(entry_id)
     result = await db.execute(select(Entry).where(Entry.id == eid))
     entry = result.scalar_one_or_none()
     if not entry:
         return {"error": "Entry not found"}
 
-    content = entry.content_text or entry.content_html or ""
-    if len(content) > 8000:
-        content = content[:8000] + "\n...[truncated]"
+    # The autolinker scans the whole body, so a silent cut here hides the very
+    # paragraph an entity link points at. Say how much there is and where to resume.
+    body = entry.content_text or entry.content_html or ""
+    start = max(offset, 0)
+    end = start + min(max(max_chars, 1), _ENTRY_WINDOW_CAP)
+    content = body[start:end]
+    truncated = end < len(body)
+    if truncated:
+        content += f"\n...[truncated: {len(body) - end} more characters, continue with offset={end}]"
 
     payload = {
         "id": str(entry.id),
@@ -93,6 +117,10 @@ async def _get_entry(db: AsyncSession, user_id: uuid.UUID, entry_id: str) -> dic
         "author": entry.author,
         "published_at": str(entry.published_at) if entry.published_at else None,
         "content": content,
+        "content_length": len(body),
+        "content_offset": start,
+        "truncated": truncated,
+        "next_offset": end if truncated else None,
         "summary": entry.summary,
     }
     # Every entity junction from the canonical map (correlation.ENTITY_CONFIG).

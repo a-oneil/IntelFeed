@@ -2012,14 +2012,24 @@ TOOLS: dict[str, dict] = {
     },
     "get_entry": {
         "description": (
-            "Fetch a single RSS entry by ID with full content and all extracted intelligence: TTPs, "
+            "Fetch a single RSS entry by ID with its content and all extracted intelligence: TTPs, "
             "CVEs, CWEs, threat actors, malware, tools, vendors, products, countries, and "
-            "mitigations."
+            "mitigations. The body comes back one window at a time, but the entities cover the whole "
+            "article \u2014 when `truncated` is true, call again with `offset` set to `next_offset` to "
+            "read the rest."
         ),
         "params": {
             "entry_id": {
                 "type": 'str',
                 "required": True,
+            },
+            "offset": {
+                "type": 'int',
+                "default": 0,
+            },
+            "max_chars": {
+                "type": 'int',
+                "default": 8000,
             },
         },
     },

@@ -176,7 +176,7 @@ def test_handles_round_trip():
     )
     server.call("search_entries", {"query": "qilin"})
     server.call("get_entry", {"entry_id": "u1"})
-    assert fake.calls[-1] == ("get_entry", {"entry_id": UUID_A})
+    assert fake.calls[-1] == ("get_entry", {"entry_id": UUID_A, "max_chars": m.LONG_TEXT_CAP})
 
 
 def test_unknown_handle():
@@ -207,6 +207,57 @@ def test_long_article_is_paged():
     page2 = server.read_more("r1", 2)
     assert "[page 2/" in page2
     assert "… [+" not in page2  # the stored copy is untrimmed
+
+
+def _windowed_entry(body: str):
+    """get_entry as the backend serves it: one window of the body, plus where to read on."""
+
+    def serve(args: dict) -> dict:
+        start = args.get("offset", 0)
+        end = start + args["max_chars"]
+        more = end < len(body)
+        content = body[start:end]
+        if more:
+            content += f"\n...[truncated: {len(body) - end} more characters, continue with offset={end}]"
+        return {
+            "id": UUID_A,
+            "title": "Risky Bulletin",
+            "content": content,
+            "content_length": len(body),
+            "content_offset": start,
+            "truncated": more,
+            "next_offset": end if more else None,
+            "threat_actors": [{"id": UUID_B, "name": "Qilin"}],
+        }
+
+    return serve
+
+
+def test_long_article_reads_on_by_offset():
+    """Regression: past the backend's first window there was no way to read on, so a
+    Qilin link pointing at paragraph 58 of a newsletter looked like noise."""
+    body = "word " * 1000 + "Qilin dox counter-claims " + "tail " * 195  # 6,000: two windows
+    server, fake = new_server({"get_entry": _windowed_entry(body)})
+
+    first, _ = server.call("get_entry", {"entry_id": UUID_A})
+    assert fake.calls[-1][1]["max_chars"] == m.LONG_TEXT_CAP
+    assert "Qilin dox" not in first
+    assert "[truncated:" not in first  # the backend marker gives way to the footer
+    assert "… [+" not in first  # the window fits, nothing is trimmed twice
+    assert "truncated" not in first and "next_offset" not in first
+    next_part = 'next part: get_entry(entry_id="u1", offset=3000)]'
+    assert f"[article text 0–3000 of {len(body)} characters — {next_part}" in first
+
+    rest, _ = server.call("get_entry", {"entry_id": "u1", "offset": 3000})
+    assert fake.calls[-1][1] == {"entry_id": UUID_A, "offset": 3000, "max_chars": m.LONG_TEXT_CAP}
+    assert "Qilin dox counter-claims" in rest
+    assert f"[article text 3000–{len(body)} of {len(body)} characters — end of article]" in rest
+
+
+def test_short_article_has_no_window_note():
+    server, _ = new_server({"get_entry": _windowed_entry("A short advisory.")})
+    text, _ = server.call("get_entry", {"entry_id": UUID_A})
+    assert "A short advisory." in text and "[article text" not in text
 
 
 def test_long_lists_capped():
