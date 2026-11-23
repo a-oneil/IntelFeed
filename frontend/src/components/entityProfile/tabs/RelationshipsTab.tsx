@@ -66,6 +66,13 @@ const GROUP_PREVIEW = 12;
 type Scope = "claims" | "context";
 
 /** Windowed rendering for long open groups (dynamic row heights measured). */
+/** A story's articles with their titles, taken from the evidence on its rows. */
+function storyEntries(entryIds: string[], rows: RelRow[]): Array<{ entry_id: string; title: string }> {
+  const titles = new Map<string, string>();
+  for (const r of rows) for (const pe of r.item.proximity_entries ?? []) if (pe.title && !titles.has(pe.entry_id)) titles.set(pe.entry_id, pe.title);
+  return entryIds.map((id) => ({ entry_id: id, title: titles.get(id) ?? "Untitled" }));
+}
+
 function VirtualRows({ rows, renderRow }: { rows: RelRow[]; renderRow: (r: RelRow) => ReactNode }) {
   const parentRef = useRef<HTMLDivElement>(null);
   const virt = useVirtualizer({
@@ -301,8 +308,9 @@ export function RelationshipsTab({
         articles: c.entryIds.length,
         nodeIds: c.members.map((m) => rowKey(m.row)),
         slug: c.slug,
+        entries: storyEntries(c.entryIds, earnedAll),
       })),
-    [mapClusters],
+    [mapClusters, earnedAll],
   );
   const ctxRegular = context.filter((r) => r.item.context_role !== "reporting_source");
   const ctxReporting = context.filter((r) => r.item.context_role === "reporting_source");
@@ -376,6 +384,7 @@ export function RelationshipsTab({
           nodeIds: c.members.map((m) => rowKey(m.row)),
           slug: c.slug,
           external: true,
+          entries: storyEntries(c.entryIds, top),
         }));
         setExpansionInfo((prev) => {
           const next = new Map(prev);

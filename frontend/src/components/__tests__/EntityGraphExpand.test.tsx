@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { EntityGraph, type EntityEdge, type EntityNode, type GraphStoryCluster } from "../EntityGraph";
 
 class ResizeObserverStub {
@@ -38,5 +38,27 @@ describe("EntityGraph expansions", () => {
 
     rerender(<EntityGraph {...props} expansions={new Map()} />);
     await waitFor(() => expect(screen.queryByText("Rclone")).not.toBeInTheDocument());
+  });
+});
+
+describe("EntityGraph story inspector", () => {
+  const story: GraphStoryCluster = {
+    ...clusters[0],
+    entries: [{ entry_id: "e1", title: "Diplomats lured with wine invites" }],
+  };
+
+  it("lists a story's articles and opens one", async () => {
+    const onEntryClick = vi.fn();
+    render(<EntityGraph nodes={nodes} edges={edges} storyClusters={[story]} onEntryClick={onEntryClick} width={800} height={500} />);
+    fireEvent.click(await screen.findByText("Wine lure"));
+    fireEvent.click(await screen.findByText("Diplomats lured with wine invites"));
+    expect(onEntryClick).toHaveBeenCalledWith("e1");
+  });
+
+  it("lists the stories a node is in, and selecting one opens it", async () => {
+    render(<EntityGraph nodes={nodes} edges={edges} storyClusters={[story]} onEntryClick={vi.fn()} width={800} height={500} />);
+    fireEvent.click(await screen.findByText("WINELOADER"));
+    fireEvent.click(await screen.findByText("Wine lure · 3"));
+    expect(await screen.findByText("Diplomats lured with wine invites")).toBeInTheDocument();
   });
 });

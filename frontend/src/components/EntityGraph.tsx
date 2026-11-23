@@ -775,6 +775,20 @@ function EntityGraphInner({
                 );
               })()}
               {info?.description && <div className={styles.inspectorDesc}>{info.description}</div>}
+              {(() => {
+                const stories = allClusters.filter((c) => c.nodeIds.includes(node.id));
+                if (stories.length === 0) return null;
+                return (
+                  <div className={styles.inspectorList}>
+                    <div className={styles.inspectorMeta}>Stories</div>
+                    {stories.map((c) => (
+                      <button key={c.id} className={styles.inspectorRow} onClick={() => setSelected({ kind: 'cluster', id: c.id })} title={c.heading}>
+                        {truncateLabel(c.heading, 34)} · {c.articles}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
               <div className={styles.inspectorActions}>
                 {isArticle ? (
                   <button className={styles.inspectorBtn} onClick={() => onEntryClick?.(node.id.replace(/^entry-/, ''))}>
@@ -835,7 +849,18 @@ function EntityGraphInner({
                   </button>
                 )}
               </div>
+              {cluster.entries && cluster.entries.length > 0 && onEntryClick && (
+                <div className={styles.inspectorList}>
+                  <div className={styles.inspectorMeta}>Articles</div>
+                  {cluster.entries.map((e) => (
+                    <button key={e.entry_id} className={styles.inspectorRow} onClick={() => onEntryClick(e.entry_id)} title={e.title}>
+                      {truncateLabel(e.title, 34)}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className={styles.inspectorList}>
+                <div className={styles.inspectorMeta}>Entities</div>
                 {members.map((m) => (
                   <button key={m.id} className={styles.inspectorRow} onClick={() => setSelected({ kind: 'node', id: m.id })}>
                     <span className={styles.legendDot} style={{ background: getNodeColor(m.type) }} />

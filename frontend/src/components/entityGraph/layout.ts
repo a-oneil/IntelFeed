@@ -64,6 +64,8 @@ export interface GraphStoryCluster {
   nodeIds: string[];
   /** Story-thread slug when threading has named this incident. */
   slug?: string | null;
+  /** The story's articles, newest first where known — listed in the inspector. */
+  entries?: Array<{ entry_id: string; title: string }>;
   /** True for clusters belonging to an EXPANDED node — their members aren't
    * rows in the viewed profile's list, so "filter list" doesn't apply. */
   external?: boolean;
