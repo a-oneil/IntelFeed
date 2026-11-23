@@ -316,7 +316,7 @@ Answer platform questions from the docs, not from memory.
 
 ### Entries & Saved Views (5 tools)
 
-- **get_entry** — Fetch an entry with full content and every extracted entity type (entry_id)
+- **get_entry** — Fetch an entry's body (8,000 characters per call) and every extracted entity type, which cover the whole article (entry_id, offset, max_chars). When `truncated` is true, call again with `offset: next_offset`; an entity link can point at a paragraph past the first window
 - **get_feed_entries** — List recent entries from a feed (feed_id, limit)
 - **get_ingest_batch** — Per-item status of a manual-upload batch (queued / parsing / created / expanded / duplicate / no_text / unsupported / too_large / failed) and the entry id each item produced; poll until `summary.status` is `complete` (batch_id). Creating a batch is a write, so it lives in the full skill
 - **list_saved_searches** — This user's saved searches with unread/total counts

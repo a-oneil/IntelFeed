@@ -613,6 +613,8 @@ HAS_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?>")
 LIST_STR_CAP = 140  # a string inside a list item
 STR_CAP = 800  # any other string
 LONG_TEXT_CAP = 3000  # article body / rule content on a single object
+# get_entry ends a partial body with this; the footer from body_window_note replaces it.
+BODY_MARKER_RE = re.compile(r"\n\.\.\.\[truncated: \d+ more characters, continue with offset=\d+\]$")
 NESTED_LIST_CAP = 12  # items shown from a list inside an object
 ITEM_LIST_CAP = 6  # items shown from a list inside a list item (aliases, sectors, ...)
 TOP_LIST_CAP = 25  # items shown from the main result list
@@ -815,6 +817,7 @@ TOOL_DROP_KEYS = {
     "get_priority_queue": frozenset({"unread", "new_since_opened", "folded_articles", "radar_threshold", "outlets"}),
     "get_story_threads": frozenset({"echo_count", "unread_count", "new_since_opened", "top_score"}),
     "get_ransomware_disclosures": frozenset({"id", "claimed_data", "source", "country_id", "country_code"}),
+    "get_entry": frozenset({"content_length", "content_offset", "truncated", "next_offset"}),
 }
 PIVOT_ROWS_PER_TYPE = 5
 
@@ -917,6 +920,8 @@ def project(tool: str | None, data: Any, args: dict | None) -> Any:
             data = _project_threads(data)
         if tool == "get_priority_queue":
             data = _project_queue(data)
+        if tool == "get_entry" and isinstance(data.get("content"), str):
+            data = {**data, "content": BODY_MARKER_RE.sub("", data["content"])}
         if tool in TOOL_DROP_KEYS:
             data = _without(data, TOOL_DROP_KEYS[tool])
         if (args or {}).get("limit"):
@@ -924,6 +929,20 @@ def project(tool: str | None, data: Any, args: dict | None) -> Any:
     except (TypeError, ValueError, AttributeError) as e:
         log(f"projection for {tool} skipped: {e}")
     return data
+
+
+def body_window_note(tool: str | None, data: Any, handles: Handles) -> str | None:
+    """Where a get_entry body window sits in the article, and the call that reads on."""
+    if tool != "get_entry" or not isinstance(data, dict) or not isinstance(data.get("content_length"), int):
+        return None
+    start, total, nxt = data.get("content_offset") or 0, data["content_length"], data.get("next_offset")
+    if start == 0 and nxt is None:
+        return None
+    end = nxt if nxt is not None else total
+    where = f"[article text {start}–{end} of {total} characters"
+    if nxt is None:
+        return where + " — end of article]"
+    return where + f' — next part: get_entry(entry_id="{handles.short(str(data["id"]))}", offset={nxt})]'
 
 
 class ResultStore:
@@ -1072,6 +1091,10 @@ def check_args(name: str, definition: dict, args: dict) -> tuple[dict, list[str]
         clean["limit"] = DEFAULT_LIMIT
     if "limit_per_type" in props and "limit_per_type" not in clean:
         clean["limit_per_type"] = PIVOT_ROWS_PER_TYPE
+    # An article body comes in windows the shaper won't trim again, so get_entry's
+    # offset is the one way through a long article.
+    if "max_chars" in props and "max_chars" not in clean:
+        clean["max_chars"] = LONG_TEXT_CAP
     notes = [f"ignored unknown argument(s) {ignored}; usage: {sig}"] if ignored else []
     return clean, notes
 
@@ -1179,11 +1202,15 @@ CORE_TOOLS: list[dict] = [
     {
         "name": "get_entry",
         "description": (
-            "Read one article: text plus the actors, malware, CVEs, TTPs and other entities extracted from it."
+            "Read one article: text plus the actors, malware, CVEs, TTPs and other entities extracted from it. "
+            "Long articles come one part at a time; the entities cover the whole article."
         ),
         "inputSchema": {
             "type": "object",
-            "properties": {"entry_id": {"type": "string", "description": "Article id, e.g. u12"}},
+            "properties": {
+                "entry_id": {"type": "string", "description": "Article id, e.g. u12"},
+                "offset": {"type": "integer", "description": "Where to start reading, from the footer's next part"},
+            },
             "required": ["entry_id"],
         },
     },
@@ -1327,6 +1354,7 @@ class Server:
     ) -> tuple[str, bool]:
         data = parse_result(raw)
         is_error = isinstance(data, dict) and set(data) <= {"error", "detail"} and "error" in data
+        window_note = body_window_note(tool, data, self.handles)
         data = project(tool, data, args)
         notes = ShapeNotes()
         shaped = shape(data, self.handles, notes)
@@ -1335,6 +1363,8 @@ class Server:
         else:
             text = "\n".join(render(shaped)) if not isinstance(shaped, str) else shaped
         footer = list(extra_notes or [])
+        if window_note:
+            footer.append(window_note)
         if notes.trimmed or len(text) > RESULT_CHARS:
             full = shape(data, self.handles, ShapeNotes(), full=True)
             full_text = "\n".join(render(full)) if not isinstance(full, str) else full

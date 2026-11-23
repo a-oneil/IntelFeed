@@ -328,7 +328,7 @@ Everything that creates, changes or deletes data is refused when `INTELFEED_READ
 
 ### Entries & Reader State (20 tools)
 
-- **get_entry** — Fetch an entry with full content and every extracted entity type (entry_id)
+- **get_entry** — Fetch an entry's body (8,000 characters per call) and every extracted entity type, which cover the whole article (entry_id, offset, max_chars). When `truncated` is true, call again with `offset: next_offset`; an entity link can point at a paragraph past the first window
 - **get_feed_entries** — List recent entries from a feed (feed_id, limit)
 - **mark_entry_read** — Mark an entry read or unread for the current user (entry_id, read)
 - **mark_all_read** — Bulk mark-read, optionally scoped to a feed or category (feed_id, category_id). Unscoped, it marks *everything*, so confirm first

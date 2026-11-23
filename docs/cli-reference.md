@@ -318,7 +318,7 @@ Source: `backend/app/tools/read.py`.
 
 | Tool | What it does | Arguments | Kind |
 |---|---|---|---|
-| `get_entry` | One article with its content and every linked entity. | **`entry_id`** | read |
+| `get_entry` | One article with its content and every linked entity. The body comes back 8,000 characters at a time (up to 20,000 with `max_chars`); `truncated` and `next_offset` say where to continue. | **`entry_id`**, `offset`, `max_chars` | read |
 | `get_feed_entries` | Recent articles from one feed. | **`feed_id`**, `limit` | read |
 | `get_threat_actor` | A threat actor profile. | **`actor_id`** | read |
 | `get_malware` | A malware family profile. | **`malware_id`** | read |

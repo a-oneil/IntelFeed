@@ -26,7 +26,7 @@ calls went from ~11.2k to ~7.4k tokens (disclosures −59%, queue −58%, thread
 
 Nine tools, fixed for the whole session (so the model server can reuse its cached prompt prefix):
 
-- `search_entries`, `search_entities`, `get_entry`, `get_trending_entities` — the registry tools, with smaller default limits.
+- `search_entries`, `search_entities`, `get_entry`, `get_trending_entities` — the registry tools, with smaller default limits. `get_entry` returns a long article's text 3,000 characters at a time (the shaper's own cap for long text, so the text is never cut twice); the footer gives the `offset` that reads the next part.
 - `get_profile(entity_type, id)` — one tool for actor, malware, CVE, CWE, TTP, campaign, detection rule, intel report and ransomware victim profiles. `id` can be a handle, a name (`APT29`, resolved through `search_entities`, aliases included), a CVE id or a technique id.
 - `pivot_entity` — co-occurrence pivot; also takes a name or a CVE/technique id.
 - `load_skill(name)` / `call_tool(tool, args)` — everything else in the registry, one task at a time.
