@@ -120,19 +120,24 @@ export function nodeRadius(node: LayoutNode, isSeed = false): number {
   return isSeed ? r + 4 : r;
 }
 
+/** Width the label under a node may use; it wraps to two lines (CSS). */
+export const LABEL_W = 132;
+
 /** Collision radius: the shape plus room for the label under it. */
 function bodyRadius(node: LayoutNode, isSeed: boolean, labels: boolean): number {
   const r = nodeRadius(node, isSeed);
   if (!labels) return r + 10;
-  const chars = Math.min(node.label.length, node.type === 'entry' ? 28 : 20);
-  return Math.max(r + 16, chars * 3.4);
+  // ~6.4px per character, wrapping at LABEL_W over at most two lines.
+  const width = Math.min(node.label.length * 6.4, LABEL_W);
+  return Math.max(r + 20, width / 2 + 6);
 }
 
 // Story box geometry.
-const CELL_W = 128;
-const CELL_H = 68;
-const BOX_PAD = 14;
-const BOX_HEADER = 42;
+const CELL_W = LABEL_W + 16;
+const CELL_H = 82;
+const BOX_PAD = 12;
+const BOX_HEADER = 50;
+const BOX_MIN_W = 170;
 const MAX_STORIES = 8;
 
 // ── Simulation ─────────────────────────────────────────────────────
@@ -140,15 +145,57 @@ const MAX_STORIES = 8;
 interface Body extends SimulationNodeDatum {
   id: string;
   r: number;
+  /** Rectangle bodies (story boxes) collide as rectangles, not circles. */
+  w?: number;
+  h?: number;
 }
 
 const TICKS = 300;
 
+/** Push overlapping bodies apart along the axis of least overlap. Circles
+ * collide as their bounding squares here — close enough, and it lets wide
+ * story boxes pack without the empty corners a circle around them leaves. */
+function separateRects(bodies: Body[], pad: number, strength = 1): void {
+  for (let i = 0; i < bodies.length; i++) {
+    const a = bodies[i];
+    for (let j = i + 1; j < bodies.length; j++) {
+      const b = bodies[j];
+      const ox = ((a.w ?? a.r * 2) + (b.w ?? b.r * 2)) / 2 + pad - Math.abs((b.x ?? 0) - (a.x ?? 0));
+      const oy = ((a.h ?? a.r * 2) + (b.h ?? b.r * 2)) / 2 + pad - Math.abs((b.y ?? 0) - (a.y ?? 0));
+      if (ox <= 0 || oy <= 0) continue;
+      const aFixed = a.fx != null;
+      const bFixed = b.fx != null;
+      if (aFixed && bFixed) continue;
+      const share = aFixed ? 0 : bFixed ? 1 : 0.5;
+      if (ox < oy) {
+        const d = ox * strength * Math.sign((b.x ?? 0) - (a.x ?? 0) || 1);
+        a.x = (a.x ?? 0) - d * share;
+        b.x = (b.x ?? 0) + d * (1 - share);
+      } else {
+        const d = oy * strength * Math.sign((b.y ?? 0) - (a.y ?? 0) || 1);
+        a.y = (a.y ?? 0) - d * share;
+        b.y = (b.y ?? 0) + d * (1 - share);
+      }
+    }
+  }
+}
+
 function settle(
   bodies: Body[],
   links: Array<SimulationLinkDatum<Body> & { distance: number }>,
-  charge: number,
+  opts: { charge: number; rects?: boolean; pad?: number; aspect?: number },
 ): void {
+  const linked = new Set<string>();
+  for (const l of links) {
+    linked.add(typeof l.source === 'string' ? l.source : (l.source as Body).id);
+    linked.add(typeof l.target === 'string' ? l.target : (l.target as Body).id);
+  }
+  // Nodes with no visible connection are pulled in hard, so they sit near
+  // the rest instead of drifting to the edges and stretching the view.
+  const pull = (b: Body) => (linked.has(b.id) ? 0.03 : 0.25);
+  // A wide panel pulls harder vertically, so the graph spreads sideways to
+  // match the space it is drawn in.
+  const aspect = Math.max(0.5, Math.min(4, opts.aspect ?? 1));
   const sim = forceSimulation(bodies)
     .force(
       'link',
@@ -156,22 +203,31 @@ function settle(
         .id((b) => b.id)
         .distance((l) => l.distance),
     )
-    .force('charge', forceManyBody<Body>().strength(charge))
-    .force('collide', forceCollide<Body>((b) => b.r).strength(1).iterations(3))
-    // Weak centering keeps nodes with no edges from drifting off.
-    .force('x', forceX<Body>(0).strength(0.03))
-    .force('y', forceY<Body>(0).strength(0.03))
-    .stop();
+    .force('charge', forceManyBody<Body>().strength(opts.charge))
+    .force('x', forceX<Body>(0).strength((b) => pull(b) / Math.sqrt(aspect)))
+    .force('y', forceY<Body>(0).strength((b) => pull(b) * Math.sqrt(aspect)));
+  if (opts.rects) {
+    const pad = opts.pad ?? 16;
+    const rect = () => separateRects(bodies, pad, 0.5);
+    sim.force('rect', rect as unknown as Parameters<typeof sim.force>[1]);
+  } else {
+    sim.force('collide', forceCollide<Body>((b) => b.r).strength(1).iterations(3));
+  }
+  sim.stop();
   for (let i = 0; i < TICKS; i++) sim.tick();
+  // Finish with plain separation so nothing is left overlapping.
+  if (opts.rects) for (let i = 0; i < 60; i++) separateRects(bodies, opts.pad ?? 16);
 }
 
-/** Start position for a body: where it was last time, or a spot on a circle
- * around the seed. The circle spot is index-based so output is deterministic. */
-function startAt(id: string, i: number, n: number, radius: number, previous?: Map<string, Point>): Point {
+/** Start position for a body: where it was last time, or a spot on an
+ * ellipse around the seed shaped like the panel (wide panel, wide ellipse).
+ * The spot is index-based so output is deterministic. */
+function startAt(id: string, i: number, n: number, radius: number, previous?: Map<string, Point>, aspect = 1): Point {
   const prev = previous?.get(id);
   if (prev) return { x: prev.x, y: prev.y };
   const a = -Math.PI / 2 + (i * 2 * Math.PI) / Math.max(n, 1);
-  return { x: radius * Math.cos(a), y: radius * Math.sin(a) };
+  const k = Math.sqrt(Math.max(0.5, Math.min(4, aspect)));
+  return { x: radius * k * Math.cos(a), y: (radius / k) * Math.sin(a) };
 }
 
 // ── Story layout ───────────────────────────────────────────────────
@@ -194,13 +250,15 @@ export interface StoryLayoutInput {
   /** Spacing multiplier, 0.5–8. */
   spacing: number;
   labels: boolean;
+  /** Width ÷ height of the panel the graph is drawn in. */
+  aspect?: number;
   previous?: Map<string, Point>;
 }
 
 export function computeStoryLayout(input: StoryLayoutInput): StoryLayout | null {
   const {
     nodes, edges, clusters, seedId, hiddenTypes, hiddenNodes, expandedGhostTypes,
-    anchorOf = new Map(), clusterAnchor = new Map(), spacing, labels, previous,
+    anchorOf = new Map(), clusterAnchor = new Map(), spacing, labels, aspect, previous,
   } = input;
   if (clusters.length === 0) return null;
 
@@ -228,7 +286,7 @@ export function computeStoryLayout(input: StoryLayoutInput): StoryLayout | null 
       cluster,
       members,
       cols,
-      w: Math.max(cols * CELL_W, 220) + BOX_PAD * 2,
+      w: Math.max(cols * CELL_W, BOX_MIN_W) + BOX_PAD * 2,
       h: rows * CELL_H + BOX_PAD * 2 + BOX_HEADER,
     });
   }
@@ -255,17 +313,18 @@ export function computeStoryLayout(input: StoryLayoutInput): StoryLayout | null 
   // Bodies: seed pinned at the origin, one per box, one per loose node.
   const seed = byId.get(seedId);
   const seedR = seed ? bodyRadius(seed, true, labels) : 30;
-  const gap = 24 * spacing;
+  const gap = 28 * spacing;
   const total = boxes.length + loose.length;
-  const ring = 260 * spacing;
+  const ring = 200 * spacing;
   const bodies: Body[] = [{ id: seedId, r: seedR, x: 0, y: 0, fx: 0, fy: 0 }];
   boxes.forEach((b, i) => {
     const key = `story:${b.cluster.id}`;
-    const r = Math.hypot(b.w, b.h) / 2 + gap / 2;
-    bodies.push({ id: key, r, ...startAt(key, i, total, ring + r, previous) });
+    // r drives link length: roughly the box's half-extent toward the seed.
+    const r = (b.w + b.h) / 4;
+    bodies.push({ id: key, r, w: b.w, h: b.h, ...startAt(key, i, total, ring + r, previous, aspect) });
   });
   loose.forEach((n, j) => {
-    bodies.push({ id: n.id, r: bodyRadius(n, false, labels) + gap / 4, ...startAt(n.id, boxes.length + j, total, ring * 1.6, previous) });
+    bodies.push({ id: n.id, r: bodyRadius(n, false, labels), ...startAt(n.id, boxes.length + j, total, ring * 1.4, previous, aspect) });
   });
   // Each body hangs off the seed, except what an expansion brought in: that
   // hangs off the expanded node (its story box when it sits in one).
@@ -293,7 +352,7 @@ export function computeStoryLayout(input: StoryLayoutInput): StoryLayout | null 
     b.x = (parent.x ?? 0) + (parent.r + b.r) * Math.cos(a);
     b.y = (parent.y ?? 0) + (parent.r + b.r) * Math.sin(a);
   });
-  if (seed) settle(bodies, links, -120);
+  if (seed) settle(bodies, links, { charge: -40, rects: true, pad: gap, aspect: (aspect ?? 1) * 1.5 });
 
   const positions = new Map<string, Point>();
   const memberOf = new Map<string, string>();
@@ -315,7 +374,7 @@ export function computeStoryLayout(input: StoryLayoutInput): StoryLayout | null 
       const rowW = inRow * CELL_W;
       positions.set(id, {
         x: gx + (b.w - rowW) / 2 + col * CELL_W + CELL_W / 2,
-        y: gy + BOX_HEADER + BOX_PAD + row * CELL_H + CELL_H / 2 - 10,
+        y: gy + BOX_HEADER + BOX_PAD + row * CELL_H + 26,
       });
       memberOf.set(id, b.cluster.id);
     });
@@ -339,11 +398,13 @@ export interface NetworkLayoutInput {
   capExempt?: Set<string>;
   spacing: number;
   labels: boolean;
+  /** Width ÷ height of the panel the graph is drawn in. */
+  aspect?: number;
   previous?: Map<string, Point>;
 }
 
 export function computeNetworkLayout(input: NetworkLayoutInput): NetworkLayout {
-  const { nodes, edges, seedId, hiddenTypes, hiddenNodes, nodesPerType, capExempt, spacing, labels, previous } = input;
+  const { nodes, edges, seedId, hiddenTypes, hiddenNodes, nodesPerType, capExempt, spacing, labels, aspect, previous } = input;
 
   // Per-type cap: the biggest (most mentioned) nodes win.
   const candidates = nodes.filter((n) => !hiddenTypes.has(n.type) && !hiddenNodes.has(n.id));
@@ -368,7 +429,7 @@ export function computeNetworkLayout(input: NetworkLayoutInput): NetworkLayout {
     const r = bodyRadius(n, isSeed, labels);
     radius.set(n.id, r);
     if (isSeed) return { id: n.id, r, x: 0, y: 0, fx: 0, fy: 0 };
-    return { id: n.id, r, ...startAt(n.id, i, visibleNodes.length, 220 * spacing, previous) };
+    return { id: n.id, r, ...startAt(n.id, i, visibleNodes.length, 220 * spacing, previous, aspect) };
   });
 
   const seen = new Set<string>();
@@ -384,7 +445,7 @@ export function computeNetworkLayout(input: NetworkLayoutInput): NetworkLayout {
       distance: (radius.get(e.source) ?? 20) + (radius.get(e.target) ?? 20) + 60 * spacing,
     });
   }
-  settle(bodies, links, -260 * spacing);
+  settle(bodies, links, { charge: -260 * spacing, aspect });
 
   const positions = new Map<string, Point>();
   for (const b of bodies) positions.set(b.id, { x: b.x ?? 0, y: b.y ?? 0 });

@@ -7,10 +7,10 @@ import {
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
-  getNodesBounds,
   getViewportForBounds,
   useNodesState,
   useReactFlow,
+  useStore,
   type Connection,
   type Node,
   type NodeMouseHandler,
@@ -270,6 +270,10 @@ function EntityGraphInner({
     return s;
   }, [expansions]);
 
+  // Panel shape, in coarse steps so resizing doesn't re-run the layout on
+  // every pixel.
+  const aspect = useStore((st) => (st.width && st.height ? Math.round((st.width / st.height) * 4) / 4 : 2));
+
   // What each expansion brought in, keyed back to the node expanded, so the
   // story layout draws it beside that node.
   const { anchorOf, clusterAnchor } = useMemo(() => {
@@ -298,8 +302,9 @@ function EntityGraphInner({
     clusterAnchor,
     spacing,
     labels: showNodeLabels,
+    aspect,
     previous: previousRef.current,
-  }), [allNodes, allEdges, allClusters, seedId, hiddenTypes, hiddenNodes, expandedGhostTypes, anchorOf, clusterAnchor, spacing, showNodeLabels]);
+  }), [allNodes, allEdges, allClusters, seedId, hiddenTypes, hiddenNodes, expandedGhostTypes, anchorOf, clusterAnchor, spacing, showNodeLabels, aspect]);
 
   const storyActive = layoutMode === 'story' && storyLayout !== null;
 
@@ -313,8 +318,9 @@ function EntityGraphInner({
     capExempt: expansionIds,
     spacing,
     labels: showNodeLabels,
+    aspect,
     previous: previousRef.current,
-  }), [storyActive, allNodes, allEdges, seedId, hiddenTypes, hiddenNodes, nodesPerType, expansionIds, spacing, showNodeLabels]);
+  }), [storyActive, allNodes, allEdges, seedId, hiddenTypes, hiddenNodes, nodesPerType, expansionIds, spacing, showNodeLabels, aspect]);
 
   const positions = storyActive ? storyLayout!.positions : networkLayout!.positions;
 
@@ -380,10 +386,30 @@ function EntityGraphInner({
     setFlowNodes(out);
   }, [positions, storyActive, storyLayout, nodeById, seedId, setFlowNodes]);
 
-  const flowEdges = useMemo<EntityFlowEdge[]>(
-    () => visibleEdges.map(({ id, edge }) => ({ id, source: edge.source, target: edge.target, type: 'floating', data: { edge } })),
-    [visibleEdges],
-  );
+  // In Stories, the seed's line to each story member is a "spoke": the box
+  // already says they are related, so spokes only draw for the hovered or
+  // selected node, and each story gets one line from the seed instead.
+  const flowEdges = useMemo<EntityFlowEdge[]>(() => {
+    const memberOf = storyActive ? storyLayout!.memberOf : null;
+    const out: EntityFlowEdge[] = visibleEdges.map(({ id, edge }) => {
+      const other = edge.source === seedId ? edge.target : edge.target === seedId ? edge.source : null;
+      const spoke = !!(memberOf && other && memberOf.has(other));
+      return { id, source: edge.source, target: edge.target, type: 'floating', data: { edge, spoke } };
+    });
+    if (storyActive && seedId) {
+      for (const g of storyLayout!.groups) {
+        const target = `${STORY_PREFIX}${g.cluster.id}`;
+        out.push({
+          id: `${seedId}>${target}`,
+          source: seedId,
+          target,
+          type: 'floating',
+          data: { edge: { source: seedId, target, weight: g.cluster.articles, label: '' }, story: true },
+        });
+      }
+    }
+    return out;
+  }, [visibleEdges, storyActive, storyLayout, seedId]);
 
   // Fit when the set of visible things changes (not on drags or hover).
   const fitKey = `${storyActive}|${[...visibleIds].sort().join(',')}|${spacing}|${isFullscreen}`;
@@ -522,7 +548,7 @@ function EntityGraphInner({
   const handleExport = useCallback(() => {
     const viewport = containerRef.current?.querySelector<HTMLElement>('.react-flow__viewport');
     if (!viewport) return;
-    const bounds = getNodesBounds(flow.getNodes());
+    const bounds = flow.getNodesBounds(flow.getNodes());
     const w = Math.min(4000, Math.max(800, bounds.width + 160));
     const h = Math.min(4000, Math.max(600, bounds.height + 160));
     const vp = getViewportForBounds(bounds, w, h, 0.1, 2, 0.08);

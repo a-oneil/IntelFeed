@@ -129,8 +129,13 @@
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  white-space: nowrap;
   text-align: center;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   text-shadow: 0 0 3px var(--bg-secondary), 0 0 3px var(--bg-secondary);
 }
 
@@ -148,10 +153,11 @@
 
 /* ── Story boxes ── */
 .story {
+  position: relative;
   width: 100%;
   height: 100%;
   box-sizing: border-box;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--accent-intel) 4%, transparent);
@@ -162,14 +168,19 @@
 .storyCorroborated { border-color: color-mix(in srgb, var(--accent-intel) 45%, transparent); }
 .storySelected { border-color: var(--accent-intel); border-width: 1.5px; }
 .storyTitle {
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-xs);
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent-intel);
-  white-space: nowrap;
+  line-height: 1.3;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
+}
+.storyCorroborated .storyTitle { color: var(--accent-intel); }
+.flow .storyEdge {
+  stroke: var(--accent-intel);
+  opacity: 0.3;
 }
 .storySub {
   font-size: var(--fs-2xs);

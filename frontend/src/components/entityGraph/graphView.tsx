@@ -18,7 +18,7 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import { getEntityColor } from '@/utils/entityTheme';
-import { polygonPoints, type GraphStoryCluster, type LayoutEdge, type LayoutNode } from './layout';
+import { LABEL_W, polygonPoints, type GraphStoryCluster, type LayoutEdge, type LayoutNode } from './layout';
 import type { GraphNodeInfo } from '../EntityGraph';
 import styles from '../EntityGraph.module.css';
 
@@ -142,7 +142,7 @@ export const EntityNodeView = memo(function EntityNodeView({ id, data }: NodePro
           node.type, c, isHovered ? r + 2 : r, color,
           `${styles.nodeShape} ${isHovered ? styles.nodeHovered : ''} ${isSeed ? styles.seedNode : ''}`,
         )}
-        {view.expandable(id) && !dimmed && (() => {
+        {view.expandable(id) && !dimmed && (isHovered || isSelected || view.isExpanded(id)) && (() => {
           const open = view.isExpanded(id);
           const bx = c + r * 0.8;
           const by = c + r * 0.8;
@@ -174,9 +174,10 @@ export const EntityNodeView = memo(function EntityNodeView({ id, data }: NodePro
       {label && (
         <div
           className={isArticle ? styles.articleLabel : styles.nodeLabel}
-          style={{ top: r * 2 + 4, fontWeight: isHovered || isSeed || isSelected ? 700 : undefined }}
+          style={{ top: r * 2 + 4, width: 'max-content', maxWidth: LABEL_W, fontWeight: isHovered || isSeed || isSelected ? 700 : undefined }}
+          title={node.label}
         >
-          {truncateLabel(node.label, isArticle ? 28 : 20)}
+          {truncateLabel(node.label, 60)}
         </div>
       )}
       <Handle type="target" position={Position.Top} style={handleStyle(false)} isConnectable={view.linking} />
@@ -199,15 +200,37 @@ export const StoryNodeView = memo(function StoryNodeView({ data }: NodeProps<Sto
       className={`${styles.story} ${cluster.corroborated ? styles.storyCorroborated : ''} ${selected ? styles.storySelected : ''}`}
       title={`${cluster.heading}. Drag to move, click to inspect.`}
     >
-      <div className={styles.storyTitle}>{truncateLabel(cluster.heading, 48)}</div>
+      <div className={styles.storyTitle}>{cluster.heading}</div>
       <div className={styles.storySub}>{sub}</div>
+      <Handle type="target" position={Position.Top} style={handleStyle(false)} isConnectable={false} />
+      <Handle type="source" position={Position.Top} style={handleStyle(false)} isConnectable={false} />
     </div>
   );
 });
 
 // ── Floating edge ──────────────────────────────────────────────────
 
-export type EntityFlowEdge = Edge<{ edge: LayoutEdge }, 'floating'>;
+export type EntityFlowEdge = Edge<{ edge: LayoutEdge; spoke?: boolean; story?: boolean }, 'floating'>;
+
+type Internal = NonNullable<ReturnType<typeof useInternalNode>>;
+
+/** Where the line from (fx, fy) toward the node's center leaves the node:
+ * its border for a story box, its shape (a circle) for everything else. */
+function anchor(n: Internal, fx: number, fy: number, gap: number): { x: number; y: number; cx: number; cy: number } {
+  const w = n.measured.width ?? 0;
+  const h = n.measured.height ?? 0;
+  const cx = n.internals.positionAbsolute.x + w / 2;
+  const cy = n.internals.positionAbsolute.y + h / 2;
+  const dx = fx - cx;
+  const dy = fy - cy;
+  const d = Math.hypot(dx, dy) || 1;
+  if (n.type === 'story') {
+    const t = Math.min(w / 2 / (Math.abs(dx) || 1e-9), h / 2 / (Math.abs(dy) || 1e-9));
+    return { x: cx + dx * t + (dx / d) * gap, y: cy + dy * t + (dy / d) * gap, cx, cy };
+  }
+  const r = w / 2 + gap;
+  return { x: cx + (dx / d) * r, y: cy + (dy / d) * r, cx, cy };
+}
 
 /** Straight line between node centers, trimmed to each node's shape so it
  * meets the shape edge instead of running under it. */
@@ -216,22 +239,30 @@ export const FloatingEdgeView = memo(function FloatingEdgeView({ id, source, tar
   const s = useInternalNode(source);
   const t = useInternalNode(target);
   if (!s?.measured.width || !t?.measured.width || !data) return null;
-
-  const sr = (s.measured.width ?? 0) / 2;
-  const tr = (t.measured.width ?? 0) / 2;
-  const sx = s.internals.positionAbsolute.x + sr;
-  const sy = s.internals.positionAbsolute.y + (s.measured.height ?? 0) / 2;
-  const tx = t.internals.positionAbsolute.x + tr;
-  const ty = t.internals.positionAbsolute.y + (t.measured.height ?? 0) / 2;
-  const d = Math.hypot(tx - sx, ty - sy) || 1;
-  const ux = (tx - sx) / d;
-  const uy = (ty - sy) / d;
-  const x1 = sx + ux * (sr + 2);
-  const y1 = sy + uy * (sr + 2);
-  const x2 = tx - ux * (tr + 2);
-  const y2 = ty - uy * (tr + 2);
-
   const edge = data.edge;
+  if (data.spoke) {
+    const focus = view.hover?.edges.has(id) || view.selectedNodeId === edge.source || view.selectedNodeId === edge.target;
+    if (!focus) return null;
+  }
+
+  const sc = anchor(s, 0, 0, 0);
+  const tc = anchor(t, 0, 0, 0);
+  const { x: x1, y: y1 } = anchor(s, tc.cx, tc.cy, 2);
+  const { x: x2, y: y2 } = anchor(t, sc.cx, sc.cy, 2);
+
+  if (data.story) {
+    const quiet = !!view.hover || !!view.searchMatches;
+    return (
+      <BaseEdge
+        id={id}
+        path={`M ${x1} ${y1} L ${x2} ${y2}`}
+        interactionWidth={0}
+        className={styles.storyEdge}
+        style={{ strokeWidth: 1 + Math.min(3, Math.log2(1 + edge.weight)), opacity: quiet ? 0.08 : undefined }}
+      />
+    );
+  }
+
   const searchDim = view.searchMatches && !view.searchMatches.has(edge.source) && !view.searchMatches.has(edge.target);
   const dimmed = (view.hover && !view.hover.edges.has(id)) || searchDim;
   const highlighted = view.hover?.edges.has(id);
