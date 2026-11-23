@@ -116,7 +116,7 @@ async def test_cache_graceful_on_redis_error(mock_redis):
 def test_key_format():
     """Key format is correct."""
     assert _pivot_key("ioc", "abc") == "intelfeed:corr:pivot3:ioc:abc"
-    assert _graph_key("threat_actor", "xyz", 2) == "intelfeed:corr:graph3:threat_actor:xyz:2"
+    assert _graph_key("threat_actor", "xyz", 2) == "intelfeed:corr:graph4:threat_actor:xyz:2"
 
 
 @pytest.mark.asyncio

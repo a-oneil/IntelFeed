@@ -447,6 +447,52 @@ async def test_graph_edges_carry_typed_verbs(db_session, test_feed, test_threat_
 
 
 @pytest.mark.asyncio
+async def test_graph_draws_relationships_no_article_backs(db_session, test_threat_actor):
+    """A MITRE-only relationship shares no article, so co-occurrence never
+    offers it — the graph must still draw it, even for an entity with no
+    articles at all (3PARA RAT: five MITRE claims, an empty map)."""
+    from app.intelligence.correlation import build_entity_graph
+    from app.models.ttp import TTP
+
+    malware = MalwareFamily(name="NoArticleRAT")
+    ttp = TTP(technique_id="T1083", technique_name="File and Directory Discovery")
+    db_session.add_all([malware, ttp])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            EntityRelationship(
+                source_type="threat_actor",
+                source_id=test_threat_actor.id,
+                target_type="malware",
+                target_id=malware.id,
+                relationship_type="uses",
+                confidence="confirmed",
+                source="external_feed",
+            ),
+            EntityRelationship(
+                source_type="malware",
+                source_id=malware.id,
+                target_type="ttp",
+                target_id=ttp.id,
+                relationship_type="uses",
+                confidence="confirmed",
+                source="external_feed",
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    graph = await build_entity_graph(db_session, "malware", malware.id)
+    seed = f"malware-{malware.id}"
+    edges = {(e["source"], e["label"], e["target"]): e for e in graph["edges"]}
+    assert (f"threat_actor-{test_threat_actor.id}", "uses", seed) in edges
+    assert (seed, "uses", f"ttp-{ttp.id}") in edges
+    assert {n["id"] for n in graph["nodes"]} == {seed, f"threat_actor-{test_threat_actor.id}", f"ttp-{ttp.id}"}
+    edge = edges[(seed, "uses", f"ttp-{ttp.id}")]
+    assert edge["provenance"] == "external_feed" and edge["entries"] == []
+
+
+@pytest.mark.asyncio
 async def test_relationship_signals_endpoint(client, auth_headers, db_session, test_threat_actor):
     malware = MalwareFamily(name="SignalLoader")
     db_session.add(malware)

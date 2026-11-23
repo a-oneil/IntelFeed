@@ -1485,8 +1485,8 @@ async def build_entity_graph(
             cutoff = datetime.now(UTC) - timedelta(days=window_days)
             win_result = await db.execute(select(Entry.id).where(Entry.id.in_(entry_ids), Entry.published_at >= cutoff))
             entry_ids = [row[0] for row in win_result.all()]
-        if not entry_ids:
-            return
+        # No articles still leaves the typed relationships (MITRE, a feed, an
+        # analyst) — drawn below with the ones that do share articles.
 
         # Keep only the N strongest neighbors per node — the cap replaces the
         # old minimum-strength filter: sparse entities keep their few (weak)
@@ -1494,7 +1494,7 @@ async def build_entity_graph(
         max_neighbors = int(env_settings.get("graph_max_neighbors_per_node") or 30)
 
         candidates: list[tuple[str, dict]] = []
-        for related_type in ENTITY_CONFIG:
+        for related_type in ENTITY_CONFIG if entry_ids else ():
             # Observables stay off the map unless asked for (or the map is
             # centered on one) — hundreds of ledger atoms as nodes is the
             # graph bloat the ledger design exists to prevent.
@@ -1613,6 +1613,60 @@ async def build_entity_graph(
 
             if current_depth > 1 and mrel["confidence"] != "possible":
                 await _expand(related_type, uuid.UUID(rel["id"]), current_depth - 1)
+
+        # Relationships no shared article backs (MITRE, an enrichment feed, an
+        # analyst) are claims all the same. Co-occurrence never offers them as
+        # candidates, and the neighbour cap can cut a co-occurring one, so add
+        # every shown relationship not drawn yet.
+        drawn = {other for pair in edge_pair_seen if node_id in pair for other in pair if other != node_id}
+        missing: dict[str, list[dict]] = {}
+        for m in manual_rels:
+            otype = m["entity_type"]
+            hidden_observable = otype == "observable" and not include_observables and etype != "observable"
+            if otype not in ENTITY_CONFIG or hidden_observable:
+                continue
+            if f"{otype}-{m['entity_id']}" in drawn:
+                continue
+            missing.setdefault(otype, []).append(m)
+        for otype, rels in missing.items():
+            model = ENTITY_CONFIG[otype][0]
+            ents = {
+                str(e.id): e
+                for e in (await db.execute(select(model).where(model.id.in_([m["entity_id"] for m in rels])))).scalars()
+            }
+            for m in rels:
+                ent_other = ents.get(str(m["entity_id"]))
+                if ent_other is None:
+                    continue
+                rel_node_id = f"{otype}-{ent_other.id}"
+                if rel_node_id not in nodes:
+                    nodes[rel_node_id] = {
+                        "id": rel_node_id,
+                        "type": otype,
+                        "label": _entity_label(otype, ent_other),
+                        "size": min((getattr(ent_other, "article_count", 0) or 0) * 10, 80),
+                        "data": _serialize_entity(otype, ent_other),
+                    }
+                edge_key = tuple(sorted([node_id, rel_node_id]))
+                if edge_key in edge_pair_seen:
+                    continue
+                edge_pair_seen.add(edge_key)
+                inbound = m["direction"] == "inbound"
+                edges.append(
+                    {
+                        "source": rel_node_id if inbound else node_id,
+                        "target": node_id if inbound else rel_node_id,
+                        "weight": 0,
+                        "label": m["relationship_type"],
+                        "proximity_score": None,
+                        "confidence": m["confidence"],
+                        "provenance": m["source"],
+                        "relationship_id": m["relationship_id"],
+                        "entries": [],
+                    }
+                )
+                if current_depth > 1 and m["confidence"] != "possible":
+                    await _expand(otype, ent_other.id, current_depth - 1)
 
         # Include origin country for threat actors as a direct relationship
         if etype == "threat_actor":

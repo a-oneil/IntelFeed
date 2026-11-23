@@ -234,7 +234,7 @@ How close two entity mentions are, by paragraph. Formula: `1 / (1 + decay_rate Ã
 | `relationship_min_tier_default` | `all` \| `moderate` \| `strong`, default `all` | Default lowest strength tier in "related" lists. Each view can narrow it. |
 | `relationship_specificity_weight` | float, `0.5` | How much a very common entity (one that appears everywhere, like a big vendor) is pushed down related lists. `0` off, `1` full. |
 | `relationship_reporting_source_specificity` | float, `0.45` | Vendors and products below this specificity are treated as *reporting sources* (the company that wrote the report) and grouped separately on profiles. |
-| `graph_max_neighbors_per_node` | int, `30` | Most neighbours shown per node in an entity graph. |
+| `graph_max_neighbors_per_node` | int, `30` | Most co-mentioned neighbours an entity graph considers per node, by article overlap. Every relationship the entity has is drawn regardless, including ones no shared article backs (MITRE, enrichment feeds, analysts). |
 | `correlation_max_entries` | int, `2000` | Most recent linked articles a pivot or graph reads per entity. Co-occurrence counts on an entity linked to more articles than this cover only the most recent ones. |
 | `graph_max_claim_edges` | int, `300` | Most relationship edges in one graph, most trusted first. |
 | `correlation_cache_ttl_seconds` | int, `3600` | Seconds correlation results stay cached (`correlation_cache.py`). The `refresh-correlation-cache` job refills it hourly at :10. |
