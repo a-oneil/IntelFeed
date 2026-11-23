@@ -733,8 +733,8 @@ Entity types: `ttp`, `cve`, `threat_actor`, `malware`, `campaign`, `country`, `t
 | GET | `/api/entity-relationships/claims/{entity_type}/{entity_id}` | User | Which enrichment sources claim each of the entity's connections (`by_target`, keyed `<type>-<id>`), linked claims per source (`sources`), and the names its sources gave that matched no entity or several (`held`, `held_count`) |
 | POST | `/api/entity-relationships/signals/{entity_type}` | Visitor | Body `{"ids": [...]}`: per id, the count and top 3 relationships. A POST because the id list is too long for a URL |
 | POST | `/api/entity-relationships` | User | Create one. Creating an existing one merges the evidence (200 instead of 201); re-creating a rejected one restores it |
-| PUT | `/api/entity-relationships/{relationship_id}` | User | Change verb, confidence, description or evidence |
-| GET | `/api/entity-relationships/{relationship_id}/evidence` | Admin | Each evidence article (up to 10) with the sentence behind the claim, and every review the edge has had |
+| PUT | `/api/entity-relationships/{relationship_id}` | User | Change verb, confidence, description or evidence. A verb the pair already has another relationship for returns 409 |
+| GET | `/api/entity-relationships/{relationship_id}/evidence` | User | Each evidence article (up to 10) with the sentence behind the claim, and every review the edge has had. Feeds the Relationships tab's evidence panel and the Review tab |
 | POST | `/api/entity-relationships/{relationship_id}/confirm` | User | Mark it analyst-confirmed (recorded as an analyst keep) |
 | POST | `/api/entity-relationships/{relationship_id}/reject` | User | Mark it rejected (hidden, not deleted; recorded as an analyst demote) |
 | DELETE | `/api/entity-relationships/{relationship_id}` | User | Delete it. Prefer reject: after a delete, new articles can create it again |

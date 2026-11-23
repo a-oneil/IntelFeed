@@ -84,6 +84,35 @@ async def test_update_entity_relationship(
 
 
 @pytest.mark.asyncio
+async def test_changing_the_verb_to_one_the_pair_already_has_is_a_conflict(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_relationship: EntityRelationship
+):
+    other = EntityRelationship(
+        source_type=test_relationship.source_type,
+        source_id=test_relationship.source_id,
+        target_type=test_relationship.target_type,
+        target_id=test_relationship.target_id,
+        relationship_type="delivers",
+        confidence="probable",
+        source="analyst_created",
+    )
+    db_session.add(other)
+    await db_session.flush()
+
+    resp = await client.put(
+        f"/api/entity-relationships/{other.id}", json={"relationship_type": "uses"}, headers=auth_headers
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"]["details"]["existing_relationship_id"] == str(test_relationship.id)
+
+    resp = await client.put(
+        f"/api/entity-relationships/{other.id}", json={"relationship_type": "related_to"}, headers=auth_headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["relationship_type"] == "related_to"
+
+
+@pytest.mark.asyncio
 async def test_delete_entity_relationship(
     client: AsyncClient, auth_headers: dict, test_relationship: EntityRelationship
 ):

@@ -100,6 +100,8 @@ export function useUpdateRelationship() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["relationships"] });
+      qc.invalidateQueries({ queryKey: ["pivot"] });
+      qc.invalidateQueries({ queryKey: ["entity-graph"] });
     },
   });
 }

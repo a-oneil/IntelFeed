@@ -38,6 +38,7 @@ import { ObservableLifecycleStrip } from "@/components/entityProfile/ObservableL
 import { DetectionTab } from "@/components/entityProfile/tabs/DetectionTab";
 import { GeographyTab } from "@/components/entityProfile/tabs/GeographyTab";
 import { VictimologyTab } from "@/components/entityProfile/tabs/VictimologyTab";
+import { flattenRelated } from "@/utils/relationshipBrowser";
 import { DetectionGapsTab } from "@/components/entityProfile/tabs/DetectionGapsTab";
 import styles from "@/components/entityProfile/entityProfile.module.css";
 import { useIsVisitor } from "@/stores/authStore";
@@ -230,19 +231,13 @@ export function EntityProfilePage({ slug }: { slug: string }) {
   // pre-truncation totals.
   const relatedCounts = pivot?.related_counts;
   const countOf = (key: string, arr?: unknown[]) => relatedCounts?.[key] ?? arr?.length ?? 0;
+  // The Relationships tab counts relationships (typed claims, and a country's
+  // targeting / origin rows), not every entity named in the same articles.
+  const relationshipCount = flattenRelated(related, entityType).filter(
+    (r) => !!r.item.relationship_id || (entityType === "country" && !!r.item.country_relationship),
+  ).length;
   const counts: Partial<Record<TabKey, number>> = {
-    relationships:
-      countOf("threat_actors", related.threat_actors) +
-      countOf("malwares", related.malwares) +
-      countOf("ttps", related.ttps) +
-      countOf("cves", related.cves) +
-      countOf("countrys", related.countrys) +
-      countOf("sectors", related.sectors) +
-      countOf("vendors", related.vendors) +
-      countOf("products", related.products) +
-      countOf("tools", related.tools) +
-      countOf("mitigations", related.mitigations) +
-      countOf("cwes", related.cwes),
+    relationships: relationshipCount,
     detection: countOf("detection_rules", related.detection_rules),
     vulnerabilities: affectedCount?.total ?? 0,
     weaknesses: cveWeaknessCount,

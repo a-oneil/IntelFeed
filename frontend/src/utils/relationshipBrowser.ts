@@ -97,6 +97,11 @@ export function allowedVerbsForPair(a: string, b: string): string[] {
   return [...new Set([...fwd, ...rev])];
 }
 
+/** Verbs a relationship stored as `source → target` may be changed to. */
+export function verbsForStored(source: string, target: string): string[] {
+  return [...(ALLOWED_MATRIX[`${source}>${target}`] ?? [])];
+}
+
 export function rowLabel(type: EntityType, item: EntitySearchResult): string {
   if (type === "cve") return item.cve_id || item.name || item.id;
   if (type === "ttp") return [item.technique_id, item.technique_name].filter(Boolean).join(" ") || item.id;
@@ -132,8 +137,11 @@ export function flattenRelated(
   const rows: RelRow[] = [];
   const rel = related as unknown as Record<string, EntitySearchResult[] | undefined>;
   for (const [type, key] of TYPE_KEYS) {
-    if (type === viewedType && type !== "cve") continue;
+    // Same-type co-mentions (every actor named beside an actor) are noise;
+    // same-type relationships ("successor of", "overlaps with") are not.
+    const sameType = type === viewedType && type !== "cve";
     for (const item of rel[key] ?? []) {
+      if (sameType && !item.relationship_id) continue;
       rows.push({ type, item, label: rowLabel(type, item), meta: rowMeta(type, item) });
     }
   }
