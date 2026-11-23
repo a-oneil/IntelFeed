@@ -142,8 +142,8 @@ export function RelationshipsTab({
   // A visitor browses: no Shift+drag links, no moderation, no review evidence.
   const isVisitor = useIsVisitor();
   const openThread = useOpenThread();
-  // A 620px graph would fill a phone before the list: start it hidden there.
-  const [graphCollapsed, setGraphCollapsed] = useState(() => window.matchMedia("(max-width: 767px)").matches);
+  // The list and its evidence are the tab; the graph opens on request.
+  const [graphCollapsed, setGraphCollapsed] = useState(true);
   const [storyFilter, setStoryFilter] = useState<{ title: string; keys: Set<string> } | null>(null);
   // On-demand neighbor sets fetched per node from the graph's +/− badge —
   // keyed by graph node id.
