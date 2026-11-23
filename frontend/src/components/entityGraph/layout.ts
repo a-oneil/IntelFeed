@@ -183,6 +183,12 @@ export interface StoryLayoutInput {
   hiddenNodes: Set<string>;
   /** Story-less types the user chose to show on the graph. */
   expandedGhostTypes: Set<string>;
+  /** Nodes brought in by expanding another node → the node expanded. They
+   * are always drawn, next to that node, never pooled into a type pill. */
+  anchorOf?: Map<string, string>;
+  /** Story clusters from an expansion → the node expanded. They sit next
+   * to that node and don't count toward the story cap. */
+  clusterAnchor?: Map<string, string>;
   /** Spacing multiplier, 0.5–8. */
   spacing: number;
   labels: boolean;
@@ -190,7 +196,10 @@ export interface StoryLayoutInput {
 }
 
 export function computeStoryLayout(input: StoryLayoutInput): StoryLayout | null {
-  const { nodes, edges, clusters, seedId, hiddenTypes, hiddenNodes, expandedGhostTypes, spacing, labels, previous } = input;
+  const {
+    nodes, edges, clusters, seedId, hiddenTypes, hiddenNodes, expandedGhostTypes,
+    anchorOf = new Map(), clusterAnchor = new Map(), spacing, labels, previous,
+  } = input;
   if (clusters.length === 0) return null;
 
   const byId = new Map(nodes.map((n) => [n.id, n]));
@@ -202,7 +211,11 @@ export function computeStoryLayout(input: StoryLayoutInput): StoryLayout | null 
   // Members per story; a node sits in the first story that claims it.
   const claimed = new Set<string>();
   const boxes: Array<{ cluster: GraphStoryCluster; members: string[]; w: number; h: number; cols: number }> = [];
-  for (const cluster of clusters.slice(0, MAX_STORIES)) {
+  const shownClusters = [
+    ...clusters.filter((c) => !clusterAnchor.has(c.id)).slice(0, MAX_STORIES),
+    ...clusters.filter((c) => clusterAnchor.has(c.id)),
+  ];
+  for (const cluster of shownClusters) {
     const members = cluster.nodeIds.filter((id) => id !== seedId && visible(id) && !claimed.has(id));
     if (members.length === 0) continue;
     members.forEach((id) => claimed.add(id));
@@ -225,7 +238,8 @@ export function computeStoryLayout(input: StoryLayoutInput): StoryLayout | null 
     if (e.source === seedId) provenance.set(e.target, e.provenance);
     else if (e.target === seedId) provenance.set(e.source, e.provenance);
   }
-  const rest = nodes.filter((n) => n.id !== seedId && visible(n.id) && !claimed.has(n.id));
+  const unclaimed = nodes.filter((n) => n.id !== seedId && visible(n.id) && !claimed.has(n.id));
+  const rest = unclaimed.filter((n) => !anchorOf.has(n.id));
   const byType = new Map<string, string[]>();
   for (const n of rest) (byType.get(n.type) ?? byType.set(n.type, []).get(n.type)!).push(n.id);
   const ghosts: GhostType[] = [...byType.entries()].map(([type, ids]) => ({
@@ -234,7 +248,7 @@ export function computeStoryLayout(input: StoryLayoutInput): StoryLayout | null 
     mitre: ids.every((id) => provenance.get(id) === 'external_feed'),
     expanded: expandedGhostTypes.has(type),
   }));
-  const loose = rest.filter((n) => expandedGhostTypes.has(n.type));
+  const loose = [...rest.filter((n) => expandedGhostTypes.has(n.type)), ...unclaimed.filter((n) => anchorOf.has(n.id))];
 
   // Bodies: seed pinned at the origin, one per box, one per loose node.
   const seed = byId.get(seedId);
@@ -251,7 +265,32 @@ export function computeStoryLayout(input: StoryLayoutInput): StoryLayout | null 
   loose.forEach((n, j) => {
     bodies.push({ id: n.id, r: bodyRadius(n, false, labels) + gap / 4, ...startAt(n.id, boxes.length + j, total, ring * 1.6, previous) });
   });
-  const links = bodies.slice(1).map((b) => ({ source: seedId, target: b.id, distance: seedR + b.r + gap }));
+  // Each body hangs off the seed, except what an expansion brought in: that
+  // hangs off the expanded node (its story box when it sits in one).
+  const boxOf = new Map<string, string>();
+  for (const b of boxes) for (const id of b.members) boxOf.set(id, `story:${b.cluster.id}`);
+  const bodyById = new Map(bodies.map((b) => [b.id, b]));
+  const bodyFor = (nodeId: string | undefined): Body => {
+    if (!nodeId) return bodies[0];
+    return bodyById.get(boxOf.get(nodeId) ?? nodeId) ?? bodies[0];
+  };
+  const parentOf = (b: Body): Body => {
+    const anchor = b.id.startsWith('story:') ? clusterAnchor.get(b.id.slice(6)) : anchorOf.get(b.id);
+    const parent = bodyFor(anchor);
+    return parent === b ? bodies[0] : parent;
+  };
+  const links = bodies.slice(1).map((b) => {
+    const parent = parentOf(b);
+    return { source: parent.id, target: b.id, distance: parent.r + b.r + gap };
+  });
+  // New expansion bodies start beside their parent rather than on the far ring.
+  bodies.slice(1).forEach((b, i) => {
+    const parent = parentOf(b);
+    if (parent === bodies[0] || previous?.has(b.id)) return;
+    const a = (i * 2.4) % (2 * Math.PI);
+    b.x = (parent.x ?? 0) + (parent.r + b.r) * Math.cos(a);
+    b.y = (parent.y ?? 0) + (parent.r + b.r) * Math.sin(a);
+  });
   if (seed) settle(bodies, links, -120);
 
   const positions = new Map<string, Point>();

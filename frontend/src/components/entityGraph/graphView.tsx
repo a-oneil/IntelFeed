@@ -38,8 +38,10 @@ export interface GraphView {
   showEdgeLabels: boolean;
   /** Shift is held and links can be drawn. */
   linking: boolean;
-  /** Whether a node shows the "has more connections" dot. */
-  canExpand: (nodeId: string) => boolean;
+  /** Whether a node gets the +/− badge for loading its own connections. */
+  expandable: (nodeId: string) => boolean;
+  isExpanded: (nodeId: string) => boolean;
+  toggleExpand: (nodeId: string) => void;
 }
 
 export const GraphViewContext = createContext<GraphView | null>(null);
@@ -140,11 +142,22 @@ export const EntityNodeView = memo(function EntityNodeView({ id, data }: NodePro
           node.type, c, isHovered ? r + 2 : r, color,
           `${styles.nodeShape} ${isHovered ? styles.nodeHovered : ''} ${isSeed ? styles.seedNode : ''}`,
         )}
-        {view.canExpand(id) && !isArticle && !dimmed && (
-          <circle className={styles.expandDot} cx={c + r * 0.75} cy={c + r * 0.75} r={4}>
-            <title>Click to expand connections</title>
-          </circle>
-        )}
+        {view.expandable(id) && !dimmed && (() => {
+          const open = view.isExpanded(id);
+          const bx = c + r * 0.8;
+          const by = c + r * 0.8;
+          return (
+            <g
+              className={`${styles.expandBadge} nodrag`}
+              onClick={(e) => { e.stopPropagation(); view.toggleExpand(id); }}
+              onDoubleClick={(e) => e.stopPropagation()}
+            >
+              <title>{open ? 'Hide the connections loaded from this node' : 'Load this node\'s own connections'}</title>
+              <circle cx={bx} cy={by} r={6} />
+              <path d={open ? `M ${bx - 3} ${by} H ${bx + 3}` : `M ${bx - 3} ${by} H ${bx + 3} M ${bx} ${by - 3} V ${by + 3}`} />
+            </g>
+          );
+        })()}
         {info?.covered !== undefined && !dimmed && (
           <circle
             cx={c + r * 0.95}

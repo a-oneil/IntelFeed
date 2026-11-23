@@ -270,6 +270,21 @@ function EntityGraphInner({
     return s;
   }, [expansions]);
 
+  // What each expansion brought in, keyed back to the node expanded, so the
+  // story layout draws it beside that node.
+  const { anchorOf, clusterAnchor } = useMemo(() => {
+    const anchorOf = new Map<string, string>();
+    const clusterAnchor = new Map<string, string>();
+    if (expansions) {
+      const base = new Set(nodes.map((n) => n.id));
+      for (const [anchor, ex] of expansions) {
+        for (const n of ex.nodes) if (!base.has(n.id) && !anchorOf.has(n.id)) anchorOf.set(n.id, anchor);
+        for (const c of ex.clusters ?? []) clusterAnchor.set(c.id, anchor);
+      }
+    }
+    return { anchorOf, clusterAnchor };
+  }, [nodes, expansions]);
+
   // ── Layout ─────────────────────────────────────────────────────
   const storyLayout = useMemo(() => computeStoryLayout({
     nodes: allNodes,
@@ -279,10 +294,12 @@ function EntityGraphInner({
     hiddenTypes,
     hiddenNodes,
     expandedGhostTypes,
+    anchorOf,
+    clusterAnchor,
     spacing,
     labels: showNodeLabels,
     previous: previousRef.current,
-  }), [allNodes, allEdges, allClusters, seedId, hiddenTypes, hiddenNodes, expandedGhostTypes, spacing, showNodeLabels]);
+  }), [allNodes, allEdges, allClusters, seedId, hiddenTypes, hiddenNodes, expandedGhostTypes, anchorOf, clusterAnchor, spacing, showNodeLabels]);
 
   const storyActive = layoutMode === 'story' && storyLayout !== null;
 
@@ -402,11 +419,16 @@ function EntityGraphInner({
     return new Set(allNodes.filter((n) => visibleIds.has(n.id) && n.label.toLowerCase().includes(hq)).map((n) => n.id));
   }, [hq, allNodes, visibleIds]);
 
-  // Expand dot: the node's own connections can still be fetched and merged.
-  const canExpand = useCallback(
-    (id: string) => !!onToggleExpand && id !== seedId && !expansions?.has(id),
-    [onToggleExpand, seedId, expansions],
+  // The +/− badge: load a node's own connections, or fold them away again.
+  const expandable = useCallback(
+    (id: string) => !!onToggleExpand && id !== seedId && nodeById.get(id)?.type !== 'entry',
+    [onToggleExpand, seedId, nodeById],
   );
+  const isExpanded = useCallback((id: string) => !!expansions?.has(id), [expansions]);
+  const toggleExpand = useCallback((id: string) => {
+    const node = nodeById.get(id);
+    if (node && onToggleExpand) onToggleExpand(id, node.type, !expansions?.has(id));
+  }, [nodeById, onToggleExpand, expansions]);
 
   const view = useMemo<GraphView>(() => ({
     seedId,
@@ -420,8 +442,10 @@ function EntityGraphInner({
     showNodeLabels,
     showEdgeLabels,
     linking,
-    canExpand,
-  }), [seedId, selected, hover, hoveredNodeId, searchMatches, nodeInfo, showNodeLabels, showEdgeLabels, linking, canExpand]);
+    expandable,
+    isExpanded,
+    toggleExpand,
+  }), [seedId, selected, hover, hoveredNodeId, searchMatches, nodeInfo, showNodeLabels, showEdgeLabels, linking, expandable, isExpanded, toggleExpand]);
 
   // Detection rules covering the selected ttp/cve node — fetched lazily on
   // first selection, cached per node id for the life of the component.
@@ -445,6 +469,18 @@ function EntityGraphInner({
     return types;
   }, [allNodes]);
 
+  // Which node marks the legend needs to explain.
+  const marks = useMemo(() => {
+    let coverage = false;
+    let kev = false;
+    for (const id of visibleIds) {
+      const ni = nodeInfo?.get(id);
+      if (ni?.covered !== undefined) coverage = true;
+      if (ni?.kev) kev = true;
+    }
+    return { coverage, kev };
+  }, [visibleIds, nodeInfo]);
+
   // ── Interaction handlers ───────────────────────────────────────
   const handleNodeClick: NodeMouseHandler = useCallback((_e, n) => {
     if (n.id.startsWith(STORY_PREFIX)) {
@@ -453,11 +489,10 @@ function EntityGraphInner({
     }
     const node = nodeById.get(n.id);
     if (!node) return;
+    // Click only selects. Loading a node's connections is the +/− badge (or
+    // the inspector), so inspecting never grows the graph by accident.
     setSelected({ kind: 'node', id: node.id });
-    // One-click exploration: fetch and merge the node's own connections
-    // (with their stories). Collapse stays in the inspector.
-    if (node.type !== 'entry' && canExpand(node.id)) onToggleExpand!(node.id, node.type, true);
-  }, [nodeById, canExpand, onToggleExpand]);
+  }, [nodeById]);
 
   // Double-click opens the node's own page (profile / article).
   const handleNodeDoubleClick: NodeMouseHandler = useCallback((_e, n) => {
@@ -584,6 +619,7 @@ function EntityGraphInner({
       {/* ── Top strip: pills left, tools right — the graph's one toolbar ── */}
       <div className={styles.topStrip}>
         <div className={styles.stripLeft}>
+          {storyActive && storyLayout!.ghosts.length > 0 && <span className={styles.stripLabel}>Not in a story</span>}
           {storyActive && storyLayout!.ghosts.map((g) => (
             <button
               key={g.type}
@@ -602,6 +638,7 @@ function EntityGraphInner({
               {g.mitre ? ' · MITRE' : ''} <span className="caret-glyph">{g.expanded ? '▾' : '▸'}</span>
             </button>
           ))}
+          {!storyActive && networkLayout && networkLayout.overflow.size > 0 && <span className={styles.stripLabel}>Not shown</span>}
           {!storyActive && networkLayout && [...networkLayout.overflow].map(([type, count]) => (
             <button
               key={type}
@@ -862,6 +899,24 @@ function EntityGraphInner({
             </button>
           );
         })}
+        {marks.coverage && (
+          <>
+            <span className={styles.legendItem} title="A detection rule in the library covers this technique or CVE">
+              <svg width="8" height="8"><circle cx="4" cy="4" r="3" fill="var(--success)" /></svg>
+              <span className={`${styles.legendLabel} ${styles.legendMark}`}>Has a rule</span>
+            </span>
+            <span className={styles.legendItem} title="No detection rule in the library covers this technique or CVE">
+              <svg width="8" height="8"><circle cx="4" cy="4" r="3" fill="none" stroke="var(--danger)" strokeWidth="1.3" /></svg>
+              <span className={`${styles.legendLabel} ${styles.legendMark}`}>No rule</span>
+            </span>
+          </>
+        )}
+        {marks.kev && (
+          <span className={styles.legendItem} title="On the CISA Known Exploited Vulnerabilities list">
+            <svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="none" stroke="var(--danger)" strokeWidth="1.5" /></svg>
+            <span className={`${styles.legendLabel} ${styles.legendMark}`}>KEV</span>
+          </span>
+        )}
       </div>
 
       {/* Interaction hint */}
@@ -869,7 +924,7 @@ function EntityGraphInner({
         <div className={styles.edgeHint}>
           {linking
             ? 'Drag from a node to another node to create a relationship'
-            : `Click to inspect${onToggleExpand ? ' & expand' : ''} · double-click to open · drag to move${onEdgeCreate ? ' · Shift+drag to link' : ''}`}
+            : `Click to inspect · double-click to open${onToggleExpand ? ' · + loads connections' : ''} · drag to move${onEdgeCreate ? ' · Shift+drag to link' : ''}`}
         </div>
       )}
 

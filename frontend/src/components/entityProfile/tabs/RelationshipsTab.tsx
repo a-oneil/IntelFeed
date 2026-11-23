@@ -22,6 +22,7 @@ import {
   type GraphNodeInfo,
   type GraphStoryCluster,
 } from "@/components/EntityGraph";
+import { pruneExpansions } from "@/components/entityGraph/expansions";
 import { usePivot, useEntityGraph, useUnlinkRelatedEntity } from "@/hooks/useCorrelation";
 import {
   useCreateRelationship,
@@ -322,7 +323,7 @@ export function RelationshipsTab({
       unlinkRelated.mutate({ entityType, entityId, otherType: row.type, otherId: row.item.id }),
   };
 
-  // Inspector "Expand connections": fetch the clicked node's own PIVOT —
+  // The node's +/− badge (or the inspector): fetch the node's own PIVOT —
   // its earned claims become satellite nodes, and its evidence stories
   // become mini hulls orbiting it. Collapse just drops the set.
   const toggleGraphExpand = (nodeId: string, nodeType: string, expand: boolean) => {
@@ -330,23 +331,8 @@ export function RelationshipsTab({
       setGraphExpansions((prev) => {
         const next = new Map(prev);
         next.delete(nodeId);
-        // Cascade: an expansion anchored to a node that just vanished (it
-        // only existed inside the collapsed set) goes with it, repeatedly,
-        // so multi-layer chains fold back cleanly.
-        const baseIds = new Set((effGraph?.nodes ?? []).map((n) => n.id));
-        let changed = true;
-        while (changed) {
-          changed = false;
-          const present = new Set(baseIds);
-          for (const exp of next.values()) for (const n of exp.nodes) present.add(n.id);
-          for (const key of [...next.keys()]) {
-            if (!present.has(key)) {
-              next.delete(key);
-              changed = true;
-            }
-          }
-        }
-        return next;
+        // Cascade: expansions hanging off the collapsed one fold back with it.
+        return pruneExpansions(next, new Set((effGraph?.nodes ?? []).map((n) => n.id)));
       });
       return;
     }

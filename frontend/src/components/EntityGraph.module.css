@@ -105,13 +105,23 @@
   stroke-width: 1.5;
 }
 
-/* ── Expand indicator dot ── */
-.expandDot {
-  fill: var(--accent);
-  stroke: var(--bg-primary);
-  stroke-width: 1.5;
-  opacity: 0.85;
+/* ── +/− badge: load or fold a node's own connections ── */
+.expandBadge {
+  pointer-events: all;
+  cursor: pointer;
 }
+.expandBadge circle {
+  fill: var(--bg-primary);
+  stroke: var(--text-muted);
+  stroke-width: 1;
+}
+.expandBadge path {
+  stroke: var(--text-secondary);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.expandBadge:hover circle { stroke: var(--accent); }
+.expandBadge:hover path { stroke: var(--text-primary); }
 
 /* ── Node labels ── */
 .nodeLabel,
@@ -220,8 +230,16 @@
 }
 
 .legendItem { display: flex; align-items: center; gap: 5px; }
+.stripLabel {
+  align-self: center;
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 .legendDot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .legendLabel { font-size: var(--fs-xs); color: var(--text-secondary); white-space: nowrap; text-transform: capitalize; }
+.legendMark { text-transform: none; }
 
 /* ── Hint bar ── */
 .edgeHint {
