@@ -345,7 +345,7 @@ Adjustments:
 
 ### Timeline Construction
 
-`GET /api/intelligence/timeline/{entity_type}/{entity_id}` (`entity_timeline()`, `backend/app/intelligence/correlation.py:2378`) merges, by date: linked articles (one per duplicate story), correlation events, enrichment runs, detection rules created, typed relationships and campaign membership.
+`GET /api/intelligence/timeline/{entity_type}/{entity_id}` (`entity_timeline()`, `backend/app/intelligence/correlation.py:2397`) merges, by date: linked articles (one per duplicate story), correlation events, enrichment runs, detection rules created, typed relationships and campaign membership.
 
 ### Typed relationships
 
