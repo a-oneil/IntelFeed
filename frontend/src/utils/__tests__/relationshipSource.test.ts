@@ -38,4 +38,12 @@ describe("relationship source wording", () => {
     expect(reasonOf(r, parts).text).toBe("Linked from articles that mention both. No reviewer has checked it yet.");
     expect(statusOf(r.item)).toBe("Not confirmed yet");
   });
+
+  it("names an AI extraction as such, not as a source or a co-mention", () => {
+    const r = row({ relationship_source: "auto_extracted", relationship_confidence: "probable" });
+    const parts = sourcesOf(r);
+    expect(sourceLabel(parts)).toBe("AI, from an article");
+    expect(reasonOf(r, parts).text).toBe("The AI read it in an article. No reviewer has checked it yet.");
+    expect(statusOf(r.item)).toBe("Stated in an article, not confirmed by a second source yet");
+  });
 });

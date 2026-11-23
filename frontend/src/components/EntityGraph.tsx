@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -32,6 +32,8 @@ import {
 import {
   EntityNodeView,
   FloatingEdgeView,
+  GraphUiContext,
+  GraphUiStore,
   GraphViewContext,
   StoryNodeView,
   getNodeColor,
@@ -290,7 +292,11 @@ function EntityGraphInner({
   }, [nodes, expansions]);
 
   // ── Layout ─────────────────────────────────────────────────────
-  const storyLayout = useMemo(() => computeStoryLayout({
+  // Only the layout on screen is computed: the story one is the costlier,
+  // and in Network mode its result would be thrown away.
+  const hasStories = allClusters.length > 0;
+  const storyActive = layoutMode === 'story' && hasStories;
+  const storyLayout = useMemo(() => !storyActive ? null : computeStoryLayout({
     nodes: allNodes,
     edges: allEdges,
     clusters: allClusters,
@@ -304,9 +310,7 @@ function EntityGraphInner({
     labels: showNodeLabels,
     aspect,
     previous: previousRef.current,
-  }), [allNodes, allEdges, allClusters, seedId, hiddenTypes, hiddenNodes, expandedGhostTypes, anchorOf, clusterAnchor, spacing, showNodeLabels, aspect]);
-
-  const storyActive = layoutMode === 'story' && storyLayout !== null;
+  }), [storyActive, allNodes, allEdges, allClusters, seedId, hiddenTypes, hiddenNodes, expandedGhostTypes, anchorOf, clusterAnchor, spacing, showNodeLabels, aspect]);
 
   const networkLayout = useMemo(() => storyActive ? null : computeNetworkLayout({
     nodes: allNodes,
@@ -458,12 +462,6 @@ function EntityGraphInner({
 
   const view = useMemo<GraphView>(() => ({
     seedId,
-    selectedNodeId: selected?.kind === 'node' ? selected.id : null,
-    selectedClusterId: selected?.kind === 'cluster' ? selected.id : null,
-    selectedEdgeId: selected?.kind === 'edge' ? selected.id : null,
-    hover,
-    hoveredNodeId,
-    searchMatches,
     nodeInfo,
     showNodeLabels,
     showEdgeLabels,
@@ -471,7 +469,21 @@ function EntityGraphInner({
     expandable,
     isExpanded,
     toggleExpand,
-  }), [seedId, selected, hover, hoveredNodeId, searchMatches, nodeInfo, showNodeLabels, showEdgeLabels, linking, expandable, isExpanded, toggleExpand]);
+  }), [seedId, nodeInfo, showNodeLabels, showEdgeLabels, linking, expandable, isExpanded, toggleExpand]);
+
+  // Hover, selection and search go through a store: each node and edge
+  // re-renders only when its own dimming or highlight changes.
+  const [uiStore] = useState(() => new GraphUiStore());
+  useLayoutEffect(() => {
+    uiStore.set({
+      hover,
+      hoveredNodeId,
+      selectedNodeId: selected?.kind === 'node' ? selected.id : null,
+      selectedClusterId: selected?.kind === 'cluster' ? selected.id : null,
+      selectedEdgeId: selected?.kind === 'edge' ? selected.id : null,
+      searchMatches,
+    });
+  }, [uiStore, hover, hoveredNodeId, selected, searchMatches]);
 
   // Detection rules covering the selected ttp/cve node — fetched lazily on
   // first selection, cached per node id for the life of the component.
@@ -600,47 +612,49 @@ function EntityGraphInner({
       className={containerClassName}
       style={isFullscreen ? undefined : { width: widthProp, height: heightProp }}
     >
-      <GraphViewContext.Provider value={view}>
-        <ReactFlow
-          className={styles.flow}
-          nodes={flowNodes}
-          edges={flowEdges}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          onNodesChange={onNodesChange}
-          onNodeDragStop={onNodeDragStop}
-          onNodeClick={handleNodeClick}
-          onNodeDoubleClick={handleNodeDoubleClick}
-          onNodeMouseEnter={onNodeMouseEnter}
-          onNodeMouseLeave={onNodeMouseLeave}
-          onEdgeClick={handleEdgeClick}
-          onPaneClick={() => setSelected(null)}
-          onConnect={handleConnect}
-          nodesConnectable={!!onEdgeCreate}
-          connectionMode={ConnectionMode.Loose}
-          connectionLineType={ConnectionLineType.Straight}
-          connectionLineStyle={{ stroke: 'var(--accent)', strokeWidth: 2, strokeDasharray: '6 4' }}
-          connectionRadius={40}
-          elementsSelectable={false}
-          deleteKeyCode={null}
-          zoomOnDoubleClick={false}
-          minZoom={0.08}
-          maxZoom={3}
-          attributionPosition="bottom-center"
-        >
-          <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="var(--border)" />
-          {showMiniMap && (
-            <MiniMap
-              className={styles.minimap}
-              pannable
-              zoomable
-              nodeColor={(n) => (n.type === 'story' ? 'transparent' : getNodeColor((n as EntityFlowNode).data.node.type))}
-              nodeStrokeColor={(n) => (n.type === 'story' ? 'var(--accent-intel)' : 'transparent')}
-              maskColor="color-mix(in srgb, var(--bg-primary) 70%, transparent)"
-            />
-          )}
-        </ReactFlow>
-      </GraphViewContext.Provider>
+      <GraphUiContext.Provider value={uiStore}>
+        <GraphViewContext.Provider value={view}>
+          <ReactFlow
+            className={styles.flow}
+            nodes={flowNodes}
+            edges={flowEdges}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            onNodesChange={onNodesChange}
+            onNodeDragStop={onNodeDragStop}
+            onNodeClick={handleNodeClick}
+            onNodeDoubleClick={handleNodeDoubleClick}
+            onNodeMouseEnter={onNodeMouseEnter}
+            onNodeMouseLeave={onNodeMouseLeave}
+            onEdgeClick={handleEdgeClick}
+            onPaneClick={() => setSelected(null)}
+            onConnect={handleConnect}
+            nodesConnectable={!!onEdgeCreate}
+            connectionMode={ConnectionMode.Loose}
+            connectionLineType={ConnectionLineType.Straight}
+            connectionLineStyle={{ stroke: 'var(--accent)', strokeWidth: 2, strokeDasharray: '6 4' }}
+            connectionRadius={40}
+            elementsSelectable={false}
+            deleteKeyCode={null}
+            zoomOnDoubleClick={false}
+            minZoom={0.08}
+            maxZoom={3}
+            attributionPosition="bottom-center"
+          >
+            <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="var(--border)" />
+            {showMiniMap && (
+              <MiniMap
+                className={styles.minimap}
+                pannable
+                zoomable
+                nodeColor={(n) => (n.type === 'story' ? 'transparent' : getNodeColor((n as EntityFlowNode).data.node.type))}
+                nodeStrokeColor={(n) => (n.type === 'story' ? 'var(--accent-intel)' : 'transparent')}
+                maskColor="color-mix(in srgb, var(--bg-primary) 70%, transparent)"
+              />
+            )}
+          </ReactFlow>
+        </GraphViewContext.Provider>
+      </GraphUiContext.Provider>
 
       {/* ── Top strip: pills left, tools right — the graph's one toolbar ── */}
       <div className={styles.topStrip}>
@@ -687,7 +701,7 @@ function EntityGraphInner({
           )}
         </div>
         <div className={styles.stripRight}>
-          {storyLayout && (
+          {hasStories && (
             <div className={styles.layoutToggle}>
               <button
                 className={layoutMode === 'story' ? styles.layoutToggleOn : ''}

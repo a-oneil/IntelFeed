@@ -18,6 +18,7 @@ export interface SourcePart {
 const MITRE: SourcePart = { key: "mitre", label: "MITRE ATT&CK", tone: "mitre" };
 const ANALYST: SourcePart = { key: "analyst", label: "Analyst", tone: "analyst" };
 const AI_REVIEWED: SourcePart = { key: "ai_reviewed", label: "AI-reviewed articles", tone: "ai" };
+const AI_EXTRACTED: SourcePart = { key: "ai_extracted", label: "AI, from an article", tone: "ai" };
 const ARTICLES: SourcePart = { key: "articles", label: "Articles, not reviewed", tone: "articles" };
 
 const REVIEWED = new Set(["corroborated", "kept"]);
@@ -50,7 +51,11 @@ export function sourcesOf(row: RelRow, via: string[] = []): SourcePart[] {
         primary = ANALYST;
         break;
       default:
-        primary = REVIEWED.has(item.relationship_adjudication ?? "") ? AI_REVIEWED : ARTICLES;
+        primary = REVIEWED.has(item.relationship_adjudication ?? "")
+          ? AI_REVIEWED
+          : item.relationship_source === "auto_extracted"
+            ? AI_EXTRACTED
+            : ARTICLES;
     }
   }
   const out = [primary];
@@ -77,11 +82,14 @@ export function statusOf(item: EntitySearchResult): string | null {
   if (item.relationship_source === "analyst_confirmed" || item.relationship_source === "analyst_created") {
     return "Confirmed by an analyst";
   }
+  const fromSource = item.relationship_source === "external_feed" || item.relationship_source === "enrichment";
   switch (item.relationship_confidence) {
     case "confirmed":
       return "Confirmed";
     case "probable":
-      return "Reported by the source, not checked against articles";
+      return fromSource
+        ? "Reported by the source, not checked against articles"
+        : "Stated in an article, not confirmed by a second source yet";
     default:
       return "Not confirmed yet";
   }
@@ -108,7 +116,10 @@ export function reasonOf(row: RelRow, parts: SourcePart[]): { quote: string | nu
       text = `An analyst added or confirmed this.${also}`;
       break;
     case "ai":
-      text = `The AI reviewer found it stated in the articles.${also}`;
+      text =
+        primary.key === "ai_extracted"
+          ? `The AI read it in an article. No reviewer has checked it yet.${also}`
+          : `The AI reviewer found it stated in the articles.${also}`;
       break;
     default:
       text = item.relationship_id

@@ -6,7 +6,7 @@
  * panel — only where they come from.
  */
 import type { EntityType } from "@/stores/intelStore";
-import { useAffectedCves, useCveAffectedRows } from "@/hooks/useAffectedCves";
+import { formatVersionRange, useAffectedCves, useCveAffectedRows } from "@/hooks/useAffectedCves";
 import { useCVEWeaknesses, useCWE, useCWEFamily } from "@/hooks/useIntelligence";
 import styles from "./relationships.module.css";
 
@@ -84,7 +84,7 @@ function CveReference({ cveId, onOpen }: { cveId: string; onOpen: Open }) {
           <div className={styles.refItems}>
             {a.map((x) => {
               const name = x.product_name ?? `${x.cpe_vendor} ${x.cpe_product}`.replace(/_/g, " ");
-              const range = [x.version_start, x.version_end].filter(Boolean).join(" – ");
+              const range = formatVersionRange(x.version_start, x.version_end);
               return (
                 <div key={`${x.cpe_vendor}/${x.cpe_product}/${x.version_start}/${x.version_end}`} className={styles.refItem}>
                   {x.product_id ? (

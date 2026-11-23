@@ -12,7 +12,8 @@ import styles from "./relationships.module.css";
 
 const CARD_PREVIEW = 5;
 
-export const coMentionCount = (row: RelRow) => row.item.strength?.articles ?? row.item.co_occurrence_count ?? 0;
+/** Articles naming both the profile and this entity. */
+export const articleCount = (row: RelRow) => row.item.strength?.articles ?? row.item.co_occurrence_count ?? 0;
 
 export function CoMentions({
   rows,
@@ -31,7 +32,7 @@ export function CoMentions({
     const byType = new Map<EntityType, RelRow[]>();
     for (const r of rows) (byType.get(r.type) ?? byType.set(r.type, []).get(r.type)!).push(r);
     return TYPE_ORDER.filter((t) => byType.has(t)).map((t) => {
-      const list = [...byType.get(t)!].sort((a, b) => coMentionCount(b) - coMentionCount(a));
+      const list = [...byType.get(t)!].sort((a, b) => articleCount(b) - articleCount(a));
       // Two entities with one name are almost always a duplicate to merge.
       const seen = new Map<string, number>();
       for (const r of list) seen.set(r.label.toLowerCase(), (seen.get(r.label.toLowerCase()) ?? 0) + 1);
@@ -49,7 +50,7 @@ export function CoMentions({
         {groups.map((g) => {
           const isOpen = open.has(g.type);
           const shown = isOpen ? g.rows : g.rows.slice(0, CARD_PREVIEW);
-          const max = Math.max(coMentionCount(g.rows[0]), 1);
+          const max = Math.max(articleCount(g.rows[0]), 1);
           const color = getEntityColor(g.type);
           return (
             <div key={g.type} className={styles.card}>
@@ -60,7 +61,7 @@ export function CoMentions({
               </div>
               <div style={isOpen ? { maxHeight: 360, overflowY: "auto" } : undefined}>
                 {shown.map((r) => {
-                  const n = coMentionCount(r);
+                  const n = articleCount(r);
                   return (
                     <button
                       key={rowKey(r)}

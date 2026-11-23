@@ -1,11 +1,13 @@
 /**
  * React Flow node and edge components for the entity graph.
  *
- * Hover, selection, search and display toggles live in one context rather
- * than in each node's `data`, so hovering a node re-renders the nodes that
- * read the context instead of rebuilding the whole node array.
+ * Display settings that rarely change (labels, seed, coverage facts, link
+ * mode) come from one context. Hover, selection and search change on every
+ * mouse move, so they sit in a small store instead: each node and edge
+ * subscribes to the yes/no values about itself, and a hover re-renders only
+ * the nodes and edges whose dimming or highlight actually changes.
  */
-import { createContext, memo, useContext } from 'react';
+import { createContext, memo, useContext, useSyncExternalStore } from 'react';
 import {
   BaseEdge,
   EdgeLabelRenderer,
@@ -26,13 +28,6 @@ import styles from '../EntityGraph.module.css';
 
 export interface GraphView {
   seedId: string | undefined;
-  selectedNodeId: string | null;
-  selectedClusterId: string | null;
-  selectedEdgeId: string | null;
-  /** Hovered node plus its neighbors and the edges between them. */
-  hover: { nodes: Set<string>; edges: Set<string> } | null;
-  hoveredNodeId: string | null;
-  searchMatches: Set<string> | null;
   nodeInfo?: Map<string, GraphNodeInfo>;
   showNodeLabels: boolean;
   showEdgeLabels: boolean;
@@ -50,6 +45,50 @@ function useGraphView(): GraphView {
   const v = useContext(GraphViewContext);
   if (!v) throw new Error('GraphViewContext missing');
   return v;
+}
+
+/** What the pointer and the selection are doing right now. */
+export interface GraphUi {
+  /** Hovered node plus its neighbors and the edges between them. */
+  hover: { nodes: Set<string>; edges: Set<string> } | null;
+  hoveredNodeId: string | null;
+  selectedNodeId: string | null;
+  selectedClusterId: string | null;
+  selectedEdgeId: string | null;
+  searchMatches: Set<string> | null;
+}
+
+export class GraphUiStore {
+  private state: GraphUi = {
+    hover: null,
+    hoveredNodeId: null,
+    selectedNodeId: null,
+    selectedClusterId: null,
+    selectedEdgeId: null,
+    searchMatches: null,
+  };
+  private listeners = new Set<() => void>();
+  get = (): GraphUi => this.state;
+  set(next: GraphUi) {
+    this.state = next;
+    this.listeners.forEach((l) => l());
+  }
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+}
+
+export const GraphUiContext = createContext<GraphUiStore | null>(null);
+
+/** Subscribe to one value derived from the UI state. Return a primitive, so
+ * the component re-renders only when that value changes. */
+function useGraphUi<T extends string | number | boolean | null>(select: (s: GraphUi) => T): T {
+  const store = useContext(GraphUiContext);
+  if (!store) throw new Error('GraphUiContext missing');
+  return useSyncExternalStore(store.subscribe, () => select(store.get()));
 }
 
 export function getNodeColor(type: string): string {
@@ -114,9 +153,11 @@ export const EntityNodeView = memo(function EntityNodeView({ id, data }: NodePro
   const color = getNodeColor(node.type);
   const isArticle = node.type === 'entry';
   const isSeed = id === view.seedId;
-  const isHovered = view.hoveredNodeId === id;
-  const isSelected = view.selectedNodeId === id;
-  const dimmed = (view.hover && !view.hover.nodes.has(id)) || (view.searchMatches && !view.searchMatches.has(id));
+  const isHovered = useGraphUi((s) => s.hoveredNodeId === id);
+  const isSelected = useGraphUi((s) => s.selectedNodeId === id);
+  const dimmed = useGraphUi(
+    (s) => !!((s.hover && !s.hover.nodes.has(id)) || (s.searchMatches && !s.searchMatches.has(id))),
+  );
   const info = view.nodeInfo?.get(id);
   const label = view.showNodeLabels && !dimmed;
 
@@ -191,9 +232,8 @@ export const EntityNodeView = memo(function EntityNodeView({ id, data }: NodePro
 export type StoryFlowNode = Node<{ cluster: GraphStoryCluster }, 'story'>;
 
 export const StoryNodeView = memo(function StoryNodeView({ data }: NodeProps<StoryFlowNode>) {
-  const view = useGraphView();
   const { cluster } = data;
-  const selected = view.selectedClusterId === cluster.id;
+  const selected = useGraphUi((s) => s.selectedClusterId === cluster.id);
   const sub = [`${cluster.articles} articles`, cluster.corroborated ? 'corroborated' : null].filter(Boolean).join(' · ');
   return (
     <div
@@ -238,12 +278,16 @@ export const FloatingEdgeView = memo(function FloatingEdgeView({ id, source, tar
   const view = useGraphView();
   const s = useInternalNode(source);
   const t = useInternalNode(target);
+  const ends = data ? [data.edge.source, data.edge.target] : [];
+  const inHover = useGraphUi((u) => !!u.hover?.edges.has(id));
+  const anyHover = useGraphUi((u) => !!u.hover);
+  const endSelected = useGraphUi((u) => !!u.selectedNodeId && ends.includes(u.selectedNodeId));
+  const selected = useGraphUi((u) => u.selectedEdgeId === id);
+  const searching = useGraphUi((u) => !!u.searchMatches);
+  const endMatches = useGraphUi((u) => !!u.searchMatches && ends.some((e) => u.searchMatches!.has(e)));
   if (!s?.measured.width || !t?.measured.width || !data) return null;
   const edge = data.edge;
-  if (data.spoke) {
-    const focus = view.hover?.edges.has(id) || view.selectedNodeId === edge.source || view.selectedNodeId === edge.target;
-    if (!focus) return null;
-  }
+  if (data.spoke && !inHover && !endSelected) return null;
 
   const sc = anchor(s, 0, 0, 0);
   const tc = anchor(t, 0, 0, 0);
@@ -251,7 +295,7 @@ export const FloatingEdgeView = memo(function FloatingEdgeView({ id, source, tar
   const { x: x2, y: y2 } = anchor(t, sc.cx, sc.cy, 2);
 
   if (data.story) {
-    const quiet = !!view.hover || !!view.searchMatches;
+    const quiet = anyHover || searching;
     return (
       <BaseEdge
         id={id}
@@ -263,10 +307,8 @@ export const FloatingEdgeView = memo(function FloatingEdgeView({ id, source, tar
     );
   }
 
-  const searchDim = view.searchMatches && !view.searchMatches.has(edge.source) && !view.searchMatches.has(edge.target);
-  const dimmed = (view.hover && !view.hover.edges.has(id)) || searchDim;
-  const highlighted = view.hover?.edges.has(id);
-  const selected = view.selectedEdgeId === id;
+  const dimmed = (anyHover && !inHover) || (searching && !endMatches);
+  const highlighted = inHover;
   // Width encodes relationship strength (0–1 composite) when present;
   // legacy weights fall back to the old scaling. Inferred (engine-only)
   // relationships render dashed; analyst-touched ones solid.

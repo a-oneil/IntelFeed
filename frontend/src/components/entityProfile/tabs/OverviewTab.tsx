@@ -300,8 +300,14 @@ export function OverviewTab({
   );
   // Always the 90-day series, whatever window the header's pulse line shows:
   // the verdict compares the last three weeks with the weeks before.
-  const { data: series90 } = useEntityMentionsTimeseries(entityType, entityId, "90d");
-  const verdict = useMemo(() => activityVerdict(series90?.points), [series90]);
+  const { data: series90, isPlaceholderData: series90Stale } = useEntityMentionsTimeseries(entityType, entityId, "90d");
+  // The hook keeps the previous series on screen while the next loads; that
+  // is the last profile's series right after navigating, so the verdict (a
+  // stated fact) waits for this entity's own.
+  const verdict = useMemo(
+    () => (series90Stale ? null : activityVerdict(series90?.points)),
+    [series90, series90Stale],
+  );
   const { data: countryProfile } = useCountryProfile(entityType === "country" ? entityId : undefined);
   const { data: weaknessProfile } = useEntityWeaknessProfile(
     entityType === "vendor" || entityType === "product" ? entityType : undefined,

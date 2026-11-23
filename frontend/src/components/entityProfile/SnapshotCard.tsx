@@ -386,9 +386,9 @@ export function SnapshotCard({
       );
   }
 
-  // No baseline "Articles" row: the header's activity line counts articles
-  // from the linked entries for the chosen window. The stored article_count
-  // counter only grows (unlinks don't decrement it), so it disagreed.
+  // No baseline "Articles" row: the stored article_count counter only grows
+  // (unlinks don't decrement it), so it disagreed with the linked articles.
+  // The Overview's Reporting fact gives the recent count instead.
 
   if (campaigns && campaigns.length > 0) {
     const [first, ...rest] = campaigns;

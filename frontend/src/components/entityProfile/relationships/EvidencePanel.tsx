@@ -13,6 +13,7 @@ import { reasonOf, sourceLabel, statusOf, type SourcePart } from "@/utils/relati
 import styles from "./relationships.module.css";
 
 const PREVIEW = 4;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const REVIEWER: Record<string, string> = { adjudicator: "AI reviewer", sweep: "AI reviewer", analyst: "Analyst" };
 
@@ -62,7 +63,10 @@ export function EvidencePanel({
 }) {
   const { item, label, type } = row;
   const relId = item.relationship_id ?? null;
-  const evidence = useRelationshipEvidence(relId && !isVisitor ? relId : null);
+  // Catalog rows (ATT&CK technique ↔ mitigation) carry a synthetic id, not a
+  // stored relationship: there is no evidence to fetch and nothing to edit.
+  const stored = !!relId && UUID.test(relId);
+  const evidence = useRelationshipEvidence(stored && !isVisitor ? relId : null);
   const [showAllCited, setShowAllCited] = useState(false);
   const [showAllMentions, setShowAllMentions] = useState(false);
   const verb = verbKeyOf(item);
@@ -89,9 +93,9 @@ export function EvidencePanel({
 
   // The stored direction decides which verbs the API accepts.
   const outbound = item.relationship_direction !== "inbound";
-  const verbs = relId ? verbsForStored(outbound ? viewedType : type, outbound ? type : viewedType) : [];
+  const verbs = stored ? verbsForStored(outbound ? viewedType : type, outbound ? type : viewedType) : [];
   const isMitre = sources[0]?.key === "mitre";
-  const canModerate = !isVisitor && !!relId && item.relationship_confidence !== "confirmed";
+  const canModerate = !isVisitor && stored && item.relationship_confidence !== "confirmed";
 
   return (
     <section className={styles.panel} aria-label="Why this relationship is listed">
@@ -116,7 +120,7 @@ export function EvidencePanel({
         )}
       </div>
 
-      {relId && !isVisitor && (evidence.isLoading || cited.length > 0) && (
+      {stored && !isVisitor && (evidence.isLoading || cited.length > 0) && (
         <>
           <div className={styles.label}>
             Articles that state it{evidence.data ? ` · ${evidence.data.article_count}` : ""}
@@ -229,7 +233,7 @@ export function EvidencePanel({
           </>
         )}
       </div>
-      {!isVisitor && relId && verbs.length > 1 && (
+      {!isVisitor && stored && verbs.length > 1 && (
         <div className={styles.actions} style={{ marginTop: 8 }}>
           <label className={styles.verbPick}>
             Change “{verb.replace(/_/g, " ")}” to
@@ -241,7 +245,7 @@ export function EvidencePanel({
               ))}
             </select>
           </label>
-          <button className={styles.btn} disabled={newVerb === verb} onClick={() => onChangeVerb(relId, newVerb)}>
+          <button className={styles.btn} disabled={newVerb === verb} onClick={() => onChangeVerb(relId!, newVerb)}>
             Change
           </button>
         </div>

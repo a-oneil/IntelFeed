@@ -56,7 +56,7 @@ import { sourceLabel, sourcesOf, type SourcePart } from "@/utils/relationshipSou
 import { useOpenThread } from "@/utils/openEntry";
 import { EvidencePanel } from "../relationships/EvidencePanel";
 import { ReferenceLinks, hasReferenceLinks } from "../relationships/ReferenceLinks";
-import { CoMentions, NotMatched } from "../relationships/CoMentions";
+import { CoMentions, NotMatched, articleCount } from "../relationships/CoMentions";
 import rel from "../relationships/relationships.module.css";
 import styles from "../entityProfile.module.css";
 
@@ -79,8 +79,6 @@ function pluralVerb(active: string): string {
   if (first.length > 3 && first.endsWith("s") && !first.endsWith("ss")) return [first.slice(0, -1), ...rest].join(" ");
   return `are ${active}`;
 }
-
-const articleCount = (row: RelRow) => row.item.strength?.articles ?? row.item.co_occurrence_count ?? 0;
 
 /** Windowed rendering for long open groups. */
 function VirtualRows({ rows, renderRow }: { rows: RelRow[]; renderRow: (r: RelRow) => ReactNode }) {

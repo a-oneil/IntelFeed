@@ -41,10 +41,13 @@ vi.mock("@/stores/authStore", () => ({ useIsVisitor: () => auth.visitor }));
 const screenSize = { mobile: false };
 vi.mock("@/hooks/useMediaQuery", () => ({ useIsMobile: () => screenSize.mobile }));
 
+/** A stored relationship id (a UUID; catalog rows carry synthetic ones). */
+const relId = (key: string) => `00000000-0000-4000-8000-${key.padStart(12, "0")}`;
+
 const tool = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
   id,
   name,
-  relationship_id: `rel-${id}`,
+  relationship_id: relId(id.replace(/\D/g, "")),
   relationship_type: "uses",
   relationship_confidence: "probable",
   relationship_source: "enrichment",
@@ -62,7 +65,7 @@ const related = {
     {
       id: "m1",
       name: "WINELOADER",
-      relationship_id: "rel-m1",
+      relationship_id: relId("901"),
       relationship_type: "uses",
       relationship_confidence: "possible",
       relationship_source: "co_occurrence",
@@ -152,7 +155,7 @@ describe("RelationshipsTab", () => {
 
   it("explains the selected relationship: the source's words and the articles that state it", () => {
     evidence.data = {
-      relationship_id: "rel-t1",
+      relationship_id: relId("1"),
       adjudication_verdict: "kept",
       article_count: 1,
       articles: [
@@ -193,7 +196,7 @@ describe("RelationshipsTab", () => {
     expect(within(panel).getByText("Articles that state it · 1")).toBeInTheDocument();
     expect(within(panel).getByText("APT29 ran AdFind to map the domain.")).toBeInTheDocument();
     expect(within(panel).getByText("AI reviewer kept it")).toBeInTheDocument();
-    expect(evidence.asked).toContain("rel-t1");
+    expect(evidence.asked).toContain(relId("1"));
   });
 
   it("changes a relationship's type to one the pair allows", () => {
@@ -204,7 +207,7 @@ describe("RelationshipsTab", () => {
     expect([...pick.querySelectorAll("option")].map((o) => o.value)).toEqual(["uses", "delivers", "related_to"]);
     fireEvent.change(pick, { target: { value: "delivers" } });
     fireEvent.click(within(panel).getByRole("button", { name: "Change" }));
-    expect(update).toHaveBeenCalledWith({ id: "rel-m1", relationship_type: "delivers" });
+    expect(update).toHaveBeenCalledWith({ id: relId("901"), relationship_type: "delivers" });
   });
 
   it("gives a visitor no claims, no review evidence and no editing", () => {
@@ -247,4 +250,27 @@ describe("RelationshipsTab", () => {
     expect(screen.getByRole("button", { name: /Mentioned in the same articles · 1/ })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("LockBit")).not.toBeInTheDocument();
   });
+
+  it("asks for no evidence and offers no editing on a catalog row with a synthetic id", () => {
+    const catalog = {
+      mitigations: [
+        {
+          id: "mi1",
+          name: "Network Intrusion Prevention",
+          relationship_id: "catalog-ttp-mitigation-mi1",
+          relationship_type: "mitigated_by",
+          relationship_confidence: "confirmed",
+          relationship_source: "external_feed",
+          relationship_direction: "outbound",
+        },
+      ],
+    } as unknown as PivotResponse["related"];
+    renderTab(catalog);
+    fireEvent.click(row("Network Intrusion Prevention"));
+    expect(evidence.asked.every((id) => id === null)).toBe(true);
+    const panel = screen.getByRole("region", { name: "Why this relationship is listed" });
+    expect(within(panel).queryByRole("combobox")).not.toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
+  });
 });
+
