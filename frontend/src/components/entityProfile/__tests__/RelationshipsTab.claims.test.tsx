@@ -71,14 +71,14 @@ const related = {
   ],
 } as unknown as PivotResponse["related"];
 
-function renderTab() {
+function renderTab(rel: PivotResponse["related"] = related) {
   return render(
     <MemoryRouter>
       <RelationshipsTab
         entityType="threat_actor"
         entityId="a1"
         entityLabel="APT29"
-        related={related}
+        related={rel}
         onOpenEntity={vi.fn()}
         onOpenArticle={vi.fn()}
         onOpenEntry={vi.fn()}
@@ -231,5 +231,20 @@ describe("RelationshipsTab", () => {
     expect(row("AdFind")).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(row("AdFind"));
     expect(screen.queryByRole("region", { name: "Why this relationship is listed" })).not.toBeInTheDocument();
+  });
+
+  it("opens the co-mentions when there are no relationships, and keeps them closed when there are", () => {
+    const coMentioned = { malwares: [{ id: "m9", name: "LockBit", co_occurrence_count: 4 }] } as unknown as PivotResponse["related"];
+    const { unmount } = renderTab(coMentioned);
+    const toggle = screen.getByRole("button", { name: /Mentioned in the same articles · 1/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("LockBit")).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(screen.queryByText("LockBit")).not.toBeInTheDocument();
+    unmount();
+
+    renderTab({ ...related, ...coMentioned } as PivotResponse["related"]);
+    expect(screen.getByRole("button", { name: /Mentioned in the same articles · 1/ })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("LockBit")).not.toBeInTheDocument();
   });
 });

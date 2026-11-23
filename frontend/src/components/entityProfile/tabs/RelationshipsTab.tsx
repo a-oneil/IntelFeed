@@ -158,7 +158,9 @@ export function RelationshipsTab({
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [heldOpen, setHeldOpen] = useState(false);
-  const [coOpen, setCoOpen] = useState(false);
+  // null until the toggle is clicked: then the open state follows whether
+  // there are relationships (none → the co-mentions are the content).
+  const [coOpenChoice, setCoOpenChoice] = useState<boolean | null>(null);
   const [pendingEdge, setPendingEdge] = useState<{
     sourceId: string;
     sourceType: string;
@@ -179,7 +181,7 @@ export function RelationshipsTab({
     setSourceFilter("");
     setSelectedKey(null);
     setHeldOpen(false);
-    setCoOpen(false);
+    setCoOpenChoice(null);
   }, [entityId]);
 
   // Which enrichment sources claim each connection, and the names they gave
@@ -233,6 +235,7 @@ export function RelationshipsTab({
     [untyped, entityType],
   );
   const hasRelationships = asserted.length > 0;
+  const coOpen = coOpenChoice ?? !hasRelationships;
 
   // The panel stays in view while the list scrolls: pinned just below any bar
   // pinned to the top of the area the page scrolls in (the profile's tab bar),
@@ -812,7 +815,7 @@ export function RelationshipsTab({
                 <span className="caret-glyph">{heldOpen ? "▾" : "▸"}</span> Not matched yet · {heldCount}
               </button>
             )}
-            <button className={rel.linkBtn} aria-expanded={coOpen} onClick={() => setCoOpen((o) => !o)}>
+            <button className={rel.linkBtn} aria-expanded={coOpen} onClick={() => setCoOpenChoice(!coOpen)}>
               <span className="caret-glyph">{coOpen ? "▾" : "▸"}</span> Mentioned in the same articles · {context.length}
             </button>
           </div>
