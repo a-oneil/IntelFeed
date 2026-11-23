@@ -3,9 +3,11 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { PivotResponse } from "@/api/types";
 import type { RelationClaims } from "@/hooks/useRelationships";
+import type { RelationshipEvidence } from "@/hooks/useHygiene";
 import { RelationshipsTab } from "../tabs/RelationshipsTab";
 
 const claims: { data: RelationClaims | undefined; enabled: boolean[] } = { data: undefined, enabled: [] };
+const update = vi.fn();
 const noop = () => ({ mutate: vi.fn(), isPending: false });
 
 vi.mock("@/hooks/useRelationships", () => ({
@@ -16,11 +18,19 @@ vi.mock("@/hooks/useRelationships", () => ({
   useCreateRelationship: () => noop(),
   useConfirmRelationship: () => noop(),
   useRejectRelationship: () => noop(),
+  useUpdateRelationship: () => ({ mutate: update, isPending: false }),
 }));
 vi.mock("@/hooks/useCorrelation", () => ({
   usePivot: () => ({ data: undefined }),
   useEntityGraph: () => ({ data: undefined }),
-  useUnlinkRelatedEntity: () => noop(),
+}));
+
+const evidence: { data: RelationshipEvidence | undefined; asked: Array<string | null> } = { data: undefined, asked: [] };
+vi.mock("@/hooks/useHygiene", () => ({
+  useRelationshipEvidence: (id: string | null) => {
+    evidence.asked.push(id);
+    return { data: id ? evidence.data : undefined, isLoading: false };
+  },
 }));
 // The graph canvas isn't what's under test.
 vi.mock("@/components/EntityGraph", () => ({ EntityGraph: () => null }));
@@ -28,28 +38,50 @@ vi.mock("@/utils/openEntry", () => ({ useOpenThread: () => vi.fn() }));
 
 const auth = { visitor: false };
 vi.mock("@/stores/authStore", () => ({ useIsVisitor: () => auth.visitor }));
+const screenSize = { mobile: false };
+vi.mock("@/hooks/useMediaQuery", () => ({ useIsMobile: () => screenSize.mobile }));
 
-const tool = (id: string, name: string) => ({
+/** A stored relationship id (a UUID; catalog rows carry synthetic ones). */
+const relId = (key: string) => `00000000-0000-4000-8000-${key.padStart(12, "0")}`;
+
+const tool = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
   id,
   name,
-  relationship_id: `rel-${id}`,
+  relationship_id: relId(id.replace(/\D/g, "")),
   relationship_type: "uses",
   relationship_confidence: "probable",
   relationship_source: "enrichment",
+  relationship_direction: "outbound",
+  ...extra,
 });
 
 const related = {
-  tools: [tool("t1", "AdFind"), tool("t2", "7-Zip"), tool("t3", "Cobalt Strike")],
+  tools: [
+    tool("t1", "AdFind", { relationship_description: "Seen on the group's ETDA card" }),
+    tool("t2", "7-Zip"),
+    tool("t3", "Cobalt Strike"),
+  ],
+  malwares: [
+    {
+      id: "m1",
+      name: "WINELOADER",
+      relationship_id: relId("901"),
+      relationship_type: "uses",
+      relationship_confidence: "possible",
+      relationship_source: "co_occurrence",
+      relationship_direction: "outbound",
+    },
+  ],
 } as unknown as PivotResponse["related"];
 
-function renderTab() {
+function renderTab(rel: PivotResponse["related"] = related) {
   return render(
     <MemoryRouter>
       <RelationshipsTab
         entityType="threat_actor"
         entityId="a1"
         entityLabel="APT29"
-        related={related}
+        related={rel}
         onOpenEntity={vi.fn()}
         onOpenArticle={vi.fn()}
         onOpenEntry={vi.fn()}
@@ -58,13 +90,19 @@ function renderTab() {
   );
 }
 
-const visibleNames = () =>
-  ["AdFind", "7-Zip", "Cobalt Strike"].filter((n) => screen.queryByText(n) !== null);
+/** The list's rows (the panel has buttons too). */
+const rows = () => [...document.querySelectorAll<HTMLButtonElement>("button[aria-pressed]")];
+const rowNames = () => rows().map((b) => b.querySelector("span span:last-child")?.textContent);
+const row = (name: string) => rows().find((b) => b.textContent?.includes(name))!;
 
-describe("RelationshipsTab enrichment claims", () => {
+describe("RelationshipsTab", () => {
   beforeEach(() => {
     auth.visitor = false;
+    screenSize.mobile = false;
     claims.enabled = [];
+    evidence.asked = [];
+    evidence.data = undefined;
+    update.mockClear();
     claims.data = {
       entity_type: "threat_actor",
       entity_id: "a1",
@@ -88,42 +126,151 @@ describe("RelationshipsTab enrichment claims", () => {
     };
   });
 
-  it("tags each claimed row with its sources", () => {
+  it("names each row's source in plain words", () => {
     renderTab();
-    const adfind = screen.getByText("AdFind").closest("button")!;
-    expect(within(adfind).getByText("ETDA")).toBeInTheDocument();
-    const zip = screen.getByText("7-Zip").closest("button")!;
-    expect(within(zip).getByText("ETDA · Malpedia")).toBeInTheDocument();
-    const cs = screen.getByText("Cobalt Strike").closest("button")!;
-    expect(within(cs).queryByText(/ETDA|Malpedia/)).not.toBeInTheDocument();
+    expect(within(row("AdFind")).getByText("ETDA")).toBeInTheDocument();
+    expect(within(row("7-Zip")).getByText("ETDA + Malpedia")).toBeInTheDocument();
+    expect(within(row("Cobalt Strike")).getByText("Enrichment feed")).toBeInTheDocument();
+    expect(within(row("WINELOADER")).getByText("Articles, not reviewed")).toBeInTheDocument();
   });
 
-  it("narrows to one source with a via chip, and back", () => {
+  it("narrows to one source with the Source filter, and back", () => {
     renderTab();
-    expect(visibleNames()).toEqual(["AdFind", "7-Zip", "Cobalt Strike"]);
-    const via = screen.getByRole("button", { name: "via Malpedia 1" });
-    fireEvent.click(via);
-    expect(via).toHaveAttribute("aria-pressed", "true");
-    expect(visibleNames()).toEqual(["7-Zip"]);
-    fireEvent.click(via);
-    expect(visibleNames()).toEqual(["AdFind", "7-Zip", "Cobalt Strike"]);
+    const select = screen.getByRole("combobox", { name: "Source" });
+    fireEvent.change(select, { target: { value: "feed:Malpedia" } });
+    expect(rowNames()).toEqual(["7-Zip"]);
+    fireEvent.change(select, { target: { value: "" } });
+    expect(rowNames()).toHaveLength(4);
   });
 
-  it("lists held targets behind an unresolved count", () => {
+  it("lists names no entity matches under Not matched yet", () => {
     renderTab();
-    const toggle = screen.getByRole("button", { name: "unresolved · 1" });
+    const toggle = screen.getByRole("button", { name: /Not matched yet · 1/ });
     expect(screen.queryByText("ATI-Agent")).not.toBeInTheDocument();
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("ATI-Agent")).toBeInTheDocument();
-    expect(screen.getByText(/via ETDA · no entity has this name yet/)).toBeInTheDocument();
+    expect(screen.getByText("ETDA lists these, but no IntelFeed entity has the name.")).toBeInTheDocument();
   });
 
-  it("doesn't ask for claims as a visitor", () => {
+  it("explains the selected relationship: the source's words and the articles that state it", () => {
+    evidence.data = {
+      relationship_id: relId("1"),
+      adjudication_verdict: "kept",
+      article_count: 1,
+      articles: [
+        {
+          entry_id: "e1",
+          title: "APT29 tooling report",
+          feed_title: "Some Feed",
+          published_at: null,
+          analysis_verb: "uses",
+          analysis_sentence: "APT29 ran AdFind to map the domain.",
+          passages: [],
+          source_only: null,
+          target_only: null,
+        },
+      ],
+      reviews: [
+        {
+          reviewer: "sweep",
+          verdict: "keep",
+          confidence: "high",
+          reason: "The article says so.",
+          quote: null,
+          suggested_verb: null,
+          flipped: false,
+          counted: true,
+          entry_id: "e1",
+          entry_title: "APT29 tooling report",
+          created_at: "2026-11-01T00:00:00Z",
+        },
+      ],
+    };
+    renderTab();
+    fireEvent.click(row("AdFind"));
+    expect(row("AdFind")).toHaveAttribute("aria-pressed", "true");
+    const panel = screen.getByRole("region", { name: "Why this relationship is listed" });
+    expect(within(panel).getByText("APT29 uses AdFind")).toBeInTheDocument();
+    expect(within(panel).getByText("“Seen on the group's ETDA card”")).toBeInTheDocument();
+    expect(within(panel).getByText("Articles that state it · 1")).toBeInTheDocument();
+    expect(within(panel).getByText("APT29 ran AdFind to map the domain.")).toBeInTheDocument();
+    expect(within(panel).getByText("AI reviewer kept it")).toBeInTheDocument();
+    expect(evidence.asked).toContain(relId("1"));
+  });
+
+  it("changes a relationship's type to one the pair allows", () => {
+    renderTab();
+    fireEvent.click(row("WINELOADER"));
+    const panel = screen.getByRole("region", { name: "Why this relationship is listed" });
+    const pick = within(panel).getByRole("combobox");
+    expect([...pick.querySelectorAll("option")].map((o) => o.value)).toEqual(["uses", "delivers", "related_to"]);
+    fireEvent.change(pick, { target: { value: "delivers" } });
+    fireEvent.click(within(panel).getByRole("button", { name: "Change" }));
+    expect(update).toHaveBeenCalledWith({ id: relId("901"), relationship_type: "delivers" });
+  });
+
+  it("gives a visitor no claims, no review evidence and no editing", () => {
     auth.visitor = true;
     renderTab();
     expect(claims.enabled.every((e) => e === false)).toBe(true);
-    expect(screen.queryByRole("button", { name: /^via / })).not.toBeInTheDocument();
-    expect(screen.queryByText(/unresolved/)).not.toBeInTheDocument();
+    expect(evidence.asked.every((id) => id === null)).toBe(true);
+    expect(screen.queryByText(/Not matched yet/)).not.toBeInTheDocument();
+    const panel = screen.getByRole("region", { name: "Why this relationship is listed" });
+    expect(within(panel).queryByRole("combobox")).not.toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
+  });
+
+  it("on a phone, opens the evidence under the tapped row and closes it on a second tap", () => {
+    screenSize.mobile = true;
+    renderTab();
+    // Nothing opens until a row is tapped.
+    expect(screen.queryByRole("region", { name: "Why this relationship is listed" })).not.toBeInTheDocument();
+    fireEvent.click(row("AdFind"));
+    const panel = screen.getByRole("region", { name: "Why this relationship is listed" });
+    expect(within(panel).getByText("APT29 uses AdFind")).toBeInTheDocument();
+    // It sits right after the row, not beside the list.
+    expect(row("AdFind").nextElementSibling?.contains(panel)).toBe(true);
+    expect(row("AdFind")).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(row("AdFind"));
+    expect(screen.queryByRole("region", { name: "Why this relationship is listed" })).not.toBeInTheDocument();
+  });
+
+  it("opens the co-mentions when there are no relationships, and keeps them closed when there are", () => {
+    const coMentioned = { malwares: [{ id: "m9", name: "LockBit", co_occurrence_count: 4 }] } as unknown as PivotResponse["related"];
+    const { unmount } = renderTab(coMentioned);
+    const toggle = screen.getByRole("button", { name: /Mentioned in the same articles · 1/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("LockBit")).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(screen.queryByText("LockBit")).not.toBeInTheDocument();
+    unmount();
+
+    renderTab({ ...related, ...coMentioned } as PivotResponse["related"]);
+    expect(screen.getByRole("button", { name: /Mentioned in the same articles · 1/ })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("LockBit")).not.toBeInTheDocument();
+  });
+
+  it("asks for no evidence and offers no editing on a catalog row with a synthetic id", () => {
+    const catalog = {
+      mitigations: [
+        {
+          id: "mi1",
+          name: "Network Intrusion Prevention",
+          relationship_id: "catalog-ttp-mitigation-mi1",
+          relationship_type: "mitigated_by",
+          relationship_confidence: "confirmed",
+          relationship_source: "external_feed",
+          relationship_direction: "outbound",
+        },
+      ],
+    } as unknown as PivotResponse["related"];
+    renderTab(catalog);
+    fireEvent.click(row("Network Intrusion Prevention"));
+    expect(evidence.asked.every((id) => id === null)).toBe(true);
+    const panel = screen.getByRole("region", { name: "Why this relationship is listed" });
+    expect(within(panel).queryByRole("combobox")).not.toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
   });
 });
+

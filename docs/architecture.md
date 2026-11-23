@@ -571,7 +571,7 @@ Profiles open at `/workbench/{type}/{id}`, for `threat_actor`, `malware`, `cve`,
 2. **Fields:** type-specific, edited in place.
 3. **Description:** editable text, often an AI-written summary.
 4. **Related entities:** from `usePivot`, with strength tiers.
-5. **Entity graph:** `EntityGraph`, a custom SVG drawing with its own layout code (`entityGraphLayout.ts`).
+5. **Entity graph:** `EntityGraph`, drawn with React Flow (`@xyflow/react`). Layout is d3-force with collision (`components/entityGraph/layout.ts`), so nodes and story boxes never overlap.
 6. **Tabs**, set per type in `entityProfileConfig.tsx`:
    - **Overview:** activity, assessment, recent developments (`/api/engine/entities/{type}/{id}/whats-new`), AI analysis and notes.
    - **Relationships:** confirm, reject and create links (`RelationshipsTab`).

@@ -1,13 +1,16 @@
 /**
- * SnapshotCard — the Overview's facts strip: the one home for the entity's
- * numbers. Header badges carry the qualitative headline (severity, KEV,
- * Active); the quantitative detail lives here only, one tile per fact across
- * the full width under the assessment.
+ * SnapshotCard — the type's own rows of the Overview's key facts: the one
+ * home for the entity's numbers. Header badges carry the qualitative headline
+ * (severity, KEV, Active); the quantitative detail lives here only, one row
+ * per fact.
  *
  * Per one-home-per-fact, a type contributes tiles ONLY for facts that don't
  * already live in an editable header badge or identity field — so the actor
  * strip is thin (motivation/origin/MITRE are editable badges) while the CVE
  * strip carries the full numeric read.
+ *
+ * It renders bare: just the tiles, as rows of the Overview's key facts
+ * table, after any `leading` rows (the activity verdict).
  */
 import { Link } from "react-router-dom";
 import type { EntityType } from "@/stores/intelStore";
@@ -19,12 +22,28 @@ import { FieldProvenance } from "./FieldProvenance";
 import { entityProfilePath, isKnownExploited } from "./entityProfileConfig";
 import styles from "./entityProfile.module.css";
 
-function Row({ k, v, mono, sub }: { k: string; v: React.ReactNode; mono?: boolean; sub?: React.ReactNode }) {
+/** One key-facts row: the fact, its value, and who says so on the right. */
+export function Row({
+  k,
+  v,
+  mono,
+  sub,
+  evidence,
+}: {
+  k: string;
+  v: React.ReactNode;
+  mono?: boolean;
+  sub?: React.ReactNode;
+  evidence?: React.ReactNode;
+}) {
   return (
     <div className={styles.factTile}>
       <span className={styles.factKey}>{k}</span>
-      <span className={`${styles.factVal} ${mono ? styles.mono : ""}`}>{v}</span>
-      {sub && <span className={styles.factSub}>{sub}</span>}
+      <span className={`${styles.factVal} ${mono ? styles.mono : ""}`}>
+        {v}
+        {sub && <span className={styles.factSub}>{sub}</span>}
+      </span>
+      <span className={styles.factEvidence}>{evidence}</span>
     </div>
   );
 }
@@ -45,12 +64,13 @@ export function SnapshotCard({
   provenance,
   victimStats,
   affected,
-  techniques,
-  ruleCount,
   countryStats,
   campaignStats,
   onOpenArticle,
+  leading,
 }: {
+  /** Rows rendered before the type's own. */
+  leading?: React.ReactNode;
   entityType: EntityType;
   entity: EntitySearchResult;
   cveDetail?: CVE;
@@ -66,10 +86,6 @@ export function SnapshotCard({
   victimStats?: ActorVictimStats | null;
   /** Vendor/product only: NVD CPE affected-CVE counts (open CVEs, KEV). */
   affected?: AffectedCVEsResponse;
-  /** Actor/malware only: technique + gap counts from the detection-gaps computation. */
-  techniques?: { total: number; gaps: number } | null;
-  /** Detection rules linked to this entity (pivot related set). */
-  ruleCount?: number;
   /** Country only: origin/targeting actor counts and the EntryCountry role split. */
   countryStats?: { origins: number; targeting: number; roles: Record<string, number> } | null;
   /** Campaign counts from /campaigns/{id}/stats, joined with the pivot's totals. */
@@ -88,7 +104,6 @@ export function SnapshotCard({
   const marker = (field: string, label: string) =>
     provenance ? (
       <FieldProvenance
-        field={field}
         label={label}
         bucket={provenance.fields[field]}
         unsourced={provenance.unsourced_fields.includes(field)}
@@ -226,23 +241,17 @@ export function SnapshotCard({
         />,
       );
     if (victimStats && victimStats.total > 0) {
-      const delta = victimStats.last_30d - victimStats.prev_30d;
       rows.push(
         <Row
           key="victims"
-          k="Leak-site victims · 30d"
+          k="Victims"
           v={
-            <span title={`${victimStats.total} on record · ${victimStats.prev_30d} in the prior 30 days`}>
-              <b>{victimStats.last_30d}</b>
-              {delta !== 0 && (
-                <span className={delta > 0 ? styles.snapUp : styles.snapDown}>
-                  {" "}
-                  {delta > 0 ? "▲" : "▼"}
-                  {Math.abs(delta)}
-                </span>
-              )}
+            <span title={`${victimStats.prev_30d} in the 30 days before that`}>
+              {victimStats.total.toLocaleString()} listed on the group's leak site,{" "}
+              {victimStats.last_30d > 0 ? `${victimStats.last_30d} in the last 30 days` : "none in the last 30 days"}
             </span>
           }
+          evidence="ransomware.live"
         />,
       );
     }
@@ -280,26 +289,6 @@ export function SnapshotCard({
     const platforms = (entity as { platforms?: string[] }).platforms;
     if (platforms?.length)
       rows.push(<Row key="platforms" k="Platforms" v={platforms.slice(0, 6).join(" · ")} />);
-  }
-
-  if (entityType === "threat_actor" || entityType === "malware") {
-    if (techniques && techniques.total > 0)
-      rows.push(<Row key="techniques" k="Techniques on record" v={<b>{techniques.total}</b>} />);
-    if ((ruleCount ?? 0) > 0 || (techniques?.gaps ?? 0) > 0)
-      rows.push(
-        <Row
-          key="rules"
-          k="Detection rules"
-          v={
-            <span>
-              <b>{ruleCount ?? 0}</b>
-              {(techniques?.gaps ?? 0) > 0 && (
-                <span className={styles.metaLabel}> · {techniques!.gaps} gaps</span>
-              )}
-            </span>
-          }
-        />,
-      );
   }
 
   if (entityType === "campaign" && campaignStats) {
@@ -397,12 +386,9 @@ export function SnapshotCard({
       );
   }
 
-  // Baseline row so every type has a populated Snapshot: total linked articles
-  // (all-time — the pulse line's count is window-scoped). CVE/CWE carry their
-  // own richer counts above.
-  if (entityType !== "cve" && entityType !== "cwe" && entity.article_count != null) {
-    rows.push(<Row key="articles" k="Articles" v={<b>{entity.article_count.toLocaleString()}</b>} />);
-  }
+  // No baseline "Articles" row: the stored article_count counter only grows
+  // (unlinks don't decrement it), so it disagreed with the linked articles.
+  // The Overview's Reporting fact gives the recent count instead.
 
   if (campaigns && campaigns.length > 0) {
     const [first, ...rest] = campaigns;
@@ -426,12 +412,12 @@ export function SnapshotCard({
     );
   }
 
-  if (rows.length === 0) return null;
+  if (rows.length === 0 && !leading) return null;
   return (
-    <div className={styles.facts} aria-label="Facts">
-      <span className={styles.sectionLabel}>Facts</span>
-      <div className={styles.factsStrip}>{rows}</div>
-    </div>
+    <>
+      {leading}
+      {rows}
+    </>
   );
 }
 

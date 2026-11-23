@@ -1,9 +1,11 @@
 /**
  * OverviewTab — the entity's dossier as one column.
  *
- * Always open at the top: the since-last-visit ribbon, the best-evidenced
- * claims, the assessment with its next-action chips, and the facts strip
- * (SnapshotCard). Below them, every other part of the profile is a section
+ * Always open at the top: the since-last-visit ribbon, then the brief, read
+ * top to bottom like a finished intel product: the assessment; key facts (the
+ * activity verdict, SnapshotCard's numbers, and KnownAssociates' claim rows,
+ * one per verb); what changed (LatestDevelopments); and next steps
+ * (NextActions). Below them, every other part of the profile is a section
  * row (OverviewSection) in the order the type's config gives: closed, each row
  * is one line whose digest answers the usual question; open, the same
  * components render beneath it. Which rows are open is remembered per entity
@@ -39,9 +41,9 @@ import { useCountryProfile } from "@/hooks/useCountryProfile";
 import {
   useActorVictims,
   useActorVictimStats,
-  useEntityDetectionGaps,
   useClearWikipedia,
   useEntityCampaigns,
+  useEntityMentionsTimeseries,
   useEntityStoryThreads,
   useEntityTopEntries,
   useFetchWikipedia,
@@ -59,12 +61,13 @@ import { formatDate } from "@/utils/formatDate";
 import { EntityNotesSection } from "@/components/EntityNotesSection";
 import { ActivityFeed } from "../ActivityFeed";
 import { AIAnalysisModule } from "../AIAnalysisModule";
-import { ExploitPocCard, SnapshotCard } from "../SnapshotCard";
+import { ExploitPocCard, Row as FactRow, SnapshotCard } from "../SnapshotCard";
+import { activityVerdict } from "../activityVerdict";
 import { VictimsStrip } from "../VictimsStrip";
 import { ActiveStoryCard } from "../ActiveStoryCard";
 import { SourcesCard } from "../SourcesCard";
 import { ContextPanel, contextDigest, contextSourcesWithData } from "../ContextPanel";
-import { AssessmentBlock } from "../AssessmentBlock";
+import { AssessmentBlock, LatestDevelopments } from "../AssessmentBlock";
 import { KnownAssociates } from "../KnownAssociates";
 import { EssentialReading } from "../EssentialReading";
 import { NextActions } from "../NextActions";
@@ -143,6 +146,24 @@ const plural = (n: number, noun: string, irregular?: string) =>
 /** Joins the non-empty parts of a digest with the house separator. */
 const digestOf = (...parts: Array<string | null | undefined | false>) => parts.filter(Boolean).join(" · ");
 
+const ATTACK_VECTOR: Record<string, string> = {
+  N: "over the network",
+  A: "from the same local network",
+  L: "with access to the machine",
+  P: "with physical access",
+};
+
+/** "Attackable over the network without logging in", from a CVSS vector's
+ * attack vector (AV) and privileges required (PR). */
+function attackPathOf(vector: string | null | undefined): string | null {
+  if (!vector) return null;
+  const part = (key: string) => vector.match(new RegExp(`(?:^|/)${key}:([A-Z])`))?.[1];
+  const where = ATTACK_VECTOR[part("AV") ?? ""];
+  if (!where) return null;
+  const pr = part("PR");
+  return `attackable ${where}${pr === "N" ? " without logging in" : pr ? ", with an account" : ""}`;
+}
+
 /** Scroll a section's child into view once that section has rendered it. */
 function scrollOnceRendered(ref: React.RefObject<HTMLElement | null>) {
   // The ref is attached by a render that follows the state change, so the
@@ -206,13 +227,13 @@ export function OverviewTab({
     [config, isVisitor],
   );
   const openKeys = useMemo(
-    () => new Set<OverviewSectionKey>(resolveOpenSections(stored, sections, config.overviewOpen, mode)),
-    [mode, sections, stored, config],
+    () => new Set<OverviewSectionKey>(resolveOpenSections(stored, sections, mode)),
+    [mode, sections, stored],
   );
   const isOpen = (key: OverviewSectionKey) => openKeys.has(key);
-  const toggle = (key: OverviewSectionKey) => setSectionOpen(entityType, key, !isOpen(key), [...openKeys], sections);
+  const toggle = (key: OverviewSectionKey) => setSectionOpen(entityType, key, !isOpen(key), [...openKeys]);
   const openAnd = (key: OverviewSectionKey, ref: React.RefObject<HTMLElement | null>) => {
-    if (!isOpen(key)) setSectionOpen(entityType, key, true, [...openKeys], sections);
+    if (!isOpen(key)) setSectionOpen(entityType, key, true, [...openKeys]);
     scrollOnceRendered(ref);
   };
 
@@ -259,7 +280,7 @@ export function OverviewTab({
   const { data: ttpFamily } = useTTPRelatedTechniques(entityType === "ttp" ? entityId : undefined);
   const { data: cweFamily } = useCWEFamily(entityType === "cwe" ? entityId : undefined);
   // The pivot payload has no corpus counts — they need a join, so like useCVE
-  // for the CVE hero this fetches the detail record for the facts strip.
+  // for the CVE hero this fetches the detail record for the key facts.
   const { data: cweDetail } = useCWE(entityType === "cwe" ? entityId : undefined);
   const { data: observableDetail } = useObservable(entityType === "observable" ? entityId : undefined);
   const { data: infrastructure } = useEntityInfrastructure(entityType, entityId);
@@ -277,11 +298,15 @@ export function OverviewTab({
     entityType === "vendor" || entityType === "product" ? entityType : undefined,
     entityId,
   );
-  // Same query as NextActions — the facts strip's techniques/rules tiles.
-  const hasGaps = entityType === "threat_actor" || entityType === "malware";
-  const { data: gapsForSnapshot } = useEntityDetectionGaps(
-    hasGaps ? entityType : undefined,
-    hasGaps ? entityId : undefined,
+  // Always the 90-day series, whatever window the header's pulse line shows:
+  // the verdict compares the last three weeks with the weeks before.
+  const { data: series90, isPlaceholderData: series90Stale } = useEntityMentionsTimeseries(entityType, entityId, "90d");
+  // The hook keeps the previous series on screen while the next loads; that
+  // is the last profile's series right after navigating, so the verdict (a
+  // stated fact) waits for this entity's own.
+  const verdict = useMemo(
+    () => (series90Stale ? null : activityVerdict(series90?.points)),
+    [series90, series90Stale],
   );
   const { data: countryProfile } = useCountryProfile(entityType === "country" ? entityId : undefined);
   const { data: weaknessProfile } = useEntityWeaknessProfile(
@@ -915,11 +940,14 @@ export function OverviewTab({
   // Each answers the row's usual question in one line, from data the section's
   // own components already fetch.
   const latestVictim = victims?.items[0];
+  const victimWhere = latestVictim
+    ? [latestVictim.country_code, latestVictim.sector_label ?? latestVictim.sector].filter(Boolean).join(", ")
+    : "";
   const victimsDigest = victimStats && victims && victims.items.length > 0
     ? digestOf(
         `leak site · ${victimStats.last_30d} in the last 30 days`,
         latestVictim &&
-          `last ${latestVictim.name} (${[latestVictim.country_code, latestVictim.sector_label ?? latestVictim.sector].filter(Boolean).join(", ")})${latestVictim.last_seen_at ? ` on ${formatDate(latestVictim.last_seen_at)}` : ""}`,
+          `last ${latestVictim.name} (${victimWhere})${latestVictim.last_seen_at ? ` on ${formatDate(latestVictim.last_seen_at)}` : ""}`,
       )
     : null;
 
@@ -950,6 +978,24 @@ export function OverviewTab({
   );
 
   const affectedVendors = [...new Set((affectedRows ?? []).map((r) => r.vendor_name ?? r.cpe_vendor))];
+  // Key facts: the products a CVE hits and how it is reached, in words.
+  const affectedProducts = [
+    ...new Map(
+      (affectedRows ?? []).map((r) => {
+        const name = r.product_name ?? r.cpe_product.replace(/_/g, " ");
+        const range = formatVersionRange(r.version_start, r.version_end);
+        return [name.toLowerCase(), range ? `${name} ${range}` : name] as const;
+      }),
+    ).values(),
+  ];
+  const attackPath = entityType === "cve" ? attackPathOf(nvd.vector) : null;
+  const affectedSummary = affectedProducts.length
+    ? digestOf(
+        affectedProducts.slice(0, 3).join(", ") + (affectedProducts.length > 3 ? ` +${affectedProducts.length - 3}` : ""),
+        attackPath,
+      )
+    : null;
+
   const affectedDigest = affectedRows?.length
     ? digestOf(
         affectedVendors.slice(0, 2).join(", ") + (affectedVendors.length > 2 ? ` +${affectedVendors.length - 2}` : ""),
@@ -1253,17 +1299,6 @@ export function OverviewTab({
         victimDates={entityType === "threat_actor" ? (victims?.items ?? []).map((v) => v.last_seen_at) : undefined}
         onCatchUp={() => openAnd("activity", activityRef)}
       />
-      {/* Associates open the Overview (moved out of the fixed header so other
-          tabs don't pay for the strip). */}
-      {related && onOpenEntity && onShowRelationships && (
-        <KnownAssociates
-          entityType={entityType}
-          entityLabel={entityLabel}
-          related={related}
-          onOpenEntity={onOpenEntity}
-          onShowRelationships={onShowRelationships}
-        />
-      )}
       {/* Catalog-keyed types retire entries, and CWE additionally publishes
           categories that are never valid mapping targets — a Draft-status
           category is not "deprecated" but carries the same warning, so the
@@ -1312,7 +1347,8 @@ export function OverviewTab({
         </div>
       )}
 
-      {/* The brief: the profile's voice, with what to do about it right under. */}
+      {/* The brief: the assessment, the facts behind it with who says so, what
+          changed, then what to do about it. */}
       <div className={styles.brief}>
         {config.hasDescription && (
           <AssessmentBlock
@@ -1320,11 +1356,90 @@ export function OverviewTab({
             entityId={entityId}
             entity={entity}
             editable={entityType !== "mitigation" && !isVisitor}
-            whatsNew={whatsNew ?? []}
             onUpdateField={onUpdateField}
             onOpenArticle={onOpenArticle}
           />
         )}
+
+        <div className={styles.keyFacts} aria-label="Key facts">
+          <span className={styles.sectionLabel}>Key facts</span>
+          <div className={styles.keyFactRows}>
+            <SnapshotCard
+              leading={
+                <>
+                  {verdict && (
+                    <FactRow
+                      k="Reporting"
+                      v={<span className={`${styles.verdict} ${styles[`verdict_${verdict.tone}`] ?? ""}`}>{verdict.label}</span>}
+                      sub={verdict.detail}
+                    />
+                  )}
+                  {affectedSummary && <FactRow k="Affected" v={affectedSummary} evidence="NVD" />}
+                </>
+              }
+              entityType={entityType}
+              entity={entity}
+              cveDetail={cveDetail}
+              cweDetail={cweDetail}
+              cveWeaknesses={cveWeaknesses}
+              cvssVector={nvd.vector}
+              campaigns={campaigns}
+              provenance={provenance}
+              victimStats={victimStats}
+              affected={affectedForCounts}
+              campaignStats={
+                campaignStatsData
+                  ? {
+                      entries: campaignStatsData.entry_count,
+                      stories: campaignStoryCount,
+                      actors: campaignStatsData.entity_counts?.threat_actor ?? 0,
+                      malware: campaignStatsData.entity_counts?.malware ?? 0,
+                      cves: campaignStatsData.entity_counts?.cve ?? 0,
+                      techniques: campaignStatsData.entity_counts?.ttp ?? 0,
+                      coveragePct: campaignStatsData.detection_coverage_pct ?? null,
+                    }
+                  : null
+              }
+              countryStats={
+                countryProfile
+                  ? {
+                      origins: countryProfile.origin_actors.length,
+                      targeting: countryProfile.targeting_actors.length,
+                      roles: countryProfile.role_breakdown ?? {},
+                    }
+                  : null
+              }
+              onOpenArticle={onOpenArticle}
+            />
+            {related && onOpenEntity && onShowRelationships && (
+              <KnownAssociates
+                entityType={entityType}
+                entityLabel={entityLabel}
+                related={related}
+                onOpenEntity={onOpenEntity}
+                onShowRelationships={onShowRelationships}
+              />
+            )}
+          </div>
+        </div>
+
+        <LatestDevelopments
+          whatsNew={whatsNew ?? []}
+          notes={
+            latestVictim
+              ? [
+                  {
+                    key: "victim",
+                    date: latestVictim.last_seen_at,
+                    text: `Last leak-site victim: ${latestVictim.name}${victimWhere ? ` (${victimWhere})` : ""}`,
+                    tag: "victim",
+                  },
+                ]
+              : []
+          }
+          onOpenArticle={onOpenArticle}
+        />
+
         {related && onShowRelationships && !isVisitor && (
           <NextActions
             entityType={entityType}
@@ -1340,49 +1455,6 @@ export function OverviewTab({
           />
         )}
       </div>
-
-      {/* The facts strip: every number the type carries, across the width. */}
-      <SnapshotCard
-        entityType={entityType}
-        entity={entity}
-        cveDetail={cveDetail}
-        cweDetail={cweDetail}
-        cveWeaknesses={cveWeaknesses}
-        cvssVector={nvd.vector}
-        campaigns={campaigns}
-        provenance={provenance}
-        victimStats={victimStats}
-        affected={affectedForCounts}
-        techniques={
-          gapsForSnapshot && gapsForSnapshot.total_ttps > 0
-            ? { total: gapsForSnapshot.total_ttps, gaps: gapsForSnapshot.gap_count }
-            : null
-        }
-        ruleCount={related?.detection_rules?.length ?? 0}
-        campaignStats={
-          campaignStatsData
-            ? {
-                entries: campaignStatsData.entry_count,
-                stories: campaignStoryCount,
-                actors: campaignStatsData.entity_counts?.threat_actor ?? 0,
-                malware: campaignStatsData.entity_counts?.malware ?? 0,
-                cves: campaignStatsData.entity_counts?.cve ?? 0,
-                techniques: campaignStatsData.entity_counts?.ttp ?? 0,
-                coveragePct: campaignStatsData.detection_coverage_pct ?? null,
-              }
-            : null
-        }
-        countryStats={
-          countryProfile
-            ? {
-                origins: countryProfile.origin_actors.length,
-                targeting: countryProfile.targeting_actors.length,
-                roles: countryProfile.role_breakdown ?? {},
-              }
-            : null
-        }
-        onOpenArticle={onOpenArticle}
-      />
 
       {/* Everything else: one row per section, in the type's order. */}
       <div className={styles.overviewRows}>

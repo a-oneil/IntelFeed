@@ -1,14 +1,18 @@
 /**
- * NextActions — computed, not curated: each chip is a signal the backend
- * already emits (detection gaps, unconfirmed relationship suggestions, bundle
- * export, missing assessment, a campaign's suggestions and standing searches).
- * One row under the assessment; each chip's explanation lives in its hover
- * card. Chips disappear as the work gets done.
+ * NextActions — the "Next steps" panel that closes the Overview's brief.
+ * Computed, not curated: every line is a signal the backend already emits.
+ * Actors and malware lead with their detection coverage (techniques with a
+ * rule, with a rule whose log source isn't collected, with none) and the
+ * Review gaps / Build hunt package buttons; a KEV CVE leads with its patch
+ * deadline and rule count. Under that, one line per remaining job (claims to
+ * corroborate, a missing assessment, a campaign's suggestions and standing
+ * searches), each with its explanation and a text link. Lines disappear as the
+ * work gets done.
  */
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import api from "@/api/client";
-import { Hint } from "@/components/primitives";
+import { formatDate } from "@/utils/formatDate";
 import { useEntityDetectionGaps } from "@/hooks/useEntityProfile";
 import {
   useAddCampaignEntries,
@@ -43,7 +47,7 @@ const GAPPED_TYPES: EntityType[] = ["threat_actor", "malware"];
 
 const BUNDLE_ENTRY_CAP = 100;
 
-type Tone = "hot" | "warm" | "cool" | "calm";
+type Tone = "hot" | "warm" | "cool";
 
 interface Action {
   key: string;
@@ -138,23 +142,12 @@ export function NextActions({
 
   const coverage = gaps && gaps.total_ttps > 0 ? gaps : null;
   const gapCount = coverage?.gap_count ?? 0;
-  const gapTechniques = (coverage?.gaps ?? []).slice(0, 3).map((g) => g.technique_id);
+  const kevDue = entityType === "cve" ? entity.kev_due_date : null;
+  const ruleCount = related.detection_rules?.length ?? 0;
   const needsAssessment = !entity.description;
   const canBundle = entries.length > 0;
 
   const actions: Action[] = [];
-
-  // No coverage percentage: source_ttps tag equality reads 88-90% for every
-  // actor, so a ring measured nothing. The honest numbers are the Threats
-  // board's: techniques on record, and the gap chip beside it.
-  if (coverage) {
-    actions.push({
-      key: "coverage",
-      tone: "cool",
-      label: `${coverage.total_ttps} techniques on record`,
-      why: "Build coverage from the Detection tab.",
-    });
-  }
 
   if (topStory && topStory.kind === "story") {
     actions.push({
@@ -182,10 +175,11 @@ export function NextActions({
     actions.push({
       key: "searches",
       tone: "cool",
-      label: `${syncingSearches.length} standing search${syncingSearches.length === 1 ? "" : "es"}`,
+      label: `${syncingSearches.length} saved search${syncingSearches.length === 1 ? " adds" : "es add"} matching articles automatically`,
       why:
-        (syncingSearches.map((x) => x.saved_search_name).filter(Boolean).slice(0, 2).join(" · ") ||
-          "Adds matching articles automatically") + (added > 0 ? `. ${added} added so far.` : ""),
+        [syncingSearches.map((x) => x.saved_search_name).filter(Boolean).slice(0, 2).join(", "), added > 0 ? `${added} added so far.` : null]
+          .filter(Boolean)
+          .join(". "),
     });
   }
 
@@ -193,8 +187,8 @@ export function NextActions({
     actions.push({
       key: "quiet",
       tone: "warm",
-      label: `No new coverage in ${campaignQuiet} days`,
-      why: `Status is still ${entity.status}. Closing it sets the end date from the last article.`,
+      label: `No new articles in ${campaignQuiet} days`,
+      why: `The campaign is still marked ${entity.status}. Closing it sets its end date to the last article.`,
       button: {
         label: updateCampaign.isPending ? "Closing…" : "Close campaign",
         disabled: updateCampaign.isPending,
@@ -210,33 +204,13 @@ export function NextActions({
     });
   }
 
-  if (gapCount > 0) {
-    actions.push({
-      key: "gaps",
-      tone: "hot",
-      label: `Close ${gapCount} detection gap${gapCount === 1 ? "" : "s"}`,
-      why: (
-        <>
-          No rule for{" "}
-          {gapTechniques.map((t) => (
-            <code key={t} className={styles.actionCode}>
-              {t}
-            </code>
-          ))}
-          {gapCount > 3 ? ` +${gapCount - 3} more` : ""}
-        </>
-      ),
-      button: { label: "Review gaps", onClick: onShowDetectionGaps },
-    });
-  }
-
   if (unconfirmed.length > 0) {
     actions.push({
       key: "claims",
       tone: "warm",
-      label: `${unconfirmed.length} claim${unconfirmed.length === 1 ? "" : "s"} to corroborate`,
-      why: "The AI adjudicator reviews these nightly. Pin or reject one to settle it now.",
-      button: { label: "Review", onClick: onShowRelationships },
+      label: `${unconfirmed.length} relationship${unconfirmed.length === 1 ? " is" : "s are"} not confirmed yet`,
+      why: "AI checks them every night. To settle one now, confirm or reject it in Relationships.",
+      button: { label: "Open Relationships", onClick: onShowRelationships },
     });
   }
 
@@ -245,48 +219,93 @@ export function NextActions({
       key: "assessment",
       tone: "cool",
       label: "No assessment yet",
-      why: "Draft one from linked reporting with AI.",
+      why: "AI can write one from the linked articles.",
       button: {
-        label: draftPending ? "Drafting…" : "Draft with AI",
+        label: draftPending ? "Writing…" : "Write with AI",
         disabled: draftPending,
         onClick: onDraftAssessment,
       },
     });
   }
 
-  if (canBundle) {
-    actions.push({
-      key: "bundle",
-      tone: "calm",
-      label: "Hunt package",
-      why: "Articles, entities, IOC CSV and ATT&CK Navigator layer as one bundle.",
-      button: { label: exporting ? "Building…" : "Build", disabled: exporting, onClick: exportBundle },
-    });
-  }
-
-  if (actions.length === 0) return null;
+  if (!coverage && !kevDue && actions.length === 0 && !canBundle) return null;
 
   return (
-    <div className={styles.nextActions} role="group" aria-label="Next actions">
-      <span className={styles.sectionLabel}>Next</span>
-      {actions.map((a) => (
-        <Hint key={a.key} title={a.label} body={a.why}>
-          <span className={`${styles.actionChip} ${styles[`actionTone_${a.tone}`]}`}>
-            <span className={styles.actionDot} aria-hidden="true" />
-            {a.label}
+    <div className={styles.move} aria-label="Next steps">
+      <div className={styles.moveMain}>
+        <span className={styles.sectionLabel}>Next steps</span>
+        {coverage && (
+          <div>
+            <div className={styles.moveHead}>
+              How your detection rules cover its {coverage.total_ttps} known techniques
+            </div>
+            {/* Proportions by count, not a percentage: tag equality reads
+                88-90% for every actor, so the missing counts are the point. */}
+            <div className={styles.meter} aria-hidden="true">
+              <i className={styles.meterCovered} style={{ flexGrow: coverage.covered_count }} />
+              <i className={styles.meterBlind} style={{ flexGrow: coverage.library_only_count }} />
+              <i className={styles.meterGap} style={{ flexGrow: coverage.no_rule_count }} />
+            </div>
+            <div className={styles.meterLegend}>
+              <span>
+                <i className={styles.meterCovered} />
+                <b>{coverage.covered_count}</b> have a rule
+              </span>
+              {coverage.library_only_count > 0 && (
+                <span>
+                  <i className={styles.meterBlind} />
+                  <b>{coverage.library_only_count}</b> have a rule that can't run, because the logs it needs aren't collected
+                </span>
+              )}
+              <span>
+                <i className={styles.meterGap} />
+                <b>{coverage.no_rule_count}</b> have no rule
+              </span>
+            </div>
+          </div>
+        )}
+        {kevDue && (
+          <div className={styles.moveHead}>
+            CISA requires this to be patched or mitigated by <b>{formatDate(kevDue)}</b>.{" "}
+            <span className={styles.moveWhy}>
+              {ruleCount > 0
+                ? `${ruleCount} detection rule${ruleCount === 1 ? "" : "s"} linked.`
+                : "No detection rules cover this CVE yet."}
+            </span>
+          </div>
+        )}
+        {actions.map((a) => (
+          <div key={a.key} className={styles.moveRow}>
+            <span className={`${styles.moveDot} ${styles[`moveDot_${a.tone}`]}`} aria-hidden="true" />
+            <span className={styles.moveLabel}>{a.label}.</span>
+            <span className={styles.moveWhy}>{a.why}</span>
             {a.button && (
-              <button
-                type="button"
-                className={styles.actionChipBtn}
-                onClick={a.button.onClick}
-                disabled={a.button.disabled}
-              >
+              <button type="button" className={styles.factLink} onClick={a.button.onClick} disabled={a.button.disabled}>
                 {a.button.label}
               </button>
             )}
-          </span>
-        </Hint>
-      ))}
+          </div>
+        ))}
+      </div>
+      {(gapCount > 0 || canBundle) && (
+        <div className={styles.moveActs}>
+          {gapCount > 0 && (
+            <button className={styles.primaryBtn} onClick={onShowDetectionGaps}>
+              See the {gapCount} technique{gapCount === 1 ? "" : "s"} with no rule
+            </button>
+          )}
+          {canBundle && (
+            <button
+              className={`${styles.primaryBtn} ${styles.moveGo}`}
+              onClick={exportBundle}
+              disabled={exporting}
+              title="One zip with the most recent articles, the entities in them, their IOCs as CSV, and an ATT&CK Navigator layer"
+            >
+              {exporting ? "Preparing…" : "Download hunt package"}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

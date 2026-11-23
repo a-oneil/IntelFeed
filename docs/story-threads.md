@@ -4,7 +4,7 @@ For operators and contributors. It explains how story threads are built, how eac
 
 One news story often arrives twenty times from different outlets. A **story thread** groups those articles into one object: a timeline of what changed in each wave of coverage, the outlet that reported it first, and the re-reports grouped under the article they repeat. The same vectors that build threads also answer "find articles like this one".
 
-Two other mechanisms handle repeats: the `feed_echo` signal lowers their score (`_feed_echo` in `backend/app/intelligence/signals.py:761`), and `temporal_clusters()` groups them on the fly by shared entities (`backend/app/intelligence/correlation.py:3101`). Neither produces an object that can be named, read or opened later.
+Two other mechanisms handle repeats: the `feed_echo` signal lowers their score (`_feed_echo` in `backend/app/intelligence/signals.py:761`), and `temporal_clusters()` groups them on the fly by shared entities (`backend/app/intelligence/correlation.py:3155`). Neither produces an object that can be named, read or opened later.
 
 - [Vector substrate](#vector-substrate)
 - [How a thread is built](#how-a-thread-is-built)

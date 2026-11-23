@@ -8,54 +8,34 @@ import {
 } from "../entityProfileConfig";
 
 const SECTIONS: OverviewSectionKey[] = ["context", "exploit", "affected", "reading", "activity", "workspace"];
-const DEFAULTS: OverviewSectionKey[] = ["context"];
 
 /**
  * Which rows are open comes from the stored choice read against the rows the
- * page has now: stale ids drop, rows added later open if the config says so,
- * and nothing the page lacks is ever handed back to be stored.
+ * page has now: every row starts closed, stale ids drop, and nothing the page
+ * lacks is ever handed back to be stored.
  */
 describe("resolveOpenSections", () => {
   it("opens every row in Everything mode, whatever is stored", () => {
-    expect(resolveOpenSections({ open: [], seen: SECTIONS }, SECTIONS, DEFAULTS, "everything")).toEqual(SECTIONS);
+    expect(resolveOpenSections([], SECTIONS, "everything")).toEqual(SECTIONS);
   });
 
-  it("shows the defaults when nothing is stored, limited to the rows the page has", () => {
-    expect(resolveOpenSections(undefined, SECTIONS, ["context", "victims"], "brief")).toEqual(["context"]);
+  it("starts with every row closed when nothing is stored", () => {
+    expect(resolveOpenSections(undefined, SECTIONS, "brief")).toEqual([]);
   });
 
-  it("shows the stored choice in page order and keeps a closed default closed", () => {
-    expect(resolveOpenSections({ open: ["reading", "exploit"], seen: SECTIONS }, SECTIONS, DEFAULTS, "brief")).toEqual([
-      "exploit",
-      "reading",
-    ]);
+  it("shows the stored choice in page order", () => {
+    expect(resolveOpenSections(["reading", "exploit"], SECTIONS, "brief")).toEqual(["exploit", "reading"]);
   });
 
   it("drops an id the page no longer has", () => {
-    const stored = { open: ["context", "renamed_row", "workspace"], seen: [...SECTIONS, "renamed_row"] };
     const visitorPage = SECTIONS.filter((k) => k !== "workspace");
-    expect(resolveOpenSections(stored, visitorPage, DEFAULTS, "brief")).toEqual(["context"]);
-  });
-
-  it("opens a default-open row the stored choice never saw", () => {
-    const before = SECTIONS.filter((k) => k !== "affected");
-    const stored = { open: ["reading"], seen: before };
-    expect(resolveOpenSections(stored, SECTIONS, ["context", "affected"], "brief")).toEqual(["affected", "reading"]);
-  });
-
-  it("does not open a new row the config leaves closed", () => {
-    const stored = { open: ["reading"], seen: SECTIONS.filter((k) => k !== "affected") };
-    expect(resolveOpenSections(stored, SECTIONS, DEFAULTS, "brief")).toEqual(["reading"]);
-  });
-
-  it("reads a bare stored list as its open rows with every current row seen", () => {
-    expect(resolveOpenSections(["reading", "old_row"], SECTIONS, ["context", "affected"], "brief")).toEqual(["reading"]);
+    expect(resolveOpenSections(["context", "renamed_row", "workspace"], visitorPage, "brief")).toEqual(["context"]);
   });
 });
 
 /**
  * Every profile stacks its Overview rows in the same order, whatever rows the
- * type has: Context directly under the facts strip, Stories & reading,
+ * type has: Context directly under the brief, Stories & reading,
  * Activity and Workspace last. The per-type config only says which rows exist.
  */
 describe("Overview section order", () => {

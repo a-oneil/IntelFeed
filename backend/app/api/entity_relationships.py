@@ -464,13 +464,17 @@ _EVIDENCE_ARTICLES = 10
 @router.get("/{relationship_id}/evidence", response_model=RelationshipEvidenceResponse)
 async def get_relationship_evidence(
     relationship_id: uuid.UUID = Path(..., description="UUID of the relationship."),
-    user: User = Depends(get_admin_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """What a reviewer needs to judge an edge: each evidence article with the
     sentence behind the claim (the analysis's own, or the passages naming both
     ends, found the same way the reviewers find them), and every review the
-    edge has had."""
+    edge has had.
+
+    Any signed-in user: the profile's Relationships tab shows it beside each
+    relationship. The articles are the same instance-wide evidence the pivot
+    already lists; anonymous visitors don't get it."""
     rel = await db.get(EntityRelationship, relationship_id)
     if rel is None:
         raise AppError(code="not_found", message="Relationship not found", status_code=404)
@@ -635,6 +639,24 @@ async def update_entity_relationship(
             details={"allowed_verbs_for_pair": allowed_verbs_for_pair(rel.source_type, rel.target_type)},
             status_code=400,
         )
+
+    if body.relationship_type is not None and body.relationship_type != rel.relationship_type:
+        clash = await db.scalar(
+            select(EntityRelationship.id).where(
+                EntityRelationship.source_type == rel.source_type,
+                EntityRelationship.source_id == rel.source_id,
+                EntityRelationship.target_type == rel.target_type,
+                EntityRelationship.target_id == rel.target_id,
+                EntityRelationship.relationship_type == body.relationship_type,
+            )
+        )
+        if clash is not None:
+            raise AppError(
+                code="duplicate_relationship",
+                message=f"These two entities already have a '{body.relationship_type}' relationship",
+                details={"existing_relationship_id": str(clash)},
+                status_code=409,
+            )
 
     for field in ["relationship_type", "confidence", "description", "evidence_entry_ids"]:
         value = getattr(body, field, None)

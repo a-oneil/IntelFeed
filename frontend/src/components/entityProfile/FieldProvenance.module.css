@@ -248,16 +248,6 @@
   font-style: italic;
 }
 
-.fieldName {
-  display: block;
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  color: var(--text-muted);
-}
-
 /* Right-aligned variant: the popover grows leftward when opening at the
    viewport's right edge (rail markers). */
 .popRight {

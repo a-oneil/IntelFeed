@@ -1,9 +1,8 @@
 /**
- * PulseLine — the header's collapsed activity readout: a bare sparkline plus
- * one quiet line of type (totals, trend vs the prior window, coverage quality)
- * with the window picker and an Expand control that unfolds the full
- * MentionsTimeline in place. No cards, no chrome — it reads like a vital sign
- * under the entity name.
+ * PulseLine — the header's collapsed activity readout: a bare sparkline on the
+ * right of the identity block, with the window picker and an Expand control
+ * that unfolds the full MentionsTimeline under the header. No numbers: the
+ * Overview's Reporting fact says what the curve means.
  */
 import { useMemo } from "react";
 import {
@@ -25,7 +24,7 @@ const WINDOW_LABELS: Record<MentionsWindow, string> = {
 };
 
 const SPARK_W = 300;
-const SPARK_H = 30;
+const SPARK_H = 44;
 
 export function PulseLine({
   entityType,
@@ -48,37 +47,6 @@ export function PulseLine({
   const total = counts.reduce((a, b) => a + b, 0);
   const max = Math.max(...counts, 1);
   const n = points.length;
-  const bucketNoun = data?.bucket === "hour" ? "hr" : data?.bucket === "day" ? "day" : "wk";
-
-  // Trend vs the immediately-prior window. Suppressed for "all" (no prior
-  // window exists) and when both windows are empty.
-  const prev = data?.previous_total ?? null;
-  const trend = useMemo(() => {
-    if (prev == null || (prev === 0 && total === 0)) return null;
-    if (prev === 0) return { dir: "up" as const, label: "new this window" };
-    const pct = Math.round(((total - prev) / prev) * 100);
-    if (pct === 0) return null;
-    return {
-      dir: pct > 0 ? ("up" as const) : ("down" as const),
-      label: `${Math.abs(pct) > 999 ? ">999" : Math.abs(pct)}% vs prior ${WINDOW_LABELS[window].toLowerCase()}`,
-    };
-  }, [prev, total, window]);
-
-  // Coverage quality: breadth of independent feeds vs one outlet echoing.
-  const feeds = data?.total_feeds ?? 0;
-  const echoShare = data?.top_feed_share ?? null;
-  const quality = useMemo(() => {
-    if (total === 0 || feeds === 0) return null;
-    // One outlet dominating outranks raw feed count — 48 feeds where one
-    // carries 73% of mentions is an echo chamber, not broad coverage.
-    if (echoShare != null && echoShare >= 0.6 && total >= 4)
-      return {
-        tone: "warn" as const,
-        label: `one outlet carries ${Math.round(echoShare * 100)}% of mentions`,
-      };
-    if (feeds >= 10) return { tone: "good" as const, label: `broad coverage · ${feeds} independent feeds` };
-    return { tone: "flat" as const, label: `${feeds} feed${feeds === 1 ? "" : "s"}` };
-  }, [total, feeds, echoShare]);
 
   const barW = n > 0 ? Math.max((SPARK_W / n) * 0.62, 1.2) : 2;
 
@@ -110,38 +78,7 @@ export function PulseLine({
         )}
       </svg>
 
-      {total > 0 ? (
-        <span className={styles.pulseStats}>
-          <b>{total}</b> article{total === 1 ? "" : "s"}
-          {feeds > 0 && (
-            <>
-              {" "}· <b>{feeds}</b> feed{feeds === 1 ? "" : "s"}
-            </>
-          )}{" "}
-          · peak <b>{Math.max(...counts, 0)}</b>/{bucketNoun}
-        </span>
-      ) : (
-        <span className={styles.pulseStats}>No mentions in this window</span>
-      )}
-
-      {trend && (
-        <span className={trend.dir === "up" ? styles.pulseDeltaUp : styles.pulseDeltaDown}>
-          {trend.dir === "up" ? "▲" : "▼"} {trend.label}
-        </span>
-      )}
-
-      {quality && (
-        <span
-          className={styles.pulseQuality}
-          title="Coverage quality: how many independent feeds mention this, or whether one outlet dominates"
-        >
-          <span
-            className={styles.pulseQualityDot}
-            data-tone={quality.tone}
-          />
-          {quality.label}
-        </span>
-      )}
+      {total === 0 && <span className={styles.pulseEmpty}>No articles in this window</span>}
 
       <span className={styles.pulseCtls}>
         <select

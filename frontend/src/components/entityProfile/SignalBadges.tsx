@@ -56,7 +56,6 @@ export function SignalBadges({
     if (!key || !provenance) return null;
     return (
       <FieldProvenance
-        field={key}
         label={b.provenanceLabel || b.title || key}
         bucket={provenance.fields[key]}
         unsourced={provenance.unsourced_fields.includes(key)}

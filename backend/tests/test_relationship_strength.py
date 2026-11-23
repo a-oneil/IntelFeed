@@ -156,6 +156,28 @@ async def test_pivot_limit_and_window(db_session, test_feed, test_threat_actor):
     windowed = await pivot_from_entity(db_session, "threat_actor", test_threat_actor.id, window_days=30)
     assert [m["name"] for m in windowed["related"]["malwares"]] == ["LoaderOne"]
 
+    # A relationship is kept on the first page however it ranks: the
+    # year-old pair gets a typed claim and survives limit_per_type=1 beside
+    # the top co-mention, so the profile lists every claim.
+    db_session.add(
+        EntityRelationship(
+            source_type="threat_actor",
+            source_id=test_threat_actor.id,
+            target_type="malware",
+            target_id=m2.id,
+            relationship_type="uses",
+            confidence="confirmed",
+            source="external_feed",
+        )
+    )
+    await db_session.flush()
+    from app.intelligence.correlation_cache import invalidate_entity_cache
+
+    await invalidate_entity_cache("threat_actor", str(test_threat_actor.id))
+    with_claim = await pivot_from_entity(db_session, "threat_actor", test_threat_actor.id, limit_per_type=1)
+    assert {m["name"] for m in with_claim["related"]["malwares"]} == {"LoaderOne", "LoaderTwo"}
+    assert with_claim["related_counts"]["malwares"] == 2
+
 
 @pytest.mark.asyncio
 async def test_pivot_entry_cap_keeps_most_recent(db_session, test_feed, test_threat_actor, monkeypatch):
@@ -444,6 +466,51 @@ async def test_graph_edges_carry_typed_verbs(db_session, test_feed, test_threat_
     assert edge["target"].startswith("malware-")
     assert edge["provenance"] == "co_occurrence"
     assert edge["confidence"] == "probable"
+
+
+@pytest.mark.asyncio
+async def test_graph_draws_relationships_no_article_backs(db_session, test_threat_actor):
+    """An entity with no articles still draws its relationships (3PARA RAT:
+    five MITRE claims, and the map was a single node)."""
+    from app.intelligence.correlation import build_entity_graph
+    from app.models.ttp import TTP
+
+    malware = MalwareFamily(name="NoArticleRAT")
+    ttp = TTP(technique_id="T1083", technique_name="File and Directory Discovery")
+    db_session.add_all([malware, ttp])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            EntityRelationship(
+                source_type="threat_actor",
+                source_id=test_threat_actor.id,
+                target_type="malware",
+                target_id=malware.id,
+                relationship_type="uses",
+                confidence="confirmed",
+                source="external_feed",
+            ),
+            EntityRelationship(
+                source_type="malware",
+                source_id=malware.id,
+                target_type="ttp",
+                target_id=ttp.id,
+                relationship_type="uses",
+                confidence="confirmed",
+                source="external_feed",
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    graph = await build_entity_graph(db_session, "malware", malware.id)
+    seed = f"malware-{malware.id}"
+    edges = {(e["source"], e["label"], e["target"]): e for e in graph["edges"]}
+    assert (f"threat_actor-{test_threat_actor.id}", "uses", seed) in edges
+    assert (seed, "uses", f"ttp-{ttp.id}") in edges
+    assert {n["id"] for n in graph["nodes"]} == {seed, f"threat_actor-{test_threat_actor.id}", f"ttp-{ttp.id}"}
+    edge = edges[(seed, "uses", f"ttp-{ttp.id}")]
+    assert edge["provenance"] == "external_feed" and not edge.get("entries")
 
 
 @pytest.mark.asyncio

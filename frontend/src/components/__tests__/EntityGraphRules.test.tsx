@@ -8,6 +8,16 @@ class ResizeObserverStub {
   disconnect() {}
 }
 vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+// React Flow reads the viewport transform through DOMMatrixReadOnly, which
+// jsdom lacks.
+class DOMMatrixReadOnlyStub {
+  m22: number;
+  constructor(transform?: string) {
+    const scale = transform?.match(/scale\(([1-9.])\)/)?.[1];
+    this.m22 = scale !== undefined ? +scale : 1;
+  }
+}
+vi.stubGlobal("DOMMatrixReadOnly", DOMMatrixReadOnlyStub);
 
 const nodes = [
   { id: "malware-seed", type: "malware", label: "SocGholish", size: 10, data: {} },
@@ -54,11 +64,8 @@ describe("EntityGraph covering rules in the inspector", () => {
       />,
     );
 
-    // Select the TTP node (mousedown+mouseup without movement = click-select).
-    const label = screen.getByText("T1047");
-    const nodeGroup = label.closest("g")!;
-    fireEvent.mouseDown(nodeGroup.querySelector("circle, path, rect, polygon")!);
-    fireEvent.mouseUp(nodeGroup.querySelector("circle, path, rect, polygon")!);
+    // Select the TTP node.
+    fireEvent.click(await screen.findByText("T1047"));
 
     // Inspector shows the coverage line with the library count.
     await waitFor(() => expect(screen.getByText(/covered ✓ · 39 rules/)).toBeInTheDocument());
@@ -90,10 +97,7 @@ describe("EntityGraph covering rules in the inspector", () => {
       />,
     );
 
-    const label = screen.getByText("T1047");
-    const nodeGroup = label.closest("g")!;
-    fireEvent.mouseDown(nodeGroup.querySelector("circle, path, rect, polygon")!);
-    fireEvent.mouseUp(nodeGroup.querySelector("circle, path, rect, polygon")!);
+    fireEvent.click(await screen.findByText("T1047"));
 
     await waitFor(() => expect(screen.getByText(/no rule in library/)).toBeInTheDocument());
     expect(onFetchCoveringRules).not.toHaveBeenCalled();

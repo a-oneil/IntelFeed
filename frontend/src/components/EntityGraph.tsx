@@ -1,32 +1,54 @@
-import { useCallback, useEffect, useRef, useState, useLayoutEffect, useMemo } from 'react';
-import { getEntityColor, getEntityLabel, getEntityPluralLabel } from '@/utils/entityTheme';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  computeRadialLayout,
-  computeEdgePath,
-  polygonPoints,
-} from './entityGraphLayout';
-import type { LayoutNode, LayoutEdge } from './entityGraphLayout';
+  Background,
+  BackgroundVariant,
+  ConnectionLineType,
+  ConnectionMode,
+  MiniMap,
+  ReactFlow,
+  ReactFlowProvider,
+  getViewportForBounds,
+  useNodesState,
+  useReactFlow,
+  useStore,
+  type Connection,
+  type Node,
+  type NodeMouseHandler,
+  type EdgeMouseHandler,
+  type OnNodeDrag,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
+import { toPng } from 'html-to-image';
+import { getEntityLabel, getEntityPluralLabel } from '@/utils/entityTheme';
+import {
+  computeNetworkLayout,
+  computeStoryLayout,
+  nodeRadius,
+  type GraphStoryCluster,
+  type LayoutEdge,
+  type LayoutNode,
+  type Point,
+} from './entityGraph/layout';
+import {
+  EntityNodeView,
+  FloatingEdgeView,
+  GraphUiContext,
+  GraphUiStore,
+  GraphViewContext,
+  StoryNodeView,
+  getNodeColor,
+  truncateLabel,
+  type EntityFlowEdge,
+  type EntityFlowNode,
+  type GraphView,
+  type StoryFlowNode,
+} from './entityGraph/graphView';
 import styles from './EntityGraph.module.css';
 
 // Re-export for consumers that import from here
 export type EntityNode = LayoutNode;
 export type EntityEdge = LayoutEdge;
-
-/** A story (incident) grouping for the story layout — nodeIds in graph id
- * format (`${type}-${id}`). Supplied by the relationships tab from the
- * pivot's evidence structure. */
-export interface GraphStoryCluster {
-  id: string;
-  heading: string;
-  corroborated: boolean;
-  articles: number;
-  nodeIds: string[];
-  /** Story-thread slug when threading has named this incident. */
-  slug?: string | null;
-  /** True for clusters belonging to an EXPANDED node — their members aren't
-   * rows in the viewed profile's list, so "filter list" doesn't apply. */
-  external?: boolean;
-}
+export type { GraphStoryCluster };
 
 /** Row-level facts the inspector shows for a node — supplied by the tab from
  * the pivot payload (trust chip text, evidence shape phrase, counts). */
@@ -58,9 +80,9 @@ interface EntityGraphProps {
   onNodeClick?: (nodeId: string, nodeType: string) => void;
   onEdgeCreate?: (sourceId: string, sourceType: string, targetId: string, targetType: string) => void;
   onEntryClick?: (entryId: string) => void;
-  /** When provided, the graph offers a "story clusters" layout (default) that
-   * groups nodes by incident inside labeled hulls — same nodes, edges, and
-   * interactions as the type-ring layout. */
+  /** When provided, the graph offers a "story" layout (default) that groups
+   * nodes by incident inside labeled boxes — same nodes, edges, and
+   * interactions as the network layout. */
   storyClusters?: GraphStoryCluster[];
   onClusterClick?: (cluster: GraphStoryCluster) => void;
   /** Inspector facts per node id. */
@@ -84,51 +106,28 @@ interface EntityGraphProps {
 type Selected =
   | { kind: 'node'; id: string }
   | { kind: 'cluster'; id: string }
-  | { kind: 'edge'; idx: number }
+  | { kind: 'edge'; id: string }
   | null;
 
-function getNodeColor(type: string): string {
-  if (type === 'entry') return '#6b7280';
-  return getEntityColor(type);
+const nodeTypes = { entity: EntityNodeView, story: StoryNodeView };
+const edgeTypes = { floating: FloatingEdgeView };
+const STORY_PREFIX = 'story:';
+
+/** "3 Articles" / "1 Malware" — graph-only `entry` nodes are articles. */
+function typeCount(type: string, n: number): string {
+  if (type === 'entry') return `${n} ${n === 1 ? 'Article' : 'Articles'}`;
+  return `${n} ${n === 1 ? getEntityLabel(type) : getEntityPluralLabel(type)}`;
 }
 
-function truncateLabel(label: string, maxLen: number = 18): string {
-  if (label.length <= maxLen) return label;
-  return label.slice(0, maxLen - 1) + '…';
+export function EntityGraph(props: EntityGraphProps) {
+  return (
+    <ReactFlowProvider>
+      <EntityGraphInner {...props} />
+    </ReactFlowProvider>
+  );
 }
 
-// ── Node shape renderer ────────────────────────────────────────────
-
-function renderNodeShape(
-  type: string, x: number, y: number, r: number, color: string,
-  extraClass: string = '', key?: string,
-) {
-  const baseProps = { fill: color, key };
-
-  switch (type) {
-    case 'malware':
-      return <polygon className={`${styles.nodeShape} ${extraClass}`} points={polygonPoints(x, y, r, 6)} {...baseProps} />;
-    case 'ttp':
-      return <rect className={`${styles.nodeShape} ${extraClass}`} x={x - r * 0.8} y={y - r * 0.8} width={r * 1.6} height={r * 1.6} rx={3} ry={3} {...baseProps} />;
-    case 'cve':
-      return <polygon className={`${styles.nodeShape} ${extraClass}`} points={polygonPoints(x, y, r, 3)} {...baseProps} />;
-    case 'entry':
-      return <rect className={`${styles.nodeShape} ${styles.articleNode} ${extraClass}`} x={x - r * 1.3} y={y - r * 0.8} width={r * 2.6} height={r * 1.6} rx={4} ry={4} {...baseProps} />;
-    case 'country':
-      return (
-        <g key={key}>
-          <circle className={`${styles.nodeShape} ${extraClass}`} cx={x} cy={y} r={r} fill={color} />
-          <circle cx={x} cy={y} r={r + 3} fill="none" stroke={color} strokeWidth={1.5} opacity={0.4} />
-        </g>
-      );
-    default: // threat_actor, tool, mitigation, etc.
-      return <circle className={`${styles.nodeShape} ${extraClass}`} cx={x} cy={y} r={r} {...baseProps} />;
-  }
-}
-
-// ── Component ──────────────────────────────────────────────────────
-
-export function EntityGraph({
+function EntityGraphInner({
   nodes,
   edges,
   onNodeClick,
@@ -146,26 +145,14 @@ export function EntityGraph({
   width: widthProp,
   height: heightProp = 500,
 }: EntityGraphProps) {
-  const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // --- Interaction state ---
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const draggingIdRef = useRef<string | null>(null);
-  const dragOffset = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
-  const dragMoved = useRef(false);
-  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const flow = useReactFlow();
 
   // Selection is the graph's core interaction: click selects (node, cluster,
   // or edge) and the inspector explains it; double-click navigates. Nothing
   // navigates on a single click.
   const [selected, setSelected] = useState<Selected>(null);
-
-  // Manual position overrides from dragging (nodeId → {x, y})
-  const [dragOverrides, setDragOverrides] = useState<Map<string, { x: number; y: number }>>(new Map());
-  // Whole-cluster drag offsets in the story layout (clusterId → {dx, dy})
-  const [clusterOffsets, setClusterOffsets] = useState<Map<string, { dx: number; dy: number }>>(new Map());
-  const clusterDragRef = useRef<{ id: string; lastX: number; lastY: number; moved: boolean } | null>(null);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
   // Per-node hide (inspector action); the strip shows a reset pill.
   const [hiddenNodes, setHiddenNodes] = useState<Set<string>>(new Set());
@@ -176,90 +163,65 @@ export function EntityGraph({
     if (!isFullscreen) return;
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsFullscreen(false); };
     document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [isFullscreen]);
-  useEffect(() => {
-    if (isFullscreen) {
-      document.body.style.overflow = 'hidden';
-      return () => { document.body.style.overflow = ''; };
-    }
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', handler);
+      document.body.style.overflow = '';
+    };
   }, [isFullscreen]);
 
   // --- Settings ---
   const [showSettings, setShowSettings] = useState(false);
-  const [layoutMode, setLayoutMode] = useState<'story' | 'type'>('story');
+  const [layoutMode, setLayoutMode] = useState<'story' | 'network'>('story');
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [showNodeLabels, setShowNodeLabels] = useState(true);
   const [showEdgeLabels, setShowEdgeLabels] = useState(false);
-  const [showRingGuides, setShowRingGuides] = useState(true);
-  const [showArcLabels, setShowArcLabels] = useState(true);
-  const [nodesPerType, setNodesPerType] = useState(5);
-  const [ringSpacing, setRingSpacing] = useState(1.0);
+  const [nodesPerType, setNodesPerType] = useState(8);
+  const [spacing, setSpacing] = useState(1.0);
+  // Story-less claim types the user chose to show from their pill.
+  const [expandedGhostTypes, setExpandedGhostTypes] = useState<Set<string>>(new Set());
 
-  // --- Expansion state ---
-  const [expandedNodes, setExpandedNodes] = useState<Map<string, string | null>>(
-    () => new Map(nodes.length > 0 ? [[nodes[0].id, null]] : []),
-  );
-
-  // Reset when seed entity changes — node ids recur across profiles (the
-  // same country appears on many maps), so stale drags/hull offsets/pill
-  // expansions from the previous profile must not carry over.
-  const prevSeedRef = useRef(nodes[0]?.id);
+  // Shift held = drawing a link (only when links can be created).
+  const [linking, setLinking] = useState(false);
   useEffect(() => {
-    const newSeed = nodes[0]?.id;
-    if (newSeed && newSeed !== prevSeedRef.current) {
-      prevSeedRef.current = newSeed;
-      setExpandedNodes(new Map([[newSeed, null]]));
+    if (!onEdgeCreate) return;
+    const sync = (e: KeyboardEvent) => setLinking(e.shiftKey);
+    const off = () => setLinking(false);
+    window.addEventListener('keydown', sync);
+    window.addEventListener('keyup', sync);
+    window.addEventListener('blur', off);
+    return () => {
+      window.removeEventListener('keydown', sync);
+      window.removeEventListener('keyup', sync);
+      window.removeEventListener('blur', off);
+    };
+  }, [onEdgeCreate]);
+
+  // Where each node ended up last layout (graph-space centers), so the next
+  // layout starts from there, and positions the user dragged by hand.
+  const previousRef = useRef<Map<string, Point>>(new Map());
+  const draggedRef = useRef<Map<string, { x: number; y: number; parentId?: string }>>(new Map());
+
+  // Reset when the seed entity changes — node ids recur across profiles (the
+  // same country appears on many maps), so stale drags and pill expansions
+  // from the previous profile must not carry over.
+  const seedId = nodes[0]?.id;
+  const prevSeedRef = useRef(seedId);
+  useEffect(() => {
+    if (seedId && seedId !== prevSeedRef.current) {
+      prevSeedRef.current = seedId;
       setSelected(null);
       setHiddenNodes(new Set());
-      setDragOverrides(new Map());
-      setClusterOffsets(new Map());
       setExpandedGhostTypes(new Set());
+      previousRef.current = new Map();
+      draggedRef.current = new Map();
     }
-  }, [nodes]);
-
-  // Shift+drag edge creation
-  const [edgeDraft, setEdgeDraft] = useState<{ sourceId: string; mouseX: number; mouseY: number } | null>(null);
-
-  // --- Measure container ---
-  const [measuredWidth, setMeasuredWidth] = useState(widthProp ?? 800);
-  const [measuredHeight, setMeasuredHeight] = useState(heightProp);
-  useLayoutEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const w = entry.contentRect.width;
-        const h = entry.contentRect.height;
-        if (w > 0) setMeasuredWidth(w);
-        if (h > 0 && isFullscreen) setMeasuredHeight(h);
-      }
-    });
-    observer.observe(el);
-    const w = el.clientWidth;
-    if (w > 0) setMeasuredWidth(w);
-    if (isFullscreen) {
-      const h = el.clientHeight;
-      if (h > 0) setMeasuredHeight(h);
-    }
-    return () => observer.disconnect();
-  }, [isFullscreen]);
-
-  const width = isFullscreen ? measuredWidth : (widthProp ?? measuredWidth);
-  const height = isFullscreen ? measuredHeight : heightProp;
-
-  // --- Zoom & pan ---
-  const [scale, setScale] = useState(1);
-  const [translate, setTranslate] = useState({ x: 0, y: 0 });
-  const [isPanning, setIsPanning] = useState(false);
-  const panStart = useRef({ x: 0, y: 0 });
-  const translateAtPanStart = useRef({ x: 0, y: 0 });
+  }, [seedId]);
 
   // ── Merge on-demand expansions into the base graph ─────────────
   // Expanded nodes' claims and stories join the SAME node/edge/cluster sets
-  // the primary layout consumes — no parallel rendering path, so expansion
-  // hulls drag, select, and label exactly like every other cluster, and
-  // expanding an expansion node just works (any node is a real node).
+  // the layout consumes — no parallel rendering path, so expanding an
+  // expansion node just works (any node is a real node).
   const allNodes = useMemo(() => {
     if (!expansions || expansions.size === 0) return nodes;
     const m = new Map(nodes.map((n) => [n.id, n]));
@@ -288,233 +250,240 @@ export function EntityGraph({
     return out;
   }, [storyClusters, expansions]);
   const clusterById = useMemo(() => new Map(allClusters.map((c) => [c.id, c])), [allClusters]);
+  const nodeById = useMemo(() => new Map(allNodes.map((n) => [n.id, n])), [allNodes]);
 
-  // ── Compute radial layout ──────────────────────────────────────
+  // Edge ids stay stable across layouts: endpoints + label, with a counter
+  // only when the same pair carries the same label twice.
+  const keyedEdges = useMemo(() => {
+    const count = new Map<string, number>();
+    return allEdges.map((edge) => {
+      const base = `${edge.source}>${edge.target}:${edge.label}`;
+      const n = count.get(base) ?? 0;
+      count.set(base, n + 1);
+      return { id: n ? `${base}#${n}` : base, edge };
+    });
+  }, [allEdges]);
 
-  const layout = useMemo(() => computeRadialLayout({
+  // Nodes from expansions are always shown in the network layout — the user
+  // asked for them; the per-type cap is for the seed's own neighbors.
+  const expansionIds = useMemo(() => {
+    const s = new Set<string>();
+    if (expansions) for (const [id, ex] of expansions) { s.add(id); for (const n of ex.nodes) s.add(n.id); }
+    return s;
+  }, [expansions]);
+
+  // Panel shape, in coarse steps so resizing doesn't re-run the layout on
+  // every pixel.
+  const aspect = useStore((st) => (st.width && st.height ? Math.round((st.width / st.height) * 4) / 4 : 2));
+
+  // What each expansion brought in, keyed back to the node expanded, so the
+  // story layout draws it beside that node.
+  const { anchorOf, clusterAnchor } = useMemo(() => {
+    const anchorOf = new Map<string, string>();
+    const clusterAnchor = new Map<string, string>();
+    if (expansions) {
+      const base = new Set(nodes.map((n) => n.id));
+      for (const [anchor, ex] of expansions) {
+        for (const n of ex.nodes) if (!base.has(n.id) && !anchorOf.has(n.id)) anchorOf.set(n.id, anchor);
+        for (const c of ex.clusters ?? []) clusterAnchor.set(c.id, anchor);
+      }
+    }
+    return { anchorOf, clusterAnchor };
+  }, [nodes, expansions]);
+
+  // ── Layout ─────────────────────────────────────────────────────
+  // Only the layout on screen is computed: the story one is the costlier,
+  // and in Network mode its result would be thrown away.
+  const hasStories = allClusters.length > 0;
+  const storyActive = layoutMode === 'story' && hasStories;
+  const storyLayout = useMemo(() => !storyActive ? null : computeStoryLayout({
     nodes: allNodes,
     edges: allEdges,
-    seedId: nodes[0]?.id ?? '',
-    expandedNodes,
-    width,
-    height,
-    nodesPerType,
-    ringSpacingMultiplier: ringSpacing,
+    clusters: allClusters,
+    seedId: seedId ?? '',
     hiddenTypes,
-  }), [allNodes, allEdges, nodes, expandedNodes, width, height, nodesPerType, ringSpacing, hiddenTypes]);
+    hiddenNodes,
+    expandedGhostTypes,
+    anchorOf,
+    clusterAnchor,
+    spacing,
+    labels: showNodeLabels,
+    aspect,
+    previous: previousRef.current,
+  }), [storyActive, allNodes, allEdges, allClusters, seedId, hiddenTypes, hiddenNodes, expandedGhostTypes, anchorOf, clusterAnchor, spacing, showNodeLabels, aspect]);
 
-  // Story-less claim types the user expanded from their ghost pill.
-  const [expandedGhostTypes, setExpandedGhostTypes] = useState<Set<string>>(new Set());
+  const networkLayout = useMemo(() => storyActive ? null : computeNetworkLayout({
+    nodes: allNodes,
+    edges: allEdges,
+    seedId: seedId ?? '',
+    hiddenTypes,
+    hiddenNodes,
+    nodesPerType,
+    capExempt: expansionIds,
+    spacing,
+    labels: showNodeLabels,
+    aspect,
+    previous: previousRef.current,
+  }), [storyActive, allNodes, allEdges, seedId, hiddenTypes, hiddenNodes, nodesPerType, expansionIds, spacing, showNodeLabels, aspect]);
 
-  // ── Story layout (operations map) ──────────────────────────────
-  // Same nodes, edges, and interactions — only positions change: each story
-  // cluster becomes a labeled hull with its members ringed inside. Story-less
-  // nodes NEVER get individual spokes (that's the ring-soup this layout
-  // exists to kill) — they collapse to one dashed ghost pill per type,
-  // expandable on click. The ring radius is computed from the hull sizes so
-  // adjacent hulls cannot overlap; node spacing reuses the settings slider.
-  const storyLayout = useMemo(() => {
-    if (allClusters.length === 0) return null;
-    const cx0 = width / 2;
-    const cy0 = height / 2;
-    const seed = nodes[0]?.id ?? '';
-    const visibleIds = new Set(allNodes.filter((n) => !hiddenTypes.has(n.type)).map((n) => n.id));
-    const shown = allClusters.slice(0, 8);
+  const positions = storyActive ? storyLayout!.positions : networkLayout!.positions;
 
-    // First pass: cluster membership and hull sizes.
-    const clustered = new Set<string>();
-    const pre: Array<{ cluster: GraphStoryCluster; members: string[]; mrx: number; mry: number; rx: number; ry: number }> = [];
-    for (const cluster of shown) {
-      const members = cluster.nodeIds.filter((id) => visibleIds.has(id) && id !== seed && !clustered.has(id));
-      if (members.length === 0) continue;
-      members.forEach((id) => clustered.add(id));
-      const mrx = 34 + members.length * 7;
-      const mry = 24 + members.length * 4;
-      pre.push({ cluster, members, mrx, mry, rx: mrx + 44, ry: mry + 38 });
-    }
+  const visibleIds = useMemo(() => new Set(positions.keys()), [positions]);
+  const visibleEdges = useMemo(
+    () => keyedEdges.filter(({ edge }) => visibleIds.has(edge.source) && visibleIds.has(edge.target)),
+    [keyedEdges, visibleIds],
+  );
 
-    // Ring radius: clear the center, and keep adjacent hulls (plus their
-    // title blocks) from touching.
-    const k = pre.length;
-    const hullR = (p: (typeof pre)[number]) => Math.max(p.rx, p.ry + 34); // +34 for the title block
-    const maxHull = pre.length ? Math.max(...pre.map(hullR)) : 0;
-    let R = Math.max(170, maxHull + 80);
-    if (k >= 2) {
-      for (let i = 0; i < k; i++) {
-        const need = (hullR(pre[i]) + hullR(pre[(i + 1) % k]) + 30) / (2 * Math.sin(Math.PI / k));
-        R = Math.max(R, need);
-      }
-    }
-    R *= ringSpacing;
+  // Manual placements belong to a coordinate space: switching layouts drops them.
+  const modeRef = useRef(storyActive);
+  if (modeRef.current !== storyActive) {
+    modeRef.current = storyActive;
+    draggedRef.current = new Map();
+  }
 
-    type StoryPos = { x: number; y: number; ring: number; angle: number; parentId: string | null };
-    const positions = new Map<string, StoryPos>();
-    positions.set(seed, { x: cx0, y: cy0, ring: 0, angle: 0, parentId: null });
+  // ── React Flow nodes ───────────────────────────────────────────
+  const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<Node>([]);
 
-    const hulls: Array<{
-      cx: number; cy: number; rx: number; ry: number;
-      cluster: GraphStoryCluster; titleBelow: boolean;
-    }> = [];
-    pre.forEach((p, i) => {
-      const angle = ((-90 + (i * 360) / k) * Math.PI) / 180;
-      const hcx = cx0 + R * Math.cos(angle);
-      const hcy = cy0 + R * Math.sin(angle);
-      p.members.forEach((id, j) => {
-        const a = ((-90 + (j * 360) / p.members.length) * Math.PI) / 180;
-        positions.set(id, { x: hcx + p.mrx * Math.cos(a), y: hcy + p.mry * Math.sin(a), ring: 1, angle: a, parentId: seed });
-      });
-      hulls.push({ cx: hcx, cy: hcy, rx: p.rx, ry: p.ry, cluster: p.cluster, titleBelow: Math.sin(angle) > 0.25 });
-    });
-
-    // Story-less claims: one ghost pill per type; expanded types lay their
-    // nodes on an outer ring.
-    const rest = allNodes.filter((n) => visibleIds.has(n.id) && n.id !== seed && !clustered.has(n.id));
-    const byType = new Map<string, string[]>();
-    for (const n of rest) (byType.get(n.type) ?? byType.set(n.type, []).get(n.type)!).push(n.id);
-
-    // Which types are pure MITRE/external claims (edge provenance from seed)?
-    const provenanceOf = new Map<string, string | null | undefined>();
-    for (const e of allEdges) {
-      if (e.source === seed) provenanceOf.set(e.target, e.provenance);
-      else if (e.target === seed) provenanceOf.set(e.source, e.provenance);
-    }
-
-    const R2 = R + maxHull + 120;
-    const expandedIds: string[] = [];
-    for (const [type, ids] of byType) {
-      if (expandedGhostTypes.has(type)) expandedIds.push(...ids);
-    }
-    expandedIds.forEach((id, i) => {
-      const a = ((-90 + (i * 360) / Math.max(expandedIds.length, 1)) * Math.PI) / 180;
-      positions.set(id, { x: cx0 + R2 * Math.cos(a), y: cy0 + R2 * Math.sin(a), ring: 2, angle: a, parentId: seed });
-    });
-
-    const ghosts = [...byType.entries()].map(([type, ids]) => ({
-      type,
-      count: ids.length,
-      mitre: ids.every((id) => provenanceOf.get(id) === 'external_feed'),
-      expanded: expandedGhostTypes.has(type),
-    }));
-
-    const clusterOf = new Map<string, string>();
-    pre.forEach((p) => {
-      p.members.forEach((id) => clusterOf.set(id, p.cluster.id));
-    });
-
-    // Fit bounds: hulls, their titles, and any expanded ghost ring.
-    let minX = cx0 - 60, minY = cy0 - 60, maxX = cx0 + 60, maxY = cy0 + 60;
-    for (const h of hulls) {
-      minX = Math.min(minX, h.cx - h.rx - 20);
-      maxX = Math.max(maxX, h.cx + h.rx + 20);
-      minY = Math.min(minY, h.cy - h.ry - 40);
-      maxY = Math.max(maxY, h.cy + h.ry + 40);
-    }
-    for (const pos of positions.values()) {
-      minX = Math.min(minX, pos.x - 30);
-      maxX = Math.max(maxX, pos.x + 30);
-      minY = Math.min(minY, pos.y - 30);
-      maxY = Math.max(maxY, pos.y + 30);
-    }
-    return { positions, hulls, ghosts, clusterOf, bounds: { minX, minY, maxX, maxY } };
-  }, [allClusters, allNodes, allEdges, nodes, width, height, hiddenTypes, ringSpacing, expandedGhostTypes]);
-
-  const storyActive = layoutMode === 'story' && storyLayout !== null;
-  const basePositions = storyActive ? storyLayout!.positions : layout.positions;
-
-  // In story layout every non-hidden node is visible (the per-type ring caps
-  // are a radial-layout concern); edges follow the visible nodes.
-  const visibleNodes = useMemo(() => {
-    const base = storyActive ? allNodes.filter((n) => storyLayout!.positions.has(n.id)) : layout.visibleNodes;
-    return hiddenNodes.size > 0 ? base.filter((n) => !hiddenNodes.has(n.id)) : base;
-  }, [storyActive, allNodes, storyLayout, layout.visibleNodes, hiddenNodes]);
-  const visibleEdges = useMemo(() => {
-    const ids = new Set(visibleNodes.map((n) => n.id));
-    if (!storyActive && hiddenNodes.size === 0) return layout.visibleEdges;
-    const source = storyActive ? allEdges : layout.visibleEdges;
-    return source.filter((e) => ids.has(e.source) && ids.has(e.target));
-  }, [storyActive, allEdges, visibleNodes, layout.visibleEdges, hiddenNodes]);
-
-  // Clear manual placements only when the coordinate SPACE changes (story ↔
-  // rings) — story offsets are meaningless in ring coordinates. Expansions
-  // merging new nodes reflow the layout but keep drags/hull offsets: they're
-  // deltas, and wiping a hand-arranged map on every click-expand would make
-  // arranging and exploring mutually exclusive. Seed changes reset above.
-  const layoutGenRef = useRef(0);
   useEffect(() => {
-    layoutGenRef.current++;
-    if (layoutGenRef.current > 1) {
-      // Don't clear on first render, only on subsequent mode switches
-      setDragOverrides(new Map());
-      setClusterOffsets(new Map());
-    }
-  }, [storyActive]);
-
-  // Merged positions: cluster-drag offsets first, then per-node overrides.
-  const positions = useMemo(() => {
-    let base = basePositions;
-    if (storyActive && clusterOffsets.size > 0) {
-      const shifted = new Map(base);
-      for (const [id, pos] of base) {
-        const cid = storyLayout!.clusterOf.get(id);
-        const off = cid ? clusterOffsets.get(cid) : undefined;
-        if (off) shifted.set(id, { ...pos, x: pos.x + off.dx, y: pos.y + off.dy });
-      }
-      base = shifted;
-    }
-    if (dragOverrides.size === 0) return base;
-    const merged = new Map(base);
-    for (const [id, pos] of dragOverrides) {
-      const existing = merged.get(id);
-      if (existing) {
-        // Cluster-relative overrides: re-apply the hull's current offset so
-        // hand-placed nodes follow later cluster drags.
-        let ox = 0, oy = 0;
-        if (storyActive) {
-          const cid = storyLayout!.clusterOf.get(id);
-          const off = cid ? clusterOffsets.get(cid) : undefined;
-          if (off) {
-            ox = off.dx;
-            oy = off.dy;
-          }
-        }
-        merged.set(id, { ...existing, x: pos.x + ox, y: pos.y + oy });
-      }
-    }
-    return merged;
-  }, [basePositions, dragOverrides, storyActive, storyLayout, clusterOffsets]);
-
-  // Auto-fit when layout changes
-  useEffect(() => {
-    if (basePositions.size === 0) return;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    previousRef.current = new Map(positions);
     if (storyActive) {
-      ({ minX, minY, maxX, maxY } = storyLayout!.bounds);
-    } else {
-      for (const pos of basePositions.values()) {
-        minX = Math.min(minX, pos.x);
-        minY = Math.min(minY, pos.y);
-        maxX = Math.max(maxX, pos.x);
-        maxY = Math.max(maxY, pos.y);
+      for (const g of storyLayout!.groups) {
+        previousRef.current.set(`${STORY_PREFIX}${g.cluster.id}`, { x: g.x + g.w / 2, y: g.y + g.h / 2 });
       }
     }
-    const pad = 80;
-    const bboxW = maxX - minX + pad * 2;
-    const bboxH = maxY - minY + pad * 2;
-    if (bboxW > 0 && bboxH > 0) {
-      const fitScale = Math.max(0.08, Math.min(1.0, Math.min(width / bboxW, height / bboxH)));
-      const fitCx = (minX + maxX) / 2;
-      const fitCy = (minY + maxY) / 2;
-      setScale(fitScale);
-      setTranslate({ x: width / 2 - fitCx * fitScale, y: height / 2 - fitCy * fitScale });
-    }
-  }, [basePositions, storyActive, storyLayout, width, height]);
 
-  // Build lookup maps
-  const nodeMap = useMemo(() => {
-    const m = new Map<string, EntityNode>();
-    for (const n of visibleNodes) m.set(n.id, n);
-    return m;
-  }, [visibleNodes]);
+    const dragged = draggedRef.current;
+    const out: Node[] = [];
+    const groupAt = new Map<string, { x: number; y: number }>();
+    if (storyActive) {
+      for (const g of storyLayout!.groups) {
+        const id = `${STORY_PREFIX}${g.cluster.id}`;
+        groupAt.set(g.cluster.id, { x: g.x, y: g.y });
+        const hand = dragged.get(id);
+        out.push({
+          id,
+          type: 'story',
+          position: hand ? { x: hand.x, y: hand.y } : { x: g.x, y: g.y },
+          data: { cluster: g.cluster },
+          style: { width: g.w, height: g.h },
+        } satisfies StoryFlowNode);
+      }
+    }
+    for (const [id, p] of positions) {
+      const node = nodeById.get(id);
+      if (!node) continue;
+      const r = nodeRadius(node, id === seedId);
+      const clusterId = storyActive ? storyLayout!.memberOf.get(id) : undefined;
+      const parentId = clusterId ? `${STORY_PREFIX}${clusterId}` : undefined;
+      const origin = clusterId ? groupAt.get(clusterId)! : { x: 0, y: 0 };
+      const hand = dragged.get(id);
+      out.push({
+        id,
+        type: 'entity',
+        position: hand && hand.parentId === parentId
+          ? { x: hand.x, y: hand.y }
+          : { x: p.x - origin.x - r, y: p.y - origin.y - r },
+        data: { node, r },
+        ...(parentId ? { parentId, extent: 'parent' as const } : {}),
+      } satisfies EntityFlowNode);
+    }
+    setFlowNodes(out);
+  }, [positions, storyActive, storyLayout, nodeById, seedId, setFlowNodes]);
+
+  // In Stories, the seed's line to each story member is a "spoke": the box
+  // already says they are related, so spokes only draw for the hovered or
+  // selected node, and each story gets one line from the seed instead.
+  const flowEdges = useMemo<EntityFlowEdge[]>(() => {
+    const memberOf = storyActive ? storyLayout!.memberOf : null;
+    const out: EntityFlowEdge[] = visibleEdges.map(({ id, edge }) => {
+      const other = edge.source === seedId ? edge.target : edge.target === seedId ? edge.source : null;
+      const spoke = !!(memberOf && other && memberOf.has(other));
+      return { id, source: edge.source, target: edge.target, type: 'floating', data: { edge, spoke } };
+    });
+    if (storyActive && seedId) {
+      for (const g of storyLayout!.groups) {
+        const target = `${STORY_PREFIX}${g.cluster.id}`;
+        out.push({
+          id: `${seedId}>${target}`,
+          source: seedId,
+          target,
+          type: 'floating',
+          data: { edge: { source: seedId, target, weight: g.cluster.articles, label: '' }, story: true },
+        });
+      }
+    }
+    return out;
+  }, [visibleEdges, storyActive, storyLayout, seedId]);
+
+  // Fit when the set of visible things changes (not on drags or hover).
+  const fitKey = `${storyActive}|${[...visibleIds].sort().join(',')}|${spacing}|${isFullscreen}`;
+  useEffect(() => {
+    const t = setTimeout(() => flow.fitView({ padding: 0.12, maxZoom: 1.25, duration: 250 }), 30);
+    return () => clearTimeout(t);
+  }, [fitKey, flow]);
+
+  const onNodeDragStop: OnNodeDrag = useCallback((_e, node) => {
+    draggedRef.current.set(node.id, { x: node.position.x, y: node.position.y, parentId: node.parentId });
+  }, []);
+
+  // ── Derived view state ─────────────────────────────────────────
+  const hover = useMemo(() => {
+    if (!hoveredNodeId) return null;
+    const ns = new Set<string>([hoveredNodeId]);
+    const es = new Set<string>();
+    for (const { id, edge } of visibleEdges) {
+      if (edge.source === hoveredNodeId || edge.target === hoveredNodeId) {
+        es.add(id);
+        ns.add(edge.source);
+        ns.add(edge.target);
+      }
+    }
+    return { nodes: ns, edges: es };
+  }, [hoveredNodeId, visibleEdges]);
+
+  // Search highlight: matching nodes stay lit, the rest recede. The tab's
+  // search box drives this — no separate find UI.
+  const hq = (highlightQuery ?? '').trim().toLowerCase();
+  const searchMatches = useMemo(() => {
+    if (!hq) return null;
+    return new Set(allNodes.filter((n) => visibleIds.has(n.id) && n.label.toLowerCase().includes(hq)).map((n) => n.id));
+  }, [hq, allNodes, visibleIds]);
+
+  // The +/− badge: load a node's own connections, or fold them away again.
+  const expandable = useCallback(
+    (id: string) => !!onToggleExpand && id !== seedId && nodeById.get(id)?.type !== 'entry',
+    [onToggleExpand, seedId, nodeById],
+  );
+  const isExpanded = useCallback((id: string) => !!expansions?.has(id), [expansions]);
+  const toggleExpand = useCallback((id: string) => {
+    const node = nodeById.get(id);
+    if (node && onToggleExpand) onToggleExpand(id, node.type, !expansions?.has(id));
+  }, [nodeById, onToggleExpand, expansions]);
+
+  const view = useMemo<GraphView>(() => ({
+    seedId,
+    nodeInfo,
+    showNodeLabels,
+    showEdgeLabels,
+    linking,
+    expandable,
+    isExpanded,
+    toggleExpand,
+  }), [seedId, nodeInfo, showNodeLabels, showEdgeLabels, linking, expandable, isExpanded, toggleExpand]);
+
+  // Hover, selection and search go through a store: each node and edge
+  // re-renders only when its own dimming or highlight changes.
+  const [uiStore] = useState(() => new GraphUiStore());
+  useLayoutEffect(() => {
+    uiStore.set({
+      hover,
+      hoveredNodeId,
+      selectedNodeId: selected?.kind === 'node' ? selected.id : null,
+      selectedClusterId: selected?.kind === 'cluster' ? selected.id : null,
+      selectedEdgeId: selected?.kind === 'edge' ? selected.id : null,
+      searchMatches,
+    });
+  }, [uiStore, hover, hoveredNodeId, selected, searchMatches]);
 
   // Detection rules covering the selected ttp/cve node — fetched lazily on
   // first selection, cached per node id for the life of the component.
@@ -523,25 +492,13 @@ export function EntityGraph({
     if (!onFetchCoveringRules || !selected || selected.kind !== 'node') return;
     const id = selected.id;
     if (!nodeInfo?.get(id)?.covered || coveringRules.has(id)) return;
-    const node = nodeMap.get(id);
+    const node = nodeById.get(id);
     if (!node || (node.type !== 'ttp' && node.type !== 'cve')) return;
     setCoveringRules((prev) => new Map(prev).set(id, 'loading'));
     onFetchCoveringRules(node)
       .then((rules) => setCoveringRules((prev) => new Map(prev).set(id, rules)))
       .catch(() => setCoveringRules((prev) => new Map(prev).set(id, [])));
-  }, [selected, onFetchCoveringRules, nodeInfo, nodeMap, coveringRules]);
-
-  // Adjacency for hover + expand detection
-  const adjacency = useMemo(() => {
-    const adj = new Map<string, Set<string>>();
-    for (const e of allEdges) {
-      if (!adj.has(e.source)) adj.set(e.source, new Set());
-      if (!adj.has(e.target)) adj.set(e.target, new Set());
-      adj.get(e.source)!.add(e.target);
-      adj.get(e.target)!.add(e.source);
-    }
-    return adj;
-  }, [allEdges]);
+  }, [selected, onFetchCoveringRules, nodeInfo, nodeById, coveringRules]);
 
   // Entity type counts (from ALL nodes, not just visible)
   const entityTypes = useMemo(() => {
@@ -550,348 +507,78 @@ export function EntityGraph({
     return types;
   }, [allNodes]);
 
-  // Hover neighborhood
-  const hoverNeighborhood = useMemo(() => {
-    if (!hoveredNodeId) return null;
-    const neighborNodes = new Set<string>([hoveredNodeId]);
-    const neighborEdgeIdxs = new Set<number>();
-    for (let i = 0; i < visibleEdges.length; i++) {
-      const e = visibleEdges[i];
-      if (e.source === hoveredNodeId || e.target === hoveredNodeId) {
-        neighborEdgeIdxs.add(i);
-        neighborNodes.add(e.source);
-        neighborNodes.add(e.target);
-      }
+  // Which node marks the legend needs to explain.
+  const marks = useMemo(() => {
+    let coverage = false;
+    let kev = false;
+    for (const id of visibleIds) {
+      const ni = nodeInfo?.get(id);
+      if (ni?.covered !== undefined) coverage = true;
+      if (ni?.kev) kev = true;
     }
-    return { nodes: neighborNodes, edges: neighborEdgeIdxs };
-  }, [hoveredNodeId, visibleEdges]);
-
-  // Search highlight: matching nodes stay lit, the rest recede. The tab's
-  // search box drives this — no separate find UI.
-  const hq = (highlightQuery ?? '').trim().toLowerCase();
-  const searchMatches = useMemo(() => {
-    if (!hq) return null;
-    return new Set(visibleNodes.filter((n) => n.label.toLowerCase().includes(hq)).map((n) => n.id));
-  }, [hq, visibleNodes]);
-
-  // ── Coordinate conversion ──────────────────────────────────────
-
-  const screenToGraph = useCallback(
-    (screenX: number, screenY: number) => {
-      const svg = svgRef.current;
-      if (!svg) return { x: screenX, y: screenY };
-      const rect = svg.getBoundingClientRect();
-      const svgScaleX = width / rect.width;
-      const svgScaleY = height / rect.height;
-      const svgX = (screenX - rect.left) * svgScaleX;
-      const svgY = (screenY - rect.top) * svgScaleY;
-      return { x: (svgX - translate.x) / scale, y: (svgY - translate.y) / scale };
-    },
-    [width, height, scale, translate],
-  );
+    return { coverage, kev };
+  }, [visibleIds, nodeInfo]);
 
   // ── Interaction handlers ───────────────────────────────────────
-
-  const handleNodeMouseDown = useCallback(
-    (nodeId: string, e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (e.shiftKey && onEdgeCreate) {
-        const pos = positions.get(nodeId);
-        if (pos) setEdgeDraft({ sourceId: nodeId, mouseX: pos.x, mouseY: pos.y });
-        return;
-      }
-
-      const pos = positions.get(nodeId);
-      if (!pos) return;
-      const graphCoords = screenToGraph(e.clientX, e.clientY);
-      dragOffset.current = { dx: pos.x - graphCoords.x, dy: pos.y - graphCoords.y };
-      dragMoved.current = false;
-      draggingIdRef.current = nodeId;
-      setDraggingId(nodeId);
-    },
-    [positions, screenToGraph, onEdgeCreate],
-  );
-
-  const handleSvgMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      const target = e.target as SVGElement;
-      if (target.tagName === 'svg' || target.classList.contains(styles.ringGuide)) {
-        setSelected(null);
-        e.preventDefault();
-        setIsPanning(true);
-        panStart.current = { x: e.clientX, y: e.clientY };
-        translateAtPanStart.current = { x: translate.x, y: translate.y };
-      }
-    },
-    [translate],
-  );
-
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent) => {
-      if (clusterDragRef.current) {
-        e.preventDefault();
-        const g = screenToGraph(e.clientX, e.clientY);
-        const cd = clusterDragRef.current;
-        const ddx = g.x - cd.lastX;
-        const ddy = g.y - cd.lastY;
-        cd.lastX = g.x;
-        cd.lastY = g.y;
-        if (Math.abs(ddx) + Math.abs(ddy) > 0.5) cd.moved = true;
-        setClusterOffsets((prev) => {
-          const next = new Map(prev);
-          const cur = next.get(cd.id) ?? { dx: 0, dy: 0 };
-          next.set(cd.id, { dx: cur.dx + ddx, dy: cur.dy + ddy });
-          return next;
-        });
-        return;
-      }
-      if (edgeDraft) {
-        e.preventDefault();
-        const graphCoords = screenToGraph(e.clientX, e.clientY);
-        setEdgeDraft((prev) => prev ? { ...prev, mouseX: graphCoords.x, mouseY: graphCoords.y } : null);
-        return;
-      }
-      if (isPanning) {
-        e.preventDefault();
-        const svg = svgRef.current;
-        if (!svg) return;
-        const rect = svg.getBoundingClientRect();
-        const dx = (e.clientX - panStart.current.x) * (width / rect.width);
-        const dy = (e.clientY - panStart.current.y) * (height / rect.height);
-        setTranslate({ x: translateAtPanStart.current.x + dx, y: translateAtPanStart.current.y + dy });
-        return;
-      }
-      const currentDragging = draggingIdRef.current;
-      if (!currentDragging) return;
-      e.preventDefault();
-      dragMoved.current = true;
-      const graphCoords = screenToGraph(e.clientX, e.clientY);
-      let newX = graphCoords.x + dragOffset.current.dx;
-      let newY = graphCoords.y + dragOffset.current.dy;
-      // Overrides for clustered nodes are stored cluster-relative (minus the
-      // hull's current offset) so a hand-placed node still rides along when
-      // its story hull is dragged afterwards.
-      if (storyActive) {
-        const cid = storyLayout!.clusterOf.get(currentDragging);
-        const off = cid ? clusterOffsets.get(cid) : undefined;
-        if (off) {
-          newX -= off.dx;
-          newY -= off.dy;
-        }
-      }
-      setDragOverrides((prev) => {
-        const next = new Map(prev);
-        next.set(currentDragging, { x: newX, y: newY });
-        return next;
-      });
-    },
-    [isPanning, screenToGraph, width, height, edgeDraft, storyActive, storyLayout, clusterOffsets],
-  );
-
-  const handleMouseUp = useCallback(
-    (e: React.MouseEvent) => {
-      if (clusterDragRef.current) {
-        const cd = clusterDragRef.current;
-        clusterDragRef.current = null;
-        // Click (no drag) selects the cluster; filtering is an inspector action.
-        if (!cd.moved) setSelected({ kind: 'cluster', id: cd.id });
-        return;
-      }
-      if (edgeDraft) {
-        // Check for drop target
-        const graphCoords = screenToGraph(e.clientX, e.clientY);
-        for (const [nid, pos] of positions) {
-          if (nid === edgeDraft.sourceId) continue;
-          const node = nodeMap.get(nid);
-          if (!node) continue;
-          const r = Math.max(6, Math.min(16, node.size * 2 + 4));
-          if ((graphCoords.x - pos.x) ** 2 + (graphCoords.y - pos.y) ** 2 <= r * r * 2) {
-            if (onEdgeCreate) {
-              onEdgeCreate(edgeDraft.sourceId, nodeMap.get(edgeDraft.sourceId)?.type ?? '', nid, node.type);
-            }
-            break;
-          }
-        }
-        setEdgeDraft(null);
-        return;
-      }
-
-      if (isPanning) { setIsPanning(false); return; }
-
-      const currentDragging = draggingIdRef.current;
-      if (currentDragging && !dragMoved.current) {
-        const node = nodeMap.get(currentDragging);
-        if (node) {
-          e.stopPropagation();
-          // Click selects; in the ring layout it also expands the node's
-          // neighbors (that layout's whole exploration model). Navigation is
-          // double-click or the inspector's Open action.
-          setSelected({ kind: 'node', id: node.id });
-          if (!storyActive && node.type !== 'entry' && !expandedNodes.has(node.id)) {
-            setExpandedNodes((prev) => {
-              const next = new Map(prev);
-              const parentPos = positions.get(node.id);
-              next.set(node.id, parentPos?.parentId ?? nodes[0]?.id ?? null);
-              return next;
-            });
-          }
-          // Story layout: same one-click exploration — fetch and merge the
-          // node's own connections (with their stories). Collapse stays in
-          // the inspector.
-          if (
-            storyActive &&
-            node.type !== 'entry' &&
-            node.id !== nodes[0]?.id &&
-            onToggleExpand &&
-            !expansions?.has(node.id)
-          ) {
-            onToggleExpand(node.id, node.type, true);
-          }
-        }
-      }
-      draggingIdRef.current = null;
-      setDraggingId(null);
-    },
-    [isPanning, nodeMap, onEdgeCreate, edgeDraft, positions, screenToGraph, expandedNodes, nodes, storyActive, onToggleExpand, expansions],
-  );
+  const handleNodeClick: NodeMouseHandler = useCallback((_e, n) => {
+    if (n.id.startsWith(STORY_PREFIX)) {
+      setSelected({ kind: 'cluster', id: n.id.slice(STORY_PREFIX.length) });
+      return;
+    }
+    const node = nodeById.get(n.id);
+    if (!node) return;
+    // Click only selects. Loading a node's connections is the +/− badge (or
+    // the inspector), so inspecting never grows the graph by accident.
+    setSelected({ kind: 'node', id: node.id });
+  }, [nodeById]);
 
   // Double-click opens the node's own page (profile / article).
-  const handleNodeDoubleClick = useCallback(
-    (nodeId: string, e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const node = nodeMap.get(nodeId);
-      if (!node) return;
-      if (node.type === 'entry') onEntryClick?.(nodeId.replace(/^entry-/, ''));
-      else onNodeClick?.(nodeId, node.type);
-    },
-    [nodeMap, onNodeClick, onEntryClick],
-  );
+  const handleNodeDoubleClick: NodeMouseHandler = useCallback((_e, n) => {
+    const node = nodeById.get(n.id);
+    if (!node) return;
+    if (node.type === 'entry') onEntryClick?.(node.id.replace(/^entry-/, ''));
+    else onNodeClick?.(node.id, node.type);
+  }, [nodeById, onNodeClick, onEntryClick]);
 
-  // Collapse a ring-layout branch (inspector action).
-  const collapseBranch = useCallback(
-    (nodeId: string) => {
-      if (nodeId === nodes[0]?.id) return;
-      setExpandedNodes((prev) => {
-        const next = new Map(prev);
-        const toRemove = new Set<string>([nodeId]);
-        let changed = true;
-        while (changed) {
-          changed = false;
-          for (const [id, parent] of next) {
-            if (parent !== null && toRemove.has(parent) && !toRemove.has(id)) {
-              toRemove.add(id);
-              changed = true;
-            }
-          }
-        }
-        for (const id of toRemove) next.delete(id);
-        return next;
-      });
-    },
-    [nodes],
-  );
+  const handleEdgeClick: EdgeMouseHandler = useCallback((_e, edge) => {
+    const data = (edge as EntityFlowEdge).data;
+    if (!data?.edge.entries?.length) return;
+    setSelected((prev) => (prev?.kind === 'edge' && prev.id === edge.id ? null : { kind: 'edge', id: edge.id }));
+  }, []);
 
-  // --- Wheel zoom ---
-  const scaleRef = useRef(scale);
-  scaleRef.current = scale;
+  const handleConnect = useCallback((c: Connection) => {
+    if (!onEdgeCreate || !c.source || !c.target || c.source === c.target) return;
+    onEdgeCreate(c.source, nodeById.get(c.source)?.type ?? '', c.target, nodeById.get(c.target)?.type ?? '');
+  }, [onEdgeCreate, nodeById]);
 
-  const handleWheel = useCallback((e: WheelEvent) => {
-    e.preventDefault();
-    const svg = svgRef.current;
-    if (!svg) return;
-    const rect = svg.getBoundingClientRect();
-    const mouseX = (e.clientX - rect.left) * (width / rect.width);
-    const mouseY = (e.clientY - rect.top) * (height / rect.height);
-    const currentScale = scaleRef.current;
-    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-    const newScale = Math.max(0.2, Math.min(4.0, currentScale * zoomFactor));
-    const ratio = newScale / currentScale;
-    setTranslate((prev) => ({
-      x: mouseX - ratio * (mouseX - prev.x),
-      y: mouseY - ratio * (mouseY - prev.y),
-    }));
-    setScale(newScale);
-  }, [width, height]);
+  const onNodeMouseEnter: NodeMouseHandler = useCallback((_e, n) => {
+    if (!n.id.startsWith(STORY_PREFIX)) setHoveredNodeId(n.id);
+  }, []);
+  const onNodeMouseLeave: NodeMouseHandler = useCallback(() => setHoveredNodeId(null), []);
 
-  useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
-    svg.addEventListener('wheel', handleWheel, { passive: false });
-    return () => svg.removeEventListener('wheel', handleWheel);
-  }, [handleWheel]);
-
-  // --- Fit to view ---
-  const handleResetView = useCallback(() => {
-    if (positions.size === 0) { setScale(1); setTranslate({ x: 0, y: 0 }); return; }
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    if (storyActive) {
-      ({ minX, minY, maxX, maxY } = storyLayout!.bounds);
-    }
-    for (const pos of positions.values()) {
-      minX = Math.min(minX, pos.x); minY = Math.min(minY, pos.y);
-      maxX = Math.max(maxX, pos.x); maxY = Math.max(maxY, pos.y);
-    }
-    const pad = 60;
-    const bboxW = maxX - minX + pad * 2;
-    const bboxH = maxY - minY + pad * 2;
-    if (bboxW <= 0 || bboxH <= 0) { setScale(1); setTranslate({ x: 0, y: 0 }); return; }
-    const newScale = Math.max(0.08, Math.min(2.0, Math.min(width / bboxW, height / bboxH)));
-    setScale(newScale);
-    setTranslate({ x: width / 2 - ((minX + maxX) / 2) * newScale, y: height / 2 - ((minY + maxY) / 2) * newScale });
-  }, [positions, storyActive, storyLayout, width, height]);
-
-  // --- Export the current view as a PNG ---
+  // --- Export the current graph as a PNG ---
   const handleExport = useCallback(() => {
-    const svg = svgRef.current;
-    const container = containerRef.current;
-    if (!svg || !container) return;
-    const clone = svg.cloneNode(true) as SVGSVGElement;
-    // CSS-module classes don't survive serialization — inline the computed
-    // presentation of every element.
-    const src = svg.querySelectorAll('*');
-    const dst = clone.querySelectorAll('*');
-    const props = ['fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-opacity', 'opacity', 'font-size', 'font-family', 'font-weight', 'letter-spacing', 'text-anchor'];
-    src.forEach((el, i) => {
-      const cs = getComputedStyle(el);
-      const d = dst[i] as SVGElement;
-      for (const prop of props) {
-        const v = cs.getPropertyValue(prop);
-        if (v) d.setAttribute(prop, v);
-      }
-    });
-    let bg = getComputedStyle(container).backgroundColor;
+    const viewport = containerRef.current?.querySelector<HTMLElement>('.react-flow__viewport');
+    if (!viewport) return;
+    const bounds = flow.getNodesBounds(flow.getNodes());
+    const w = Math.min(4000, Math.max(800, bounds.width + 160));
+    const h = Math.min(4000, Math.max(600, bounds.height + 160));
+    const vp = getViewportForBounds(bounds, w, h, 0.1, 2, 0.08);
+    let bg = getComputedStyle(containerRef.current!).backgroundColor;
     if (!bg || bg === 'rgba(0, 0, 0, 0)') bg = getComputedStyle(document.body).backgroundColor || '#101318';
-    const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    bgRect.setAttribute('width', String(width));
-    bgRect.setAttribute('height', String(height));
-    bgRect.setAttribute('fill', bg);
-    clone.insertBefore(bgRect, clone.firstChild);
-    clone.setAttribute('width', String(width * 2));
-    clone.setAttribute('height', String(height * 2));
-    const xml = new XMLSerializer().serializeToString(clone);
-    const url = URL.createObjectURL(new Blob([xml], { type: 'image/svg+xml;charset=utf-8' }));
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = width * 2;
-      canvas.height = height * 2;
-      canvas.getContext('2d')!.drawImage(img, 0, 0, width * 2, height * 2);
-      URL.revokeObjectURL(url);
-      canvas.toBlob((blob) => {
-        if (!blob) return;
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        const seedLabel = nodes[0]?.label?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'graph';
-        a.download = `${seedLabel}-graph.png`;
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      }, 'image/png');
-    };
-    img.src = url;
-  }, [width, height, nodes]);
+    toPng(viewport, {
+      backgroundColor: bg,
+      width: w,
+      height: h,
+      pixelRatio: 2,
+      style: { width: `${w}px`, height: `${h}px`, transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})` },
+    }).then((url) => {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${nodes[0]?.label?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'graph'}-graph.png`;
+      a.click();
+    }).catch(() => { /* export is best-effort */ });
+  }, [flow, nodes]);
 
   // --- Toggle type filter (the legend is the control) ---
   const toggleType = useCallback((type: string) => {
@@ -902,16 +589,7 @@ export function EntityGraph({
     });
   }, []);
 
-  // --- Stats ---
-  const visibleNodeCount = visibleNodes.length;
-  const visibleEdgeCount = visibleEdges.length;
-  const seedId = nodes[0]?.id;
-  const baseRadius = Math.min(width, height) * 0.22;
-
-  const effectiveShowEdgeLabels = showEdgeLabels;
-
   // ── Empty state ────────────────────────────────────────────────
-
   if (nodes.length === 0) {
     return (
       <div ref={containerRef} className={styles.container} style={{ width: widthProp, height: heightProp }}>
@@ -921,22 +599,12 @@ export function EntityGraph({
   }
 
   // ── Render ─────────────────────────────────────────────────────
-
-  const svgClassName = [
-    styles.graphSvg,
-    isPanning ? styles.panning : '',
-    draggingId ? styles.draggingNode : '',
-    edgeDraft ? styles.drawingEdge : '',
-  ].filter(Boolean).join(' ');
-
   const containerClassName = [
     styles.container,
     isFullscreen ? styles.fullscreen : '',
+    linking ? styles.linking : '',
   ].filter(Boolean).join(' ');
-
-  const selectedNodeId = selected?.kind === 'node' ? selected.id : null;
-  const selectedClusterId = selected?.kind === 'cluster' ? selected.id : null;
-  const selectedEdgeIdx = selected?.kind === 'edge' ? selected.idx : null;
+  const showMiniMap = (isFullscreen || heightProp >= 400) && !selected && !showSettings;
 
   return (
     <div
@@ -944,299 +612,54 @@ export function EntityGraph({
       className={containerClassName}
       style={isFullscreen ? undefined : { width: widthProp, height: heightProp }}
     >
-      <svg
-        ref={svgRef}
-        className={svgClassName}
-        viewBox={`0 0 ${width} ${height}`}
-        onMouseDown={handleSvgMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-      >
-        <g transform={`translate(${translate.x}, ${translate.y}) scale(${scale})`}>
-
-          {/* Story hulls — one labeled ellipse per incident, behind everything. */}
-          {storyActive && storyLayout!.hulls.map((h, i) => {
-            const off = clusterOffsets.get(h.cluster.id) ?? { dx: 0, dy: 0 };
-            const hcx = h.cx + off.dx;
-            const hcy = h.cy + off.dy;
-            const titleY = h.titleBelow ? hcy + h.ry + 18 : hcy - h.ry - 22;
-            const sub = [`${h.cluster.articles} articles`, h.cluster.corroborated ? 'corroborated' : null]
-              .filter(Boolean)
-              .join(' · ');
-            const isSel = selectedClusterId === h.cluster.id;
-            return (
-              <g key={`hull-${i}`}>
-                <ellipse
-                  className={`${styles.storyHull} ${isSel ? styles.storyHullSelected : ''}`}
-                  cx={hcx}
-                  cy={hcy}
-                  rx={h.rx}
-                  ry={h.ry}
-                  stroke={h.cluster.corroborated ? 'var(--accent-intel)' : 'var(--border)'}
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    const g = screenToGraph(e.clientX, e.clientY);
-                    clusterDragRef.current = { id: h.cluster.id, lastX: g.x, lastY: g.y, moved: false };
-                  }}
-                >
-                  <title>{`${h.cluster.heading}. Drag to move, click to inspect.`}</title>
-                </ellipse>
-                <text className={styles.storyHullTitle} x={hcx} y={titleY} textAnchor="middle">
-                  {truncateLabel(h.cluster.heading, 40).toUpperCase()}
-                </text>
-                <text className={styles.storyHullSub} x={hcx} y={titleY + 13} textAnchor="middle">
-                  {sub}
-                </text>
-              </g>
-            );
-          })}
-
-          {/* Ring guides (radial layout only) */}
-          {!storyActive && showRingGuides && layout.ringRadii.map((r, i) => (
-            i > 0 && r > 0 ? (
-              <circle
-                key={`ring-${i}`}
-                className={styles.ringGuide}
-                cx={layout.center.x}
-                cy={layout.center.y}
-                r={r}
+      <GraphUiContext.Provider value={uiStore}>
+        <GraphViewContext.Provider value={view}>
+          <ReactFlow
+            className={styles.flow}
+            nodes={flowNodes}
+            edges={flowEdges}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            onNodesChange={onNodesChange}
+            onNodeDragStop={onNodeDragStop}
+            onNodeClick={handleNodeClick}
+            onNodeDoubleClick={handleNodeDoubleClick}
+            onNodeMouseEnter={onNodeMouseEnter}
+            onNodeMouseLeave={onNodeMouseLeave}
+            onEdgeClick={handleEdgeClick}
+            onPaneClick={() => setSelected(null)}
+            onConnect={handleConnect}
+            nodesConnectable={!!onEdgeCreate}
+            connectionMode={ConnectionMode.Loose}
+            connectionLineType={ConnectionLineType.Straight}
+            connectionLineStyle={{ stroke: 'var(--accent)', strokeWidth: 2, strokeDasharray: '6 4' }}
+            connectionRadius={40}
+            elementsSelectable={false}
+            deleteKeyCode={null}
+            zoomOnDoubleClick={false}
+            minZoom={0.08}
+            maxZoom={3}
+            attributionPosition="bottom-center"
+          >
+            <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="var(--border)" />
+            {showMiniMap && (
+              <MiniMap
+                className={styles.minimap}
+                pannable
+                zoomable
+                nodeColor={(n) => (n.type === 'story' ? 'transparent' : getNodeColor((n as EntityFlowNode).data.node.type))}
+                nodeStrokeColor={(n) => (n.type === 'story' ? 'var(--accent-intel)' : 'transparent')}
+                maskColor="color-mix(in srgb, var(--bg-primary) 70%, transparent)"
               />
-            ) : null
-          ))}
-
-          {/* Arc labels (radial layout only) */}
-          {!storyActive && showArcLabels && layout.arcs.filter((s) => s.ring === 1).map((arc) => {
-            const labelR = (layout.ringRadii[1] ?? baseRadius) + 28;
-            const lx = layout.center.x + labelR * Math.cos(arc.midAngle);
-            const ly = layout.center.y + labelR * Math.sin(arc.midAngle);
-            return (
-              <text
-                key={`arc-${arc.type}`}
-                className={styles.arcLabel}
-                x={lx}
-                y={ly}
-                textAnchor="middle"
-                dominantBaseline="central"
-              >
-                {getEntityLabel(arc.type) || arc.type} ({arc.total})
-              </text>
-            );
-          })}
-
-          {/* Edges */}
-          {visibleEdges.map((edge, i) => {
-            const sp = positions.get(edge.source);
-            const tp = positions.get(edge.target);
-            if (!sp || !tp) return null;
-
-            const searchDim = searchMatches && !searchMatches.has(edge.source) && !searchMatches.has(edge.target);
-            const isDimmed = (hoverNeighborhood && !hoverNeighborhood.edges.has(i)) || searchDim;
-            const isHighlighted = hoverNeighborhood?.edges.has(i);
-            const isSelected = selectedEdgeIdx === i;
-            const hasEntries = (edge.entries?.length ?? 0) > 0;
-
-            const pathD = computeEdgePath(
-              sp.x, sp.y, tp.x, tp.y,
-              layout.center.x, layout.center.y, baseRadius,
-            );
-
-            const midX = (sp.x + tp.x) / 2;
-            const midY = (sp.y + tp.y) / 2;
-            const entryCount = edge.entries?.length ?? 0;
-            const w = edge.weight;
-            // Width encodes relationship strength (0–1 composite) when present;
-            // legacy weights fall back to the old scaling. Inferred (engine-only)
-            // relationships render dashed; analyst-touched ones solid.
-            const strength = edge.proximity_score;
-            const strokeWidth = strength != null
-              ? Math.max(1, Math.min(4, 1 + strength * 3))
-              : Math.max(1, Math.min(4, w <= 2 ? w * 2 : w));
-            const inferred = !edge.provenance || edge.provenance === 'co_occurrence';
-            // Signal-tier claims stay visible but quiet — same dimming the
-            // claims list gives signal rows.
-            const signalTier = edge.confidence === 'possible';
-
-            return (
-              <g key={`edge-${i}`} opacity={isDimmed ? 0.06 : signalTier && !isHighlighted && !isSelected ? 0.45 : undefined}>
-                {/* Hit area */}
-                {hasEntries && !isDimmed && (
-                  <path
-                    d={pathD}
-                    fill="none"
-                    stroke="transparent"
-                    strokeWidth={Math.max(14, strokeWidth + 10)}
-                    style={{ cursor: 'pointer' }}
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      setSelected(isSelected ? null : { kind: 'edge', idx: i });
-                    }}
-                  />
-                )}
-                <path
-                  d={pathD}
-                  fill="none"
-                  className={`${styles.edgeLine} ${isSelected ? styles.edgeSelected : ''} ${isHighlighted ? styles.edgeHighlighted : ''}`}
-                  strokeWidth={isHighlighted ? Math.max(strokeWidth, 2) : strokeWidth}
-                  strokeDasharray={inferred ? '5,4' : undefined}
-                />
-                {effectiveShowEdgeLabels && edge.label && !isDimmed && (
-                  <text className={styles.edgeLabel} x={midX} y={midY - 4} textAnchor="middle">
-                    {truncateLabel(edge.label, 24)}
-                    {entryCount > 0 ? ` (${entryCount})` : ''}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-
-          {/* Nodes */}
-          {visibleNodes.map((node) => {
-            const pos = positions.get(node.id);
-            if (!pos) return null;
-
-            const isArticle = node.type === 'entry';
-            const r = isArticle ? Math.max(4, Math.min(12, node.size * 2 + 2)) : Math.max(6, Math.min(16, node.size * 2 + 4));
-            const color = getNodeColor(node.type);
-            const searchDim = searchMatches && !searchMatches.has(node.id);
-            const isDimmed = (hoverNeighborhood && !hoverNeighborhood.nodes.has(node.id)) || searchDim;
-            const isHovered = hoveredNodeId === node.id;
-            const isSeed = node.id === seedId;
-            const isSelectedNode = selectedNodeId === node.id;
-            const isExpanded = expandedNodes.has(node.id);
-            const showLabel = isDimmed ? false : showNodeLabels;
-
-            // Has hidden connections?
-            const fullNeighbors = adjacency.get(node.id);
-            const hasHidden = !isArticle && fullNeighbors &&
-              Array.from(fullNeighbors).some((nid) => !positions.has(nid) && !hiddenTypes.has(nodeMap.get(nid)?.type ?? allNodes.find((n) => n.id === nid)?.type ?? ''));
-
-            const ni = nodeInfo?.get(node.id);
-            return (
-              <g
-                key={`node-${node.id}`}
-                onMouseDown={(e) => handleNodeMouseDown(node.id, e)}
-                onDoubleClick={(e) => handleNodeDoubleClick(node.id, e)}
-                onMouseEnter={() => setHoveredNodeId(node.id)}
-                onMouseLeave={() => setHoveredNodeId(null)}
-                opacity={isDimmed ? 0.1 : undefined}
-              >
-                {/* KEV: known-exploited CVEs wear a red ring */}
-                {ni?.kev && (
-                  <circle cx={pos.x} cy={pos.y} r={r + 4} fill="none" stroke="var(--danger)" strokeWidth={1.5} opacity={0.85}>
-                    <title>CISA KEV: known exploited</title>
-                  </circle>
-                )}
-                {/* Seed / selection rings */}
-                {isSeed && (
-                  <circle cx={pos.x} cy={pos.y} r={r + 6} fill="none" stroke={color} strokeWidth={2} opacity={0.3} />
-                )}
-                {isSelectedNode && (
-                  <circle cx={pos.x} cy={pos.y} r={r + 5} fill="none" stroke="var(--accent)" strokeWidth={2} opacity={0.85} />
-                )}
-
-                {/* Node shape */}
-                {renderNodeShape(
-                  node.type, pos.x, pos.y,
-                  isHovered ? r + 2 : isSeed ? r + 1 : r,
-                  color,
-                  `${isHovered ? styles.nodeHovered : ''} ${isSeed ? styles.seedNode : ''}`,
-                )}
-
-                {/* Expand indicator dot: ring layout = graph data holds unshown
-                    neighbors; story layout = the node's own connections can be
-                    fetched and merged (one click, same as rings). */}
-                {(storyActive
-                  ? !!onToggleExpand && !isSeed && !expansions?.has(node.id)
-                  : hasHidden && !isExpanded) && !isArticle && !isDimmed && (
-                  <circle
-                    className={styles.expandDot}
-                    cx={pos.x + (pos.ring > 0 ? (r + 4) * Math.cos(pos.angle) : r + 4)}
-                    cy={pos.y + (pos.ring > 0 ? (r + 4) * Math.sin(pos.angle) : -(r + 4))}
-                    r={4}
-                  >
-                    <title>Click to expand connections</title>
-                  </circle>
-                )}
-
-                {/* Detection coverage: filled = a rule detects it, hollow = gap */}
-                {ni?.covered !== undefined && !isDimmed && (
-                  <circle
-                    cx={pos.x + r * 0.95}
-                    cy={pos.y - r * 0.95}
-                    r={3.5}
-                    fill={ni.covered ? 'var(--success)' : 'var(--bg-primary)'}
-                    stroke={ni.covered ? 'var(--success)' : 'var(--danger)'}
-                    strokeWidth={1.3}
-                  >
-                    <title>{ni.covered ? 'Detection rule exists' : 'No detection rule covers this'}</title>
-                  </circle>
-                )}
-                {/* Label — the type sub-label is gone: shape + color already
-                    say it, and the inspector spells it out. */}
-                {showLabel && (
-                  <text
-                    className={isArticle ? styles.articleLabel : styles.nodeLabel}
-                    x={pos.x}
-                    y={pos.y + r + 14}
-                    fontWeight={isHovered || isSeed || isSelectedNode ? 700 : undefined}
-                  >
-                    {truncateLabel(node.label, isArticle ? 28 : 20)}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-
-          {/* Overflow pills: "+N more" (radial layout only) */}
-          {!storyActive && layout.overflowPills.map((pill) => (
-            <g
-              key={`pill-${pill.type}-${pill.ring}-${pill.expandedById}`}
-              className={styles.morePillGroup}
-              onClick={() => setNodesPerType((prev) => Math.min(prev + 4, 20))}
-              style={{ cursor: 'pointer' }}
-            >
-              <rect
-                className={styles.morePill}
-                x={pill.x - 16}
-                y={pill.y - 9}
-                width={32}
-                height={18}
-                rx={9}
-                ry={9}
-              />
-              <text
-                className={styles.morePillText}
-                x={pill.x}
-                y={pill.y}
-                textAnchor="middle"
-                dominantBaseline="central"
-              >
-                +{pill.count}
-              </text>
-            </g>
-          ))}
-
-          {/* Draft edge */}
-          {edgeDraft && (() => {
-            const sp = positions.get(edgeDraft.sourceId);
-            if (!sp) return null;
-            return (
-              <line
-                className={styles.draftEdgeLine}
-                x1={sp.x} y1={sp.y}
-                x2={edgeDraft.mouseX} y2={edgeDraft.mouseY}
-                strokeWidth={2} strokeDasharray="6,4"
-              />
-            );
-          })()}
-        </g>
-      </svg>
+            )}
+          </ReactFlow>
+        </GraphViewContext.Provider>
+      </GraphUiContext.Provider>
 
       {/* ── Top strip: pills left, tools right — the graph's one toolbar ── */}
       <div className={styles.topStrip}>
         <div className={styles.stripLeft}>
+          {storyActive && storyLayout!.ghosts.length > 0 && <span className={styles.stripLabel}>Not in a story</span>}
           {storyActive && storyLayout!.ghosts.map((g) => (
             <button
               key={g.type}
@@ -1251,8 +674,20 @@ export function EntityGraph({
               }
             >
               <span className={styles.ghostBarDot} style={{ background: getNodeColor(g.type) }} />
-              {g.count} {g.count === 1 ? getEntityLabel(g.type) : getEntityPluralLabel(g.type)}
+              {typeCount(g.type, g.count)}
               {g.mitre ? ' · MITRE' : ''} <span className="caret-glyph">{g.expanded ? '▾' : '▸'}</span>
+            </button>
+          ))}
+          {!storyActive && networkLayout && networkLayout.overflow.size > 0 && <span className={styles.stripLabel}>Not shown</span>}
+          {!storyActive && networkLayout && [...networkLayout.overflow].map(([type, count]) => (
+            <button
+              key={type}
+              className={styles.ghostBarPill}
+              title={`${count} more ${getEntityPluralLabel(type) || type} not on the graph. Click to show more of each type.`}
+              onClick={() => setNodesPerType((n) => Math.min(n + 8, 60))}
+            >
+              <span className={styles.ghostBarDot} style={{ background: getNodeColor(type) }} />
+              +{typeCount(type, count)}
             </button>
           ))}
           {hiddenNodes.size > 0 && (
@@ -1266,7 +701,7 @@ export function EntityGraph({
           )}
         </div>
         <div className={styles.stripRight}>
-          {storyLayout && (
+          {hasStories && (
             <div className={styles.layoutToggle}>
               <button
                 className={layoutMode === 'story' ? styles.layoutToggleOn : ''}
@@ -1276,17 +711,29 @@ export function EntityGraph({
                 Stories
               </button>
               <button
-                className={layoutMode === 'type' ? styles.layoutToggleOn : ''}
-                onClick={() => setLayoutMode('type')}
-                title="Group by entity type (rings)"
+                className={layoutMode === 'network' ? styles.layoutToggleOn : ''}
+                onClick={() => setLayoutMode('network')}
+                title="Every node and edge, arranged by its connections"
               >
-                Rings
+                Network
               </button>
             </div>
           )}
-          <button className={styles.toolbarButton} onClick={() => { const s = Math.min(4, scale * 1.2); const r = s / scale; setTranslate((p) => ({ x: width/2 - r*(width/2 - p.x), y: height/2 - r*(height/2 - p.y) })); setScale(s); }} title="Zoom in">+</button>
-          <button className={styles.toolbarButton} onClick={() => { const s = Math.max(0.2, scale / 1.2); const r = s / scale; setTranslate((p) => ({ x: width/2 - r*(width/2 - p.x), y: height/2 - r*(height/2 - p.y) })); setScale(s); }} title="Zoom out">-</button>
-          <button className={styles.toolbarButton} onClick={handleResetView} title="Fit to view">Fit</button>
+          <button className={styles.toolbarButton} onClick={() => flow.zoomIn({ duration: 150 })} title="Zoom in">+</button>
+          <button className={styles.toolbarButton} onClick={() => flow.zoomOut({ duration: 150 })} title="Zoom out">-</button>
+          <button className={styles.toolbarButton} onClick={() => flow.fitView({ padding: 0.12, maxZoom: 1.25, duration: 250 })} title="Fit to view">Fit</button>
+          <button
+            className={styles.toolbarButton}
+            onClick={() => {
+              draggedRef.current = new Map();
+              previousRef.current = new Map();
+              // A new (equal) set makes both layouts recompute from scratch.
+              setHiddenNodes((prev) => new Set(prev));
+            }}
+            title="Undo manual moves and lay the graph out again"
+          >
+            Re-layout
+          </button>
           <button className={styles.toolbarButton} onClick={handleExport} title="Export as PNG">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
               <path d="M7.5 1.5a.5.5 0 0 1 1 0v7.79l2.15-2.14a.5.5 0 1 1 .7.7l-3 3a.5.5 0 0 1-.7 0l-3-3a.5.5 0 1 1 .7-.7L7.5 9.29V1.5zM2 11.5a.5.5 0 0 1 1 0v2a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 1 1 0v2A1.5 1.5 0 0 1 12.5 15h-9A1.5 1.5 0 0 1 2 13.5v-2z"/>
@@ -1319,7 +766,7 @@ export function EntityGraph({
       {/* ── Inspector: what the selection is and what you can do with it ── */}
       {selected && (() => {
         if (selected.kind === 'node') {
-          const node = nodeMap.get(selected.id) ?? nodes.find((n) => n.id === selected.id);
+          const node = nodeById.get(selected.id);
           if (!node) return null;
           const info = nodeInfo?.get(node.id);
           const isArticle = node.type === 'entry';
@@ -1368,6 +815,20 @@ export function EntityGraph({
                 );
               })()}
               {info?.description && <div className={styles.inspectorDesc}>{info.description}</div>}
+              {(() => {
+                const stories = allClusters.filter((c) => c.nodeIds.includes(node.id));
+                if (stories.length === 0) return null;
+                return (
+                  <div className={styles.inspectorList}>
+                    <div className={styles.inspectorMeta}>Stories</div>
+                    {stories.map((c) => (
+                      <button key={c.id} className={styles.inspectorRow} onClick={() => setSelected({ kind: 'cluster', id: c.id })} title={c.heading}>
+                        {truncateLabel(c.heading, 34)} · {c.articles}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
               <div className={styles.inspectorActions}>
                 {isArticle ? (
                   <button className={styles.inspectorBtn} onClick={() => onEntryClick?.(node.id.replace(/^entry-/, ''))}>
@@ -1380,12 +841,7 @@ export function EntityGraph({
                     </button>
                   )
                 )}
-                {!storyActive && !isArticle && expandedNodes.has(node.id) && !isSeed && (
-                  <button className={styles.inspectorBtn} onClick={() => collapseBranch(node.id)}>
-                    Collapse branch
-                  </button>
-                )}
-                {onToggleExpand && !isArticle && (
+                {onToggleExpand && !isArticle && !isSeed && (
                   <button
                     className={styles.inspectorBtn}
                     onClick={() => onToggleExpand(node.id, node.type, !expansions?.has(node.id))}
@@ -1411,9 +867,7 @@ export function EntityGraph({
         if (selected.kind === 'cluster') {
           const cluster = clusterById.get(selected.id);
           if (!cluster) return null;
-          const members = cluster.nodeIds
-            .map((id) => nodeMap.get(id) ?? nodes.find((n) => n.id === id))
-            .filter(Boolean) as EntityNode[];
+          const members = cluster.nodeIds.map((id) => nodeById.get(id)).filter(Boolean) as EntityNode[];
           return (
             <div className={styles.inspector}>
               <div className={styles.inspectorHead}>
@@ -1435,7 +889,18 @@ export function EntityGraph({
                   </button>
                 )}
               </div>
+              {cluster.entries && cluster.entries.length > 0 && onEntryClick && (
+                <div className={styles.inspectorList}>
+                  <div className={styles.inspectorMeta}>Articles</div>
+                  {cluster.entries.map((e) => (
+                    <button key={e.entry_id} className={styles.inspectorRow} onClick={() => onEntryClick(e.entry_id)} title={e.title}>
+                      {truncateLabel(e.title, 34)}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className={styles.inspectorList}>
+                <div className={styles.inspectorMeta}>Entities</div>
                 {members.map((m) => (
                   <button key={m.id} className={styles.inspectorRow} onClick={() => setSelected({ kind: 'node', id: m.id })}>
                     <span className={styles.legendDot} style={{ background: getNodeColor(m.type) }} />
@@ -1447,10 +912,10 @@ export function EntityGraph({
           );
         }
         // edge
-        const edge = visibleEdges[selected.idx];
+        const edge = visibleEdges.find((e) => e.id === selected.id)?.edge;
         if (!edge) return null;
-        const sourceNode = nodeMap.get(edge.source);
-        const targetNode = nodeMap.get(edge.target);
+        const sourceNode = nodeById.get(edge.source);
+        const targetNode = nodeById.get(edge.target);
         return (
           <div className={styles.inspector}>
             <div className={styles.inspectorHead}>
@@ -1499,17 +964,34 @@ export function EntityGraph({
             </button>
           );
         })}
+        {marks.coverage && (
+          <>
+            <span className={styles.legendItem} title="A detection rule in the library covers this technique or CVE">
+              <svg width="8" height="8"><circle cx="4" cy="4" r="3" fill="var(--success)" /></svg>
+              <span className={`${styles.legendLabel} ${styles.legendMark}`}>Has a rule</span>
+            </span>
+            <span className={styles.legendItem} title="No detection rule in the library covers this technique or CVE">
+              <svg width="8" height="8"><circle cx="4" cy="4" r="3" fill="none" stroke="var(--danger)" strokeWidth="1.3" /></svg>
+              <span className={`${styles.legendLabel} ${styles.legendMark}`}>No rule</span>
+            </span>
+          </>
+        )}
+        {marks.kev && (
+          <span className={styles.legendItem} title="On the CISA Known Exploited Vulnerabilities list">
+            <svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="none" stroke="var(--danger)" strokeWidth="1.5" /></svg>
+            <span className={`${styles.legendLabel} ${styles.legendMark}`}>KEV</span>
+          </span>
+        )}
       </div>
 
       {/* Interaction hint */}
-      <div className={styles.edgeHint}>
-        {edgeDraft
-          ? 'Release on a node to create relationship'
-          : storyActive
-            ? `Click to inspect · double-click to open · drag hulls to move${onEdgeCreate ? ' · Shift+drag to link' : ''}`
-            : `Click to inspect & expand · double-click to open${onEdgeCreate ? ' · Shift+drag to link' : ''}`
-        }
-      </div>
+      {!showMiniMap && (
+        <div className={styles.edgeHint}>
+          {linking
+            ? 'Drag from a node to another node to create a relationship'
+            : `Click to inspect · double-click to open${onToggleExpand ? ' · + loads connections' : ''} · drag to move${onEdgeCreate ? ' · Shift+drag to link' : ''}`}
+        </div>
+      )}
 
       {/* Settings panel — only the knobs the active layout uses. */}
       {showSettings && (
@@ -1525,44 +1007,28 @@ export function EntityGraph({
                 Nodes per Type
                 <span className={styles.settingsSliderValue}>{nodesPerType}</span>
               </div>
-              <input type="range" className={styles.settingsSlider} min={1} max={20} value={nodesPerType} onChange={(e) => setNodesPerType(Number(e.target.value))} />
-              <div className={styles.settingsSliderRange}><span>1</span><span>20</span></div>
+              <input type="range" className={styles.settingsSlider} min={1} max={60} value={nodesPerType} onChange={(e) => setNodesPerType(Number(e.target.value))} />
+              <div className={styles.settingsSliderRange}><span>1</span><span>60</span></div>
             </div>
           )}
 
           <div className={styles.settingsSection}>
             <div className={styles.settingsSectionTitle}>
-              {storyActive ? 'Cluster Spacing' : 'Node Spacing'}
-              <span className={styles.settingsSliderValue}>{ringSpacing.toFixed(1)}x</span>
+              Spacing
+              <span className={styles.settingsSliderValue}>{spacing.toFixed(1)}x</span>
             </div>
-            <input type="range" className={styles.settingsSlider} min={0.5} max={8.0} step={0.1} value={ringSpacing} onChange={(e) => setRingSpacing(Number(e.target.value))} />
+            <input type="range" className={styles.settingsSlider} min={0.5} max={4.0} step={0.1} value={spacing} onChange={(e) => setSpacing(Number(e.target.value))} />
             <div className={styles.settingsSliderRange}><span>Compact</span><span>Spread</span></div>
           </div>
 
           <div className={styles.settingsSection}>
             <div className={styles.settingsSectionTitle}>Display</div>
-            {!storyActive && (
-              <>
-                <label className={styles.settingsCheckbox}><input type="checkbox" checked={showRingGuides} onChange={() => setShowRingGuides(!showRingGuides)} /><span className={styles.settingsOptionLabel}>Ring guides</span></label>
-                <label className={styles.settingsCheckbox}><input type="checkbox" checked={showArcLabels} onChange={() => setShowArcLabels(!showArcLabels)} /><span className={styles.settingsOptionLabel}>Arc labels</span></label>
-              </>
-            )}
             <label className={styles.settingsCheckbox}><input type="checkbox" checked={showNodeLabels} onChange={() => setShowNodeLabels(!showNodeLabels)} /><span className={styles.settingsOptionLabel}>Node labels</span></label>
             <label className={styles.settingsCheckbox}><input type="checkbox" checked={showEdgeLabels} onChange={() => setShowEdgeLabels(!showEdgeLabels)} /><span className={styles.settingsOptionLabel}>Edge labels</span></label>
-            {!storyActive && (
-              <div className={styles.settingsButtons}>
-                <button className={styles.settingsMiniButton} onClick={() => {
-                  const all = new Map<string, string | null>([[nodes[0]?.id, null]]);
-                  for (const n of nodes) { if (!all.has(n.id)) all.set(n.id, nodes[0]?.id ?? null); }
-                  setExpandedNodes(all);
-                }}>Expand All</button>
-                <button className={styles.settingsMiniButton} onClick={() => setExpandedNodes(new Map(nodes[0] ? [[nodes[0].id, null]] : []))}>Collapse</button>
-              </div>
-            )}
           </div>
 
           <div className={styles.settingsStats}>
-            {visibleNodeCount} nodes &middot; {visibleEdgeCount} edges
+            {visibleIds.size} nodes &middot; {visibleEdges.length} edges
           </div>
         </div>
       )}

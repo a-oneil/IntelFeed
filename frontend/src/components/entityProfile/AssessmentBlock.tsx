@@ -1,8 +1,8 @@
 /**
  * AssessmentBlock — the profile's voice: the entity description promoted to a
- * prominent, analyst-editable narrative with an AI refresh, followed by dated
- * "latest developments" from the What's-New engine — the Overview's opening
- * module, with the next-action chips under it.
+ * prominent, analyst-editable narrative with an AI refresh. The Overview's
+ * opening module; the key facts follow it, then LatestDevelopments (dated
+ * items from the What's-New engine, exported below).
  */
 import { useState } from "react";
 import { toast } from "sonner";
@@ -21,9 +21,10 @@ import styles from "./entityProfile.module.css";
 import { useIsVisitor } from "@/stores/authStore";
 
 const DEVELOPMENTS_LIMIT = 4;
-/** Past this, the prose starts folded to its opening lines with a toggle —
- * a pasted-in encyclopedia article should not be the whole first screen. */
-const FOLD_AT_CHARS = 900;
+/** Past this, the prose starts folded to its opening lines with a toggle:
+ * the first few sentences are the bottom line, and the history behind them
+ * should not push the facts and lenses off the first screen. */
+const FOLD_AT_CHARS = 480;
 
 const SIGNAL_LABELS: Record<string, string> = {
   novel_entity: "new",
@@ -42,7 +43,6 @@ export function AssessmentBlock({
   entityId,
   entity,
   editable,
-  whatsNew = [],
   onUpdateField,
   onOpenArticle,
 }: {
@@ -50,7 +50,6 @@ export function AssessmentBlock({
   entityId: string;
   entity: EntitySearchResult;
   editable: boolean;
-  whatsNew?: WhatsNewItem[];
   onUpdateField: (field: string, value: string | string[]) => void;
   onOpenArticle: (entryId: string) => void;
 }) {
@@ -85,7 +84,6 @@ export function AssessmentBlock({
     );
   };
 
-  const developments = whatsNew.slice(0, DEVELOPMENTS_LIMIT);
   const foldable = (entity.description?.length ?? 0) > FOLD_AT_CHARS;
   const [unfolded, setUnfolded] = useState(false);
   const folded = foldable && !unfolded;
@@ -96,7 +94,6 @@ export function AssessmentBlock({
         <span className={styles.assessmentTitle}>Assessment</span>
         {provenance && (
           <FieldProvenance
-            field="description"
             label="Assessment"
             bucket={provenance.fields.description}
             unsourced={provenance.unsourced_fields.includes("description")}
@@ -169,40 +166,72 @@ export function AssessmentBlock({
         const n = bucket.claims.length;
         return (
           <div className={styles.assessmentProvLine}>
-            {ai.length ? "AI-drafted" : "Sourced"}
-            {when ? ` ${when}` : ""} · {n} claim{n === 1 ? "" : "s"} on record
+            {ai.length ? "Written by AI" : "Last updated"}
+            {when ? ` on ${when}` : ""} from {n} source{n === 1 ? "" : "s"}
           </div>
         );
       })()}
 
-      {developments.length > 0 && (
-        <div className={styles.developments}>
-          <div className={styles.developmentsTitle}>Latest developments</div>
-          {developments.map((item, i) => (
-            <div key={`${item.signal_type}:${i}`} className={styles.development}>
-              <span className={styles.developmentDate}>
-                {item.published_at ? formatDate(item.published_at) : "—"}
+    </div>
+  );
+}
+
+/** A dated line under What changed that is not a What's-New signal (an
+ * actor's latest leak-site victim). */
+export interface DevelopmentNote {
+  key: string;
+  date: string | null;
+  text: string;
+  tag: string;
+}
+
+/** What changed: dated What's-New items, each opening its article, merged with
+ * any `notes` by date, newest first. */
+export function LatestDevelopments({
+  whatsNew,
+  notes = [],
+  onOpenArticle,
+}: {
+  whatsNew: WhatsNewItem[];
+  notes?: DevelopmentNote[];
+  onOpenArticle: (entryId: string) => void;
+}) {
+  const rows = [
+    ...whatsNew.slice(0, DEVELOPMENTS_LIMIT).map((item, i) => ({ key: `${item.signal_type}:${i}`, date: item.published_at, item })),
+    ...notes.map((note) => ({ key: note.key, date: note.date, note })),
+  ].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+  if (rows.length === 0) return null;
+  return (
+    <div className={styles.developments}>
+      <span className={styles.sectionLabel}>What changed</span>
+      {rows.map((row) => (
+        <div key={row.key} className={styles.development}>
+          <span className={styles.developmentDate}>{row.date ? formatDate(row.date) : "—"}</span>
+          {"item" in row ? (
+            <span className={styles.developmentText}>
+              <button className={styles.developmentLink} onClick={() => onOpenArticle(row.item.entry_id)}>
+                {row.item.explanation || row.item.entry_title}
+              </button>
+              {row.item.subject?.id && (
+                <Link
+                  className={styles.developmentSubject}
+                  to={entityProfilePath(row.item.subject.type as EntityType, row.item.subject.id)}
+                >
+                  {row.item.subject.name}
+                </Link>
+              )}
+              <span className={styles.developmentTag}>
+                {SIGNAL_LABELS[row.item.signal_type] || row.item.signal_type.replace(/_/g, " ")}
               </span>
-              <span className={styles.developmentText}>
-                <button className={styles.developmentLink} onClick={() => onOpenArticle(item.entry_id)}>
-                  {item.explanation || item.entry_title}
-                </button>
-                {item.subject?.id && (
-                  <Link
-                    className={styles.developmentSubject}
-                    to={entityProfilePath(item.subject.type as EntityType, item.subject.id)}
-                  >
-                    {item.subject.name}
-                  </Link>
-                )}
-                <span className={styles.developmentTag}>
-                  {SIGNAL_LABELS[item.signal_type] || item.signal_type.replace(/_/g, " ")}
-                </span>
-              </span>
-            </div>
-          ))}
+            </span>
+          ) : (
+            <span className={styles.developmentText}>
+              {row.note.text}
+              <span className={styles.developmentTag}>{row.note.tag}</span>
+            </span>
+          )}
         </div>
-      )}
+      ))}
     </div>
   );
 }

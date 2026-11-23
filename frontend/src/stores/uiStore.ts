@@ -173,17 +173,6 @@ export type ReaderMaxWidth = 600 | 720 | 860 | 1000 | 0; // 0 = unlimited
  */
 export type SidebarMode = "reading" | "workbench";
 export type ProfileOverviewMode = "brief" | "everything";
-/**
- * One entity type's remembered Overview choice. `open` is the rows left open;
- * `seen` is every row the type had when that choice was made, so a row the
- * config adds later can be told apart from one the analyst closed. An entry
- * saved as a bare list (before `seen` existed) counts every current row as
- * seen. `resolveOpenSections` in entityProfileConfig reads both shapes.
- */
-export interface ProfileOpenSections {
-  open: string[];
-  seen: string[];
-}
 
 interface UIState {
   sidebarCollapsed: boolean;
@@ -247,15 +236,14 @@ interface UIState {
   collapseAllMode: boolean;
   /**
    * Entity profile Overview: which sections are left open, per entity type
-   * ("cve", "threat_actor", …). A type with no entry shows its configured
-   * defaults. Persisted: if you always open Mitigations on techniques, it
+   * ("cve", "threat_actor", …). Every row starts closed, so
+   * a type with no entry shows them all closed. Persisted: if you always open Mitigations on techniques, it
    * stays open on techniques.
    */
-  profileOpenSections: Record<string, ProfileOpenSections | string[]>;
-  /** `currentlyOpen` is what the tab shows right now (defaults, the stored
-   *  set, or everything), so a toggle from "Everything" lands on a real set;
-   *  `sections` is every row the tab has, recorded as seen. */
-  setProfileSectionOpen: (entityType: string, key: string, open: boolean, currentlyOpen: string[], sections: string[]) => void;
+  profileOpenSections: Record<string, string[]>;
+  /** `currentlyOpen` is what the tab shows right now (the stored set, or
+   *  everything), so a toggle from "Everything" lands on a real set. */
+  setProfileSectionOpen: (entityType: string, key: string, open: boolean, currentlyOpen: string[]) => void;
   /** "brief" shows the per-type open set; "everything" opens every section. */
   profileOverviewMode: ProfileOverviewMode;
   setProfileOverviewMode: (mode: ProfileOverviewMode) => void;
@@ -470,14 +458,11 @@ export const useUIStore = create<UIState>()(
       collapsedDays: [],
       collapseAllMode: false,
       profileOpenSections: {},
-      setProfileSectionOpen: (entityType, key, open, currentlyOpen, sections) =>
+      setProfileSectionOpen: (entityType, key, open, currentlyOpen) =>
         set((s) => ({
           profileOpenSections: {
             ...s.profileOpenSections,
-            [entityType]: {
-              open: open ? [...new Set([...currentlyOpen, key])] : currentlyOpen.filter((k) => k !== key),
-              seen: [...sections],
-            },
+            [entityType]: open ? [...new Set([...currentlyOpen, key])] : currentlyOpen.filter((k) => k !== key),
           },
           // Closing one row while everything is open means "not everything".
           profileOverviewMode: "brief",
@@ -900,7 +885,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "intelfeed-ui",
-      version: 5,
+      version: 6,
       migrate: (persisted, version) => {
         if (!persisted || typeof persisted !== "object") return persisted;
         let s = persisted as Record<string, unknown>;
@@ -977,6 +962,12 @@ export const useUIStore = create<UIState>()(
           s = { ...s };
           delete s.whyRankedCollapsed;
           if (s.sortOrder === "radar") s.sortOrder = "newest";
+        }
+
+        // v5 → v6: profile Overview rows all start closed. Stored choices had
+        // the old per-type default-open rows baked in, so they start over.
+        if (version < 6) {
+          s = { ...s, profileOpenSections: {} };
         }
 
         return s;

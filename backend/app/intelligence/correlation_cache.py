@@ -15,8 +15,10 @@ logger = logging.getLogger(__name__)
 # v2: specificity damping, context_role, adjudication fields.
 # v3: graphs carry every claim tier + CWE/mitigation catalog layers; pivots
 #     carry rule_coverage and catalog mitigation claim rows.
-_PREFIX_PIVOT = "intelfeed:corr:pivot3"
-_PREFIX_GRAPH = "intelfeed:corr:graph3"
+# graph4: an entity with no articles still draws its relationships.
+# pivot4: the first page keeps every typed relationship, not only the top 50.
+_PREFIX_PIVOT = "intelfeed:corr:pivot4"
+_PREFIX_GRAPH = "intelfeed:corr:graph4"
 
 
 def _default_ttl() -> int:

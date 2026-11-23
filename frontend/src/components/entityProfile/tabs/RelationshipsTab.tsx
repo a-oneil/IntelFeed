@@ -1,16 +1,19 @@
 /**
- * RelationshipsTab — Direction A: claims & context.
+ * RelationshipsTab — the entity's relationships as a compact list beside an
+ * evidence panel.
  *
- * Asserted relationships (typed, matrix-valid, trust-graded) group by verb and
- * read as sentences ("APT29 uses → …"); trust is machine-earned (MITRE / AI
- * adjudicator / analyst pin) and shown as the only graded chip. Co-mentions
- * demote to an "appears alongside" chip shelf, specificity-ranked, with
- * ubiquitous reporting vendors folded away. Three controls replace the old
- * six; strength words never appear.
+ * The list reads as sentences grouped by verb and type ("Qilin uses ·
+ * techniques"), each row naming its source (MITRE ATT&CK, a feed, AI-reviewed
+ * articles, an analyst) and how many articles it was seen in. Selecting a row
+ * opens the panel: why it's listed, the articles that state it, the reviews,
+ * and — kept apart — the articles that merely mention both. CVE and CWE
+ * profiles add the links that come from reference data. Co-mentions (no
+ * relationship stated) and names no entity matches sit below, on request.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useIsVisitor } from "@/stores/authStore";
+import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import api from "@/api/client";
@@ -22,12 +25,14 @@ import {
   type GraphNodeInfo,
   type GraphStoryCluster,
 } from "@/components/EntityGraph";
-import { usePivot, useEntityGraph, useUnlinkRelatedEntity } from "@/hooks/useCorrelation";
+import { pruneExpansions } from "@/components/entityGraph/expansions";
+import { usePivot, useEntityGraph } from "@/hooks/useCorrelation";
 import {
   useCreateRelationship,
   useConfirmRelationship,
   useRejectRelationship,
   useRelationClaims,
+  useUpdateRelationship,
 } from "@/hooks/useRelationships";
 import type { EntityType } from "@/stores/intelStore";
 import type { GraphResponse, PivotResponse } from "@/api/types";
@@ -38,10 +43,7 @@ import {
   clusterHeading,
   flattenRelated,
   groupByVerb,
-  isEverydaySoftware,
-  isImplausibleCveId,
   partitionEarned,
-  REGION_NAMES,
   RELATED_KEY,
   rowKey,
   splitAssertedContext,
@@ -49,11 +51,13 @@ import {
   trustOf,
   TYPE_ORDER,
   type RelRow,
-  type VerbGroup,
 } from "@/utils/relationshipBrowser";
-import { Segmented } from "@/components/primitives";
+import { sourceLabel, sourcesOf, type SourcePart } from "@/utils/relationshipSource";
 import { useOpenThread } from "@/utils/openEntry";
-import { RelationshipRow } from "../RelationshipRow";
+import { EvidencePanel } from "../relationships/EvidencePanel";
+import { ReferenceLinks, hasReferenceLinks } from "../relationships/ReferenceLinks";
+import { CoMentions, NotMatched, articleCount } from "../relationships/CoMentions";
+import rel from "../relationships/relationships.module.css";
 import styles from "../entityProfile.module.css";
 
 const NAV_TYPES = new Set([
@@ -62,15 +66,27 @@ const NAV_TYPES = new Set([
 const MAX_GRAPH_NODES = 500;
 const GROUP_PREVIEW = 12;
 
-type Scope = "claims" | "context";
+/** A story's articles with their titles, taken from the evidence on its rows. */
+function storyEntries(entryIds: string[], rows: RelRow[]): Array<{ entry_id: string; title: string }> {
+  const titles = new Map<string, string>();
+  for (const r of rows) for (const pe of r.item.proximity_entries ?? []) if (pe.title && !titles.has(pe.entry_id)) titles.set(pe.entry_id, pe.title);
+  return entryIds.map((id) => ({ entry_id: id, title: titles.get(id) ?? "Untitled" }));
+}
 
-/** Windowed rendering for long open groups (dynamic row heights measured). */
+/** "uses" → "use", "attributed to" → "are attributed to": the verb after a plural subject. */
+function pluralVerb(active: string): string {
+  const [first, ...rest] = active.split(" ");
+  if (first.length > 3 && first.endsWith("s") && !first.endsWith("ss")) return [first.slice(0, -1), ...rest].join(" ");
+  return `are ${active}`;
+}
+
+/** Windowed rendering for long open groups. */
 function VirtualRows({ rows, renderRow }: { rows: RelRow[]; renderRow: (r: RelRow) => ReactNode }) {
   const parentRef = useRef<HTMLDivElement>(null);
   const virt = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 34,
+    estimateSize: () => 40,
     overscan: 12,
   });
   return (
@@ -89,6 +105,12 @@ function VirtualRows({ rows, renderRow }: { rows: RelRow[]; renderRow: (r: RelRo
       </div>
     </div>
   );
+}
+
+interface ListGroup {
+  key: string;
+  head: ReactNode;
+  rows: RelRow[];
 }
 
 export function RelationshipsTab({
@@ -115,26 +137,28 @@ export function RelationshipsTab({
   onOpenEntry: (entryId: string) => void;
 }) {
   const navigate = useNavigate();
-  // A visitor browses the graph: no Shift+drag links, no Engine review link.
+  // A visitor browses: no Shift+drag links, no moderation, no review evidence.
   const isVisitor = useIsVisitor();
   const openThread = useOpenThread();
-  const [graphCollapsed, setGraphCollapsed] = useState(false);
+  // The list and its evidence are the tab; the graph opens on request.
+  const [graphCollapsed, setGraphCollapsed] = useState(true);
   const [storyFilter, setStoryFilter] = useState<{ title: string; keys: Set<string> } | null>(null);
-  // On-demand neighbor sets fetched per node from the inspector's
-  // "Expand connections" — keyed by graph node id.
+  // On-demand neighbor sets fetched per node from the graph's +/− badge —
+  // keyed by graph node id.
   const [graphExpansions, setGraphExpansions] = useState<
     Map<string, { nodes: EntityNode[]; edges: EntityEdge[]; clusters: GraphStoryCluster[] }>
   >(new Map());
   const [expansionInfo, setExpansionInfo] = useState<Map<string, GraphNodeInfo>>(new Map());
   const [search, setSearch] = useState("");
-  const [scope, setScope] = useState<Scope>("claims");
+  const [sourceFilter, setSourceFilter] = useState<string>("");
   const [windowDays, setWindowDays] = useState(0); // 0 = all time
   const [serverExpanded, setServerExpanded] = useState(false);
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
-  const [reportingOpen, setReportingOpen] = useState(false);
-  // "via <source>": narrow the claims to one enrichment source's.
-  const [viaSource, setViaSource] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [heldOpen, setHeldOpen] = useState(false);
+  // null until the toggle is clicked: then the open state follows whether
+  // there are relationships (none → the co-mentions are the content).
+  const [coOpenChoice, setCoOpenChoice] = useState<boolean | null>(null);
   const [pendingEdge, setPendingEdge] = useState<{
     sourceId: string;
     sourceType: string;
@@ -144,35 +168,38 @@ export function RelationshipsTab({
     confidence: string;
   } | null>(null);
   const pendingVerbs = pendingEdge ? allowedVerbsForPair(pendingEdge.sourceType, pendingEdge.targetType) : [];
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Phone: the evidence opens under the tapped row instead of beside the list.
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     setGraphExpansions(new Map());
     setExpansionInfo(new Map());
     setStoryFilter(null);
-    setViaSource(null);
+    setSourceFilter("");
+    setSelectedKey(null);
     setHeldOpen(false);
+    setCoOpenChoice(null);
   }, [entityId]);
 
   // Which enrichment sources claim each connection, and the names they gave
   // that resolved to nothing (held). Signed-in only.
   const { data: claims } = useRelationClaims(entityType, entityId, !isVisitor);
-  const sourceLabel = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const x of claims?.sources ?? []) m.set(x.source_type, x.label);
-    for (const h of claims?.held ?? []) m.set(h.source_type, h.source_label);
-    return m;
-  }, [claims]);
-  const claimSourcesOf = useCallback(
-    (row: RelRow) => (claims?.by_target[rowKey(row)] ?? []).map((st) => sourceLabel.get(st) ?? st),
-    [claims, sourceLabel],
+  const viaOf = useCallback(
+    (row: RelRow) => {
+      const labels = new Map<string, string>();
+      for (const x of claims?.sources ?? []) labels.set(x.source_type, x.label);
+      return (claims?.by_target[rowKey(row)] ?? []).map((st) => labels.get(st) ?? st);
+    },
+    [claims],
   );
 
-  const unlinkRelated = useUnlinkRelatedEntity();
   const confirmRel = useConfirmRelationship();
   const rejectRel = useRejectRelationship();
+  const updateRel = useUpdateRelationship();
   const createRelationship = useCreateRelationship();
 
-  // Window / show-all re-query the pivot with parameters; the default view
+  // Window / load-all re-query the pivot with parameters; the default view
   // reuses the page-level pivot passed in as props.
   const needsParamFetch = windowDays > 0 || serverExpanded;
   const paramPivot = usePivot(entityType, needsParamFetch ? entityId : undefined, {
@@ -193,47 +220,155 @@ export function RelationshipsTab({
 
   const allRows = useMemo(() => flattenRelated(effRelated, entityType), [effRelated, entityType]);
 
-  const searched = useMemo(() => {
+  // Country profiles' targeting / origin / infrastructure rows come from
+  // article tagging, not typed relationships — listed with the relationships.
+  const countryRole = (r: RelRow) => (entityType === "country" ? r.item.country_relationship : undefined);
+  const { asserted: typed, context: untyped } = useMemo(() => splitAssertedContext(allRows), [allRows]);
+  const asserted = useMemo(
+    () => (entityType === "country" ? [...typed, ...untyped.filter((r) => r.item.country_relationship)] : typed),
+    [typed, untyped, entityType],
+  );
+  const context = useMemo(
+    () => (entityType === "country" ? untyped.filter((r) => !r.item.country_relationship) : untyped),
+    [untyped, entityType],
+  );
+  const hasRelationships = asserted.length > 0;
+  const coOpen = coOpenChoice ?? !hasRelationships;
+
+  // The panel stays in view while the list scrolls: pinned just below any bar
+  // pinned to the top of the area the page scrolls in (the profile's tab bar),
+  // and no taller than what's visible there, so its own scroll reaches the end.
+  useLayoutEffect(() => {
+    const slot = panelRef.current;
+    if (!slot) return;
+    let scroller: HTMLElement | null = slot.parentElement;
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+    const fit = () => {
+      let pinned = 0;
+      const bar = scroller?.querySelector<HTMLElement>("[role=tablist]") ?? null;
+      for (let el = bar; el && el !== scroller; el = el.parentElement) {
+        if (getComputedStyle(el).position === "sticky") {
+          pinned = el.getBoundingClientRect().height;
+          break;
+        }
+      }
+      slot.style.top = `${pinned + 12}px`;
+      // Until it pins, the panel starts lower down the page: fit it to the
+      // space between where it starts now and the bottom of the visible area.
+      const visibleBottom = scroller ? scroller.getBoundingClientRect().top + scroller.clientHeight : window.innerHeight;
+      slot.style.maxHeight = `${Math.max(240, visibleBottom - slot.getBoundingClientRect().top - 12)}px`;
+    };
+    let frame = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(fit);
+    };
+    fit();
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
+    if (scroller) ro?.observe(scroller);
+    ro?.observe(slot.parentElement!);
+    (scroller ?? window).addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", fit);
+    return () => {
+      cancelAnimationFrame(frame);
+      ro?.disconnect();
+      (scroller ?? window).removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", fit);
+    };
+  }, [isMobile, hasRelationships]);
+
+  const sourcesByKey = useMemo(() => {
+    const m = new Map<string, SourcePart[]>();
+    for (const r of asserted) m.set(rowKey(r), sourcesOf(r, viaOf(r)));
+    return m;
+  }, [asserted, viaOf]);
+
+  // Source filter options, with counts, from everything listed.
+  const sourceOptions = useMemo(() => {
+    const m = new Map<string, { label: string; count: number }>();
+    for (const parts of sourcesByKey.values()) {
+      for (const p of parts) {
+        const o = m.get(p.key) ?? { label: p.label, count: 0 };
+        o.count++;
+        m.set(p.key, o);
+      }
+    }
+    return [...m.entries()].sort((a, b) => b[1].count - a[1].count);
+  }, [sourcesByKey]);
+
+  const listed = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const via = viaSource ? (r: RelRow) => (claims?.by_target[rowKey(r)] ?? []).includes(viaSource) : null;
-    if (!q && !via) return allRows;
-    return allRows.filter(
+    return asserted.filter(
       (r) =>
-        (!via || via(r)) &&
+        (!sourceFilter || (sourcesByKey.get(rowKey(r)) ?? []).some((p) => p.key === sourceFilter)) &&
+        (!storyFilter || storyFilter.keys.has(rowKey(r))) &&
         (!q ||
           r.label.toLowerCase().includes(q) ||
           (r.item.aliases ?? []).some((a) => (a || "").toLowerCase().includes(q))),
     );
-  }, [allRows, search, viaSource, claims]);
+  }, [asserted, search, sourceFilter, storyFilter, sourcesByKey]);
 
-  // Country profiles keep their semantic verb groups (targets / operates from /
-  // infrastructure) — junction-derived, rendered ahead of the typed groups.
-  const countryGroups =
-    entityType === "country"
-      ? {
-          targets: searched.filter((r) => r.item.country_relationship === "targets"),
-          operates: searched.filter((r) => r.item.country_relationship === "operates_from"),
-          infra: searched.filter((r) => r.item.country_relationship === "infrastructure"),
-        }
-      : null;
-  const countryGrouped = new Set(
-    [...(countryGroups?.targets ?? []), ...(countryGroups?.operates ?? []), ...(countryGroups?.infra ?? [])].map(
-      rowKey,
-    ),
-  );
-  const rest = countryGroups ? searched.filter((r) => !countryGrouped.has(rowKey(r))) : searched;
+  // Groups: the sentence head, then the rows by evidence volume.
+  const groups = useMemo<ListGroup[]>(() => {
+    const byCount = (a: RelRow, b: RelRow) => articleCount(b) - articleCount(a) || a.label.localeCompare(b.label);
+    const out: ListGroup[] = [];
+    if (entityType === "country") {
+      const roles: Array<[string, string]> = [
+        ["targets", "that target"],
+        ["operates_from", "that operate from"],
+        ["infrastructure", "with infrastructure in"],
+      ];
+      for (const [role, phrase] of roles) {
+        const rows = listed.filter((r) => countryRole(r) === role);
+        if (rows.length) out.push({ key: `country:${role}`, head: <>Entities <b>{phrase}</b> {entityLabel}</>, rows: rows.sort(byCount) });
+      }
+    }
+    for (const g of groupByVerb(listed.filter((r) => !countryRole(r)))) {
+      const byType = new Map<EntityType, RelRow[]>();
+      for (const r of g.rows) (byType.get(r.type) ?? byType.set(r.type, []).get(r.type)!).push(r);
+      for (const t of TYPE_ORDER) {
+        const rows = byType.get(t);
+        if (!rows) continue;
+        const plural = getEntityPluralLabel(t);
+        const active = g.verb.replace(/_/g, " ");
+        out.push({
+          key: `${g.key}:${t}`,
+          head:
+            g.direction === "outbound" ? (
+              <>
+                {entityLabel} <b>{g.label}</b> · {plural}
+              </>
+            ) : (
+              <>
+                {plural} that <b>{pluralVerb(active)}</b> {entityLabel}
+              </>
+            ),
+          rows: rows.sort(byCount),
+        });
+      }
+    }
+    return out;
+    // countryRole only reads entityType
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listed, entityType, entityLabel]);
 
-  const { asserted, context } = useMemo(() => splitAssertedContext(rest), [rest]);
-  // A story-map cluster click narrows the list to that incident's members.
-  const assertedView = useMemo(
-    () => (storyFilter ? asserted.filter((r) => storyFilter.keys.has(rowKey(r))) : asserted),
-    [asserted, storyFilter],
-  );
-  const verbGroups = useMemo(() => groupByVerb(assertedView), [assertedView]);
+  // Beside the list, keep a row selected so the panel always explains
+  // something. On a phone nothing opens until a row is tapped.
+  const visibleKeys = useMemo(() => new Set(groups.flatMap((g) => g.rows.map(rowKey))), [groups]);
+  const selected = useMemo(() => {
+    const fallback = !isMobile && groups[0] ? rowKey(groups[0].rows[0]) : null;
+    const key = selectedKey && visibleKeys.has(selectedKey) ? selectedKey : fallback;
+    return key ? asserted.find((r) => rowKey(r) === key) ?? null : null;
+  }, [selectedKey, visibleKeys, groups, asserted, isMobile]);
 
-  // The operations map + the header transparency note both come from the
-  // earned/folded split over everything asserted (unfiltered).
-  const { earned: earnedAll, folded: foldedAll } = useMemo(() => partitionEarned(asserted), [asserted]);
+  // A second tap on the open row closes it (phone only: beside the list,
+  // something is always open).
+  const selectRow = (row: RelRow) =>
+    setSelectedKey((prev) => (isMobile && prev === rowKey(row) ? null : rowKey(row)));
+
+  // The graph's story clusters and inspector facts come from the earned
+  // (story-backed) typed relationships, unfiltered.
+  const { earned: earnedAll } = useMemo(() => partitionEarned(typed), [typed]);
   const mapClusters = useMemo(() => buildStoryMap(earnedAll), [earnedAll]);
   // Detection coverage: prefer the pivot's library-wide rule_coverage (how
   // many rules in the WHOLE library reference each technique/CVE — counts
@@ -263,7 +398,7 @@ export function RelationshipsTab({
   // profile description, KEV, and detection coverage.
   const graphNodeInfo = useMemo(() => {
     const m = new Map<string, GraphNodeInfo>();
-    for (const r of asserted) {
+    for (const r of typed) {
       const t = trustOf(r.item);
       const p = structurePhrase(r.item);
       let covered: boolean | undefined;
@@ -289,7 +424,7 @@ export function RelationshipsTab({
     }
     for (const [k, v] of expansionInfo) if (!m.has(k)) m.set(k, v);
     return m;
-  }, [asserted, coverage, expansionInfo]);
+  }, [typed, coverage, expansionInfo]);
 
   const graphClusters = useMemo<GraphStoryCluster[]>(
     () =>
@@ -300,8 +435,9 @@ export function RelationshipsTab({
         articles: c.entryIds.length,
         nodeIds: c.members.map((m) => rowKey(m.row)),
         slug: c.slug,
+        entries: storyEntries(c.entryIds, earnedAll),
       })),
-    [mapClusters],
+    [mapClusters, earnedAll],
   );
   const ctxRegular = context.filter((r) => r.item.context_role !== "reporting_source");
   const ctxReporting = context.filter((r) => r.item.context_role === "reporting_source");
@@ -311,18 +447,7 @@ export function RelationshipsTab({
     0,
   );
 
-  const rowActions = {
-    viewedLabel: entityLabel,
-    claimSources: claimSourcesOf,
-    onOpen: onOpenEntity,
-    onOpenArticle,
-    onConfirm: (id: string) => confirmRel.mutate(id),
-    onReject: (id: string) => rejectRel.mutate(id),
-    onUnlink: (row: RelRow) =>
-      unlinkRelated.mutate({ entityType, entityId, otherType: row.type, otherId: row.item.id }),
-  };
-
-  // Inspector "Expand connections": fetch the clicked node's own PIVOT —
+  // The node's +/− badge (or the inspector): fetch the node's own PIVOT —
   // its earned claims become satellite nodes, and its evidence stories
   // become mini hulls orbiting it. Collapse just drops the set.
   const toggleGraphExpand = (nodeId: string, nodeType: string, expand: boolean) => {
@@ -330,23 +455,8 @@ export function RelationshipsTab({
       setGraphExpansions((prev) => {
         const next = new Map(prev);
         next.delete(nodeId);
-        // Cascade: an expansion anchored to a node that just vanished (it
-        // only existed inside the collapsed set) goes with it, repeatedly,
-        // so multi-layer chains fold back cleanly.
-        const baseIds = new Set((effGraph?.nodes ?? []).map((n) => n.id));
-        let changed = true;
-        while (changed) {
-          changed = false;
-          const present = new Set(baseIds);
-          for (const exp of next.values()) for (const n of exp.nodes) present.add(n.id);
-          for (const key of [...next.keys()]) {
-            if (!present.has(key)) {
-              next.delete(key);
-              changed = true;
-            }
-          }
-        }
-        return next;
+        // Cascade: expansions hanging off the collapsed one fold back with it.
+        return pruneExpansions(next, new Set((effGraph?.nodes ?? []).map((n) => n.id)));
       });
       return;
     }
@@ -390,6 +500,7 @@ export function RelationshipsTab({
           nodeIds: c.members.map((m) => rowKey(m.row)),
           slug: c.slug,
           external: true,
+          entries: storyEntries(c.entryIds, top),
         }));
         setExpansionInfo((prev) => {
           const next = new Map(prev);
@@ -463,323 +574,97 @@ export function RelationshipsTab({
       return next;
     });
 
-  // Country targeting rendered as a ranked pattern, not rows — 32 identical
-  // "targets Country" rows say nothing; the weight distribution is the intel.
-  // Region names mis-filed as countries ("Europe") are kept out of the bars.
-  const renderTargetingBlock = (g: VerbGroup, rows: RelRow[]) => {
-    const regions = rows.filter((r) => REGION_NAMES.has(r.label.toLowerCase()));
-    const countries = rows.filter((r) => !REGION_NAMES.has(r.label.toLowerCase()));
-    const ranked = [...countries].sort((a, b) => ctxCount(b) - ctxCount(a));
-    const top = ranked.slice(0, 8);
-    const max = Math.max(ctxCount(top[0]), 1);
-    return (
-      <div className={styles.targetBlock}>
-        <div className={styles.targetSummary}>
-          Targeting reported across {countries.length} countries, mostly{" "}
-          {top.slice(0, 3).map((r) => r.label).join(", ")}.
-          {regions.length > 0 && (
-            <span className={styles.groupNote}>
-              {" "}
-              {regions.map((r) => `“${r.label}”`).join(", ")} {regions.length === 1 ? "is a region" : "are regions"}{" "}
-              mis-filed as {regions.length === 1 ? "a country" : "countries"}, grouped here.
-            </span>
-          )}
-        </div>
-        <div className={styles.targetBars}>
-          {top.map((r) => (
-            <button
-              key={rowKey(r)}
-              className={styles.targetBarRow}
-              onClick={() => onOpenEntity(r.type, r.item.id, r.label)}
-              title={`${r.label}: ${ctxCount(r)} article${ctxCount(r) === 1 ? "" : "s"}`}
-            >
-              <span className={styles.targetLabel}>{r.label}</span>
-              <span className={styles.targetTrack}>
-                <span className={styles.targetFill} style={{ width: `${(ctxCount(r) / max) * 100}%` }} />
-              </span>
-              <span className={styles.targetCount}>{ctxCount(r)}</span>
-            </button>
-          ))}
-        </div>
-        <button className={styles.metaLink} onClick={() => toggleGroup(`targetrows:${g.key}`)}>
-          all {rows.length} as rows <span className="caret-glyph">▸</span>
-        </button>
-      </div>
-    );
-  };
+  const renderPanel = (row: RelRow) => (
+    <EvidencePanel
+      row={row}
+      viewedType={entityType}
+      viewedLabel={entityLabel}
+      sources={sourcesByKey.get(rowKey(row)) ?? []}
+      isVisitor={isVisitor}
+      onOpen={onOpenEntity}
+      onOpenArticle={onOpenArticle}
+      onOpenThread={openThread}
+      onConfirm={(id) => confirmRel.mutate(id)}
+      onReject={(id) => rejectRel.mutate(id)}
+      onChangeVerb={(id, verb) => updateRel.mutate({ id, relationship_type: verb })}
+    />
+  );
 
-  // Quiet full-width band shared by the three fold kinds: story-less claims,
-  // everyday software, implausible ids. Bold label — muted note, mono caption
-  // hard right. Nothing is deleted — a second story promotes any folded claim
-  // back to a row automatically.
-  const renderFold = (
-    key: string,
-    label: string,
-    note: ReactNode,
-    cap: ReactNode,
-    rows: RelRow[],
-    explain?: string,
-  ) => {
-    const open = openGroups.has(key);
-    return (
-      <div className={styles.claimFold} key={key}>
-        <button className={styles.foldToggle} onClick={() => toggleGroup(key)}>
-          <span className="caret-glyph">{open ? "▾" : "▸"}</span> <b>{label}</b>
-          {note && <span>: {note}</span>}
-        </button>
-        {cap && <span className={styles.foldCap}>{cap}</span>}
-        {open && (
-          <div className={styles.foldBody}>
-            <div className={styles.ctxShelf}>{rows.map((r) => ctxChip(r, { dim: true }))}</div>
-            {explain && <div className={styles.foldExplain}>{explain}</div>}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // The tab's one identity-level claim reads as a sentence, not a row in a
-  // crowd ("Attributed to Russia").
-  const renderAttributedSentence = (g: VerbGroup) => {
-    const r = g.rows[0];
-    return (
-      <div className={styles.verbGroup} key={g.key}>
-        <button className={styles.attribRow} onClick={() => onOpenEntity(r.type, r.item.id, r.label)}>
-          <span className={styles.relDot} style={{ background: getEntityColor(r.type) }} />
-          <span className={styles.attribText}>
-            Attributed to <b>{r.label}</b>
-          </span>
-          <span className={styles.attribCap}>
-            {r.item.strength?.articles ? `${r.item.strength.articles} art` : ""}
-            {r.item.strength && r.item.strength.sources > 1 ? ` · ${r.item.strength.sources} feeds` : ""}
-          </span>
-        </button>
-      </div>
-    );
-  };
-
-  const TARGET_BLOCK_MIN = 6;
-
-  const renderVerbGroup = (g: VerbGroup) => {
-    if (g.verb === "attributed_to" && g.direction === "outbound" && g.rows.length === 1) {
-      return renderAttributedSentence(g);
-    }
-    const open = openGroups.has(g.key);
-    // Searching or a story filter disables folding and pattern blocks — a
-    // match must never hide behind a fold.
-    const searching = search.trim().length > 0 || storyFilter !== null;
-    const countryRows =
-      !searching && g.verb === "targets" && g.direction === "outbound"
-        ? g.rows.filter((r) => r.type === "country")
-        : [];
-    const useTargetBlock = countryRows.length >= TARGET_BLOCK_MIN && !openGroups.has(`targetrows:${g.key}`);
-    const baseRows = useTargetBlock ? g.rows.filter((r) => r.type !== "country") : g.rows;
-
-    // Fold order: junk ids out first, then everyday software, then the
-    // earned/story-less split over what remains.
-    const implausible = searching ? [] : baseRows.filter((r) => r.type === "cve" && isImplausibleCveId(r.label));
-    const afterJunk = searching ? baseRows : baseRows.filter((r) => !implausible.includes(r));
-    const everyday = searching ? [] : afterJunk.filter(isEverydaySoftware);
-    const remaining = searching ? afterJunk : afterJunk.filter((r) => !everyday.includes(r));
-    const { earned, folded } = searching ? { earned: remaining, folded: [] } : partitionEarned(remaining);
-    const shown = open ? earned : earned.slice(0, GROUP_PREVIEW);
-    return (
-      <div className={styles.verbGroup} key={g.key}>
-        <div className={styles.verbGroupHeader}>
-          {g.direction === "outbound" ? (
-            <>
-              <span className={styles.verbGroupSubject}>{entityLabel}</span>{" "}
-              <span className={styles.verbGroupVerb}>{g.label}</span>
-            </>
-          ) : (
-            <span className={styles.verbGroupVerb}>{g.label}</span>
-          )}
-          <span className={styles.verbCount}>{g.rows.length}</span>
-          {countryRows.length >= TARGET_BLOCK_MIN && !useTargetBlock && (
-            <button className={styles.metaLink} onClick={() => toggleGroup(`targetrows:${g.key}`)}>
-              <span className="caret-glyph">▾</span> targeting summary
-            </button>
-          )}
-        </div>
-        {useTargetBlock && renderTargetingBlock(g, countryRows)}
-        {open && shown.length > 60 ? (
-          <VirtualRows rows={shown} renderRow={(row) => <RelationshipRow key={rowKey(row)} row={row} {...rowActions} />} />
-        ) : (
-          shown.map((row) => <RelationshipRow key={rowKey(row)} row={row} {...rowActions} />)
-        )}
-        {earned.length > GROUP_PREVIEW && (
-          <button className={styles.showMoreBtn} onClick={() => toggleGroup(g.key)}>
-            {open ? "Show less" : `Show all ${earned.length}`}
-          </button>
-        )}
-        {everyday.length > 0 &&
-          renderFold(
-            `everyday:${g.key}`,
-            "Everyday software named in passing",
-            everyday
-              .slice(0, 4)
-              .map((r) => r.label)
-              .join(", ") + (everyday.length > 4 ? ` + ${everyday.length - 4} more` : ""),
-            "grouped with reporting vendors",
-            everyday,
-          )}
-        {folded.length > 0 &&
-          renderFold(
-            `fold:${g.key}`,
-            `${folded.length} single mention${folded.length === 1 ? "" : "s"}`,
-            folded.every((r) => (r.item.strength?.articles ?? 1) <= 1)
-              ? "one mention each, not yet part of a story"
-              : "mentions and roundup co-mentions, not yet part of a story",
-            "needs a second source",
-            folded,
-            "Each of these is a single mention. It becomes a relationship when a second article reports it.",
-          )}
-        {implausible.length > 0 &&
-          renderFold(
-            `junk:${g.key}`,
-            `${implausible.length} implausible CVE id${implausible.length === 1 ? "" : "s"}`,
-            implausible
-              .slice(0, 3)
-              .map((r) => r.label)
-              .join(", ") +
-              (implausible.length > 3 ? ` + ${implausible.length - 3} more` : "") +
-              " · likely extraction junk",
-            isVisitor ? null : (
-              <button className={styles.metaLink} onClick={() => navigate("/settings?section=engine&view=entities")}>
-                review in Engine →
-              </button>
-            ),
-            implausible,
-          )}
-      </div>
-    );
-  };
-
-  const renderCountrySection = (title: string, rows: RelRow[]) => {
-    if (rows.length === 0) return null;
-    const open = openGroups.has(title);
-    const shown = open ? rows : rows.slice(0, GROUP_PREVIEW * 2);
-    return (
-      <div className={styles.verbGroup} key={title}>
-        <div className={styles.verbGroupHeader}>
-          <span className={styles.verbGroupVerb}>{title}</span>
-          <span className={styles.verbCount}>{rows.length}</span>
-        </div>
-        {open && shown.length > 60 ? (
-          <VirtualRows rows={shown} renderRow={(row) => <RelationshipRow key={rowKey(row)} row={row} {...rowActions} />} />
-        ) : (
-          shown.map((row) => <RelationshipRow key={rowKey(row)} row={row} {...rowActions} />)
-        )}
-        {rows.length > GROUP_PREVIEW * 2 && (
-          <button className={styles.showMoreBtn} onClick={() => toggleGroup(title)}>
-            {open ? "Show less" : `Show all ${rows.length}`}
-          </button>
-        )}
-      </div>
-    );
-  };
-
-  const ctxCount = (row: RelRow) => row.item.strength?.articles ?? row.item.co_occurrence_count ?? 0;
-
-  const ctxChip = (row: RelRow, opts?: { dot?: boolean; dim?: boolean }) => {
-    const n = ctxCount(row);
-    return (
+  const renderRow = (row: RelRow) => {
+    const parts = sourcesByKey.get(rowKey(row)) ?? [];
+    const n = articleCount(row);
+    const on = !!selected && rowKey(selected) === rowKey(row);
+    const button = (
       <button
         key={rowKey(row)}
-        className={`${styles.ctxChip} ${opts?.dim ? styles.ctxChipDim : ""}`}
-        onClick={() => onOpenEntity(row.type, row.item.id, row.label)}
-        title={`${row.label}: co-mentioned in ${n} shared article${n === 1 ? "" : "s"}`}
+        className={`${rel.row} ${on ? rel.rowOn : ""}`}
+        aria-pressed={on}
+        aria-expanded={isMobile ? on : undefined}
+        onClick={() => selectRow(row)}
       >
-        {opts?.dot && <span className={styles.relDot} style={{ background: getEntityColor(row.type) }} />}
-        {row.label}
-        {n > 1 && <span className={styles.ctxChipCount}>×{n}</span>}
+        <span className={rel.rowName}>
+          <span className={rel.dot} style={{ background: getEntityColor(row.type) }} />
+          <span>{row.label}</span>
+        </span>
+        <span className={`${rel.rowSource} ${rel[`tone_${parts[0]?.tone ?? "articles"}`]}`}>{sourceLabel(parts)}</span>
+        <span className={rel.rowCount}>{n ? `${n} article${n === 1 ? "" : "s"}` : "no articles"}</span>
       </button>
     );
-  };
-
-  // Context, grouped by type: one labeled row per entity type, repeat
-  // co-mentions up front (sorted by count), the ×1 tail folded into a quiet
-  // "+N seen once" — hierarchy instead of a 200-chip wall.
-  const ctxGroups = useMemo(() => {
-    const byType = new Map<EntityType, RelRow[]>();
-    for (const r of ctxRegular) {
-      const list = byType.get(r.type) ?? [];
-      list.push(r);
-      byType.set(r.type, list);
-    }
-    return TYPE_ORDER.filter((t) => byType.has(t)).map((t) => {
-      const rows = [...byType.get(t)!].sort((a, b) => ctxCount(b) - ctxCount(a));
-      const repeats = rows.filter((r) => ctxCount(r) > 1);
-      const singles = rows.filter((r) => ctxCount(r) <= 1);
-      return { type: t, repeats, singles };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctxRegular]);
-
-  const CTX_PREVIEW = 10;
-
-  const renderCtxGroup = (g: { type: EntityType; repeats: RelRow[]; singles: RelRow[] }) => {
-    const key = `ctx:${g.type}`;
-    const open = openGroups.has(key);
-    // Fill the preview budget: repeats first, then the strongest singles
-    // (dimmed) — sparse profiles with only ×1 co-mentions still show chips
-    // instead of collapsing whole rows behind a "seen once" link.
-    const shownRepeats = open ? g.repeats : g.repeats.slice(0, CTX_PREVIEW);
-    const singleBudget = open ? g.singles.length : Math.max(0, CTX_PREVIEW - shownRepeats.length);
-    const shownSingles = g.singles.slice(0, singleBudget);
-    const hiddenCount = g.repeats.length - shownRepeats.length + g.singles.length - shownSingles.length;
+    if (!(isMobile && on)) return button;
     return (
-      <div className={styles.ctxGroupRow} key={g.type}>
-        <span className={styles.ctxGroupLabel}>
-          <span className={styles.relDot} style={{ background: getEntityColor(g.type) }} />
-          {getEntityPluralLabel(g.type)}
-        </span>
-        <span className={styles.ctxGroupChips}>
-          {shownRepeats.map((r) => ctxChip(r))}
-          {shownSingles.map((r) => ctxChip(r, { dim: true }))}
-          {!open && hiddenCount > 0 && (
-            <button className={styles.ctxTail} onClick={() => toggleGroup(key)}>
-              +{hiddenCount} more
-            </button>
-          )}
-          {open && (
-            <button className={styles.ctxTail} onClick={() => toggleGroup(key)}>
-              show less
-            </button>
-          )}
-        </span>
+      <div key={rowKey(row)}>
+        {button}
+        <div className={rel.inlinePanel}>{renderPanel(row)}</div>
       </div>
     );
   };
 
-  // Co-mentions never render on the default view — they are the discovery
-  // layer, reachable only when explicitly asked for.
-  const showAsserted = scope === "claims";
-  const showContext = scope === "context";
+  const renderGroup = (g: ListGroup) => {
+    const open = openGroups.has(g.key);
+    const shown = open ? g.rows : g.rows.slice(0, GROUP_PREVIEW);
+    return (
+      <div key={g.key}>
+        <div className={rel.groupHead}>
+          <span>{g.head}</span>
+          <span className={rel.groupCount}>{g.rows.length}</span>
+        </div>
+        {open && shown.length > 60 ? <VirtualRows rows={shown} renderRow={renderRow} /> : shown.map(renderRow)}
+        {g.rows.length > GROUP_PREVIEW && (
+          <button className={rel.linkBtn} onClick={() => toggleGroup(g.key)}>
+            {open ? "Show fewer" : `Show all ${g.rows.length}`}
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  const heldCount = claims?.held_count ?? 0;
 
   return (
     <div className={styles.tabPanel}>
-      {/* The panel's control bar: mode first (it swaps the view below), a
-          flexible search, then the view controls right-aligned. Counts live
-          in the segments — no separate tally. */}
       <div className={styles.relControls}>
-        <Segmented
-          options={[
-            { value: "claims", label: `Claims${asserted.length ? ` · ${asserted.length}` : ""}` },
-            { value: "context", label: `Co-mentions${context.length ? ` · ${context.length}` : ""}` },
-          ]}
-          value={scope}
-          onChange={setScope}
-          label="Relationship scope"
-          role="tablist"
-          size="sm"
-        />
         <input
           className={styles.relSearch}
-          placeholder="Search relationships…"
+          placeholder="Find a relationship…"
+          aria-label="Find a relationship"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        {sourceOptions.length > 1 && (
+          <select
+            className={styles.browserSelect}
+            aria-label="Source"
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value)}
+          >
+            <option value="">All sources ({asserted.length})</option>
+            {sourceOptions.map(([key, o]) => (
+              <option key={key} value={key}>
+                {o.label} ({o.count})
+              </option>
+            ))}
+          </select>
+        )}
         {storyFilter && (
           <button className={styles.storyFilterChip} onClick={() => setStoryFilter(null)}>
             Story: {storyFilter.title} ✕
@@ -788,6 +673,7 @@ export function RelationshipsTab({
         <div className={styles.relControlsRight}>
           <select
             className={styles.browserSelect}
+            aria-label="Time window"
             value={windowDays}
             onChange={(e) => setWindowDays(Number(e.target.value))}
           >
@@ -804,52 +690,6 @@ export function RelationshipsTab({
           </button>
         </div>
       </div>
-
-      {showAsserted && claims && (claims.sources.length > 0 || claims.held_count > 0) && (
-        <div className={styles.viaRow} role="group" aria-label="Filter by enrichment source">
-          {claims.sources.map((x) => {
-            const on = viaSource === x.source_type;
-            return (
-              <button
-                key={x.source_type}
-                type="button"
-                className={`${styles.viaChip} ${on ? styles.viaChipOn : ""}`}
-                aria-pressed={on}
-                onClick={() => setViaSource(on ? null : x.source_type)}
-                title={`Only the connections ${x.label} claims`}
-              >
-                via {x.label} <span className={styles.viaCount}>{x.linked}</span>
-              </button>
-            );
-          })}
-          {claims.held_count > 0 && (
-            <button
-              type="button"
-              className={styles.heldToggle}
-              aria-expanded={heldOpen}
-              aria-controls="relationships-held"
-              onClick={() => setHeldOpen((o) => !o)}
-              title="Names a source gave that match no entity, or more than one"
-            >
-              unresolved · {claims.held_count}
-            </button>
-          )}
-        </div>
-      )}
-      {showAsserted && heldOpen && claims && claims.held.length > 0 && (
-        <ul id="relationships-held" className={styles.heldList}>
-          {claims.held.map((h) => (
-            <li key={`${h.source_type}-${h.relation}-${h.target_name}`} className={styles.heldItem}>
-              <span className={styles.heldName}>{h.target_name}</span>
-              <span className={styles.groupNote}>
-                {h.relation.replace(/_/g, " ")}
-                {h.target_type ? ` · ${h.target_type.replace(/_/g, " ")}` : ""} · via {h.source_label} ·{" "}
-                {h.held_reason === "ambiguous" ? "matches more than one entity" : "no entity has this name yet"}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
 
       {!graphCollapsed && nodes.length > 0 && (
         <div className={styles.section}>
@@ -946,84 +786,73 @@ export function RelationshipsTab({
         </div>
       )}
 
-      {countryGroups && showAsserted && (
-        <>
-          {renderCountrySection(`Targeting ${entityLabel}`, countryGroups.targets)}
-          {renderCountrySection(`Operating from ${entityLabel}`, countryGroups.operates)}
-          {renderCountrySection(`Infrastructure in ${entityLabel}`, countryGroups.infra)}
-        </>
-      )}
+      <div className={rel.layout}>
+        <div className={rel.list}>
+          {hasReferenceLinks(entityType) && (
+            <ReferenceLinks entityType={entityType} entityId={entityId} onOpen={onOpenEntity} />
+          )}
 
-      {showAsserted && (
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            Asserted relationships <span className={styles.sectionCount}>{asserted.length}</span>
-            <span className={styles.sectionNote}>
-              {viaSource
-                ? `via ${sourceLabel.get(viaSource) ?? viaSource} · ${assertedView.length} claims`
-                : storyFilter
-                ? `filtered to one story · ${assertedView.length} claims`
-                : foldedAll.length > 0
-                  ? `${earnedAll.length} shown · rest grouped below each verb`
-                  : "typed claims, graded by trust"}
-            </span>
+          <div className={rel.sectionHead}>
+            Relationships <span className={rel.count}>{asserted.length}</span>
           </div>
-          {verbGroups.length === 0 ? (
-            <div className={styles.emptySection}>
-              No asserted relationships{search ? " match the search" : " yet"}.
+          {groups.length === 0 ? (
+            <div className={rel.empty}>
+              {asserted.length === 0
+                ? context.length > 0
+                  ? `No relationship is recorded yet. ${context.length} entities are named in the same articles, listed below.`
+                  : "No relationship is recorded yet."
+                : "Nothing matches the filters."}
             </div>
           ) : (
-            verbGroups.map(renderVerbGroup)
+            groups.map(renderGroup)
           )}
-        </div>
-      )}
 
-      {showContext && (
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            Appears alongside <span className={styles.sectionCount}>{context.length}</span>
-            <span className={styles.sectionNote}>co-mentioned in shared reporting, not claims</span>
+          <div className={rel.footerLinks}>
+            {heldCount > 0 && (
+              <button className={rel.linkBtn} aria-expanded={heldOpen} onClick={() => setHeldOpen((o) => !o)}>
+                <span className="caret-glyph">{heldOpen ? "▾" : "▸"}</span> Not matched yet · {heldCount}
+              </button>
+            )}
+            <button className={rel.linkBtn} aria-expanded={coOpen} onClick={() => setCoOpenChoice(!coOpen)}>
+              <span className="caret-glyph">{coOpen ? "▾" : "▸"}</span> Mentioned in the same articles · {context.length}
+            </button>
           </div>
-          {context.length === 0 ? (
-            <div className={styles.emptySection}>No co-mention context{search ? " matches the search" : ""}.</div>
-          ) : (
+
+          {heldOpen && claims && claims.held.length > 0 && (
             <>
-              <div className={styles.ctxGroups}>{ctxGroups.map(renderCtxGroup)}</div>
-              {ctxReporting.length > 0 && (
-                <div className={styles.ctxFold}>
-                  <button
-                    className={styles.metaLink}
-                    onClick={() => setReportingOpen((o) => !o)}
-                    title="Vendors and products named across most coverage: the reporter or the platform in the story, not a relationship"
-                  >
-                    <span className="caret-glyph">{reportingOpen ? "▾" : "▸"}</span> {ctxReporting.length} ubiquitous vendor
-                    {ctxReporting.length === 1 ? "" : "s"} &amp; products
-                  </button>
-                  <span className={styles.groupNote}>
-                    {reportingOpen
-                      ? "named across most coverage: background, not relationships"
-                      : ctxReporting
-                          .slice(0, 4)
-                          .map((r) => r.label)
-                          .join(", ") + (ctxReporting.length > 4 ? "…" : "")}
-                  </span>
-                  {reportingOpen && (
-                    <div className={styles.ctxShelf}>{ctxReporting.map((r) => ctxChip(r, { dot: true }))}</div>
-                  )}
-                </div>
+              <div className={rel.sectionHead}>
+                Not matched yet <span className={rel.count}>{heldCount}</span>
+              </div>
+              <NotMatched held={claims.held} />
+            </>
+          )}
+
+          {coOpen && (
+            <>
+              <div className={rel.sectionHead}>
+                Mentioned in the same articles <span className={rel.count}>{context.length}</span>
+              </div>
+              <p className={rel.sectionNote}>No relationship is stated for these. The number is how many articles name both.</p>
+              <CoMentions rows={ctxRegular} reporting={ctxReporting} onOpen={onOpenEntity} />
+              {totalKnown > allRows.length && !serverExpanded && (
+                <button className={rel.linkBtn} style={{ paddingLeft: 0 }} onClick={() => setServerExpanded(true)}>
+                  Load all {totalKnown} from the server
+                </button>
               )}
             </>
           )}
         </div>
-      )}
 
-      {/* The server-side tail is almost entirely co-mention context — the
-          claims view never needs this button. */}
-      {scope === "context" && totalKnown > allRows.length && !serverExpanded && (
-        <button className={styles.showMoreBtn} onClick={() => setServerExpanded(true)}>
-          Load all {totalKnown} from server…
-        </button>
-      )}
+        {!isMobile && hasRelationships && (
+          <div className={rel.panelSlot} ref={panelRef}>
+            {selected ? (
+              renderPanel(selected)
+            ) : (
+              <div className={`${rel.panel} ${rel.reasonText}`}>Select a relationship to see why it's listed.</div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

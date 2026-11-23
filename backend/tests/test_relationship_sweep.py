@@ -376,10 +376,14 @@ async def test_the_evidence_endpoint_shows_each_article_and_every_review(
 
 
 @pytest.mark.asyncio
-async def test_the_evidence_endpoint_is_for_admins(client, auth_headers, db_session: AsyncSession):
+async def test_the_evidence_endpoint_is_for_signed_in_users(client, auth_headers, db_session: AsyncSession):
+    # The profile's Relationships tab shows it to every signed-in user;
+    # anonymous visitors don't get it.
     edge = await _claim(db_session, [ARTICLE])
     resp = await client.get(f"/api/entity-relationships/{edge.id}/evidence", headers=auth_headers)
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    assert resp.json()["article_count"] == 1
+    assert (await client.get(f"/api/entity-relationships/{edge.id}/evidence")).status_code == 401
 
 
 @pytest.mark.asyncio

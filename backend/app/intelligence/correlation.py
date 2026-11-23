@@ -967,6 +967,11 @@ async def _get_manual_relationships(db: AsyncSession, entity_type: str, entity_i
     return relationships
 
 
+# Typed relationships the pivot's first page keeps per type, whatever their
+# rank (matches the graph's default graph_max_claim_edges).
+_PIVOT_MAX_CLAIMS = 300
+
+
 async def pivot_from_entity(
     db: AsyncSession,
     entity_type: str,
@@ -1205,7 +1210,15 @@ async def pivot_from_entity(
             if sort != "strength":
                 items = sorted(items, key=_sort_key, reverse=True)
         related_counts[key] = len(items)
-        related[key] = items[offset : offset + limit_per_type]
+        if key == "detection_rules" or offset:
+            related[key] = items[offset : offset + limit_per_type]
+            continue
+        # Relationships are the profile's claims, not ranked co-mentions: the
+        # first page keeps every one (up to the graph's hub cap) on top of the
+        # top co-mentions, so a busy entity's lower-ranked claims still list.
+        claims = [i for i in items if isinstance(i, dict) and i.get("relationship_id")]
+        mentions = [i for i in items if not (isinstance(i, dict) and i.get("relationship_id"))]
+        related[key] = claims[:_PIVOT_MAX_CLAIMS] + mentions[:limit_per_type]
 
     # Hydrate evidence titles only for rows that survived truncation.
     survivors = [i for items in related.values() for i in items if isinstance(i, dict)]
@@ -1485,8 +1498,10 @@ async def build_entity_graph(
             cutoff = datetime.now(UTC) - timedelta(days=window_days)
             win_result = await db.execute(select(Entry.id).where(Entry.id.in_(entry_ids), Entry.published_at >= cutoff))
             entry_ids = [row[0] for row in win_result.all()]
-        if not entry_ids:
-            return
+        # No articles still leaves the typed relationships (MITRE, a feed, an
+        # analyst): the claim block below draws them. An early return here
+        # left an article-less entity (3PARA RAT, five MITRE claims) a single
+        # node.
 
         # Keep only the N strongest neighbors per node — the cap replaces the
         # old minimum-strength filter: sparse entities keep their few (weak)
@@ -1494,7 +1509,7 @@ async def build_entity_graph(
         max_neighbors = int(env_settings.get("graph_max_neighbors_per_node") or 30)
 
         candidates: list[tuple[str, dict]] = []
-        for related_type in ENTITY_CONFIG:
+        for related_type in ENTITY_CONFIG if entry_ids else ():
             # Observables stay off the map unless asked for (or the map is
             # centered on one) — hundreds of ledger atoms as nodes is the
             # graph bloat the ledger design exists to prevent.

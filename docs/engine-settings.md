@@ -236,7 +236,7 @@ How close two entity mentions are, by paragraph. Formula: `1 / (1 + decay_rate Ã
 | `relationship_reporting_source_specificity` | float, `0.45` | Vendors and products below this specificity are treated as *reporting sources* (the company that wrote the report) and grouped separately on profiles. |
 | `graph_max_neighbors_per_node` | int, `30` | Most neighbours shown per node in an entity graph. |
 | `correlation_max_entries` | int, `2000` | Most recent linked articles a pivot or graph reads per entity. Co-occurrence counts on an entity linked to more articles than this cover only the most recent ones. |
-| `graph_max_claim_edges` | int, `300` | Most relationship edges in one graph, most trusted first. |
+| `graph_max_claim_edges` | int, `300` | Most relationship edges in one graph, most trusted first. Relationships no shared article backs (MITRE, enrichment feeds, analysts) count too, including for an entity with no articles. |
 | `correlation_cache_ttl_seconds` | int, `3600` | Seconds correlation results stay cached (`correlation_cache.py`). The `refresh-correlation-cache` job refills it hourly at :10. |
 
 ### Evidence structure
