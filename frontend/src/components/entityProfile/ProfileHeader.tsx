@@ -1,10 +1,11 @@
 /**
  * ProfileHeader — the dossier hero: stacked identity (type chip, display name,
  * aka line, signal badges + activity status, action row) with a portrait tile
- * on the right, washed in the entity's intel-panel color. Scrolls with the page;
+ * on the right, washed in the entity's intel-panel color. The bottom row holds
+ * first / last seen, with the activity sparkline (`aside`) at its right end. Scrolls with the page;
  * the tab bar below it is the sticky element.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Chip } from "@/components/primitives";
@@ -59,6 +60,7 @@ export function ProfileHeader({
   onOpenEntity,
   onOpenArticle,
   onNavigateAway,
+  aside,
 }: {
   entityType: EntityType;
   entityId: string;
@@ -72,6 +74,8 @@ export function ProfileHeader({
   onOpenEntity: (type: EntityType, id: string, label?: string) => void;
   onOpenArticle?: (entryId: string) => void;
   onNavigateAway: () => void;
+  /** Rendered at the right end of the header's bottom row (the activity sparkline). */
+  aside?: ReactNode;
 }) {
   const accent = getEntityColor(entityType);
   const displayName = entityDisplayName(entity, entityId);
@@ -256,6 +260,7 @@ export function ProfileHeader({
         )}
         {/* External pivot links moved to the Overview's Sources card — the
             header meta row keeps only identity facts. */}
+        {aside && <div className={styles.heroAside}>{aside}</div>}
       </div>
     </div>
   );

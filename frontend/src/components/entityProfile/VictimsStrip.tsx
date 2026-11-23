@@ -1,7 +1,7 @@
 /**
  * VictimsStrip — recent leak-site victims for a ransomware actor, from the
  * ransomware tracker, inside the Overview's Recent victims section (whose row
- * carries the title and count). The facts strip counts them; this is the
+ * carries the title and count). The key facts count them; this is the
  * victimology: who, in what sector, where, when. Renders nothing when the
  * tracker has no disclosures for this actor (or is disabled).
  */

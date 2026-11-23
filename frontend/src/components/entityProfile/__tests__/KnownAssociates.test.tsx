@@ -60,15 +60,15 @@ describe("KnownAssociates", () => {
       vi.fn(),
       onTab,
     );
-    // No chips — co-mentions stay in the tab — but the strip still offers a
-    // way in, because the tab count is otherwise the only entry point.
-    expect(screen.getByText("No corroborated claims yet")).toBeInTheDocument();
-    const link = screen.getByRole("button", { name: /all 2 related entities/ });
+    // No claim rows — co-mentions stay in the tab — but a way in remains,
+    // because the tab count is otherwise the only entry point.
+    expect(screen.getByText(/None confirmed yet/)).toBeInTheDocument();
+    const link = screen.getByRole("button", { name: /See all 2 related entities/ });
     fireEvent.click(link);
     expect(onTab).toHaveBeenCalled();
   });
 
-  it("shows asserted claims as verb + entity, corroborated first", () => {
+  it("shows asserted claims under their verb, corroborated first", () => {
     renderStrip({
       malwares: [
         item({
@@ -92,11 +92,12 @@ describe("KnownAssociates", () => {
       ],
     } as never);
 
-    const chips = screen.getAllByRole("button");
-    expect(chips[0]).toHaveTextContent("Sandworm Wiper");
-    expect(chips[0]).toHaveTextContent("MITRE");
-    expect(chips[1]).toHaveTextContent("uses");
-    expect(chips[1]).toHaveTextContent("Chaos Ransomware");
+    const names = screen.getAllByRole("button");
+    expect(names.map((b) => b.textContent)).toEqual(["Sandworm Wiper", "Chaos Ransomware"]);
+    expect(names[0]).toHaveAttribute("title", expect.stringMatching(/Confirmed by MITRE ATT&CK/));
+    // One row for the shared verb, keyed by it, with no source tag.
+    expect(screen.getAllByText("Uses")).toHaveLength(1);
+    expect(screen.queryByText("MITRE")).toBeNull();
     // The old co-mention strength words are gone.
     expect(screen.queryByText(/STRONG/i)).toBeNull();
   });
@@ -140,12 +141,12 @@ describe("KnownAssociates", () => {
         }),
       ],
     } as never);
-    // Every claim filtered → no chips; only the escape-hatch link remains.
-    expect(screen.queryByText(/uses|exploits/)).toBeNull();
+    // Every claim filtered → no claim rows; only the escape-hatch link remains.
+    expect(screen.queryByText(/^(Uses|Exploits)$/)).toBeNull();
     expect(screen.getByRole("button", { name: /related entities/ })).toBeInTheDocument();
   });
 
-  it("caps one entity type at two chips so the strip is not all techniques", () => {
+  it("caps one entity type at four names so the rows are not all techniques", () => {
     const mitre = (over: Partial<EntitySearchResult>) =>
       item({
         relationship_type: "uses",
@@ -155,8 +156,8 @@ describe("KnownAssociates", () => {
         ...over,
       });
     renderStrip({
-      ttps: Array.from({ length: 6 }, (_, i) =>
-        mitre({ id: `tt${i}`, technique_id: `T10${i}`, technique_name: `Technique ${i}`, relationship_id: `rt${i}` }),
+      ttps: Array.from({ length: 20 }, (_, i) =>
+        mitre({ id: `tt${i}`, technique_id: `T1${100 + i}`, technique_name: `Technique ${i}`, relationship_id: `rt${i}` }),
       ),
       malwares: [
         mitre({ id: "m1", name: "Chaos Ransomware", relationship_id: "rm1" }),
@@ -164,18 +165,16 @@ describe("KnownAssociates", () => {
       ],
       tools: [mitre({ id: "t1", name: "Impacket", relationship_id: "rt9" })],
     } as never);
-    // Techniques are capped even though six of them outrank the rest.
-    expect(screen.getAllByText(/^T10\d Technique /)).toHaveLength(2);
+    // Twenty techniques outrank the rest, but the cap keeps room for the other
+    // types: 12 names, 3 of them not techniques.
+    expect(screen.getAllByText(/^T1\d{3} Technique /)).toHaveLength(9);
     expect(screen.getByText("Chaos Ransomware")).toBeTruthy();
     expect(screen.getByText("Impacket")).toBeTruthy();
-    // Every chip is MITRE-corroborated → the badge is said once in the title.
-    expect(screen.queryByText("MITRE")).toBeNull();
-    expect(screen.getByText(/all corroborated by MITRE/)).toBeTruthy();
   });
 
   it("links the overflow chip to the relationships tab", () => {
     const onTab = vi.fn();
-    const many = Array.from({ length: 7 }, (_, i) =>
+    const many = Array.from({ length: 14 }, (_, i) =>
       item({
         id: `m${i}`,
         name: `Malware ${i}`,
@@ -186,8 +185,47 @@ describe("KnownAssociates", () => {
       }),
     );
     renderStrip({ malwares: many } as never, vi.fn(), onTab);
-    const more = screen.getByText(/all 7 claims/);
+    const more = screen.getByText(/See all 14 relationships/);
     fireEvent.click(more);
     expect(onTab).toHaveBeenCalled();
+  });
+
+  it("renders one labelled row per verb", () => {
+    render(
+      <KnownAssociates
+        entityType="threat_actor"
+        entityLabel="APT28"
+        related={
+          {
+            malwares: [
+              item({
+                id: "m2",
+                name: "Sandworm Wiper",
+                relationship_id: "r2",
+                relationship_type: "uses",
+                relationship_direction: "outbound",
+                relationship_confidence: "confirmed",
+                relationship_source: "external_feed",
+              }),
+            ],
+            sectors: [
+              item({
+                id: "s1",
+                name: "Energy",
+                relationship_id: "r6",
+                relationship_type: "targets",
+                relationship_direction: "outbound",
+                relationship_confidence: "confirmed",
+                relationship_source: "external_feed",
+              }),
+            ],
+          } as never
+        }
+        onOpenEntity={vi.fn()}
+        onShowRelationships={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Uses").parentElement).toHaveTextContent("Sandworm Wiper");
+    expect(screen.getByText("Targets").parentElement).toHaveTextContent("Energy");
   });
 });

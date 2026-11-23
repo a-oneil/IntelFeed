@@ -257,12 +257,25 @@ export function EntityProfilePage({ slug }: { slug: string }) {
         onOpenEntity={openEntity}
         onOpenArticle={openArticle}
         onNavigateAway={() => navigate("/workbench/explore")}
+        aside={
+          pulseExpanded ? null : (
+            <PulseLine
+              entityType={entityType}
+              entityId={entityId}
+              window={timeWindow}
+              onWindowChange={setTimeWindow}
+              onExpand={() => togglePulse(true)}
+            />
+          )
+        }
       />
 
-      {/* The activity readout (pulse line / expanded timeline) renders on every
-          tab so the tab bar doesn't jump when switching away from Overview. */}
-      <div className={styles.heroExtras}>
-          {pulseExpanded ? (
+      {/* The expanded timeline and the lifecycle strips render on every tab so
+          the tab bar doesn't jump when switching away from Overview. The
+          collapsed sparkline sits in the header itself. */}
+      {(pulseExpanded || entityType === "cve" || entityType === "observable") && (
+        <div className={styles.heroExtras}>
+          {pulseExpanded && (
             <MentionsTimeline
               entityType={entityType}
               entityId={entityId}
@@ -274,18 +287,11 @@ export function EntityProfilePage({ slug }: { slug: string }) {
               onOpenStory={openStory}
               onCollapse={() => togglePulse(false)}
             />
-          ) : (
-            <PulseLine
-              entityType={entityType}
-              entityId={entityId}
-              window={timeWindow}
-              onWindowChange={setTimeWindow}
-              onExpand={() => togglePulse(true)}
-            />
           )}
           {entityType === "cve" && <CveLifecycleStrip entity={entity} cveDetail={cveDetail} />}
           {entityType === "observable" && <ObservableLifecycleStrip detail={observableDetail} />}
         </div>
+      )}
 
       {/* detection_gaps is in no config — it appends itself while active so
           the rail's "Review gaps" jump gets a highlighted tab and a way back. */}

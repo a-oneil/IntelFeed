@@ -35,7 +35,6 @@ export function IdentityMetaFields({
   const sources = (key: string, label: string) =>
     provenance ? (
       <FieldProvenance
-        field={key}
         label={label}
         bucket={provenance.fields[key]}
         unsourced={provenance.unsourced_fields.includes(key)}

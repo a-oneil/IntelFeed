@@ -106,10 +106,21 @@
 .metaRow {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-end;
   gap: var(--sp-4);
   font-size: var(--fs-base);
   color: var(--text-secondary);
   padding: var(--sp-3) 0 var(--sp-4);
+}
+
+/* The activity sparkline: bottom-right of the header, on the meta row. */
+.heroAside {
+  margin-left: auto;
+  max-width: 100%;
+}
+@media (max-width: 640px) {
+  .heroAside { margin-left: 0; }
+  .heroAside .pulseLine { align-items: flex-start; }
 }
 
 .metaItem {
@@ -1423,98 +1434,6 @@
   margin-top: 6px;
 }
 
-/* ── Known associates strip ───────────────────────────────────────────── */
-.associates {
-  margin: var(--sp-2) 0 18px;
-}
-.associatesTitle {
-  font-size: var(--fs-xs);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
-  margin-bottom: var(--sp-3);
-}
-.associatesRow {
-  display: flex;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
-}
-.associateChip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-3);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 5px 11px;
-  cursor: pointer;
-  font-family: inherit;
-}
-.associateChip:hover {
-  border-color: var(--bg-hover);
-  background: var(--bg-tertiary);
-}
-.associateDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.associateName {
-  font-size: var(--fs-base);
-  font-weight: 600;
-  color: var(--text-primary);
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.associateVerb {
-  font-family: var(--font-display);
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: lowercase;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.associateMark {
-  font-family: var(--font-display);
-  font-size: var(--fs-2xs);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  border-radius: var(--r-sm);
-  padding: 1px 5px;
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-.associateMark_corroborated {
-  background: color-mix(in srgb, var(--success) 15%, transparent);
-  color: var(--success);
-}
-.associateMark_recurring {
-  background: color-mix(in srgb, var(--accent-intel) 15%, transparent);
-  color: var(--accent-intel);
-}
-.associateMore {
-  display: inline-flex;
-  align-items: center;
-  font-size: var(--fs-base);
-  color: var(--text-secondary);
-  background: none;
-  border: 1px dashed var(--border);
-  border-radius: var(--r-md);
-  padding: 5px 11px;
-  cursor: pointer;
-  font-family: inherit;
-}
-.associateMore:hover {
-  color: var(--text-primary);
-  border-color: var(--bg-hover);
-}
-
 /* ── Hero polish: portrait, aka line, CVE stat row ────────────────────── */
 
 .akaLine {
@@ -1583,13 +1502,6 @@
   margin-top: 14px;
   display: grid;
   gap: var(--sp-3);
-}
-.developmentsTitle {
-  font-size: var(--fs-xs);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
 }
 .development {
   display: flex;
@@ -1958,15 +1870,6 @@
 /* Inside the composer the preview is already indented by the card, so it drops
    the 52px gutter the offer previews use to clear their kind column. */
 .intakeComposer .intakePreview { margin-left: 0; }
-
-.actionCode {
-  font-family: var(--font-display);
-  font-size: var(--fs-sm);
-  background: var(--bg-tertiary);
-  padding: 0 var(--sp-2);
-  border-radius: var(--r-sm);
-  margin-right: var(--sp-2);
-}
 
 /* ── Essential reading ────────────────────────────────────────────────── */
 .reading {
@@ -2930,67 +2833,26 @@ a.affProdLink[href^="http"] {
    card, no well — so the header flows straight into the tab bar. */
 .pulseLine {
   display: flex;
-  align-items: baseline;
-  gap: var(--sp-5);
-  padding: var(--sp-3) 20px 2px;
-  min-height: 34px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-2);
 }
 .pulseSpark {
   flex-shrink: 0;
-  align-self: center;
   cursor: pointer;
 }
 .pulseSparkBase {
   stroke: var(--bg-tertiary);
   stroke-width: 1;
 }
-.pulseStats {
-  font-size: var(--fs-base);
+.pulseEmpty {
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
-  white-space: nowrap;
-}
-.pulseStats b {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-.pulseDeltaUp,
-.pulseDeltaDown {
-  font-size: var(--fs-base);
-  font-weight: 600;
-  white-space: nowrap;
-}
-.pulseDeltaUp {
-  color: var(--severity-high);
-}
-.pulseDeltaDown {
-  color: var(--success);
-}
-.pulseQuality {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-base);
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-.pulseQualityDot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-muted);
-}
-.pulseQualityDot[data-tone="good"] {
-  background: var(--success);
-}
-.pulseQualityDot[data-tone="warn"] {
-  background: var(--warning);
 }
 .pulseCtls {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: var(--sp-4);
-  align-self: center;
 }
 .pulseSelect {
   font-family: var(--font-mono);
@@ -3760,16 +3622,16 @@ a.affProdLink[href^="http"] {
   box-shadow: -10px 0 8px -6px var(--bg-secondary);
 }
 
-/* The brief: assessment with the next-action chips right under it. */
+/* The brief: assessment, key facts, what changed, next steps — one column. */
 .brief {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-4);
+  gap: 22px;
 }
 
 /* A long pasted-in description shows its opening lines until unfolded. */
 .assessmentFolded {
-  max-height: 9.6em;
+  max-height: 6.4em;
   overflow: hidden;
   mask-image: linear-gradient(#000 70%, transparent);
 }
@@ -3786,80 +3648,38 @@ a.affProdLink[href^="http"] {
 }
 .assessmentFoldToggle:hover { text-decoration: underline; }
 
-.nextActions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2) var(--sp-3);
-}
-.actionChip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  min-height: 26px;
-  padding: 0 var(--sp-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--bg-secondary);
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.actionDot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-muted);
-}
-.actionTone_hot .actionDot { background: var(--danger); }
-.actionTone_warm .actionDot { background: var(--severity-high); }
-.actionTone_cool .actionDot { background: var(--accent-intel); }
-.actionTone_calm .actionDot { background: var(--success); }
-.actionChipBtn {
-  border: 0;
-  background: none;
-  padding: 0 0 0 var(--sp-1);
-  font: inherit;
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--accent);
-  cursor: pointer;
-}
-.actionChipBtn:hover:not(:disabled) { text-decoration: underline; }
-.actionChipBtn:disabled { opacity: 0.6; cursor: default; }
-
-/* Facts strip: one tile per fact, across the width. */
-.facts {
+/* Key facts: one labelled row per fact (SnapshotCard's numbers, the activity
+   verdict, KnownAssociates' claims by verb). */
+.keyFacts {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
-.factsStrip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+.keyFactRows {
+  display: flex;
+  flex-direction: column;
 }
 .factTile {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  column-gap: var(--sp-4);
+  align-items: baseline;
   min-width: 0;
-  padding: var(--sp-2) 14px;
-  border-left: 1px solid var(--border);
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
 }
-.factTile:first-child {
-  border-left: 0;
-  padding-left: 0;
+.factTile:first-child { border-top: 0; }
+@media (max-width: 640px) {
+  .factTile { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; }
+  .factKey { grid-column: 1 / -1; }
 }
 .factKey {
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
 }
 .factVal {
-  font-size: var(--fs-lg);
-  font-weight: 600;
+  font-size: var(--fs-base);
+  font-weight: 400;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
   min-width: 0;
@@ -3874,16 +3694,132 @@ a.affProdLink[href^="http"] {
   font-size: var(--fs-base);
 }
 .factSub {
+  display: block;
   font-size: var(--fs-xs);
   color: var(--text-secondary);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+/* Who says so: a quiet mono tag at the row's right edge. */
+.factEvidence {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  text-align: right;
   white-space: nowrap;
 }
+.factEvidence:empty { display: none; }
+/* An entity name in a fact: reads as text, underlined to show it opens. */
+.factLink {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--text-primary);
+  text-decoration: underline dotted var(--text-muted);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.factLink:hover:not(:disabled) { color: var(--accent); }
+.factLink:disabled { opacity: 0.6; cursor: default; }
+.claimsNone { color: var(--text-secondary); }
+
+/* Next steps: the panel that closes the brief. */
+.move {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-3) var(--sp-5);
+  align-items: end;
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+}
+@media (max-width: 640px) {
+  .move { grid-template-columns: minmax(0, 1fr); }
+}
+.moveMain {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.moveHead { font-size: var(--fs-base); color: var(--text-primary); }
+.moveActs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+}
+.moveGo {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 55%, transparent);
+}
+.moveRow {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px var(--sp-2);
+  font-size: var(--fs-sm);
+}
+.moveDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  align-self: center;
+  background: var(--text-muted);
+}
+.moveDot_hot { background: var(--danger); }
+.moveDot_warm { background: var(--severity-high); }
+.moveDot_cool { background: var(--accent-intel); }
+.moveLabel { font-weight: 600; color: var(--text-primary); }
+.moveWhy { color: var(--text-secondary); }
+.meter {
+  display: flex;
+  height: 8px;
+  margin: 6px 0 5px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-tertiary);
+}
+.meter i { display: block; flex-basis: 0; }
+.meterCovered { background: var(--success); }
+.meterBlind { background: var(--warning); }
+.meterGap { background: var(--danger); }
+.meterLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+.meterLegend b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.meterLegend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 2px;
+}
+
+/* The activity verdict's dot: hot when it grows, amber when it fades. */
+.verdict { font-weight: 700; }
+.verdict::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  vertical-align: 1px;
+}
+.verdict_rising::before,
+.verdict_new::before { background: var(--danger); }
+.verdict_steady::before { background: var(--accent-intel); }
+.verdict_cooling::before { background: var(--warning); }
 
 /* Section rows. The tab's own divider already separates the stack from the
-   facts strip, so the first row brings no border of its own. */
+   brief, so the first row brings no border of its own. */
 .overviewRows {
   display: flex;
   flex-direction: column;

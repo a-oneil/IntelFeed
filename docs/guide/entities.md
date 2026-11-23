@@ -49,11 +49,16 @@ more:
 | Geography | Countries | Actors from or targeting the country, its role in reports, related countries |
 | Victimology | Sectors | Who targets this industry |
 
-**Overview** holds an **Assessment**, a **Snapshot** of key facts, **Latest
-developments**, the most important articles, AI analysis, **Notes**, and
-**Sources & References**. The Sources card links to searches on sites such
-as MITRE ATT&CK, VirusTotal and MalwareBazaar. A CVE also shows severity and
-exploitation; an actor shows attribution and targeting.
+**Overview** opens with the **Assessment**, then **Key facts**: one row per
+fact, with its source on the right where there is one. They include how reporting has moved over
+90 days (Rising, Steady, Cooling, Quiet or New), the type's numbers, and the
+best-evidenced claims by verb (Targets, Uses). **What changed** lists the
+latest developments. **Next steps** shows detection coverage, with buttons to
+review gaps and build a hunt package. A CVE in KEV shows its patch deadline
+instead. Below that, each section is a single closed row that opens in place:
+the most important articles, AI analysis, **Notes**, and **Sources &
+References**. The Sources card links to searches on sites such as MITRE
+ATT&CK, VirusTotal and MalwareBazaar.
 
 **Relationships**: see [Relationships](#relationships) below.
 

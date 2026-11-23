@@ -82,13 +82,11 @@ function ClaimRow({ claim, onOpenArticle }: { claim: FieldClaim; onOpenArticle?:
 }
 
 export function FieldProvenance({
-  field,
   label,
   bucket,
   unsourced,
   onOpenArticle,
 }: {
-  field: string;
   /** Human name of the field, used in the popover heading. */
   label: string;
   bucket?: FieldProvenanceBucket;
@@ -125,7 +123,7 @@ export function FieldProvenance({
   const state = unsourced ? "unsourced" : conflicting > 0 ? "contested" : "sourced";
   const marker = unsourced ? "?" : conflicting > 0 ? "!" : String(agreeing || claims.length);
   const title = unsourced
-    ? `${label} has no recorded source`
+    ? "No source recorded"
     : conflicting > 0
       ? `${agreeing} source${agreeing === 1 ? "" : "s"} agree, ${conflicting} reported a different value`
       : `${agreeing || claims.length} source${(agreeing || claims.length) === 1 ? "" : "s"}`;
@@ -135,7 +133,7 @@ export function FieldProvenance({
       <Hint
         title="Where this came from"
         body="Every field on a profile records which sources reported it and whether they agree."
-        aside={`${title}. Click to see the claims.`}
+        aside={`${title}. Click to see them.`}
         place="left"
         align="center"
         disabled={open}
@@ -175,9 +173,8 @@ export function FieldProvenance({
 
           {unsourced ? (
             <p className={styles.unsourcedBody}>
-              This value is on the profile, but no source was recorded for it. It predates provenance
-              tracking or was written by a path that does not report one. Editing the field records you
-              as its source.
+              We don't know where this came from. It was added before IntelFeed started recording
+              sources. If you edit it, you are recorded as the source.
             </p>
           ) : (
             <ul className={styles.claims}>
@@ -186,7 +183,6 @@ export function FieldProvenance({
               ))}
             </ul>
           )}
-          <span className={styles.fieldName}>{field}</span>
         </div>
       )}
     </span>
