@@ -422,12 +422,24 @@ button.story:hover {
 .cardRow:hover .cardName {
   text-decoration: underline;
 }
+.cardMain {
+  display: block;
+  min-width: 0;
+}
+.cardLine {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
 .cardName {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .bar {
+  display: block;
   height: 3px;
   background: var(--bg-tertiary);
   border-radius: 2px;
@@ -439,6 +451,7 @@ button.story:hover {
   border-radius: 2px;
 }
 .dup {
+  flex: none;
   font-size: var(--fs-2xs);
   color: var(--warning);
   border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);

@@ -68,14 +68,16 @@ export function CoMentions({
                       onClick={() => onOpen(r.type, r.item.id, r.label)}
                       title={`${r.label}: named in ${n} of the same article${n === 1 ? "" : "s"}`}
                     >
-                      <span style={{ minWidth: 0 }}>
-                        <span className={styles.cardName}>{r.label}</span>
-                        {g.dup(r) && (
-                          <span className={styles.dup} title="Another entity of this type has the same name">
-                            duplicate name
-                          </span>
-                        )}
-                        <span className={styles.bar} style={{ display: "block" }}>
+                      <span className={styles.cardMain}>
+                        <span className={styles.cardLine}>
+                          <span className={styles.cardName}>{r.label}</span>
+                          {g.dup(r) && (
+                            <span className={styles.dup} title="Another entity of this type has the same name">
+                              duplicate name
+                            </span>
+                          )}
+                        </span>
+                        <span className={styles.bar}>
                           <i style={{ width: `${(n / max) * 100}%`, background: color }} />
                         </span>
                       </span>
