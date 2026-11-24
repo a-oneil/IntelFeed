@@ -26,10 +26,14 @@ VALID_CATEGORIES = (
     "dlp",
     "threat_intel",
     "physical_iot",
+    "virtualization",
+    "web_server",
+    "network_infra",
+    "backup_storage",
+    "file_transfer",
     # Legacy categories kept for backward compat
     "endpoint",
     "network",
-    "virtualization",
     "application",
 )
 
