@@ -1054,15 +1054,23 @@ All User.
 | GET | `/api/threat-board/precedent` | Past stories similar to this one |
 | GET | `/api/threat-board/{entity_type}/{entity_key}/rules` | Rules that match a board row |
 | PUT | `/api/threat-board/{entity_type}/{entity_key}/state` | Mark a row `open`, `handled`, `muted` (dismissed) or `tracked` (pinned); the decision also covers the CVEs grouped onto the row |
-| GET | `/api/threat-board/{entity_type}/{entity_key}/hunt-pack` | The row's cached hunt pack: one to three hypotheses with queries in the user's preferred query language (`?language=` overrides it), telemetry checked at read time (`status: none` until drafted) |
-| POST | `/api/threat-board/{entity_type}/{entity_key}/hunt-pack` | Draft or redraft the hunt pack now (synchronous AI call; 409 when the window has nothing to hunt from, 422 when `hunt_pack` has no provider) |
-| GET | `/api/threat-board/{entity_type}/{entity_key}/hunt-pack.md` | The pack as an ATHF hunt file: YAML frontmatter and the LOCK body, Keep left empty. `?hunt_id=H-0042` numbers it so `athf hunt validate` passes as exported; without it the id stays the `H-XXXX` placeholder for the workspace to assign |
 | GET | `/api/coverage-workspace/{entity_type}/{entity_key}` | Articles and behaviours for one threat |
 | GET | `/api/coverage-workspace/{entity_type}/{entity_key}/behaviours/{technique_id}/rules` | Rules for one behaviour |
 | GET, POST | `/api/coverage-workspace/{entity_type}/{entity_key}/sets` | List or save rule sets for the threat |
 | POST | `/api/coverage-workspace/sets/{summary_id}/export` | Export a set |
 | GET | `/api/coverage-workspace/sets/{summary_id}/export.zip` | A set as a ZIP, one file per rule |
 | GET | `/api/coverage-workspace/windows` | The windows the workspace offers |
+
+### Hunt packs
+
+One service for the Threats board drawer and the profile. `scope` is a board window (`7d`, `14d`, `30d`) or `all`, everything reported (the profile's pack, the default). Types: `threat_actor`, `malware`, `cve`, `ttp`, `campaign`; the key is the entity uuid or the board's canonical id (`CVE-2026-1234`, `T1059.001`). `?language=` overrides the user's preferred query language.
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/api/hunt-packs/{entity_type}/{entity_key}` | The pack for a scope and language, telemetry checked at read time. `status` is `none`, `drafting` (poll; `pack` keeps the previous one), `ready` or `failed` (reason in `error`). Each hypothesis carries `technique_refs` (catalog name and profile id, read live) |
+| POST | `/api/hunt-packs/{entity_type}/{entity_key}` | Queue a draft on the AI worker and return 202 with `status: drafting`. A window drafts one to three hypotheses; `all` up to five, claimed techniques and techniques with no rule first. `?more=true` keeps the existing hypotheses, shows them to the model as hunts not to repeat, and adds the new ones after them (H6, H7…, up to 20). 409 when there is nothing to hunt from or the engine is stopped, 422 when `hunt_pack` has no provider |
+| GET | `/api/hunt-packs/{entity_type}/{entity_key}/hunts/{hypothesis_id}.md` | One hypothesis as an ATHF hunt file: YAML frontmatter and the LOCK body, Keep left empty. `?hunt_id=H-0042` numbers it so `athf hunt validate` passes as exported; without it the id stays the `H-XXXX` placeholder |
+| GET | `/api/hunt-packs/{entity_type}/{entity_key}/package.zip` | The hunt package: README, profile, one ATHF file per hypothesis (profile and board packs), queries, telemetry, rules written for the entity and saved rule sets, coverage-coloured ATT&CK layers, entities (claimed apart from co-mentioned), IOCs as CSV and STIX, a timeline and the key articles. Never calls a model |
 
 #### Tools (Registry Execution)
 
