@@ -1063,7 +1063,7 @@ All User.
 
 ### Hunt packs
 
-One service for the Threats board drawer and the profile. `scope` is a board window (`7d`, `14d`, `30d`) or `all`, everything reported (the profile's pack, the default). Types: `threat_actor`, `malware`, `cve`, `ttp`, `campaign`; the key is the entity uuid or the board's canonical id (`CVE-2026-1234`, `T1059.001`). `?language=` overrides the user's preferred query language.
+One service for the Threats board drawer and the profile. `scope` is a board window (`7d`, `14d`, `30d`) or `all`, everything reported (the profile's pack, the default). Types: `threat_actor`, `malware`, `cve`, `ttp`, `tool`, `campaign`; the key is the entity uuid or the board's canonical id (`CVE-2026-1234`, `T1059.001`). `?language=` overrides the user's preferred query language.
 
 | Method | Path | What it does |
 | --- | --- | --- |

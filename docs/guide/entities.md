@@ -55,7 +55,7 @@ fact, with its source on the right where there is one. They include how reportin
 best-evidenced claims by verb (Targets, Uses). **What changed** lists the
 latest developments. **Next steps** shows detection coverage, with buttons to
 review gaps and download a hunt package. A CVE in KEV shows its patch deadline
-instead. On actors, malware, CVEs, techniques and campaigns, **Download hunt
+instead. On actors, malware, CVEs, techniques, tools and campaigns, **Download hunt
 package** first has AI draft up to five hunts from everything reported (a
 line in Next steps shows it running; you can leave the page), then downloads
 one zip: an ATHF hunt file and a query per hunt, the rules written for the

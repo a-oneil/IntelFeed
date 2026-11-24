@@ -680,7 +680,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     nameEditable: true,
     // Malpedia/GitHub links live in the Sources card.
     overviewPanels: ["infrastructure"],
-    overviewSections: ["context", "infrastructure", "reading", "activity", "workspace"],
+    overviewSections: ["context", "infrastructure", "hunts", "reading", "activity", "workspace"],
     cascadeType: "tool",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
   },

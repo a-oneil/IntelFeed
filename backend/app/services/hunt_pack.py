@@ -62,12 +62,13 @@ TARGET_TYPE = "hunt_pack"
 PROFILE_SCOPE = "all"
 SCOPES = (*WINDOW_HOURS, PROFILE_SCOPE)
 # Types a pack can be drafted for. The board only ranks the first three; a
-# technique and a campaign get packs from their profiles.
+# technique, a tool and a campaign get packs from their profiles.
 HUNT_TYPES = (
     entity_types.THREAT_ACTOR,
     entity_types.MALWARE,
     entity_types.CVE,
     entity_types.TTP,
+    entity_types.TOOL,
     "campaign",  # not in entity_types: a curated list, not an extracted type
 )
 

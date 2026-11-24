@@ -14,7 +14,7 @@ import type { QueryLanguage } from "@/utils/queryLanguage";
 export const PROFILE_SCOPE = "all";
 
 /** Entity types a pack can be drafted for (mirrors hunt_pack.HUNT_TYPES). */
-export const HUNT_TYPES = ["threat_actor", "malware", "cve", "ttp", "campaign"] as const;
+export const HUNT_TYPES = ["threat_actor", "malware", "cve", "ttp", "tool", "campaign"] as const;
 
 export function huntsSupported(entityType: string): boolean {
   return (HUNT_TYPES as readonly string[]).includes(entityType);

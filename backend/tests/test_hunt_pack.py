@@ -746,6 +746,42 @@ class TestProfilePack:
         assert claimed["quotes"] == [], "bookkeeping notes never reach the prompt as evidence"
         assert all("reclassified" not in q for e in v["entries"] for q in e["quotes"])
 
+    async def test_a_tool_gets_a_profile_pack_from_the_articles_that_name_it(
+        self, db_session, test_feed, test_user, monkeypatch
+    ):
+        from app.models.tool import EntryTool, Tool
+
+        tool = Tool(name="Rclone Hunt Test")
+        ttp = TTP(technique_id="T1567.002", technique_name="Exfiltration to Cloud Storage", tactic="exfiltration")
+        db_session.add_all([tool, ttp])
+        await db_session.flush()
+        entry = Entry(
+            feed_id=test_feed.id,
+            guid="rclone-hunt-test",
+            title="Rclone Hunt Test used to copy shares to Mega",
+            url="https://example.com/rclone",
+            summary="The operators staged archives and copied them out with rclone.",
+            published_at=datetime.now(UTC) - timedelta(days=3),
+        )
+        db_session.add(entry)
+        await db_session.flush()
+        db_session.add_all(
+            [
+                EntryTool(entry_id=entry.id, tool_id=tool.id),
+                EntryTTP(entry_id=entry.id, ttp_id=ttp.id, source_text="copied them out with rclone"),
+            ]
+        )
+        await db_session.commit()
+        await _ensure_task(db_session)
+        calls = _stub_run_task(monkeypatch, db_session, CANNED)
+
+        assert "tool" in hp.HUNT_TYPES
+        pack = await hp.generate_hunt_pack(db_session, test_user.id, "tool", str(tool.id), "all", "kql")
+        assert pack is not None and pack["entity_type"] == "tool" and pack["label"] == "Rclone Hunt Test"
+        v = calls[0]["variables"]
+        assert [e["title"] for e in v["entries"]] == ["Rclone Hunt Test used to copy shares to Mega"]
+        assert [b["technique_id"] for b in v["behaviours"]] == ["T1567.002"]
+
     async def test_hunt_package_zip(self, db_session, client, auth_headers, test_feed, test_user, monkeypatch):
         import io
         import zipfile
