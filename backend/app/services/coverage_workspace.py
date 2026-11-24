@@ -82,12 +82,16 @@ ENTITY_SOURCES: dict[str, tuple[str, str]] = {
     # they carry are read the same way — so it gets the same build bench as an
     # actor instead of the bare coverage list it had.
     "campaign": ("campaign_entries", "campaign_id"),
+    # A tool (Cobalt Strike, Rclone, PsExec) is hunted by what it does on a
+    # host, read from the articles that name it — the same bench as malware.
+    entity_types.TOOL: ("entry_tools", "tool_id"),
 }
 
 _ENTITY_TABLE: dict[str, str] = {
     entity_types.THREAT_ACTOR: "threat_actors",
     entity_types.MALWARE: "malware_families",
     "campaign": "campaigns",
+    entity_types.TOOL: "tools",
 }
 
 _CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.I)

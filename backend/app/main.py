@@ -785,6 +785,7 @@ from app.api.false_positives import router as false_positives_router
 from app.api.feeds import router as feeds_router
 from app.api.glossary import router as glossary_router
 from app.api.health import router as health_router
+from app.api.hunt_packs import router as hunt_packs_router
 from app.api.hygiene import router as hygiene_router
 from app.api.ingest import router as ingest_router
 from app.api.ingest_files import router as ingest_files_router
@@ -890,6 +891,7 @@ app.include_router(entity_relationships_router, prefix="/api/entity-relationship
 app.include_router(entity_links_router, prefix="/api/entity-links", tags=["entity-links"])
 app.include_router(telemetry_sources_router, prefix="/api/telemetry-sources", tags=["telemetry-sources"])
 app.include_router(threat_board_router, prefix="/api/threat-board", tags=["threat-board"])
+app.include_router(hunt_packs_router, prefix="/api/hunt-packs", tags=["hunt-packs"])
 app.include_router(threads_router, prefix="/api/threads", tags=["threads"])
 app.include_router(coverage_workspace_router, prefix="/api/coverage-workspace", tags=["coverage-workspace"])
 app.include_router(intel_profiles_router, prefix="/api/intel-profiles", tags=["intel-profiles"])

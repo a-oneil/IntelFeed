@@ -19,6 +19,7 @@ export function OverviewSection({
   digest,
   open,
   onToggle,
+  actions,
   children,
 }: {
   id: string;
@@ -29,32 +30,37 @@ export function OverviewSection({
   digest?: ReactNode;
   open: boolean;
   onToggle: () => void;
+  /** Controls at the right of the row's line while it is open (a section's own verbs). */
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   const nameId = `overview-${id}`;
   const bodyId = `overview-${id}-body`;
   return (
     <section className={styles.overviewRow} aria-labelledby={nameId}>
-      <button
-        type="button"
-        className={styles.overviewRowToggle}
-        aria-expanded={open}
-        aria-controls={bodyId}
-        onClick={onToggle}
-      >
-        <svg
-          className={`${styles.overviewRowCaret} ${open ? styles.overviewRowCaretOpen : ""}`}
-          viewBox="0 0 16 16"
-          aria-hidden="true"
+      <div className={styles.overviewRowHead}>
+        <button
+          type="button"
+          className={styles.overviewRowToggle}
+          aria-expanded={open}
+          aria-controls={bodyId}
+          onClick={onToggle}
         >
-          <path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        <span id={nameId} className={styles.overviewRowName}>
-          {title}
-          {count != null && count !== "" && <span className={styles.overviewRowCount}>{count}</span>}
-        </span>
-        {digest && <span className={styles.overviewRowDigest}>{digest}</span>}
-      </button>
+          <svg
+            className={`${styles.overviewRowCaret} ${open ? styles.overviewRowCaretOpen : ""}`}
+            viewBox="0 0 16 16"
+            aria-hidden="true"
+          >
+            <path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span id={nameId} className={styles.overviewRowName}>
+            {title}
+            {count != null && count !== "" && <span className={styles.overviewRowCount}>{count}</span>}
+          </span>
+          {digest && <span className={styles.overviewRowDigest}>{digest}</span>}
+        </button>
+        {open && actions && <span className={styles.overviewRowActions}>{actions}</span>}
+      </div>
       {open && (
         <div id={bodyId} className={styles.overviewRowBody}>
           {children}

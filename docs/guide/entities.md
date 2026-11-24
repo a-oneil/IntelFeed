@@ -54,8 +54,15 @@ fact, with its source on the right where there is one. They include how reportin
 90 days (Rising, Steady, Cooling, Quiet or New), the type's numbers, and the
 best-evidenced claims by verb (Targets, Uses). **What changed** lists the
 latest developments. **Next steps** shows detection coverage, with buttons to
-review gaps and build a hunt package. A CVE in KEV shows its patch deadline
-instead. Below that, each section is a single closed row that opens in place:
+review gaps and download a hunt package. A CVE in KEV shows its patch deadline
+instead. On actors, malware, CVEs, techniques, tools and campaigns, **Download hunt
+package** first has AI draft up to five hunts from everything reported (a
+line in Next steps shows it running; you can leave the page), then downloads
+one zip: an ATHF hunt file and a query per hunt, the rules written for the
+entity, an ATT&CK Navigator layer coloured by rule coverage, its entities with
+the claimed ones kept apart from mere co-mentions, IOCs as CSV and STIX, and
+the key articles. The hunts then show in a **Hunts** row at the top of the
+sections below. Below that, each section is a single closed row that opens in place:
 the most important articles, AI analysis, **Notes**, and **Sources &
 References**. The Sources card links to searches on sites such as MITRE
 ATT&CK, VirusTotal and MalwareBazaar.

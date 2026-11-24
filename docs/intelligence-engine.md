@@ -481,6 +481,8 @@ The reader highlights glossary terms in an article in the browser (`frontend/src
 | Threat Exposure Report (`exposure_report`) | Exposure for a saved scope | executive_summary, scope, threat_surface, ttps, iocs, outlook, references |
 | Detection Engineering Report (`detection_report`) | Detection work | executive_summary, attack_chain, ttps, detection_opportunities, coverage_gaps, iocs, log_source_requirements, recommended_actions, references |
 
+The builtin **Manual** template (`manual`) is a database row with no sections. A report built from it is one free-text markdown body that the analyst writes or pastes; nothing is scaffolded, the AI report wizard leaves it out, and exports print the body as written.
+
 The `iocs` section is filled from the `observables` table: judged rows sighted in the report's source entries, defanged, with their attribution.
 
 Each template has its own AI prompt for writing sections (`REPORT_SECTION_TASKS`, `backend/app/intelligence/reporting.py:110`): `report_section_flash_alert`, `report_section_actor_profile`, `report_section_campaign_tracker`, `report_section_landscape`, `report_section_exposure`, `report_section_detection`. They are seeded from `backend/app/ai/prompts/defaults.py` and editable at Settings → AI Configuration → Prompts.

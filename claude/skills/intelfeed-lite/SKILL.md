@@ -458,6 +458,8 @@ When a call fails, do not only report the error. Try to work around it.
 
 **Authentication errors (401):** The CLI handles token refresh automatically. If 401s persist, ask the user to check their `INTELFEED_USERNAME` and `INTELFEED_PASSWORD` environment variables.
 
+**`Login is rate limited (429)`:** The server allows 10 logins per 5 minutes per address. The CLI keeps its token in `~/.cache/intelfeed/` between runs, so this is rare. Wait the number of seconds the message gives, then batch the remaining calls into one invocation.
+
 **A write was requested:** The lite CLI has no write tools, so it does not recognize a write tool's name. Say the lite skill is read-only and name the tool the full skill would use. Do not look for a workaround.
 
 ## Filling Gaps with Web Search

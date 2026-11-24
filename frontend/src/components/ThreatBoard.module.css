@@ -456,13 +456,6 @@
   gap: 5px;
 }
 
-.dheadNote {
-  margin-left: 10px;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--text-muted);
-}
-
 .dRule {
   display: grid;
   grid-template-columns: 84px minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
@@ -542,8 +535,9 @@
   color: var(--accent);
 }
 
-/* The hunt pack at the drawer's foot: hypotheses and queries the analyst
-   takes to their SIEM. Nothing here is a tracker. */
+/* The hunt pack at the drawer's foot (cards: components/hunt/HuntPackPanel):
+   hypotheses and queries the analyst takes to their SIEM. Nothing here is a
+   tracker. */
 .dHunt {
   grid-column: 1 / -1;
   border-top: 1px solid var(--border-subtle);
@@ -553,112 +547,13 @@
   gap: 10px;
 }
 
-.dHuntEmpty {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  font-size: 12px;
+.dHuntLink {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
   color: var(--text-secondary);
-}
-
-.dHyp {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--r-md);
-}
-
-.dHypHead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.dHypTitle {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.dHypMeta {
-  font-family: var(--font-mono);
-  font-style: normal;
-  font-size: 10px;
-  color: var(--text-muted);
-}
-
-.dHypText {
-  margin: 0;
-  font-size: 12.5px;
-  color: var(--text-secondary);
-  line-height: 1.45;
-}
-
-.dHypTel {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-muted);
-}
-
-.telHave,
-.telMiss {
-  padding: 0 7px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  white-space: nowrap;
-}
-
-.telHave {
-  color: var(--success);
-  border-color: color-mix(in srgb, var(--success) 45%, transparent);
-}
-
-.telMiss {
-  color: var(--danger);
-  border-style: dashed;
-  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
-}
-
-.dQuery {
-  margin: 0;
-  padding: 10px 12px;
-  background: var(--board-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--r-md);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: var(--text-primary);
-  overflow-x: auto;
-  white-space: pre;
-}
-
-.dHypFoot {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.dHypNote {
-  font-size: 11.5px;
-  color: var(--text-secondary);
-  line-height: 1.4;
-}
-
-.dHuntFoot {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  text-decoration: underline dotted var(--text-muted);
+  text-underline-offset: 3px;
+  cursor: pointer;
 }

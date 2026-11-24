@@ -784,7 +784,7 @@ Table `intel_profiles`: a named, reusable report scope. It saves a set of region
 #### IntelReport
 Table `intel_reports`.
 - `title`, `summary`, `created_by` (SET NULL)
-- `template_type` — `actor_profile`, `campaign_tracker`, `detection_report`, `exposure_report`, `flash_alert` or `landscape_report`
+- `template_type` — `actor_profile`, `campaign_tracker`, `detection_report`, `exposure_report`, `flash_alert`, `landscape_report` or `manual` (a blank free-text report)
 - `status` (indexed, default `draft`) — `draft`, `published` or `archived`
 - `tlp_marking` (default `TLP:GREEN`)
 - `content` (JSONB) — the report sections

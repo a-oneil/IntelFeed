@@ -22,6 +22,11 @@ export interface ReportDocSection {
 
 interface Props {
   sections: ReportDocSection[];
+  /**
+   * Markdown written outside any section, drawn first with no heading. It is
+   * the whole document for a template with no sections.
+   */
+  freeText?: string;
   /** Link entity mentions to their profiles (needs a signed-in session). */
   linkEntities?: boolean;
   /**
@@ -171,9 +176,28 @@ export function SectionItemsTable({ items }: { items: Record<string, unknown>[] 
   );
 }
 
-export function ReportDocument({ sections, linkEntities = true, entityMatches, frameless = false, emptyText }: Props) {
+export function ReportDocument({
+  sections,
+  freeText,
+  linkEntities = true,
+  entityMatches,
+  frameless = false,
+  emptyText,
+}: Props) {
   return (
     <div className={frameless ? styles.docPlain : styles.docSurface}>
+      {freeText && freeText.trim() && (
+        <section className={styles.docSection} data-untrusted-content="">
+          <div className={styles.docProse}>
+            <EntityLinkedMarkdown
+              text={freeText}
+              enabled={linkEntities}
+              matches={entityMatches}
+              readOnly={!!entityMatches}
+            />
+          </div>
+        </section>
+      )}
       {sections.map((sec) => {
         const body = sec.body || "";
         const items = Array.isArray(sec.items) ? sec.items : [];
@@ -183,12 +207,14 @@ export function ReportDocument({ sections, linkEntities = true, entityMatches, f
           <section key={sec.name} className={styles.docSection} data-untrusted-content="">
             <h2 className={styles.docHeading}>{sec.title || sec.name}</h2>
             {body && (
-              <EntityLinkedMarkdown
-                text={body}
-                enabled={linkEntities}
-                matches={entityMatches}
-                readOnly={!!entityMatches}
-              />
+              <div className={styles.docProse}>
+                <EntityLinkedMarkdown
+                  text={body}
+                  enabled={linkEntities}
+                  matches={entityMatches}
+                  readOnly={!!entityMatches}
+                />
+              </div>
             )}
             {items.length > 0 && <SectionItemsTable items={items} />}
             {empty && emptyText && <p className={styles.docEmpty}>{emptyText(sec)}</p>}

@@ -146,10 +146,10 @@ DEFAULT_ASSIGNMENT_CONFIGS: dict[str, dict] = {
         # Detailed multi-section briefing — default 4096 truncates on busy days.
         "max_tokens": 8192,
     },
-    # Three hypotheses each carrying a multi-line query: a KQL hunt with two
-    # joins is 300-400 tokens on its own, and a truncated query is worse than
-    # none because it parses and then lies.
-    "hunt_pack": {"max_tokens": 6000},
+    # Up to five hypotheses (a profile pack) each carrying a multi-line query:
+    # a KQL hunt with two joins is 300-400 tokens on its own, and a truncated
+    # query is worse than none because it parses and then lies.
+    "hunt_pack": {"max_tokens": 10000},
 }
 
 SYSTEM_TASKS = [
@@ -491,44 +491,59 @@ Write the story line now, under the contract in your instructions.""",
         "name": "hunt_pack",
         "display_name": "Threat Hunt Pack",
         "description": (
-            "One to three threat-hunting hypotheses for a threat-board row, each with a query in the "
-            "analyst's preferred query language, drafted only from the window's articles and extracted techniques"
+            "Threat-hunting hypotheses for one threat, each with a query in the analyst's preferred query "
+            "language: one to three from a Threats board window, up to five from everything reported on a "
+            "profile, drafted only from the supplied articles, techniques, claims and rules"
         ),
         "category": "generation",
         "variables": [
             "threat_name",
             "entity_type",
             "window",
+            "scope",
+            "max_hypotheses",
             "query_language",
             "query_language_name",
             "entries",
             "entry_count",
+            "article_total",
             "behaviours",
             "facts",
+            "claimed",
+            "linked_rules",
+            "existing_hunts",
+            "telemetry_inventory",
             "log_types",
         ],
-        # Drafted on request from the board's drawer; not a per-article or
-        # per-entity action.
+        # Drafted on request from the board's drawer or the profile's Next
+        # steps; not a per-article or per-entity action.
         "show_in_entry_actions": False,
         "show_in_entity_actions": False,
-        "default_system_template": """You draft threat-hunting hypotheses for a threat hunter. The hunter has one threat in front of them and a window of recent reporting about it; your output is the starting point of a hunt they will run themselves in their SIEM and document in their own hunting workspace. You are not writing a detection rule and not writing a report.
+        "default_system_template": """You draft threat-hunting hypotheses for a threat hunter. {% if scope == "profile" %}The hunter has one threat in front of them and everything IntelFeed holds on it: the techniques and tools it is claimed to use, every technique its articles report, and the detection rules already written for it. The hunter wants to know what this threat does across its whole playbook and where to look for it.{% else %}The hunter has one threat in front of them and a window of recent reporting about it.{% endif %} Your output is the starting point of a hunt they will run themselves in their SIEM and document in their own hunting workspace. You are not writing a detection rule and not writing a report.
 
 CONTRACT — every rule here is load-bearing:
-- Use ONLY the supplied articles, extracted techniques, quoted observable sentences and facts. No background knowledge of this threat, no remembered campaigns, no attribution the input does not state. If it is not in the input, it does not exist.
-- Write one to three hypotheses. Fewer, well-grounded hypotheses beat three thin ones. If the input documents only one searchable behavior, write one.
-- Behavior first. Each hypothesis must describe something the adversary DOES that leaves telemetry — a process chain, an authentication pattern, a configuration change, a traffic shape — not a list of indicators. Hashes, IPs and domains from the input may appear only inside query_notes as enrichment, never as the thing the query looks for.
+- Use ONLY the supplied articles, techniques, quoted sentences, claims, rules and facts. No background knowledge of this threat, no remembered campaigns, no attribution the input does not state. If it is not in the input, it does not exist.
+{% if scope == "profile" %}- Write up to {{ max_hypotheses }} hypotheses, at most one per tactic, spread across the threat's playbook (initial access, credential access, discovery, lateral movement, exfiltration, impact…). Fewer, well-grounded hypotheses beat thin ones.
+- Order of preference: techniques marked claimed: true before ones only mentioned; within those, rule_status no_rule first, then library_only, then covered. A claimed tool (Rclone, PsExec, AnyDesk…) is a strong anchor for a behavior.
+- Do not write a hunt for behavior a listed linked rule already detects; hunt for what it leaves uncovered.
+{% else %}- Write one to {{ max_hypotheses }} hypotheses. Fewer, well-grounded hypotheses beat thin ones. If the input documents only one searchable behavior, write one.
+{% endif %}{% if existing_hunts %}- The hunter already has the hunts listed under "Hunts already in the pack". Every hypothesis you write must hunt a different behavior; reuse a technique only for a clearly different behavior. Fewer new hunts beat near-duplicates.
+{% endif %}- Behavior first. Each hypothesis must describe something the adversary DOES that leaves telemetry — a process chain, an authentication pattern, a configuration change, a traffic shape — not a list of indicators. Hashes, IPs and domains from the input may appear only inside query_notes as enrichment, never as the thing the query looks for.
 - Phrase the hypothesis sentence exactly in the form: "Adversaries use [behavior] to [goal] on [target]." One sentence.
 - Prefer hypotheses whose telemetry the hunter already collects (telemetry_collected: true on the technique). Include at most one hypothesis that needs telemetry they do not collect, and only when the input makes it the most important behavior.
-- techniques: one to three MITRE ATT&CK technique IDs, taken from the extracted techniques supplied whenever one fits. tactic: one slug from this list — initial-access, execution, persistence, privilege-escalation, defense-evasion, credential-access, discovery, lateral-movement, collection, command-and-control, exfiltration, impact. platform: one of Windows, macOS, Linux, Network Devices, Containers, ESXi, IaaS, SaaS, Identity Provider, Office Suite.
+- techniques: one to three MITRE ATT&CK technique IDs, taken from the techniques supplied whenever one fits. tactic: one slug from this list — initial-access, execution, persistence, privilege-escalation, defense-evasion, credential-access, discovery, lateral-movement, collection, command-and-control, exfiltration, impact. platform: the target the hunt looks at, one of Windows, macOS, Linux, Network Devices, Containers, ESXi (VMware ESXi hosts and vCenter appliances), IaaS, SaaS, Identity Provider, Office Suite. Inventory sources list in [brackets] the platforms they see; a source with no brackets sees every platform (network and host-independent logs). Pick a source that sees the hunt's platform.
+- WHERE THE LOGS ARE. The query language says where the query runs, not what is in it. Pick the log that actually sees the behavior on its target, from the hunter's telemetry inventory below. Agent events (CrowdStrike Falcon ProcessRollup2, Defender DeviceProcessEvents, Sysmon, Carbon Black) exist only on hosts that run the agent: Windows, macOS and supported Linux servers. Appliances and hypervisors run no agent — VMware vCenter/VCSA and ESXi, firewalls, VPN gateways, load balancers, storage, SaaS — so hunt them through their own logs forwarded to the SIEM (vCenter vpxd/SSO/events, VCSA shell and audit logs, ESXi hostd/shell/auth logs by syslog; device syslog; SaaS audit APIs) or through network telemetry around them (firewall, NetFlow, proxy, DNS). Never query agent events for a target an agent cannot run on.
+- log_source: one sentence naming that log and how it reaches the SIEM, e.g. "vCenter VCSA syslog (vpxd, sso, shell) forwarded to LogScale". source_name: the exact name of the inventory source that holds it, copied from the list below, or "" when no source in the inventory does — then still write the query against that log's conventional source and say in query_notes that it must be onboarded first.
 - data_sources: ONLY ids from the supplied log_types list (for example auth.mfa, process.creation, vpn.session). They are matched against the hunter's telemetry inventory; an id outside the list can never match and must not be used. Two to four ids.
-- query: written in {{ query_language_name }} and nothing else. It is a HUNTING query, not an alert: bound it to the last 7 days, aggregate or summarize so the result is a triage table (counts, distinct counts, first/last seen, grouped by the thing the hunter would pivot on), and cap raw-row output at 100. Use that platform's standard schema (Sentinel tables and KQL operators; Splunk CIM fields and index=/sourcetype= scoping; ECS field names for ES|QL; Sigma logsource/detection YAML). Where a name depends on the hunter's environment (an index, an allowlist, a lookup), use the conventional one and say so in query_notes rather than inventing a placeholder syntax that will not parse.
+- hunting_query: written in {{ query_language_name }} and nothing else, one statement or pipe stage per line. It is a HUNTING query, not an alert: bound it to the last 7 days, aggregate or summarize so the result is a triage table (counts, distinct counts, first/last seen, grouped by the thing the hunter would pivot on), and cap raw-row output at 100. Use that platform's standard schema (Sentinel tables and KQL operators; Splunk CIM fields and index=/sourcetype= scoping; ECS field names for ES|QL; Sigma logsource/detection YAML). Where a name depends on the hunter's environment (an index, an allowlist, a lookup), use the conventional one and say so in query_notes rather than inventing a placeholder syntax that will not parse.
 - query_notes: two or three sentences — what the query finds, what to adapt (index names, allowlists, time range), and any indicator from the input worth adding as enrichment.
 - false_positives: one sentence naming the legitimate activity that will also match and how to tell it apart.
+- evidence: one sentence saying what in the input this hunt rests on — the claim (with its confidence) or a short quote, and how many articles report it.
 - title: at most ten words, the behavior in plain English.
 - No filler, no preamble, no restating the threat's name or counts.
 
-Respond with JSON: {"hypotheses": [{"title": "...", "hypothesis": "Adversaries use ... to ... on ...", "tactic": "...", "techniques": ["T1234"], "platform": "...", "data_sources": ["..."], "query": "...", "query_notes": "...", "false_positives": "..."}]}""",
-        "default_prompt_template": """Threat: {{ threat_name }} ({{ entity_type }}), window: {{ window }}, {{ entry_count }} articles. Query language: {{ query_language_name }}.
+Respond with JSON: {"hypotheses": [{"title": "...", "hypothesis": "Adversaries use ... to ... on ...", "tactic": "...", "techniques": ["T1234"], "platform": "...", "data_sources": ["..."], "hunting_query": "...", "query_notes": "...", "false_positives": "...", "evidence": "...", "log_source": "...", "source_name": "..."}]}""",
+        "default_prompt_template": """Threat: {{ threat_name }} ({{ entity_type }}), {% if scope == "profile" %}all reporting{% if article_total %} ({{ article_total }} articles){% endif %}{% else %}window: {{ window }}{% endif %}, {{ entry_count }} articles shown below. Query language: {{ query_language_name }}.
 
 {% if facts %}## Vulnerability facts (ground your claims; do not restate as bare numbers)
 {% if facts.affected %}**Affected**: {{ facts.affected | join(", ") }}
@@ -536,12 +551,18 @@ Respond with JSON: {"hypotheses": [{"title": "...", "hypothesis": "Adversaries u
 {% endif %}{% if facts.is_kev %}**On CISA KEV**{% if facts.kev_date_added %} since {{ facts.kev_date_added }}{% endif %}
 {% endif %}{% if facts.exploit_status %}**Exploit status**: {{ facts.exploit_status }}{% endif %}{% if facts.exploit_availability %} | **Exploit availability**: {{ facts.exploit_availability }}{% endif %}
 
-{% endif %}## Techniques extracted from the window
-{% if behaviours %}{% for b in behaviours %}- {{ b.technique_id }} {{ b.technique_name }}{% if b.tactic %} ({{ b.tactic }}){% endif %} — {{ b.entry_count }} article{{ "s" if b.entry_count != 1 else "" }}{% if b.is_new %}, NEW this window{% endif %}; telemetry_collected: {{ "true" if b.telemetry_collected else "false" }}{% if b.channels %}; ATT&CK data sources: {{ b.channels | join(", ") }}{% endif %}
+{% endif %}{% if claimed %}## Claimed relationships (tools, malware, CVEs, actors)
+{% for c in claimed %}- {{ c.verb }} {{ c.name }} ({{ c.type }}, {{ c.confidence }}){% if c.description %} — {{ c.description }}{% endif %}
+{% endfor %}
+{% endif %}## Techniques{% if scope == "profile" %} (claimed first, then no rule first){% else %} extracted from the window{% endif %}
+{% if behaviours %}{% for b in behaviours %}- {{ b.technique_id }} {{ b.technique_name }}{% if b.tactic %} ({{ b.tactic }}){% endif %} — {{ b.entry_count }} article{{ "s" if b.entry_count != 1 else "" }}{% if b.is_new %}, NEW{% endif %}{% if b.claimed is defined %}; claimed: {{ "true" if b.claimed else "false" }}; rule_status: {{ b.rule_status }}{% endif %}; telemetry_collected: {{ "true" if b.telemetry_collected else "false" }}{% if b.channels %}; ATT&CK data sources: {{ b.channels | join(", ") }}{% endif %}
 {% for q in b.quotes %}  > {{ q.text }}{% if q.observable_value %} [{{ q.observable_type }}: {{ q.observable_value }}]{% endif %}
 {% endfor %}{% endfor %}{% else %}(none extracted — hypothesize only from the articles below){% endif %}
 
-## Articles
+{% if linked_rules %}## Rules already written for this threat (do not duplicate)
+{% for r in linked_rules %}- [{{ r.rule_type }}] {{ r.title }}{% if r.techniques %} — {{ r.techniques | join(", ") }}{% endif %}
+{% endfor %}
+{% endif %}## Articles
 {% for entry in entries %}
 ### {{ loop.index }}. {{ entry.title }}
 **Source**: {{ entry.source }}{% if entry.published_at %} | **Published**: {{ entry.published_at }}{% endif %}
@@ -552,10 +573,17 @@ Respond with JSON: {"hypotheses": [{"title": "...", "hypothesis": "Adversaries u
 ---
 {% endfor %}
 
-## Allowed data_sources ids
+{% if existing_hunts %}## Hunts already in the pack (write different ones)
+{% for h in existing_hunts %}- {{ h.title }}{% if h.techniques %} — {{ h.techniques | join(", ") }}{% endif %}
+{% endfor %}
+{% endif %}{% if telemetry_inventory %}## The hunter's telemetry inventory (enabled sources, by category: names, then the log types they give between them)
+{% for c in telemetry_inventory %}- {{ c.category }}: {{ c.sources | join("; ") }}{% if c.log_types %} — {{ c.log_types | join(", ") }}{% endif %}
+{% endfor %}No category or source above means the hunter does not collect it.
+
+{% endif %}## Allowed data_sources ids
 {{ log_types | join(", ") }}
 
-Draft the hunt pack now, under the contract in your instructions. Queries in {{ query_language_name }} only.""",
+Draft the hunt pack now, under the contract in your instructions: at most {{ max_hypotheses }} hypotheses, queries in {{ query_language_name }} only.""",
         "output_schema": {
             "type": "object",
             "properties": {
@@ -570,11 +598,35 @@ Draft the hunt pack now, under the contract in your instructions. Queries in {{ 
                             "techniques": {"type": "array", "items": {"type": "string"}},
                             "platform": {"type": "string"},
                             "data_sources": {"type": "array", "items": {"type": "string"}},
-                            "query": {"type": "string"},
+                            # Not "query": ai_tasks.output_schema is JSONB,
+                            # which orders keys by length, and structured
+                            # output writes fields in schema order — a
+                            # five-letter key put the query before the
+                            # hypothesis it tests, and models left it empty.
+                            "hunting_query": {"type": "string"},
                             "query_notes": {"type": "string"},
                             "false_positives": {"type": "string"},
+                            "evidence": {"type": "string"},
+                            "log_source": {"type": "string"},
+                            "source_name": {"type": "string"},
                         },
-                        "required": ["hypothesis", "query", "data_sources"],
+                        # Every field: with structured output a model leaves
+                        # out whatever is optional, and tactic, platform and
+                        # evidence are what the cards and ATHF files show.
+                        "required": [
+                            "title",
+                            "hypothesis",
+                            "tactic",
+                            "techniques",
+                            "platform",
+                            "data_sources",
+                            "hunting_query",
+                            "query_notes",
+                            "false_positives",
+                            "evidence",
+                            "log_source",
+                            "source_name",
+                        ],
                     },
                 },
             },

@@ -2731,6 +2731,11 @@ const CATEGORY_LABELS: Record<string, string> = {
   dlp: "DLP / Data Security",
   threat_intel: "Threat Intelligence Platforms",
   physical_iot: "Physical Security / IoT",
+  virtualization: "Virtualization",
+  web_server: "Web Servers",
+  network_infra: "Network Infrastructure",
+  backup_storage: "Backup & Storage",
+  file_transfer: "Managed File Transfer",
 };
 
 function TelemetrySourcesSection() {

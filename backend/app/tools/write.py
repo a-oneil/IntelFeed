@@ -83,6 +83,40 @@ def _validate_template_type(template_type: str) -> dict | None:
     return None
 
 
+async def _validate_usable_template(db: AsyncSession, user_id: uuid.UUID, template_type: str) -> dict | None:
+    """A builtin code template, or a saved template this user may build from.
+
+    Saved templates are the builtin rows (Manual, IOC Bulletin, Country Threat
+    Brief), shared ones and the user's own; admins may use any. Same rule as
+    the API's template check, so the tool cannot reach a private template.
+    """
+    if template_type in REPORT_TEMPLATES:
+        return None
+    from app.models.report_template import ReportTemplate
+    from app.models.user import User
+
+    tmpl = (
+        await db.execute(select(ReportTemplate).where(ReportTemplate.template_slug == template_type))
+    ).scalar_one_or_none()
+    if tmpl is not None:
+        if tmpl.is_builtin or tmpl.is_shared or tmpl.created_by == user_id:
+            return None
+        user = await db.get(User, user_id)
+        if user is not None and user.role == "admin":
+            return None
+    usable = (
+        await db.execute(
+            select(ReportTemplate.template_slug).where(
+                (ReportTemplate.is_builtin == True)  # noqa: E712
+                | (ReportTemplate.is_shared == True)  # noqa: E712
+                | (ReportTemplate.created_by == user_id)
+            )
+        )
+    ).scalars()
+    valid = sorted(set(_REPORT_TEMPLATE_TYPES) | set(usable))
+    return {"error": f"unknown template_type '{template_type}'; valid: {valid}"}
+
+
 def _merge_aliases(entity_type: str, entity, name: str, aliases: list[str] | None) -> None:
     """Fold an incoming name + aliases into ``entity.aliases`` without duplicates.
 
@@ -1098,16 +1132,25 @@ async def _create_automation_rule(
     name="create_intel_report",
     description=(
         "Create a draft intelligence report from a template with linked entities and entries. "
-        f"Templates: {', '.join(_REPORT_TEMPLATE_TYPES)}. Uses TLP 2.0 markings. The legacy TLP:WHITE "
-        "is accepted and normalized to TLP:CLEAR."
+        f"Templates with sections: {', '.join(_REPORT_TEMPLATE_TYPES)}; saved templates (ioc_bulletin, "
+        "country_threat_brief, and any shared or your own) are accepted by slug. For a report you have "
+        "already written, use template_type 'manual': it has no sections, and body holds the whole report "
+        "as markdown. With another template, body is free text shown above the sections. Uses TLP 2.0 "
+        "markings. The legacy TLP:WHITE is accepted and normalized to TLP:CLEAR."
     ),
     input_schema={
         "properties": {
             "title": {"type": "string", "description": "Report title"},
             "template_type": {
                 "type": "string",
-                "enum": _REPORT_TEMPLATE_TYPES,
+                "description": "Template slug, e.g. manual, flash_alert, detection_report",
             },
+            "body": {
+                "type": "string",
+                "description": "Markdown text. The whole report for template_type manual.",
+            },
+            "summary": {"type": "string", "description": "One- or two-sentence executive summary"},
+            "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for the report"},
             "entry_ids": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -1134,10 +1177,13 @@ async def _create_intel_report(
     entry_ids: list[str] | None = None,
     entity_ids: dict | None = None,
     tlp_marking: str = "TLP:GREEN",
+    body: str | None = None,
+    summary: str | None = None,
+    tags: list[str] | None = None,
 ) -> dict:
     from app.intelligence.reporting import generate_report_content
 
-    template_err = _validate_template_type(template_type)
+    template_err = await _validate_usable_template(db, user_id, template_type)
     if template_err:
         return template_err
     tlp_marking, tlp_err = _normalize_tlp_or_error(tlp_marking)
@@ -1146,12 +1192,16 @@ async def _create_intel_report(
 
     eids = [uuid.UUID(e) for e in (entry_ids or [])]
     content = await generate_report_content(template_type, eids, entity_ids or {}, db)
+    if body:
+        content["body"] = body
     report = IntelReport(
         created_by=user_id,
         title=title,
         template_type=template_type,
         tlp_marking=tlp_marking,
         content=content,
+        summary=summary or None,
+        tags=tags or [],
         entry_ids=eids,
         entity_ids=entity_ids or {},
         status="draft",

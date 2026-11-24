@@ -25,6 +25,7 @@ celery_app = Celery(
         "app.workers.enrichment_tasks",
         "app.workers.enrichment_dispatch_tasks",
         "app.workers.report_tasks",
+        "app.workers.hunt_pack_tasks",
         "app.workers.reddit_digest_tasks",
         "app.workers.telegram_link_tasks",
         "app.workers.translation_tasks",
@@ -89,6 +90,8 @@ celery_app.conf.update(
         "app.workers.daily_summary_tasks.generate_daily_summaries": {"queue": "ai"},
         "app.workers.reddit_digest_tasks.generate_reddit_digest": {"queue": "ai"},
         "app.workers.report_tasks.generate_full_report": {"queue": "ai"},
+        # Hunt packs: the analyst asked, and may leave the page while it drafts.
+        "app.workers.hunt_pack_tasks.draft_hunt_pack": {"queue": "ai"},
         # Interactive global copilot CLI turns — same dedicated worker (owns the
         # OAuth credentials volume), streamed back to the api over Redis.
         "app.workers.copilot_tasks.run_copilot_stream": {"queue": "ai"},

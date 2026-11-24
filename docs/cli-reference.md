@@ -37,6 +37,9 @@ Set these environment variables:
 | `INTELFEED_PASSWORD` | Yes | Your IntelFeed password. Keep it in a secrets store or an untracked file. |
 | `INTELFEED_READ_ONLY` | No | Full CLI only. Set to `1`, `true`, `yes` or `on` to block every write tool. See [Read-Only Mode](#read-only-mode). |
 | `INTELFEED_ALLOW_INSECURE_HTTP` | No | Set to `1` to allow plain `http://` to a host other than localhost, such as a trusted LAN or the Docker Compose network. |
+| `INTELFEED_TOKEN` | No | A ready-made bearer token. The CLI uses it as given: it does not log in, refresh or save anything, and the username and password are not needed. |
+| `INTELFEED_NO_TOKEN_CACHE` | No | Set to `1` to log in on every run and keep no token file. |
+| `INTELFEED_DEBUG` | No | Set to `1` to print each login, refresh and cache step to stderr. |
 
 ```bash
 # On your machine, once per shell (or in your shell profile)
@@ -49,8 +52,11 @@ export INTELFEED_PASSWORD="your-password"
 
 ### How login works
 
-- Each run logs in once with `POST /api/auth/login` and keeps the tokens in memory. Nothing is saved between runs.
-- If a call gets a 401, the CLI refreshes the token (or logs in again) and retries once.
+- The first run logs in with `POST /api/auth/login` and saves the access and refresh tokens to `~/.cache/intelfeed/token-<hash>.json`. The hash comes from the server address and username, so each server and account has its own file. The folder is readable by you only (mode 700) and so is the file (mode 600). The password is never saved.
+- Later runs read that file and do not log in. A missing, damaged or unreadable file means a normal login.
+- If a call gets a 401, the CLI refreshes the token (or logs in again), saves the new tokens and retries once. Access tokens last 2 hours and refresh tokens 7 days.
+- The server allows 10 login and refresh requests per 5 minutes per client address. If a login or refresh gets a 429, the CLI waits for the `Retry-After` time and tries once more when that is 60 seconds or less. Otherwise it stops and prints how long to wait.
+- Delete the file to force a fresh login. `INTELFEED_NO_TOKEN_CACHE=1` turns the file off; each run then logs in, so a loop of more than 10 runs in 5 minutes is refused.
 - Each tool call is a `POST /api/tools/execute`. The request times out after 120 seconds.
 - Redirects are not followed, because that could send your token to another host. A redirect shows up as an `API returned 30x` error. Point `INTELFEED_API_URL` at the final `https://` address.
 
@@ -530,7 +536,7 @@ Source: `backend/app/tools/write.py`.
 | `add_to_campaign` | Link an article or entity to a campaign. | **`campaign_id`**, `entry_id`, `entity_type`, `entity_id`, `role` | write |
 | `link_entities` | Record a relationship between two entities (for example actor `uses` malware). | **`source_type`**, **`source_id`**, **`target_type`**, **`target_id`**, **`relationship_type`**, `description`, `confidence`, `evidence_entry_ids` | write |
 | `create_automation_rule` | Create an automation rule. It starts enabled. | **`name`**, **`trigger_type`**, **`actions`**, `description`, `trigger_config`, `conditions` | write |
-| `create_intel_report` | Create a draft report from a template. | **`title`**, **`template_type`**, `entry_ids`, `entity_ids`, `tlp_marking` | write |
+| `create_intel_report` | Create a draft report from a template. `template_type` takes a builtin or saved template slug; with `manual`, `body` is the whole report as markdown. | **`title`**, **`template_type`**, `entry_ids`, `entity_ids`, `tlp_marking`, `body`, `summary`, `tags` | write |
 | `merge_threat_actors` | Merge a duplicate actor into another. `mode: shadow` only logs. | **`target_id`**, **`source_id`**, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
 | `reclassify_entity` | Move an entity filed under the wrong type. Name the source by `source_id` or `source_name`. | **`source_type`**, **`target_type`**, `source_id`, `source_name`, `target_id`, `target_name`, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
 | `merge_vendors` | Merge a duplicate vendor into another. | **`target_id`**, **`source_id`**, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
@@ -719,6 +725,7 @@ Trigger types start with `on_`. A rule saved with any other spelling never fires
 |---|---|---|
 | `Error: Login failed (401)` on stderr | Wrong username or password | Check `INTELFEED_USERNAME` and `INTELFEED_PASSWORD`. Try logging in to the web app. |
 | `Error: INTELFEED_USERNAME and INTELFEED_PASSWORD must be set.` | A variable is missing | Export both. |
+| `Error: Login is rate limited (429). Try again in N seconds.` on stderr | More than 10 logins or refreshes in 5 minutes from your address | Wait the stated time. Put several tool calls in one run, and leave the token file on. |
 | `{"error": "INTELFEED_API_URL is not set. …"}` | No server address | Export `INTELFEED_API_URL`. |
 | `{"error": "INTELFEED_API_URL http://… is plain http:// to another host, …"}` | Plain http to a remote host | Use `https://`, or set `INTELFEED_ALLOW_INSECURE_HTTP=1` on a trusted network. |
 | `Connection refused` or `Name or service not known` | Wrong URL, or the server is down | `curl "$INTELFEED_API_URL/api/health"`. For a local stack, `docker compose -f docker-compose.dev.yml ps`. |

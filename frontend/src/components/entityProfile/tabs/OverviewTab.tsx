@@ -73,6 +73,9 @@ import { EssentialReading } from "../EssentialReading";
 import { NextActions } from "../NextActions";
 import { CampaignIntake } from "../CampaignIntake";
 import { OverviewSection } from "../OverviewSection";
+import { HuntDraftLinks, HuntRowBody, runsPhrase, shortDate, useHuntDraft } from "@/components/hunt/HuntPackPanel";
+import { PROFILE_SCOPE, huntsSupported } from "@/hooks/useHuntPacks";
+import { queryLanguageShort } from "@/utils/queryLanguage";
 import { useCampaignStats } from "@/hooks/useCampaigns";
 import { SinceLastVisitRibbon } from "../SinceLastVisitRibbon";
 import type { PivotResponse } from "@/api/types";
@@ -214,26 +217,47 @@ export function OverviewTab({
 }) {
   // Public read-only mode: saved assessments show; AI, notes, next actions and edits do not.
   const isVisitor = useIsVisitor();
+  const hunts = useHuntDraft(
+    entityType,
+    entityId,
+    PROFILE_SCOPE,
+    entityDisplayName(entity, entityId),
+    !isVisitor && huntsSupported(entityType),
+  );
+  const huntState = hunts.data;
   const activityRef = useRef<HTMLDivElement>(null);
   const notesRef = useRef<HTMLDivElement>(null);
   const readingRef = useRef<HTMLDivElement>(null);
+  const huntsRef = useRef<HTMLDivElement>(null);
 
   // ── Which sections are open ────────────────────────────────────────────
   const mode = useUIStore((s) => s.profileOverviewMode);
   const stored = useUIStore((s) => s.profileOpenSections[entityType]);
   const setSectionOpen = useUIStore((s) => s.setProfileSectionOpen);
   const sections = useMemo(
-    () => orderedOverviewSections(isVisitor ? config.overviewSections.filter((k) => k !== "workspace") : config.overviewSections),
+    () =>
+      orderedOverviewSections(
+        isVisitor ? config.overviewSections.filter((k) => k !== "workspace" && k !== "hunts") : config.overviewSections,
+      ),
     [config, isVisitor],
   );
   const openKeys = useMemo(
-    () => new Set<OverviewSectionKey>(resolveOpenSections(stored, sections, mode)),
+    () => new Set<OverviewSectionKey>(resolveOpenSections(stored, sections, mode).filter((k) => k !== "hunts")),
     [mode, sections, stored],
   );
-  const isOpen = (key: OverviewSectionKey) => openKeys.has(key);
-  const toggle = (key: OverviewSectionKey) => setSectionOpen(entityType, key, !isOpen(key), [...openKeys]);
+  // Hunts start closed on every visit (only Everything opens them): the row
+  // is a working tool, not part of the brief the remembered rows build.
+  const [huntsOpen, setHuntsOpen] = useState(false);
+  useEffect(() => setHuntsOpen(false), [entityId]);
+  const isOpen = (key: OverviewSectionKey) =>
+    key === "hunts" ? huntsOpen || mode === "everything" : openKeys.has(key);
+  const toggle = (key: OverviewSectionKey) => {
+    if (key === "hunts") setHuntsOpen(!isOpen(key));
+    else setSectionOpen(entityType, key, !isOpen(key), [...openKeys]);
+  };
   const openAnd = (key: OverviewSectionKey, ref: React.RefObject<HTMLElement | null>) => {
-    if (!isOpen(key)) setSectionOpen(entityType, key, true, [...openKeys]);
+    if (key === "hunts") setHuntsOpen(true);
+    else if (!isOpen(key)) setSectionOpen(entityType, key, true, [...openKeys]);
     scrollOnceRendered(ref);
   };
 
@@ -1130,9 +1154,40 @@ export function OverviewTab({
   );
 
   // ── Section bodies ─────────────────────────────────────────────────────
-  type SectionSpec = { digest: string | null; count?: ReactNode; body: ReactNode; hidden?: boolean };
+  type SectionSpec = { digest: string | null; count?: ReactNode; body: ReactNode; hidden?: boolean; actions?: ReactNode };
   const sectionSpec = (key: OverviewSectionKey): SectionSpec => {
     switch (key) {
+      case "hunts": {
+        // On every profile that can draft hunts, drafted or not: the row is
+        // where they are offered as well as where they live.
+        const pack = huntState?.pack ?? null;
+        const dialect = queryLanguageShort(huntState?.language);
+        const digest = hunts.drafting
+          ? `drafting in ${dialect}…`
+          : pack
+            ? [dialect, "all reporting", runsPhrase(pack), pack.generated_at ? `drafted ${shortDate(pack.generated_at)}` : null]
+                .filter(Boolean)
+                .join(" · ")
+            : huntState?.status === "failed"
+              ? "the last draft failed"
+              : "none yet";
+        return {
+          digest,
+          count: pack?.hypotheses.length,
+          hidden: !huntState,
+          actions: pack ? <HuntDraftLinks drafting={hunts.drafting} onRun={hunts.run} /> : undefined,
+          body: (
+            <div ref={huntsRef}>
+              <HuntRowBody
+                draftState={hunts}
+                entityType={entityType}
+                entityKey={entityId}
+                label={entityDisplayName(entity, entityId)}
+              />
+            </div>
+          ),
+        };
+      }
       case "victims":
         return { digest: victimsDigest, count: victims?.total, body: <VictimsStrip entityId={entityId} />, hidden: !victimsDigest };
       case "catalog": {
@@ -1452,6 +1507,7 @@ export function OverviewTab({
             onShowDetectionGaps={onShowDetectionGaps ?? onShowRelationships}
             onDraftAssessment={draftAssessment}
             draftPending={draftAI.isPending}
+            onShowHunts={() => openAnd("hunts", huntsRef)}
           />
         )}
       </div>
@@ -1468,6 +1524,7 @@ export function OverviewTab({
               title={OVERVIEW_SECTION_LABELS[key]}
               count={spec.count}
               digest={spec.digest}
+              actions={spec.actions}
               open={isOpen(key)}
               onToggle={() => toggle(key)}
             >

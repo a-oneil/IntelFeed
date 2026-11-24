@@ -3771,6 +3771,7 @@ a.affProdLink[href^="http"] {
 .moveDot_hot { background: var(--danger); }
 .moveDot_warm { background: var(--severity-high); }
 .moveDot_cool { background: var(--accent-intel); }
+.moveDot_go { background: var(--success); }
 .moveLabel { font-weight: 600; color: var(--text-primary); }
 .moveWhy { color: var(--text-secondary); }
 .meter {
@@ -3829,6 +3830,18 @@ a.affProdLink[href^="http"] {
   min-width: 0;
 }
 .overviewRow:first-child { border-top: 0; }
+.overviewRowHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.overviewRowActions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding-right: var(--sp-1);
+}
 .overviewRowToggle {
   display: flex;
   align-items: center;
