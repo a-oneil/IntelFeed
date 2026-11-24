@@ -254,6 +254,7 @@ export type OverviewPanelKey =
  * opened.
  */
 export type OverviewSectionKey =
+  | "hunts"
   | "victims"
   | "catalog"
   | "context"
@@ -269,7 +270,8 @@ export type OverviewSectionKey =
 
 /**
  * One order for every type: Context first (every type has it), then the rows
- * that are the entity's own record or structure, then what is written about it.
+ * that are the entity's own record or structure, then Hunts (what to go and
+ * look for), then what is written about it.
  */
 export const OVERVIEW_SECTION_ORDER: OverviewSectionKey[] = [
   "context",
@@ -281,6 +283,7 @@ export const OVERVIEW_SECTION_ORDER: OverviewSectionKey[] = [
   "weakness_profile",
   "infrastructure",
   "attribution",
+  "hunts",
   "reading",
   "activity",
   "workspace",
@@ -307,6 +310,7 @@ export function resolveOpenSections(
 }
 
 export const OVERVIEW_SECTION_LABELS: Record<OverviewSectionKey, string> = {
+  hunts: "Hunts",
   victims: "Recent victims",
   catalog: "Catalog",
   context: "Context",
@@ -415,7 +419,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: true,
     overviewPanels: ["infrastructure"],
-    overviewSections: ["infrastructure", "reading", "activity", "workspace"],
+    overviewSections: ["infrastructure", "hunts", "reading", "activity", "workspace"],
     // Campaigns are internal objects; there is nothing to look them up in.
     externalLinks: () => [],
     // No cascadeType: the preview counts extraction links that would be severed,
@@ -443,7 +447,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     // Techniques/attribution now live in the hero (associates strip, badges) —
     // no overview panels repeat them.
     overviewPanels: ["infrastructure"],
-    overviewSections: ["context", "victims", "infrastructure", "reading", "activity", "workspace"],
+    overviewSections: ["context", "victims", "infrastructure", "hunts", "reading", "activity", "workspace"],
     externalLinks: (e) => getPivotLinks("threat_actor", e.name || ""),
     cascadeType: "threat_actor",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -461,7 +465,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     nameEditable: true,
     // Malpedia links live in the Sources card.
     overviewPanels: ["infrastructure"],
-    overviewSections: ["context", "infrastructure", "reading", "activity", "workspace"],
+    overviewSections: ["context", "infrastructure", "hunts", "reading", "activity", "workspace"],
     externalLinks: (e) => getPivotLinks("malware", e.name || ""),
     cascadeType: "malware",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -511,7 +515,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     // Exploit & PoC section; references in Sources. Only the structured
     // CPE affected-products list keeps a panel of its own.
     overviewPanels: ["cve_affected"],
-    overviewSections: ["context", "exploit", "affected", "reading", "activity", "workspace"],
+    overviewSections: ["context", "exploit", "affected", "hunts", "reading", "activity", "workspace"],
     externalLinks: (e) => getPivotLinks("cve", e.cve_id || ""),
     cascadeType: "cve",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -622,7 +626,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     nameEditable: false,
     monoIdKey: "technique_id",
     overviewPanels: ["ttp_mitre", "ttp_family", "ttp_mitigations"],
-    overviewSections: ["context", "catalog", "reading", "activity", "workspace"],
+    overviewSections: ["context", "catalog", "hunts", "reading", "activity", "workspace"],
     externalLinks: (e) => getPivotLinks("ttp", e.technique_id || ""),
     cascadeType: "ttp",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],

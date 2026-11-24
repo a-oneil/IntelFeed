@@ -35,13 +35,16 @@ describe("resolveOpenSections", () => {
 
 /**
  * Every profile stacks its Overview rows in the same order, whatever rows the
- * type has: Context directly under the brief, Stories & reading,
- * Activity and Workspace last. The per-type config only says which rows exist.
+ * type has: Context directly under the brief, Hunts just before Stories &
+ * reading, Activity and Workspace last. The per-type config only says which
+ * rows exist.
  */
 describe("Overview section order", () => {
-  it("puts Context first and reading, activity, workspace last for every type", () => {
+  it("puts Context first, Hunts before reading, and reading, activity, workspace last for every type", () => {
     for (const [type, config] of Object.entries(ENTITY_PROFILE_CONFIG)) {
-      const rows = orderedOverviewSections(config.overviewSections);
+      const rows = orderedOverviewSections(config.overviewSections).filter((k) => k !== "hunts");
+      const all = orderedOverviewSections(config.overviewSections);
+      if (all.includes("hunts")) expect(all[all.indexOf("reading") - 1], type).toBe("hunts");
       // A campaign is an internal object no enrichment source applies to, so
       // it has no Context row; every other type leads with it.
       if (type !== "campaign") expect(rows[0], type).toBe("context");

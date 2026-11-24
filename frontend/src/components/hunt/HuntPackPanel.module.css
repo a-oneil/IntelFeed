@@ -1,0 +1,268 @@
+/* Hunts, one line per hunt (profile Hunts row and Threats board drawer). */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Board header line: "Hunt · 3  KQL · last 14 days · all 3 run …" + actions. */
+.head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.headLabel {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-right: auto;
+}
+
+.headNote {
+  margin-left: 8px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+.hunt {
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+}
+
+.lineToggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.lineToggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--r-sm);
+}
+
+.caret {
+  flex: none;
+  width: 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.hid {
+  flex: none;
+  width: 20px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.title {
+  min-width: 0;
+  font-size: 12.6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tactic {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.needs {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--severity-high);
+  white-space: nowrap;
+}
+
+.lineBtn {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 3px 8px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.lineBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* An open hunt, lined up with its title (caret 10 + gap 10 + id 20 + gap 10). */
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 0 0 14px 50px;
+  min-width: 0;
+}
+
+.hypothesis {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.techniques {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.techLink {
+  color: var(--text-primary);
+  text-decoration: underline dotted var(--text-muted);
+  text-underline-offset: 3px;
+}
+
+.techLink:hover {
+  color: var(--accent);
+}
+
+.reads {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.readsMissing {
+  color: var(--severity-high);
+}
+
+.query {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--bg-tertiary);
+  border-radius: var(--r-md);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  white-space: pre;
+  overflow: auto;
+  max-height: 230px;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 8px 14px;
+  font-size: 11.8px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.k {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  text-decoration: underline dotted var(--text-muted);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.link:hover {
+  color: var(--accent);
+}
+
+.btn {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 4px 9px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.muted {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.error {
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.footer {
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  padding-top: 10px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}

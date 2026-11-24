@@ -5,22 +5,19 @@ import { toast } from "sonner";
 import { AsyncStateLoading } from "@/components/AsyncState";
 import { Segmented } from "@/components/primitives";
 import { useCoverageWorkspace } from "@/hooks/useCoverageWorkspace";
+import { HuntPackPanel, huntApiMessage } from "@/components/hunt/HuntPackPanel";
+import { PROFILE_SCOPE, downloadHuntPackage, useHuntPack } from "@/hooks/useHuntPacks";
 import {
-  downloadHuntFile,
   useBoardRules,
-  useDraftHuntPack,
-  useHuntPack,
   usePrecedent,
   useSetThreatState,
   useThreatBoard,
   type BoardFacet,
-  type HuntHypothesis,
   type ThreatBoardItem,
   type ThreatState,
 } from "@/hooks/useThreatBoard";
 import { useIntelStore } from "@/stores/intelStore";
 import { useOpenThread } from "@/utils/openEntry";
-import { queryLanguageShort } from "@/utils/queryLanguage";
 import styles from "./ThreatBoard.module.css";
 
 /** The Threats board: one briefing row per resolved threat.
@@ -327,133 +324,55 @@ function StoryDrawer({
   );
 }
 
-function apiMessage(err: unknown, fallback: string): string {
-  const msg = (err as { response?: { data?: { message?: string; detail?: string } } })?.response?.data;
-  return msg?.message ?? msg?.detail ?? fallback;
-}
-
-/** The row's hunt pack: one to three hypotheses with queries in the analyst's
-    preferred query language, drafted on request from this window's articles and
-    techniques. A starting point for a hunt that is run in the SIEM and
-    recorded in the ATHF workspace — IntelFeed tracks nothing past the draft. */
+/** The row's hunts: the shared hunt cards (components/hunt/HuntPackPanel)
+    for this window, a Download hunt package button for the whole zip, and a
+    link to the profile's all-reporting hunts when they exist. A starting point
+    for a hunt that is run in the SIEM and recorded in the ATHF workspace —
+    IntelFeed tracks nothing past the draft. */
 function HuntSection({ item, window }: { item: ThreatBoardItem; window: string }) {
-  const { data, isLoading } = useHuntPack(item.entity_type, item.entity_key, window, true);
-  const draft = useDraftHuntPack();
-  const [copied, setCopied] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
-  const pack = data?.pack ?? null;
-  const dialect = queryLanguageShort(data?.language);
+  const navigate = useNavigate();
+  const { data: profile } = useHuntPack(item.entity_type, item.entity_key, PROFILE_SCOPE);
+  const [downloading, setDownloading] = useState(false);
+  const profileCount = profile?.pack?.hypotheses.length ?? 0;
 
-  const run = () =>
-    draft.mutate(
-      { entityType: item.entity_type, entityKey: item.entity_key, window },
-      {
-        onSuccess: () => toast.success(`Hunt pack drafted for ${item.label}`),
-        onError: (err) => toast.error(apiMessage(err, `Could not draft a hunt pack for ${item.label}`)),
-      }
-    );
-
-  const copy = async (h: HuntHypothesis) => {
+  const download = async () => {
+    setDownloading(true);
     try {
-      await navigator.clipboard.writeText(h.query);
-      setCopied(h.id);
-      setTimeout(() => setCopied(null), 1500);
-    } catch {
-      toast.error("Clipboard unavailable. Select the query and copy it.");
-    }
-  };
-
-  const exportFile = async () => {
-    setExporting(true);
-    try {
-      await downloadHuntFile(item.entity_type, item.entity_key, window);
+      await downloadHuntPackage(item.entity_type, item.entity_key, item.label);
     } catch (err) {
-      toast.error(apiMessage(err, "Could not export the hunt file"));
+      toast.error(huntApiMessage(err, "Could not build the hunt package"));
     } finally {
-      setExporting(false);
+      setDownloading(false);
     }
   };
 
   return (
     <div className={styles.dHunt}>
-      <div className={styles.dhead}>
-        Hunt
-        {pack ? ` · ${pack.hypotheses.length} hypothes${pack.hypotheses.length === 1 ? "is" : "es"}` : ""}
-        {data && (
-          <span className={styles.dheadNote}>
-            {data.language_name}
-          </span>
-        )}
-      </div>
-
-      {isLoading && <div className={styles.dmore}>…</div>}
-
-      {!isLoading && !pack && (
-        <div className={styles.dHuntEmpty}>
-          <span>
-            Up to three hunt hypotheses with {dialect} queries, from this window&apos;s articles and techniques.
-          </span>
-          <button
-            className={`${styles.btn} ${styles.btnPrimary}`}
-            disabled={draft.isPending}
-            onClick={run}
-          >
-            {draft.isPending ? "Drafting…" : "Draft hunt pack"}
+      <HuntPackPanel
+        entityType={item.entity_type}
+        entityKey={item.entity_key}
+        label={item.label}
+        scope={window}
+        scopeLabel={`last ${window.replace("d", " days")}`}
+        actions={
+          <button className={styles.btn} onClick={download} disabled={downloading}>
+            {downloading ? "Preparing…" : "Download hunt package"}
           </button>
-        </div>
-      )}
-
-      {pack?.hypotheses.map((h) => (
-        <div key={h.id} className={styles.dHyp}>
-          <div className={styles.dHypHead}>
-            <b className={styles.dHypTitle}>
-              {h.id} · {h.title}
-            </b>
-            {h.techniques.map((t) => (
-              <span key={t} className={styles.dttp}>
-                {t}
-              </span>
-            ))}
-            {h.tactic && <i className={styles.dHypMeta}>{h.tactic}</i>}
-            {h.platform && <i className={styles.dHypMeta}>{h.platform}</i>}
-          </div>
-          <p className={styles.dHypText}>{h.hypothesis}</p>
-          {h.telemetry.length > 0 && (
-            <div className={styles.dHypTel}>
-              <span>requires</span>
-              {h.telemetry.map((t) => (
-                <span
-                  key={t.source}
-                  className={t.have ? styles.telHave : styles.telMiss}
-                  title={t.have ? "Covered by an enabled telemetry source" : "No enabled telemetry source covers this"}
-                >
-                  {t.source}
-                  {t.have ? "" : " · not collected"}
-                </span>
-              ))}
-            </div>
-          )}
-          <pre className={styles.dQuery}>{h.query}</pre>
-          <div className={styles.dHypFoot}>
-            <button className={styles.btn} onClick={() => copy(h)} aria-label={`Copy ${dialect} for ${h.id}`}>
-              {copied === h.id ? "Copied" : `Copy ${dialect}`}
-            </button>
-            {h.query_notes && <span className={styles.dHypNote}>{h.query_notes}</span>}
-          </div>
-          {h.false_positives && <div className={styles.dHypNote}>Expected false positives: {h.false_positives}</div>}
-        </div>
-      ))}
-
-      {pack && (
-        <div className={styles.dHuntFoot}>
-          <button className={`${styles.btn} ${styles.btnPrimary}`} disabled={exporting} onClick={exportFile}>
-            {exporting ? "Exporting…" : "Export ATHF hunt file"}
-          </button>
-          <button className={styles.btn} disabled={draft.isPending} onClick={run}>
-            {draft.isPending ? "Drafting…" : "Draft again"}
-          </button>
-        </div>
-      )}
+        }
+        footer={
+          profileCount > 0 ? (
+            <>
+              All-reporting hunts for {item.label}: {profileCount}, on its profile.{" "}
+              <button
+                className={styles.dHuntLink}
+                onClick={() => navigate(`/workbench/${item.entity_type}/${item.profile_id ?? item.entity_key}`)}
+              >
+                Open
+              </button>
+            </>
+          ) : undefined
+        }
+      />
     </div>
   );
 }

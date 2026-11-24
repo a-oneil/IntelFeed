@@ -84,13 +84,37 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), info: vi.fn(), error: vi.f
 const setStateMutate = vi.fn();
 const draftMutate = vi.fn();
 const downloadSpy = vi.fn();
-// The hunt pack the drawer shows: none until a test sets one.
-let huntPack: import("@/hooks/useThreatBoard").HuntPackResponse = {
-  status: "none",
-  language: "kql",
+const packageSpy = vi.fn();
+// The hunt pack the drawer shows: none until a test sets one. The profile's
+// all-reporting pack stays none, so the drawer offers no profile link.
+const NO_PACK = {
+  status: "none" as const,
+  language: "kql" as const,
   language_name: "KQL (Microsoft Sentinel / Defender XDR)",
   pack: null,
+  started_at: null,
+  error: null,
 };
+let huntPack: import("@/hooks/useHuntPacks").HuntPackResponse = NO_PACK;
+vi.mock("@/hooks/useHuntPacks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/useHuntPacks")>();
+  return {
+    ...actual,
+    useHuntPack: (_type: string, _key: string, scope: string) => ({
+      data: scope === "all" ? NO_PACK : huntPack,
+      isLoading: false,
+    }),
+    useDraftHuntPack: () => ({ mutate: draftMutate, isPending: false }),
+    downloadHuntFile: (...args: unknown[]) => {
+      downloadSpy(...args);
+      return Promise.resolve();
+    },
+    downloadHuntPackage: (...args: unknown[]) => {
+      packageSpy(...args);
+      return Promise.resolve();
+    },
+  };
+});
 vi.mock("@/hooks/useThreatBoard", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/useThreatBoard")>();
   return {
@@ -100,12 +124,6 @@ vi.mock("@/hooks/useThreatBoard", async (importOriginal) => {
     usePrecedent: () => ({ data: precedent }),
     // The drawer's full-width rule inventory — loading state is enough here.
     useBoardRules: () => ({ data: undefined, isLoading: true }),
-    useHuntPack: () => ({ data: huntPack, isLoading: false }),
-    useDraftHuntPack: () => ({ mutate: draftMutate, isPending: false }),
-    downloadHuntFile: (...args: unknown[]) => {
-      downloadSpy(...args);
-      return Promise.resolve();
-    },
   };
 });
 
@@ -209,7 +227,8 @@ describe("ThreatBoard briefing rows", () => {
 
 
 /** The hunt pack at the drawer's foot: drafted on request, copied to the SIEM,
-    exported to ATHF. Nothing here tracks a hunt. */
+    downloaded one ATHF file per hunt or as the whole package. Nothing here
+    tracks a hunt. */
 describe("ThreatBoard hunt pack", () => {
   function openDrawer() {
     renderBoard();
@@ -218,22 +237,24 @@ describe("ThreatBoard hunt pack", () => {
 
   it("offers to draft a pack when none exists, and asks the server for this row and window", () => {
     workspace = EMPTY_WORKSPACE;
-    huntPack = { status: "none", language: "kql", language_name: "KQL (Microsoft Sentinel / Defender XDR)", pack: null };
+    huntPack = NO_PACK;
     openDrawer();
-    fireEvent.click(screen.getByRole("button", { name: "Draft hunt pack" }));
+    fireEvent.click(screen.getByRole("button", { name: "Draft hunts" }));
     expect(draftMutate).toHaveBeenCalledWith(
-      { entityType: "threat_actor", entityKey: "a2", window: "14d" },
+      { entityType: "threat_actor", entityKey: "a2", scope: "14d", more: false },
       expect.anything()
     );
-    expect(screen.queryByText("Export ATHF hunt file")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /ATHF hunt file/ })).not.toBeInTheDocument();
   });
 
-  it("renders each hypothesis with its query, telemetry check and the ATHF export", () => {
+  it("renders each hypothesis with its query, telemetry check, a per-hunt ATHF file and the package", () => {
     workspace = EMPTY_WORKSPACE;
     huntPack = {
       status: "ready",
       language: "kql",
       language_name: "KQL (Microsoft Sentinel / Defender XDR)",
+      started_at: null,
+      error: null,
       pack: {
         entity_type: "threat_actor",
         entity_key: "a2",
@@ -266,12 +287,20 @@ describe("ThreatBoard hunt pack", () => {
       },
     };
     openDrawer();
-    expect(screen.getByText("H1 · Help-desk reset then MFA enrollment")).toBeInTheDocument();
+    // One line per hunt; the first is open, showing its query.
+    expect(screen.getByText("Help-desk reset then MFA enrollment")).toBeInTheDocument();
     expect(screen.getByText("AuditLogs | where TimeGenerated > ago(7d) | take 100")).toBeInTheDocument();
-    expect(screen.getByText("vpn.session · not collected")).toBeInTheDocument();
+    expect(screen.getByText("needs vpn.session")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Draft more" }));
+    expect(draftMutate).toHaveBeenLastCalledWith(
+      { entityType: "threat_actor", entityKey: "a2", scope: "14d", more: true },
+      expect.anything()
+    );
     expect(screen.getByRole("button", { name: "Copy KQL for H1" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Export ATHF hunt file" }));
-    expect(downloadSpy).toHaveBeenCalledWith("threat_actor", "a2", "14d");
+    fireEvent.click(screen.getByRole("button", { name: "Download H1 as an ATHF hunt file" }));
+    expect(downloadSpy).toHaveBeenCalledWith("threat_actor", "a2", "14d", "H1");
+    fireEvent.click(screen.getByRole("button", { name: "Download hunt package" }));
+    expect(packageSpy).toHaveBeenCalledWith("threat_actor", "a2", "APT29");
     // The pack is a starting point: no verdicts, findings or tickets anywhere.
     expect(screen.queryByText(/verdict|finding|ticket/i)).not.toBeInTheDocument();
   });

@@ -3,16 +3,22 @@
  * Computed, not curated: every line is a signal the backend already emits.
  * Actors and malware lead with their detection coverage (techniques with a
  * rule, with a rule whose log source isn't collected, with none) and the
- * Review gaps / Build hunt package buttons; a KEV CVE leads with its patch
+ * Review gaps / Download hunt package buttons; a KEV CVE leads with its patch
  * deadline and rule count. Under that, one line per remaining job (claims to
  * corroborate, a missing assessment, a campaign's suggestions and standing
  * searches), each with its explanation and a text link. Lines disappear as the
  * work gets done.
+ *
+ * Download hunt package drafts the profile's hunts first when there are none
+ * (an AI job on the worker; a line here shows it running), then downloads the
+ * zip. For types without hunts it downloads the research bundle as before.
  */
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import api from "@/api/client";
 import { formatDate } from "@/utils/formatDate";
+import { huntsSupported, useHuntPackageDownload } from "@/hooks/useHuntPacks";
+import { runnableSummary, useElapsed } from "@/components/hunt/HuntPackPanel";
 import { useEntityDetectionGaps } from "@/hooks/useEntityProfile";
 import {
   useAddCampaignEntries,
@@ -47,7 +53,7 @@ const GAPPED_TYPES: EntityType[] = ["threat_actor", "malware"];
 
 const BUNDLE_ENTRY_CAP = 100;
 
-type Tone = "hot" | "warm" | "cool";
+type Tone = "hot" | "warm" | "cool" | "go";
 
 interface Action {
   key: string;
@@ -68,6 +74,7 @@ export function NextActions({
   onShowDetectionGaps,
   onDraftAssessment,
   draftPending,
+  onShowHunts,
 }: {
   entityType: EntityType;
   entityId: string;
@@ -79,6 +86,8 @@ export function NextActions({
   onShowDetectionGaps: () => void;
   onDraftAssessment: () => void;
   draftPending: boolean;
+  /** Opens the Overview's Hunts row. */
+  onShowHunts?: () => void;
 }) {
   const hasGaps = GAPPED_TYPES.includes(entityType);
   const { data: gaps } = useEntityDetectionGaps(
@@ -86,6 +95,9 @@ export function NextActions({
     hasGaps ? entityId : undefined,
   );
   const [exporting, setExporting] = useState(false);
+  const withHunts = huntsSupported(entityType);
+  const hunts = useHuntPackageDownload(entityType, entityId, displayName);
+  const huntElapsed = useElapsed(hunts.status === "drafting" ? hunts.startedAt : null);
 
   // A campaign's next actions are the two tabs it used to carry — Suggestions
   // and Searches — plus the one thing nothing ever told you: that it has gone
@@ -111,6 +123,10 @@ export function NextActions({
   ).filter((e) => e.relationship_id && !isConfirmed(e));
 
   const exportBundle = async () => {
+    if (withHunts) {
+      hunts.start();
+      return;
+    }
     setExporting(true);
     try {
       const entryIds = [...entries]
@@ -148,6 +164,32 @@ export function NextActions({
   const canBundle = entries.length > 0;
 
   const actions: Action[] = [];
+
+  if (withHunts && hunts.drafting) {
+    actions.push({
+      key: "hunts",
+      tone: "cool",
+      label: `Drafting hunts${huntElapsed ? ` · ${huntElapsed}` : ""}`,
+      why: `Up to five${hunts.languageName ? `, in ${hunts.languageName.split(" ")[0]}` : ""}, from ${displayName}'s claimed techniques and tools, techniques with no rule first. The zip downloads when they're ready; you can keep reading meanwhile.`,
+    });
+  } else if (withHunts && hunts.status === "failed") {
+    actions.push({
+      key: "hunts",
+      tone: "warm",
+      label: "The last hunt draft failed",
+      why: hunts.error ?? "",
+      button: onShowHunts ? { label: "Show hunts", onClick: onShowHunts } : undefined,
+    });
+  } else if (withHunts && hunts.pack) {
+    const n = hunts.pack.hypotheses.length;
+    actions.push({
+      key: "hunts",
+      tone: "go",
+      label: `${n} hunt${n === 1 ? "" : "s"} drafted${hunts.pack.generated_at ? ` ${formatDate(hunts.pack.generated_at)}` : ""}`,
+      why: runnableSummary(hunts.pack),
+      button: onShowHunts ? { label: "Show hunts", onClick: onShowHunts } : undefined,
+    });
+  }
 
   if (topStory && topStory.kind === "story") {
     actions.push({
@@ -298,10 +340,18 @@ export function NextActions({
             <button
               className={`${styles.primaryBtn} ${styles.moveGo}`}
               onClick={exportBundle}
-              disabled={exporting}
-              title="One zip with the most recent articles, the entities in them, their IOCs as CSV, and an ATT&CK Navigator layer"
+              disabled={withHunts ? hunts.busy : exporting}
+              title={
+                withHunts
+                  ? "One zip: ATHF hunt files and queries, rules, a coverage-coloured ATT&CK layer, entities, IOCs and the key articles. Drafts the hunts first if there are none."
+                  : "One zip with the most recent articles, the entities in them, their IOCs as CSV, and an ATT&CK Navigator layer"
+              }
             >
-              {exporting ? "Preparing…" : "Download hunt package"}
+              {withHunts && hunts.drafting
+                ? "Drafting hunts…"
+                : (withHunts ? hunts.downloading : exporting)
+                  ? "Preparing…"
+                  : "Download hunt package"}
             </button>
           )}
         </div>
