@@ -37,7 +37,6 @@ Set these environment variables:
 | `INTELFEED_PASSWORD` | Yes | Your IntelFeed password. Keep it in a secrets store or an untracked file. |
 | `INTELFEED_READ_ONLY` | No | Full CLI only. Set to `1`, `true`, `yes` or `on` to block every write tool. See [Read-Only Mode](#read-only-mode). |
 | `INTELFEED_ALLOW_INSECURE_HTTP` | No | Set to `1` to allow plain `http://` to a host other than localhost, such as a trusted LAN or the Docker Compose network. |
-| `INTELFEED_TOKEN` | No | A ready-made bearer token. The CLI uses it as given: it does not log in, refresh or save anything, and the username and password are not needed. |
 | `INTELFEED_NO_TOKEN_CACHE` | No | Set to `1` to log in on every run and keep no token file. |
 | `INTELFEED_DEBUG` | No | Set to `1` to print each login, refresh and cache step to stderr. |
 
