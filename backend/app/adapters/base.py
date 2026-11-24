@@ -3,7 +3,7 @@
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
 # Browsers drop ASCII control characters and spaces around and inside a scheme
@@ -28,6 +28,21 @@ def web_url_or_none(url: str | None) -> str | None:
     return url if scheme in ("", "http", "https") else None
 
 
+# Feeds fill a missing date with a zero value instead of leaving it out: Hugo
+# writes "Mon, 01 Jan 0001" for undated pages, and other generators emit the
+# Unix epoch. Year 1 is datetime.min, which asyncpg stores as -infinity, and
+# .timestamp() on that fails. Nothing real was published at or before the epoch.
+PLACEHOLDER_DATE_CUTOFF = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def real_date_or_none(value: datetime | None) -> datetime | None:
+    """``value``, or None when it is a feed's placeholder for "no date"."""
+    if value is None:
+        return None
+    aware = value if value.tzinfo else value.replace(tzinfo=UTC)
+    return None if aware <= PLACEHOLDER_DATE_CUTOFF else value
+
+
 @dataclass
 class ParsedEntry:
     """Normalized entry from any feed type."""
@@ -49,6 +64,7 @@ class ParsedEntry:
 
     def __post_init__(self) -> None:
         self.url = web_url_or_none(self.url)
+        self.published_at = real_date_or_none(self.published_at)
 
 
 @dataclass
