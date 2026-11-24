@@ -135,6 +135,12 @@ class HuntTelemetry(BaseModel):
     have: bool = Field(description="Whether an enabled telemetry source covers it today")
 
 
+class HuntTechniqueRef(BaseModel):
+    technique_id: str
+    name: str | None = Field(None, description="Catalog name; null when the catalog has no such technique")
+    id: str | None = Field(None, description="The technique's profile uuid, for a link; null when not in the catalog")
+
+
 class HuntHypothesis(BaseModel):
     id: str = Field(description="H1..H3 within the pack")
     title: str
@@ -150,26 +156,43 @@ class HuntHypothesis(BaseModel):
     query: str = Field(description="The hunting query, in the pack's language")
     query_notes: str | None = None
     false_positives: str | None = None
+    evidence: str | None = Field(None, description="Why this hunt: the claim or quote it rests on (profile packs)")
+    log_source: str | None = Field(None, description="The log the query reads and how it reaches the SIEM")
+    source_name: str | None = Field(None, description="The telemetry inventory source holding that log; empty if none")
+    source_have: bool | None = Field(
+        None, description="Whether source_name is an enabled telemetry source (null on packs without log_source)"
+    )
+    technique_refs: list[HuntTechniqueRef] = Field(
+        default_factory=list, description="techniques with their catalog names and profile ids, read live"
+    )
 
 
 class HuntPack(BaseModel):
     entity_type: str
     entity_key: str
     label: str
-    window: str
+    window: str = Field(description="Scope the pack was drafted from: a board window (7d, 14d, 30d) or all")
     language: str = Field(description="Query language id, e.g. kql, spl, esql (see app.ai.query_language)")
     language_name: str
     generated_at: str | None = None
     model: str | None = None
-    entry_ids: list[str] = Field(default_factory=list, description="Window entries the pack was drafted from")
+    entry_ids: list[str] = Field(default_factory=list, description="Entries the pack was drafted from")
     hypotheses: list[HuntHypothesis]
 
 
 class HuntPackResponse(BaseModel):
-    status: str = Field(description="ready | none. none until a pack is drafted for this row, window and language")
+    status: str = Field(
+        description=(
+            "none | drafting | ready | failed. none until a pack is drafted for this entity, scope and "
+            "language; drafting while the AI worker writes one (pack holds the previous one, if any); "
+            "failed when the last draft did, with the reason in error"
+        )
+    )
     language: str
     language_name: str
     pack: HuntPack | None = None
+    started_at: str | None = Field(None, description="When the draft in flight started (status drafting)")
+    error: str | None = Field(None, description="Why the last draft failed (status failed)")
 
     model_config = ConfigDict(
         json_schema_extra={
