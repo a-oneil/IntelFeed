@@ -9,7 +9,6 @@ Environment variables:
     INTELFEED_ALLOW_INSECURE_HTTP  1 to allow plain http:// to another host (a trusted LAN or compose network)
     INTELFEED_USERNAME      Username for authentication
     INTELFEED_PASSWORD      Password for authentication
-    INTELFEED_TOKEN         A ready-made bearer token, used instead of logging in (optional)
     INTELFEED_NO_TOKEN_CACHE  1 to log in on every run instead of reusing ~/.cache/intelfeed/token-*.json
     INTELFEED_DEBUG         1 to print login/cache steps to stderr
 
@@ -48,8 +47,6 @@ import urllib.request
 API_URL = os.environ.get("INTELFEED_API_URL", "").strip().rstrip("/")
 USERNAME = os.environ.get("INTELFEED_USERNAME", "")
 PASSWORD = os.environ.get("INTELFEED_PASSWORD", "")
-# A ready-made bearer token, used instead of logging in (same as intelfeed-mcp).
-STATIC_TOKEN = os.environ.get("INTELFEED_TOKEN", "").strip()
 # Tokens are kept in ~/.cache/intelfeed/ between runs unless this is set.
 TOKEN_CACHE_ENABLED = os.environ.get("INTELFEED_NO_TOKEN_CACHE", "").strip().lower() not in ("1", "true", "yes", "on")
 DEBUG = os.environ.get("INTELFEED_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
@@ -2031,9 +2028,7 @@ class IntelFeedClient:
 
     def __init__(self, base_url: str):
         self.base_url = base_url
-        # A supplied token is the whole credential: no login, no refresh, no cache.
-        self.static_token: str | None = STATIC_TOKEN or None
-        self.access_token: str | None = self.static_token
+        self.access_token: str | None = None
         self.refresh_token: str | None = None
 
     def _send(
@@ -2108,7 +2103,7 @@ class IntelFeedClient:
 
     def _cache_path(self) -> str | None:
         """Where this instance + user's tokens are kept, or None when the cache is off."""
-        if self.static_token or not TOKEN_CACHE_ENABLED:
+        if not TOKEN_CACHE_ENABLED:
             return None
         key = hashlib.sha256(f"{self.base_url}\n{USERNAME}".encode()).hexdigest()[:16]
         return os.path.join(os.path.expanduser("~"), ".cache", "intelfeed", f"token-{key}.json")
@@ -2167,10 +2162,7 @@ class IntelFeedClient:
     # -- authentication ------------------------------------------------------
 
     def authenticate(self) -> None:
-        """Get a usable token: INTELFEED_TOKEN, else the cached pair, else a login."""
-        if self.static_token:
-            _debug("using INTELFEED_TOKEN")
-            return
+        """Get a usable token: the cached pair, else a login."""
         if self._load_cache():
             _debug("using cached token (no login)")
             return
@@ -2220,7 +2212,7 @@ class IntelFeedClient:
             {"tool_name": tool_name, "args": args},
             headers=self._auth_headers(),
         )
-        if status == 401 and not self.static_token:
+        if status == 401:
             self._refresh()
             status, data = self._post(
                 "/api/tools/execute",
