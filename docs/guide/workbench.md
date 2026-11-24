@@ -57,7 +57,10 @@ ATT&CK Navigator.
 [Writing detection rules](detection-rules.md).
 
 **Telemetry Sources**: tick the log sources you collect. IntelFeed then tells
-you when a rule needs logs you do not collect, so it could never fire.
+you when a rule needs logs you do not collect, so it could never fire. The
+list is shared by everyone on the instance. Hunts also know what kind of
+system each source collects from, so an EDR's process events never count for
+a hunt on a vCenter appliance or an ESXi host.
 
 **Threats**: what is active now, ranked by story rather than article, so ten
 write-ups of one breach count once. Tabs: **All**, **Actors**, **Malware** and

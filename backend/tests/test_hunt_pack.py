@@ -434,7 +434,7 @@ class TestGenerate:
 
         inventory = calls[0]["variables"]["telemetry_inventory"]
         identity = next(c for c in inventory if c["category"] == "identity")
-        assert "Okta Identity Cloud (into LogScale)" in identity["sources"]
+        assert "Okta Identity Cloud [Identity Provider] (into LogScale)" in identity["sources"]
         assert "auth.mfa" in identity["log_types"]
 
         annotated = await hp.annotate_telemetry(db_session, dict(pack))
@@ -444,6 +444,51 @@ class TestGenerate:
         assert vcenter["runnable"] is False, "a log nobody collects is not runnable, whatever its log type says"
         md = hp.render_athf_markdown(hp.single_hypothesis(annotated, "H2"), hunter="a", articles=[])
         assert "**Log source (H2):** vCenter VCSA syslog — not in the telemetry inventory" in md
+
+    async def test_a_log_type_counts_only_where_a_source_covers_the_hunts_platform(
+        self, db_session, test_feed, test_user, monkeypatch
+    ):
+        from app.models.telemetry_source import TelemetrySource
+
+        actor = await _seed_actor(db_session, test_feed, name="Platform Crew")
+        await _ensure_task(db_session)
+        db_session.add(
+            TelemetrySource(
+                name="Platform Test EDR",
+                category="endpoint_edr",
+                enabled=True,
+                log_types=["process_creation"],
+                log_types_canonical=["process.creation"],
+                created_by=test_user.id,
+            )
+        )
+        await db_session.commit()
+        item = {**CANNED["hypotheses"][0], "data_sources": ["process.creation"]}
+        drafted = {
+            "hypotheses": [
+                {**item, "title": "Shell on a workstation", "platform": "Windows"},
+                {**item, "title": "Shell on ESXi", "platform": "ESXi"},
+                {
+                    **item,
+                    "title": "Agent events on vCenter",
+                    "platform": "ESXi",
+                    "log_source": "EDR process events",
+                    "source_name": "Platform Test EDR [Windows, macOS, Linux]",
+                },
+            ]
+        }
+        calls = _stub_run_task(monkeypatch, db_session, drafted)
+        pack = await hp.generate_hunt_pack(db_session, test_user.id, "threat_actor", str(actor.id), "all", "kql")
+        edr_line = next(c for c in calls[0]["variables"]["telemetry_inventory"] if c["category"] == "endpoint_edr")
+        assert "Platform Test EDR [Windows, macOS, Linux]" in edr_line["sources"]
+
+        windows, esxi, vcenter = (await hp.annotate_telemetry(db_session, dict(pack)))["hypotheses"]
+        proc = lambda h: next(t for t in h["telemetry"] if t["source"] == "process.creation")  # noqa: E731
+        assert proc(windows)["have"] is True
+        # Every enabled source in the test DB that gives process.creation is an
+        # endpoint agent, so ESXi is uncovered unless one covers it.
+        assert proc(esxi)["have"] is False
+        assert vcenter["source_have"] is False, "the named source exists but does not see ESXi"
 
     async def test_window_without_evidence_is_nothing_to_hunt(self, db_session, test_feed, test_user, monkeypatch):
         actor = await _seed_actor(db_session, test_feed, name="Quiet Crew", entries=0, technique=False)

@@ -457,6 +457,14 @@ You list the log sources you collect at Workbench **Detection → Telemetry Sour
 | `POST /telemetry-sources/check-feasibility` | Which of a list of data sources you collect |
 | `GET /telemetry-sources/telemetry-gaps` | Rules blocked by missing telemetry |
 
+### What a source collects from
+
+The inventory is instance-wide, and a log type alone overstates what it covers: CrowdStrike Falcon gives process creation only where its sensor runs, never on an ESXi host or a vCenter appliance. `app/telemetry_platforms.py` works out which platforms each source collects from, in the vocabulary hunt hypotheses use for their target: Windows, macOS, Linux, ESXi (ESXi hosts and vCenter appliances), Network Devices, Containers, IaaS, SaaS, Identity Provider, Office Suite, or Any for sources that watch from the network or don't depend on the host (firewalls, NDR, DNS, proxies, NetFlow). Nobody assigns it: it follows from the source's category (an EDR: Windows, macOS, Linux; virtualization: ESXi; firewalls: Any), with name hints for the exceptions (Hyper-V is Windows, macOS logs are macOS). Nothing is stored.
+
+A hunt's runs / needs badge uses it: a log type counts as collected for a hunt only when an enabled source that gives it collects from the hunt's platform, and the source the hunt names must collect from it too.
+
+The catalog covers virtualization (VMware vCenter Server, ESXi, NSX, Hyper-V, Nutanix Prism, Proxmox VE), web servers (Apache HTTP Server, Nginx, IIS, Tomcat, HAProxy, Envoy), network infrastructure (Cisco IOS/IOS-XE and NX-OS, Junos, Arista EOS, Aruba, F5 BIG-IP, Citrix NetScaler ADC, NetFlow/IPFIX, Infoblox NIOS), backup and storage (Veeam, Rubrik, Cohesity, Commvault, NetApp ONTAP, Dell PowerScale), managed file transfer (MOVEit Transfer, GoAnywhere MFT, Cleo, Kiteworks), RMM tools (ScreenConnect, TeamViewer, AnyDesk), Exchange Server and SQL Server audit, alongside the EDR, Windows, Linux, network, identity, cloud and SaaS sources.
+
 ### Feasibility Checking
 
 ```json

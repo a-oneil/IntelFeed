@@ -53,6 +53,7 @@ from app.services.detection_coverage import (
 )
 from app.services.threat_board import WINDOW_HOURS
 from app.services.threat_brief import collect_brief_entries, collect_cve_facts
+from app.telemetry_platforms import ANY, covers, default_platforms
 
 TASK_NAME = "hunt_pack"
 TARGET_TYPE = "hunt_pack"
@@ -349,7 +350,10 @@ async def telemetry_inventory(db: AsyncSession) -> list[dict]:
         cat = by_cat.setdefault(
             src.category or "other", {"category": src.category or "other", "sources": [], "log_types": set()}
         )
-        label = src.name + (f" (into {src.ingested_into})" if src.ingested_into else "")
+        # Platforms only when they narrow it: "Any" sources see every host.
+        plats = default_platforms(src.category, src.name)
+        label = src.name + (f" [{', '.join(plats)}]" if ANY not in plats else "")
+        label += f" (into {src.ingested_into})" if src.ingested_into else ""
         cat["sources"].append(label)
         cat["log_types"].update(src.log_types_canonical or [])
     return [
@@ -358,11 +362,22 @@ async def telemetry_inventory(db: AsyncSession) -> list[dict]:
     ]
 
 
-async def enabled_source_names(db: AsyncSession) -> set[str]:
+async def enabled_sources(db: AsyncSession) -> list[tuple[str, set[str], list[str]]]:
+    """(lower-cased name, canonical log types, platforms covered) per enabled source."""
     from app.models.telemetry_source import TelemetrySource
 
-    rows = await db.execute(select(TelemetrySource.name).where(TelemetrySource.enabled.is_(True)))
-    return {n.strip().lower() for n in rows.scalars() if n}
+    rows = (await db.execute(select(TelemetrySource).where(TelemetrySource.enabled.is_(True)))).scalars()
+    return [
+        (src.name.strip().lower(), set(src.log_types_canonical or []), default_platforms(src.category, src.name))
+        for src in rows
+        if src.name
+    ]
+
+
+def _source_key(name: str | None) -> str:
+    """An inventory name as the model may echo it, without the prompt's [platforms] or (into …)."""
+    bare = re.sub(r"\s*\(into [^)]*\)\s*$", "", name or "")
+    return re.sub(r"\s*\[[^\]]*\]\s*$", "", bare).strip().lower()
 
 
 async def collect_hunt_inputs(db: AsyncSession, entity_type: str, entity_key: str, scope: str) -> dict | None:
@@ -874,17 +889,30 @@ async def annotate_telemetry(db: AsyncSession, pack: dict) -> dict:
     flip the chip without a redraft.
     """
     profile = await get_available_telemetry(db)
-    names = await enabled_source_names(db)
+    sources = await enabled_sources(db)
+    platforms_by_name = {name: plats for name, _types, plats in sources}
     for h in pack["hypotheses"]:
+        platform = h.get("platform")
+
+        def _have(ds: str, tier: str | None) -> bool:
+            if tier is None:
+                return False
+            # Per platform: some source must give this log type AND see the
+            # hunt's target. Falcon's process creation is no use on ESXi. A
+            # type no source lists canonically (a legacy free-text match)
+            # keeps the old answer.
+            givers = [plats for _n, types, plats in sources if ds in types]
+            return not givers or any(covers(plats, platform) for plats in givers)
+
         h["telemetry"] = [
-            {"source": ds, "have": tier is not None} for ds, tier in classify_data_sources(h["data_sources"], profile)
+            {"source": ds, "have": _have(ds, tier)} for ds, tier in classify_data_sources(h["data_sources"], profile)
         ]
         h["runnable"] = all(t["have"] for t in h["telemetry"]) if h["telemetry"] else True
         # Packs drafted before the log_source field have none: judged by log
         # type alone, as they always were.
         if h.get("log_source"):
-            picked = re.sub(r"\s*\(into [^)]*\)\s*$", "", h.get("source_name") or "").strip().lower()
-            have = bool(picked) and picked in names
+            plats = platforms_by_name.get(_source_key(h.get("source_name")))
+            have = plats is not None and covers(plats, platform)
             h["source_have"] = have
             h["runnable"] = h["runnable"] and have
     return pack

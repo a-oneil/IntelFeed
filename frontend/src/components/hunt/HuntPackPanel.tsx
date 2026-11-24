@@ -52,14 +52,26 @@ export function runsPhrase(pack: HuntPack): string {
 }
 
 /** "4 run on the telemetry you collect; 1 needs auth.failure." — the Next steps line. */
+/** What one hunt needs that isn't collected: the log it reads first, then log types. */
+export function missingFor(h: HuntHypothesis): string[] {
+  return [
+    ...(h.log_source && h.source_have === false ? [h.log_source] : []),
+    ...h.telemetry.filter((t) => !t.have).map((t) => t.source),
+  ];
+}
+
 export function runnableSummary(pack: HuntPack): string {
   const runs = pack.hypotheses.filter((h) => h.runnable).length;
-  const missing = [
-    ...new Set(pack.hypotheses.flatMap((h) => h.telemetry.filter((t) => !t.have).map((t) => t.source))),
-  ];
+  const blockedHunts = pack.hypotheses.filter((h) => !h.runnable);
+  // A missing log is a sentence ("vCenter VCSA SSO logs forwarded via
+  // syslog to…"): too long to list here, and each hunt's own line names it.
+  const missing = blockedHunts.some((h) => h.log_source && h.source_have === false)
+    ? []
+    : [...new Set(blockedHunts.flatMap(missingFor))];
   const blocked = pack.hypotheses.length - runs;
   if (blocked === 0) return `${runs === 1 ? "It runs" : `All ${runs} run`} on the telemetry you collect.`;
-  return `${runs} run on the telemetry you collect; ${blocked} need${blocked === 1 ? "s" : ""} ${missing.join(", ")}.`;
+  const needs = missing.length ? ` ${missing.join(", ")}` : " logs you don't collect";
+  return `${runs} run on the telemetry you collect; ${blocked} need${blocked === 1 ? "s" : ""}${needs}.`;
 }
 
 /** "Nov 23". */
@@ -113,10 +125,7 @@ function HuntLine({
   const [details, setDetails] = useState(false);
   // The log nobody collects comes first: it is why the hunt can't run, even
   // when its log types read as collected from some other source.
-  const missing = [
-    ...(h.log_source && h.source_have === false ? [h.log_source] : []),
-    ...h.telemetry.filter((t) => !t.have).map((t) => t.source),
-  ];
+  const missing = missingFor(h);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(h.query);
