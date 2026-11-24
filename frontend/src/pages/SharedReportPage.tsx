@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { IntelFeedLogo } from "@/components/IntelFeedLogo";
 import { RouteFallback } from "@/components/RouteFallback";
 import { ToolbarDropdown, DropdownItem } from "@/components/ToolbarDropdown";
-import { EntityLinkedMarkdown } from "@/components/EntityLinkedMarkdown";
 import { ReportDocument } from "@/components/report/ReportDocument";
 import { Chip } from "@/components/primitives/Chip";
 import { TLP_COLORS } from "@/utils/colorSchemes";
@@ -160,21 +159,19 @@ export function SharedReportPage() {
           <div className={`${readerStyles.content} ${styles.content}`}>
             {report.summary && <p className={styles.summary}>{report.summary}</p>}
 
-            {report.body && (
-              <div className={styles.preamble} data-untrusted-content="">
-                <EntityLinkedMarkdown text={report.body} enabled={false} matches={report.entities} readOnly />
-              </div>
-            )}
-
-            {report.sections.length > 0 ? (
+            {/* Free text (a Manual report's whole body, or a preamble) and the
+                sections go through one renderer, so code blocks, tables and
+                long lines are drawn the same way as in the builder. */}
+            {report.body || report.sections.length > 0 ? (
               <ReportDocument
                 sections={report.sections}
+                freeText={report.body}
                 linkEntities={false}
                 entityMatches={report.entities}
                 frameless
               />
             ) : (
-              !report.body && <p className={styles.empty}>This report has no content yet.</p>
+              <p className={styles.empty}>This report has no content yet.</p>
             )}
 
             {report.tags.length > 0 && (

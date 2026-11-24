@@ -822,7 +822,7 @@
  },
  {
   "name": "create_intel_report",
-  "description": "Create a draft intelligence report from a template with linked entities and entries. Templates: actor_profile, campaign_tracker, detection_report, exposure_report, flash_alert, landscape_report. Uses TLP 2.0 markings. The legacy TLP:WHITE is accepted and normalized to TLP:CLEAR.",
+  "description": "Create a draft intelligence report from a template with linked entities and entries. Templates with sections: actor_profile, campaign_tracker, detection_report, exposure_report, flash_alert, landscape_report; saved templates (ioc_bulletin, country_threat_brief, and any shared or your own) are accepted by slug. For a report you have already written, use template_type 'manual': it has no sections, and body holds the whole report as markdown. With another template, body is free text shown above the sections. Uses TLP 2.0 markings. The legacy TLP:WHITE is accepted and normalized to TLP:CLEAR.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -832,14 +832,22 @@
     },
     "template_type": {
      "type": "string",
-     "enum": [
-      "actor_profile",
-      "campaign_tracker",
-      "detection_report",
-      "exposure_report",
-      "flash_alert",
-      "landscape_report"
-     ]
+     "description": "Template slug, e.g. manual, flash_alert, detection_report"
+    },
+    "body": {
+     "type": "string",
+     "description": "Markdown text. The whole report for template_type manual."
+    },
+    "summary": {
+     "type": "string",
+     "description": "One- or two-sentence executive summary"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Tags for the report"
     },
     "entry_ids": {
      "type": "array",

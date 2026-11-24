@@ -28,10 +28,6 @@
   max-width: 72ch;
 }
 
-.preamble {
-  line-height: 1.6;
-}
-
 .empty {
   color: var(--text-muted);
   font-style: italic;

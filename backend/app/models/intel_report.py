@@ -17,7 +17,7 @@ class IntelReport(Base):
     )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     template_type: Mapped[str] = mapped_column(String(30), nullable=False)
-    # ioc_bulletin, actor_profile, campaign_tracker, flash_alert, landscape_report, custom
+    # ioc_bulletin, actor_profile, campaign_tracker, flash_alert, landscape_report, manual, custom
     tlp_marking: Mapped[str] = mapped_column(String(20), default="TLP:GREEN")
     status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
     # draft, published, archived

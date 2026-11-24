@@ -348,7 +348,8 @@ function TemplateStep({
 }) {
   return (
     <div className={styles.templateGrid}>
-      {templates.map((t) => (
+      {/* The wizard writes sections with AI, so a template with none is left out. */}
+      {templates.filter((t) => (t.sections || []).length > 0).map((t) => (
         <div
           key={t.type}
           className={

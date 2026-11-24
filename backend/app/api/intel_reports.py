@@ -426,7 +426,13 @@ async def generate_full_intel_report(
     # 2. Validate template
     template = REPORT_TEMPLATES.get(body.template_type)
     if not template:
-        await _usable_template(db, body.template_type, user)
+        db_tmpl = await _usable_template(db, body.template_type, user)
+        if db_tmpl is not None and not db_tmpl.sections:
+            raise AppError(
+                code="invalid_template",
+                message="This template has no sections to generate. Pick a template with sections.",
+                status_code=400,
+            )
         template = {"name": body.template_type.replace("_", " ").title()}
 
     # 3. Pre-fill data sections (in memory: nothing is written yet)

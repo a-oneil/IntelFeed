@@ -220,12 +220,22 @@ export function ReportBuilderPage() {
   );
 
   // Sync from server data when editing
+  const openedReportRef = useRef<string | null>(null);
   useEffect(() => {
     if (report) {
       setTitle(report.title);
       const content = report.content as Record<string, unknown>;
-      setBody(typeof content?.body === "string" ? content.body : "");
+      const savedBody = typeof content?.body === "string" ? content.body : "";
+      setBody(savedBody);
       const rawSections = (content?.sections || {}) as Record<string, unknown>;
+      // Opening a report picks the view once: a free-text report with nothing
+      // in it opens ready to write, everything else opens as the document.
+      // Later refetches (after a save) leave the analyst's choice alone.
+      if (openedReportRef.current !== report.id) {
+        openedReportRef.current = report.id;
+        const blank = Object.keys(rawSections).length === 0 && !savedBody.trim();
+        setDocView(blank ? "markdown" : "rendered");
+      }
       const sectionData: Record<string, string> = {};
       for (const [key, val] of Object.entries(rawSections)) {
         if (typeof val === "string") {
@@ -262,8 +272,9 @@ export function ReportBuilderPage() {
     const secs = (templates?.find((t) => t.type === templateType)?.sections || []).filter(
       (sec): sec is ReportTemplateSection => typeof sec === "object" && sec !== null
     );
-    if (secs.length === 0) return;
-    const skeleton = buildTemplateSkeleton(secs);
+    // A template with no sections (Manual) has an empty skeleton, so switching
+    // to it clears another template's untouched headings.
+    const skeleton = secs.length > 0 ? buildTemplateSkeleton(secs) : "";
     if ((body.trim() === "" || body === lastSkeletonRef.current) && body !== skeleton) {
       setBody(skeleton);
     }
@@ -722,7 +733,7 @@ export function ReportBuilderPage() {
                 <>
                   <span className={styles.templateExpanderName}>{sel.name}</span>
                   <span className={styles.templateExpanderMeta}>
-                    {sel.sections.length} sections
+                    {sel.sections.length > 0 ? `${sel.sections.length} sections` : "Blank"}
                   </span>
                 </>
               ) : (
@@ -953,7 +964,7 @@ export function ReportBuilderPage() {
               behind a toggle. Data sections draw their items as tables. */}
           {(activeSectionTab === null || viewingVersionId) && (
             <>
-              {!viewingVersionId && currentTemplateSections.length > 0 && (
+              {!viewingVersionId && (
                 <div className={styles.docViewToggle}>
                   <button
                     className={`${styles.docViewBtn} ${docView === "rendered" ? styles.docViewBtnOn : ""}`}
@@ -971,7 +982,14 @@ export function ReportBuilderPage() {
                   </button>
                 </div>
               )}
-              {!viewingVersionId && currentTemplateSections.length > 0 && docView === "rendered" ? (
+              {!viewingVersionId && currentTemplateSections.length === 0 && docView === "rendered" ? (
+                // No sections (Manual): the free-text body is the document.
+                body.trim() ? (
+                  <ReportDocument sections={[]} freeText={body} />
+                ) : (
+                  <p className={styles.docViewEmpty}>Nothing written yet. Switch to Markdown to write or paste.</p>
+                )
+              ) : !viewingVersionId && docView === "rendered" ? (
                 <ReportDocument
                   sections={currentTemplateSections.map((sec) => {
                     const data = (contentSections[sec.name] || {}) as SectionData;

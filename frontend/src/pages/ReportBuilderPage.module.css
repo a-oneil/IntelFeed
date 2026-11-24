@@ -1081,6 +1081,13 @@
 
 /* --- Rendered document view (Full Document tab) --- */
 
+.docViewEmpty {
+  color: var(--text-muted);
+  font-size: var(--fs-md);
+  font-style: italic;
+  margin: 0;
+}
+
 .docViewToggle {
   display: inline-flex;
   gap: 2px;

@@ -9,6 +9,9 @@ Environment variables:
     INTELFEED_ALLOW_INSECURE_HTTP  1 to allow plain http:// to another host (a trusted LAN or compose network)
     INTELFEED_USERNAME      Username for authentication
     INTELFEED_PASSWORD      Password for authentication
+    INTELFEED_TOKEN         A ready-made bearer token, used instead of logging in (optional)
+    INTELFEED_NO_TOKEN_CACHE  1 to log in on every run instead of reusing ~/.cache/intelfeed/token-*.json
+    INTELFEED_DEBUG         1 to print login/cache steps to stderr
 
 Usage:
     # Single tool call
@@ -29,9 +32,12 @@ Usage:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
+import tempfile
+import time
 import urllib.error
 import urllib.request
 
@@ -42,6 +48,18 @@ import urllib.request
 API_URL = os.environ.get("INTELFEED_API_URL", "").strip().rstrip("/")
 USERNAME = os.environ.get("INTELFEED_USERNAME", "")
 PASSWORD = os.environ.get("INTELFEED_PASSWORD", "")
+# A ready-made bearer token, used instead of logging in (same as intelfeed-mcp).
+STATIC_TOKEN = os.environ.get("INTELFEED_TOKEN", "").strip()
+# Tokens are kept in ~/.cache/intelfeed/ between runs unless this is set.
+TOKEN_CACHE_ENABLED = os.environ.get("INTELFEED_NO_TOKEN_CACHE", "").strip().lower() not in ("1", "true", "yes", "on")
+DEBUG = os.environ.get("INTELFEED_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
+# On a 429 from login/refresh, a Retry-After up to this many seconds is waited out once.
+MAX_RETRY_AFTER_SLEEP = 60
+
+
+def _debug(message: str) -> None:
+    if DEBUG:
+        print(f"[intelfeed-cli] {message}", file=sys.stderr)
 
 
 def insecure_url_problem(url: str) -> str | None:
@@ -2004,17 +2022,24 @@ _OPENER = urllib.request.build_opener(_RefuseRedirects)
 
 
 class IntelFeedClient:
-    """Synchronous HTTP client for IntelFeed API using urllib."""
+    """Synchronous HTTP client for IntelFeed API using urllib.
+
+    Tokens are kept in a small file between runs, so a shell loop of single
+    calls logs in once instead of once per process. The server allows ten
+    login/refresh requests per five minutes per client address.
+    """
 
     def __init__(self, base_url: str):
         self.base_url = base_url
-        self.access_token: str | None = None
+        # A supplied token is the whole credential: no login, no refresh, no cache.
+        self.static_token: str | None = STATIC_TOKEN or None
+        self.access_token: str | None = self.static_token
         self.refresh_token: str | None = None
 
-    def _post(
+    def _send(
         self, path: str, body: dict, headers: dict[str, str] | None = None
-    ) -> tuple[int, dict | str]:
-        """Send a POST request and return (status_code, parsed_json_or_text)."""
+    ) -> tuple[int, dict | str, dict[str, str]]:
+        """Send a POST request and return (status_code, parsed_json_or_text, response_headers)."""
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
             f"{self.base_url}{path}",
@@ -2029,16 +2054,127 @@ class IntelFeedClient:
         try:
             with _OPENER.open(req, timeout=120) as resp:
                 raw = resp.read().decode("utf-8")
+                resp_headers = {k.lower(): v for k, v in resp.headers.items()}
                 try:
-                    return resp.status, json.loads(raw)
+                    return resp.status, json.loads(raw), resp_headers
                 except json.JSONDecodeError:
-                    return resp.status, raw
+                    return resp.status, raw, resp_headers
         except urllib.error.HTTPError as e:
             raw = e.read().decode("utf-8")
+            resp_headers = {k.lower(): v for k, v in (e.headers.items() if e.headers else [])}
             try:
-                return e.code, json.loads(raw)
+                return e.code, json.loads(raw), resp_headers
             except json.JSONDecodeError:
-                return e.code, raw
+                return e.code, raw, resp_headers
+
+    def _post(
+        self, path: str, body: dict, headers: dict[str, str] | None = None
+    ) -> tuple[int, dict | str]:
+        """Send a POST request and return (status_code, parsed_json_or_text)."""
+        status, data, _ = self._send(path, body, headers)
+        return status, data
+
+    def _auth_post(self, path: str, body: dict) -> tuple[int, dict | str]:
+        """POST to a login/refresh route. On a 429, wait out a short Retry-After and
+        try once more; on a long one, exit and say how long to wait."""
+        _debug(f"POST {path}")
+        status, data, headers = self._send(path, body)
+        if status != 429:
+            return status, data
+        try:
+            wait = int(float(headers.get("retry-after", "")))
+        except ValueError:
+            wait = None
+        if wait is not None and 0 <= wait <= MAX_RETRY_AFTER_SLEEP:
+            _debug(f"429 from {path}, waiting {wait}s and retrying once")
+            time.sleep(wait)
+            status, data, headers = self._send(path, body)
+            if status != 429:
+                return status, data
+            try:
+                wait = int(float(headers.get("retry-after", "")))
+            except ValueError:
+                wait = None
+        when = f"in {wait} seconds" if wait is not None else "in a few minutes"
+        print(
+            f"Error: Login is rate limited (429). Try again {when}. The server allows 10 "
+            "logins per 5 minutes per address. Passing several tool calls to one invocation "
+            "costs one login.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # -- token cache ---------------------------------------------------------
+
+    def _cache_path(self) -> str | None:
+        """Where this instance + user's tokens are kept, or None when the cache is off."""
+        if self.static_token or not TOKEN_CACHE_ENABLED:
+            return None
+        key = hashlib.sha256(f"{self.base_url}\n{USERNAME}".encode()).hexdigest()[:16]
+        return os.path.join(os.path.expanduser("~"), ".cache", "intelfeed", f"token-{key}.json")
+
+    def _load_cache(self) -> bool:
+        """Take the token pair from the cache file. Any problem means 'no cache'."""
+        path = self._cache_path()
+        if not path:
+            return False
+        try:
+            with open(path, encoding="utf-8") as f:
+                cached = json.load(f)
+            access, refresh = cached["access_token"], cached["refresh_token"]
+            if cached.get("api_url") != self.base_url or cached.get("username") != USERNAME:
+                return False
+            if not (isinstance(access, str) and access and isinstance(refresh, str) and refresh):
+                return False
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+        self.access_token, self.refresh_token = access, refresh
+        return True
+
+    def _save_cache(self) -> None:
+        """Write the token pair atomically, readable by this user only. Never fatal."""
+        path = self._cache_path()
+        if not path:
+            return
+        tmp = None
+        try:
+            directory = os.path.dirname(path)
+            os.makedirs(directory, mode=0o700, exist_ok=True)
+            os.chmod(directory, 0o700)
+            fd, tmp = tempfile.mkstemp(dir=directory, prefix=".token-", suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "api_url": self.base_url,
+                        "username": USERNAME,
+                        "access_token": self.access_token,
+                        "refresh_token": self.refresh_token,
+                    },
+                    f,
+                )
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, path)
+            tmp = None
+        except OSError as e:
+            _debug(f"could not write token cache: {e}")
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+
+    # -- authentication ------------------------------------------------------
+
+    def authenticate(self) -> None:
+        """Get a usable token: INTELFEED_TOKEN, else the cached pair, else a login."""
+        if self.static_token:
+            _debug("using INTELFEED_TOKEN")
+            return
+        if self._load_cache():
+            _debug("using cached token (no login)")
+            return
+        self.login()
 
     def login(self) -> None:
         if not USERNAME or not PASSWORD:
@@ -2047,7 +2183,7 @@ class IntelFeedClient:
                 file=sys.stderr,
             )
             sys.exit(1)
-        status, data = self._post(
+        status, data = self._auth_post(
             "/api/auth/login",
             {"username": USERNAME, "password": PASSWORD},
         )
@@ -2056,18 +2192,22 @@ class IntelFeedClient:
             sys.exit(1)
         self.access_token = data["access_token"]
         self.refresh_token = data["refresh_token"]
+        self._save_cache()
 
     def _refresh(self) -> None:
         if not self.refresh_token:
             self.login()
             return
-        status, data = self._post(
+        status, data = self._auth_post(
             "/api/auth/refresh",
             {"refresh_token": self.refresh_token},
         )
         if status == 200:
+            # The server rotates refresh tokens: the one just sent is now dead,
+            # so the new pair must be saved.
             self.access_token = data["access_token"]
             self.refresh_token = data["refresh_token"]
+            self._save_cache()
         else:
             self.login()
 
@@ -2080,7 +2220,7 @@ class IntelFeedClient:
             {"tool_name": tool_name, "args": args},
             headers=self._auth_headers(),
         )
-        if status == 401:
+        if status == 401 and not self.static_token:
             self._refresh()
             status, data = self._post(
                 "/api/tools/execute",
@@ -2231,7 +2371,7 @@ def main() -> None:
         print(json.dumps({"error": problem}))
         sys.exit(1)
     client = IntelFeedClient(API_URL)
-    client.login()
+    client.authenticate()
 
     results = []
     for tool_name, tool_args in calls:

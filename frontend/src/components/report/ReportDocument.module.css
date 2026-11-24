@@ -33,8 +33,156 @@
   border-bottom: 1px solid var(--border);
 }
 
-.docSurface p {
-  max-width: 72ch;
+/* Markdown written by the analyst or the AI. Wide content (code, tables)
+   scrolls inside the sheet instead of running past its edge. */
+.docSection {
+  min-width: 0;
+}
+
+
+/* Rendered markdown, styled to match the HTML export: body-font headings
+   with rules under h1 and h2, 1.6 line height, real paragraph and list
+   spacing. The app-wide reset zeroes every margin and padding, so all of
+   the rhythm is set here. */
+.docProse {
+  min-width: 0;
+  max-width: 860px;
+  overflow-wrap: anywhere;
+  /* Between the app's body size and the old 16px: 14px at default scale. */
+  font-size: calc(var(--fs-md) * 1.08);
+  line-height: 1.6;
+}
+
+.docProse > * + * {
+  margin-top: var(--sp-5);
+}
+
+.docProse :is(h1, h2, h3, h4, h5, h6) {
+  font-family: var(--font-body);
+  color: var(--text-primary);
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.docProse h1 {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  padding-bottom: var(--sp-3);
+  border-bottom: 2px solid var(--border);
+}
+
+.docProse h2 {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.docProse h3 {
+  font-size: calc(var(--fs-md) * 1.15);
+  font-weight: 600;
+}
+
+.docProse :is(h4, h5, h6) {
+  font-size: calc(var(--fs-md) * 1.08);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.docProse > :is(h1, h2):not(:first-child) {
+  margin-top: calc(var(--sp-6) + var(--sp-4));
+}
+
+.docProse > :is(h3, h4, h5, h6):not(:first-child) {
+  margin-top: var(--sp-6);
+}
+
+.docProse > :is(h1, h2, h3, h4, h5, h6) + * {
+  margin-top: var(--sp-4);
+}
+
+.docProse :is(ul, ol) {
+  padding-left: 1.5em;
+}
+
+.docProse li + li,
+.docProse li > :is(ul, ol, pre, p) {
+  margin-top: var(--sp-3);
+}
+
+.docProse strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.docProse pre {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: var(--sp-3) 0;
+  padding: 12px 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.docProse code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+}
+
+.docProse pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+.docProse table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: var(--sp-3) 0;
+  border-collapse: collapse;
+  font-size: var(--fs-md);
+  overflow-wrap: normal;
+}
+
+.docProse th,
+.docProse td {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.docProse th {
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  white-space: nowrap;
+}
+
+.docProse blockquote {
+  margin: var(--sp-3) 0;
+  padding: 4px 14px;
+  border-left: 3px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.docProse hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: var(--sp-4) 0;
 }
 
 .docEmpty {

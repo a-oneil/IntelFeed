@@ -451,11 +451,11 @@ Rule formats across the platform: `sigma`, `splunk_spl`, `crowdstrike_ql`, `elas
 
 ### Intelligence Reports (13 tools)
 
-Templates: `actor_profile`, `campaign_tracker`, `detection_report`, `exposure_report`, `flash_alert`, `landscape_report`. TLP 2.0 markings; legacy `TLP:WHITE` is accepted and normalized to `TLP:CLEAR`.
+Templates: `actor_profile`, `campaign_tracker`, `detection_report`, `exposure_report`, `flash_alert`, `landscape_report`, plus the saved templates `manual`, `ioc_bulletin` and `country_threat_brief` (and any shared or your own) by slug. `manual` has no sections: the report is one markdown `body`, and it cannot be used with `generate_full_report`. TLP 2.0 markings; legacy `TLP:WHITE` is accepted and normalized to `TLP:CLEAR`.
 
 - **list_intel_reports** — Reports newest-updated first, section names only (status, template_type, limit, offset)
 - **get_intel_report** — One report with every section's content (report_id)
-- **create_intel_report** — Draft from a template with linked entries/entities (title, template_type, entry_ids, entity_ids, tlp_marking)
+- **create_intel_report** — Draft from a template with linked entries/entities (title, template_type, entry_ids, entity_ids, tlp_marking, body, summary, tags). For a report you wrote yourself, use `template_type: "manual"` and put the whole markdown in `body`; tables, code blocks and headings render in the app, on share pages and in exports
 - **update_intel_report** — Update title, TLP, status or full content (report_id, updates)
 - **generate_full_report** — AI-generated report from source entries; creates a draft and queues generation (title, template_type, entry_ids, focus, tlp_marking)
 - **generate_campaign_report** — Same, sourced from a campaign's entries and entities (campaign_id, template_type, title, tlp_marking)
@@ -586,6 +586,8 @@ When a call fails, do not only report the error. Try to work around it.
 **Empty extraction results:** The article may not contain structured indicators. Check with `get_entry` whether it is a technical report or an opinion piece. Suggest `use_ai: true` if extraction was run without AI.
 
 **Authentication errors (401):** The CLI handles token refresh automatically. If 401s persist, ask the user to check their `INTELFEED_USERNAME` and `INTELFEED_PASSWORD` environment variables.
+
+**`Login is rate limited (429)`:** The server allows 10 logins per 5 minutes per address. The CLI keeps its token in `~/.cache/intelfeed/` between runs, so this is rare. Wait the number of seconds the message gives, then batch the remaining calls into one invocation.
 
 **Permission errors (403):** The tool is admin-only (marked ⚠ above) and the account is not an admin. Report what it would have done and stop. There is no non-admin way to make the same change.
 

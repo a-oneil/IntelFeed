@@ -327,6 +327,7 @@ async def generate_report_content(
     """Generate initial report content from template + linked entities."""
     template = REPORT_TEMPLATES.get(template_type)
     section_names: list[str] | None = list(template["sections"]) if template else None
+    blank = False
     if section_names is None:
         # DB template (builtin extras like ioc_bulletin, or user-created):
         # honor ITS section list instead of silently pre-filling flash_alert's.
@@ -339,7 +340,13 @@ async def generate_report_content(
         )
         if row and row.sections:
             section_names = [s.get("name") for s in row.sections if isinstance(s, dict) and s.get("name")]
-    if not section_names:
+        elif row is not None:
+            # A template with an empty section list (the builtin Manual one)
+            # is a free-text report: scaffold nothing.
+            blank = True
+    if blank:
+        section_names = []
+    elif not section_names:
         section_names = list(REPORT_TEMPLATES["flash_alert"]["sections"])
 
     # Fetch linked entries
@@ -889,6 +896,13 @@ def render_markdown(report) -> str:
     # Sections — use template ordering if available, fall back to dict order
     content = report.content or {}
     sections = content.get("sections", {})
+
+    # Free text written outside any section: the whole report for a template
+    # with no sections, the preamble above the first heading otherwise.
+    free_text = content.get("body")
+    if isinstance(free_text, str) and free_text.strip():
+        lines.append(free_text.strip())
+        lines.append("")
     template = REPORT_TEMPLATES.get(report.template_type)
     if template:
         ordered_keys = [s for s in template["sections"] if s in sections]
@@ -1026,29 +1040,67 @@ def render_html(report) -> str:
     }
     tlp_color = tlp_colors.get(report.tlp_marking, "#cccccc")
 
+    # The theme follows the reader's system setting, and the switch in the
+    # corner flips it. It is a checkbox read by CSS, with no script: the
+    # export never carries a <script> tag, so it opens the same anywhere and
+    # stays inert as a file. Print and PDF are always light.
+    dark_vars = (
+        "--bg: #0d1117; --fg: #e6edf3; --muted: #9aa4af; --h2: #cfd8e3; --h3: #b7c3d0; "
+        "--rule: #30363d; --rule-soft: #21262d; --code-bg: #161b22; --pre-bg: #161b22; "
+        "--th-bg: #161b22; --link: #58a6ff; color-scheme: dark;"
+    )
     return f"""<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html_module.escape(report.title)}</title>
 <style>
+:root {{
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #555555; --h2: #2c3e50; --h3: #34495e;
+  --rule: #dddddd; --rule-soft: #eeeeee; --code-bg: #f4f4f4; --pre-bg: #f8f9fa;
+  --th-bg: #f8f9fa; --link: #2563eb;
+}}
+.to-light {{ display: none; }}
+@media screen and (prefers-color-scheme: dark) {{
+  body:not(:has(#theme-flip:checked)) {{ {dark_vars} }}
+  body:not(:has(#theme-flip:checked)) .to-light {{ display: inline; }}
+  body:not(:has(#theme-flip:checked)) .to-dark {{ display: none; }}
+}}
+@media screen and (not (prefers-color-scheme: dark)) {{
+  body:has(#theme-flip:checked) {{ {dark_vars} }}
+  body:has(#theme-flip:checked) .to-light {{ display: inline; }}
+  body:has(#theme-flip:checked) .to-dark {{ display: none; }}
+}}
 body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-       max-width: 800px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; line-height: 1.6; }}
+       max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6;
+       color: var(--fg); background: var(--bg); }}
 .tlp-banner {{ background: {tlp_color}; color: #000; padding: 8px 16px; font-weight: bold;
                text-align: center; margin-bottom: 24px; border-radius: 4px; }}
-h1 {{ border-bottom: 2px solid #333; padding-bottom: 8px; }}
-h2 {{ color: #2c3e50; margin-top: 32px; border-bottom: 1px solid #eee; padding-bottom: 4px; }}
-h3 {{ color: #34495e; margin-top: 24px; }}
-code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }}
-pre {{ background: #f8f9fa; padding: 16px; border-radius: 6px; overflow-x: auto; }}
+.theme-switch {{ position: fixed; top: 12px; right: 16px; font-size: 13px; color: var(--muted);
+                 background: var(--bg); border: 1px solid var(--rule); border-radius: 999px;
+                 padding: 4px 12px; cursor: pointer; user-select: none; }}
+.theme-switch:hover {{ color: var(--fg); }}
+#theme-flip {{ position: absolute; opacity: 0; pointer-events: none; }}
+#theme-flip:focus-visible + .theme-switch {{ outline: 2px solid var(--link); outline-offset: 2px; }}
+h1 {{ border-bottom: 2px solid var(--rule); padding-bottom: 8px; }}
+h2 {{ color: var(--h2); margin-top: 32px; border-bottom: 1px solid var(--rule-soft); padding-bottom: 4px; }}
+h3 {{ color: var(--h3); margin-top: 24px; }}
+code {{ background: var(--code-bg); padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }}
+pre {{ background: var(--pre-bg); padding: 16px; border-radius: 6px; overflow-x: auto; }}
 pre code {{ background: none; padding: 0; }}
 table {{ border-collapse: collapse; width: 100%; margin: 16px 0; }}
-th, td {{ border: 1px solid #ddd; padding: 8px 12px; text-align: left; }}
-th {{ background: #f8f9fa; font-weight: 600; }}
-blockquote {{ border-left: 4px solid #ddd; margin: 16px 0; padding: 8px 16px; color: #555; }}
-hr {{ border: none; border-top: 1px solid #ddd; margin: 24px 0; }}
-a {{ color: #2563eb; }}
+th, td {{ border: 1px solid var(--rule); padding: 8px 12px; text-align: left; }}
+th {{ background: var(--th-bg); font-weight: 600; }}
+blockquote {{ border-left: 4px solid var(--rule); margin: 16px 0; padding: 8px 16px; color: var(--muted); }}
+hr {{ border: none; border-top: 1px solid var(--rule); margin: 24px 0; }}
+a {{ color: var(--link); }}
+@media print {{ .theme-switch {{ display: none; }} }}
 </style>
 </head><body>
+<input type="checkbox" id="theme-flip" aria-label="Switch between light and dark mode">
+<label class="theme-switch" for="theme-flip">
+<span class="to-dark">Dark mode</span><span class="to-light">Light mode</span>
+</label>
 <div class="tlp-banner">{html_module.escape(report.tlp_marking)}</div>
 {body_html}
 </body></html>"""
