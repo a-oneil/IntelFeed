@@ -1,7 +1,7 @@
 """Priority Queue — the ranked reading queue, entries and story threads in one list.
 
 The queue is not just a sorted entry list: a story covered by eleven outlets is
-one row, not eleven, and the thread row ranks by the best unread beat it holds.
+one row, not eleven, and the thread row ranks by the best beat it holds, read or not.
 Assembling that server-side means every consumer (the reader, the CLI, an agent)
 sees the same queue in the same order.
 """
@@ -23,7 +23,7 @@ class PriorityQueueRow(BaseModel):
         description=(
             "Rank of this row on the 0–10 priority scale. For an entry it is its stored priority "
             "score; for a thread, the score of its best "
-            "unread beat. Rows arrive sorted by this score, highest first."
+            "beat, read or not. Rows arrive sorted by this score, highest first."
         )
     )
     entry: EntryResponse | None = Field(None, description="Populated when kind is `entry`")

@@ -237,7 +237,7 @@ In a dry run, both branches are listed and neither runs.
 A morning briefing over 30 articles where 8 cover the same story would spend most of its space on that one story. Both briefing paths therefore reduce their input to one article per story using [story threads](story-threads.md) (`fold_by_thread`, `backend/app/intelligence/story_threads.py:1004`), keeping the **strongest** article and dropping the rest.
 
 - **`run_ai_task` in batch mode** reduces the matched entries this way. Set `fold_threads: false` in the action config to send every article.
-- **The daily briefing** (`_fetch_day_entries`, `backend/app/api/entries.py:1662`) reduces the day's articles the same way. This is what `use_daily_summary` and the in-app day-divider summaries read.
+- **The daily briefing** (`_fetch_day_entries`, `backend/app/api/entries.py:1665`) reduces the day's articles the same way. This is what `use_daily_summary` and the in-app day-divider summaries read.
 
 Each kept item records what is grouped under it:
 

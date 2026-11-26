@@ -205,9 +205,7 @@ class TestThreadFolding:
 
         assert titles(body) == ["Still unread"]
 
-    async def test_thread_ranks_on_its_best_unread_beat_not_an_echo(
-        self, client, auth_headers, db_session, subscribed_feed
-    ):
+    async def test_thread_ranks_on_its_best_beat_not_an_echo(self, client, auth_headers, db_session, subscribed_feed):
         echo = await make_entry(db_session, subscribed_feed, title="Echo", score=9.0)
         beat = await make_entry(db_session, subscribed_feed, title="Beat", score=3.0)
         await make_thread(db_session, title="Story", members=[echo, beat], source_count=1, echoes=1)
@@ -217,6 +215,25 @@ class TestThreadFolding:
 
         # The echo's 9.0 is a reprint, not a beat — the row ranks on the 3.0.
         assert body["items"][0]["score"] == pytest.approx(3.0)
+
+    async def test_reading_an_article_does_not_change_the_story_score(
+        self, client, auth_headers, db_session, test_user, subscribed_feed
+    ):
+        loud = await make_entry(db_session, subscribed_feed, title="Loud beat", score=6.0)
+        quiet = await make_entry(db_session, subscribed_feed, title="Quiet beat", score=0.0)
+        await make_thread(db_session, title="Story", members=[loud, quiet], source_count=2)
+        await db_session.commit()
+
+        before = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
+        await mark_read(db_session, test_user, loud)
+        await db_session.commit()
+        after = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
+
+        # The loud beat is read, but the story keeps its 6.0 while the quiet one
+        # is still unread — it doesn't drop to 0.0.
+        assert kinds(before) == kinds(after) == ["thread"]
+        assert before["items"][0]["score"] == after["items"][0]["score"] == pytest.approx(6.0)
+        assert after["items"][0]["thread"]["top_score"] == pytest.approx(6.0)
 
     async def test_with_threads_false_returns_the_members(self, client, auth_headers, db_session, subscribed_feed):
         members = [await make_entry(db_session, subscribed_feed, title=f"Beat {i}", score=5.0 - i) for i in range(3)]

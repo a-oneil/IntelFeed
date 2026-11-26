@@ -3089,7 +3089,7 @@ export interface StoryThread {
   key_entities: ThreadEntity[];
   unread_count: number;
   new_since_opened: number;
-  /** Priority score of the best unread non-echo member — the row's rank. */
+  /** Priority score of the best non-echo member, read or not — the row's rank. */
   top_score: number | null;
   top_entry_id: string | null;
   entry_ids: string[];

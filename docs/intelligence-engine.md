@@ -711,4 +711,4 @@ With `signal_engine_surface` on:
 - Per-user watch and mute (`/api/intelligence/watchlist`) boost or hide entities at read time.
 - Entity profiles show recent developments from `GET /api/engine/entities/{type}/{id}/whats-new`.
 
-The Priority Queue (`/priority-queue`) mixes open **story threads** with single ranked entries, built server-side by `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1449`). A thread ranks by the score of its best unread, non-echo article, and its articles do not also appear on their own. See [story-threads.md](story-threads.md). Signal details: [engine.md](engine.md#signal-catalog).
+The Priority Queue (`/priority-queue`) mixes open **story threads** with single ranked entries, built server-side by `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1452`). A thread ranks by the score of its best non-echo article, read or not (reading an article doesn't change it), and its articles do not also appear on their own. See [story-threads.md](story-threads.md). Signal details: [engine.md](engine.md#signal-catalog).

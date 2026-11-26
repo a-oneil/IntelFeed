@@ -248,7 +248,7 @@ const COLUMNS: DataTableColumn<TableRow>[] = [
   {
     key: "signal", label: "Signal", width: 76, minWidth: 56, hideable: true,
     // This column is the signal engine's score for the row's own content, which
-    // for a thread is its best unread member (`top_score`) — not the queue's
+    // for a thread is its best member (`top_score`) — not the queue's
     // ranking score, which can carry a read-time lift the entry column doesn't.
     sortValue: (r) => r.kind === "thread"
       ? (r.thread.top_score ?? r.score)
