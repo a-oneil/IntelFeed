@@ -272,7 +272,7 @@ With surfacing on, the entry list (`list_entries`, `backend/app/api/entries.py:4
 
 The Priority Queue (`/priority-queue`) is a second, ranked entry list: `MainLayout` in `priorityMode`, which mounts `EntryList` with `sortOverride="radar"` and `withThreads`, a docked reader, and a "Why it's ranked" card (`frontend/src/components/WhyRankedCard.tsx`). It groups **story threads** into single rows in the list.
 
-Ranking and grouping happen on the server (`build_priority_queue`, `backend/app/api/entries.py:1449`). The endpoint lists open threads with something unread, scores each one by its best **unread, non-echo** member, and merges them into the radar-ordered entries so a thread appears just before the first entry it outranks. Every member of a live thread is held back from the list as a standalone entry, including members on later pages. A thread with nothing unread is not shown.
+Ranking and grouping happen on the server (`build_priority_queue`, `backend/app/api/entries.py:1452`). The endpoint lists open threads with something unread, scores each one by its best **unread, non-echo** member, and merges them into the radar-ordered entries so a thread appears just before the first entry it outranks. Every member of a live thread is held back from the list as a standalone entry, including members on later pages. A thread with nothing unread is not shown.
 
 The client only flattens the response into rows (`queueItems`, `frontend/src/utils/threads.ts:39`) and adds day dividers. The cursor carries both the entry position and the thread position, so paging never repeats a thread.
 

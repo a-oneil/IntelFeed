@@ -180,6 +180,7 @@ async def visitor_thread_view(db, thread_ids) -> dict:
                    MAX(e.priority_raw) FILTER (WHERE ste.role <> 'echo') AS top_raw,
                    COUNT(DISTINCT e.feed_id) AS source_count,
                    COUNT(*) FILTER (WHERE ste.role = 'echo') AS echo_count,
+                   COUNT(*) FILTER (WHERE ste.role <> 'echo') AS beat_count,
                    MIN(e.published_at) AS first_seen,
                    MAX(e.published_at) AS last_seen
             FROM story_thread_entries ste

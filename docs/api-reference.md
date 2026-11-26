@@ -335,7 +335,7 @@ An entry is one article (or post, video, file) pulled from a feed.
 
 `GET /api/entries` filters: `feed_id`, `category_id`, `is_read`, `is_starred`, `is_bookmarked`, `content_type`, `change_type`, `since`, `before`, `country_id` + `country_role` (`origin`, `target`, `infrastructure`, `mentioned`), `campaign_id`, `exploited_cves`, `entity_type` + `entity_id`, `sector`, `watched`, `sort` (`newest`, `oldest`, `title_asc`, `title_desc`, `shortest`, `longest`, `radar`), `dedup` (default true: show one copy of the same article from several feeds), `limit` (default 50, max 500), `cursor`. Muted feeds are left out of the all-feeds view, but included when you pass `feed_id` or `category_id`.
 
-**Priority Queue.** Unread articles above the radar threshold, ranked by their 0-10 priority score. Each open story thread is one row: a thread ranks by its best unread article, and its members do not also appear on their own. Parameters: `unread_only` (default true), `with_threads` (default true), `exclude_thread_ids` (repeatable; those threads' members come back as normal rows), `limit` (default 50, max 200; thread rows come on top), `cursor`.
+**Priority Queue.** Unread articles above the radar threshold, ranked by their 0-10 priority score. Each open story thread is one row: a thread ranks by its best article, read or not, and its members do not also appear on their own. Parameters: `unread_only` (default true), `with_threads` (default true), `exclude_thread_ids` (repeatable; those threads' members come back as normal rows), `limit` (default 50, max 200; thread rows come on top), `cursor`.
 
 ```json
 {
@@ -464,7 +464,7 @@ A story thread groups every article that reports one story. See [story-threads.m
 | GET | `/api/threads/{slug}` | Visitor | One thread: its `beats` (the timeline), `members` (each an `origin`, `beat` or `echo`), what it produced, and the `nearest` similar threads |
 | POST | `/api/threads/{thread_id}/open` | User | Mark the thread as seen. `new_since_opened` counts from here |
 
-Each list row has `entry_count`, `source_count` (outlets, not feeds), `echo_count`, `unread_count`, `new_since_opened`, `top_score` (its best unread article's priority score), `key_entities` and the member `entry_ids`.
+Each list row has `entry_count`, `source_count` (outlets, not feeds), `echo_count`, `unread_count`, `new_since_opened`, `top_score` (its best article's priority score, read or not), `key_entities` and the member `entry_ids`.
 
 ---
 

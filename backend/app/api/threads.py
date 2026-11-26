@@ -38,7 +38,7 @@ router = APIRouter()
     description=(
         "Open story threads, most recently active first. Each row carries the counts a reading "
         "surface needs to fold the pile: unread members, members added since this analyst last "
-        "opened it, the score of the best unread beat, and every member id so a list view can "
+        "opened it, the score of the best beat (read or not), and every member id so a list view can "
         "absorb them into the thread row. Pass `q` to search titles instead, for a picker that "
         "needs one named story rather than the recent ones."
     ),
@@ -104,10 +104,11 @@ async def get_thread(
         nearest = await story_threads.nearest_threads(db, thread_id)
 
     unread = [m for m in members if not m["is_read"]]
-    # Members arrive in publication order; the thread's rank is its best unread
-    # beat, so the entry reported alongside that score has to be the same one.
-    best_unread = max(
-        (m for m in unread if m["role"] != "echo"),
+    # Members arrive in publication order; the thread's rank is its best beat,
+    # read or not, so the entry reported alongside that score has to be the
+    # same one.
+    best = max(
+        (m for m in members if m["role"] != "echo"),
         key=lambda m: m["priority_raw"] or 0,
         default=None,
     )
@@ -119,8 +120,8 @@ async def get_thread(
             "new_since_opened": 0
             if user.is_anonymous
             else sum(1 for m in members if last_opened is None or (m["added_at"] and m["added_at"] > last_opened)),
-            "top_score": (best_unread["priority_score"] or 0) if best_unread else None,
-            "top_entry_id": best_unread["entry_id"] if best_unread else None,
+            "top_score": (best["priority_score"] or 0) if best else None,
+            "top_entry_id": best["entry_id"] if best else None,
             "entry_ids": [m["entry_id"] for m in members],
         }
     )

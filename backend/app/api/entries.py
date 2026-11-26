@@ -1311,14 +1311,14 @@ async def priority_unread_count(
         return {"unread_count": 0}
 
     # Open story threads with anything unread fold their members out of the
-    # standalone entry count; only those with an unread beat count as a row.
+    # standalone entry count; only those with an unread non-echo member count as a row.
     # Matches build_priority_queue.
     rows = await story_threads.list_threads(db, user.id, status="open", limit=_QUEUE_THREAD_LIMIT)
     folded = [r for r in rows if (r.get("unread_count") or 0) > 0]
     member_ids: set[uuid.UUID] = set()
     for row in folded:
         member_ids.update(row.get("entry_ids") or [])
-    live = [r for r in folded if r.get("top_raw") is not None]
+    live = [r for r in folded if (r.get("unread_beats") or 0) > 0]
 
     exposure_sq = None
     if bool(await get_setting("my_stack_exposure_enabled", db)):
@@ -1389,12 +1389,15 @@ async def priority_unread_count(
 # the CLI and an agent all get the same queue in the same order.
 
 # How deep into the open-thread list the queue looks. Threads are ranked by their
-# best unread beat, and one below this many is not going to outrank anything.
+# best beat, and one below this many is not going to outrank anything.
 _QUEUE_THREAD_LIMIT = 40
 
 
 def _thread_queue_score(row: dict) -> float:
-    """The rank a thread row takes (raw units): the score of its best unread beat.
+    """The rank a thread row takes (raw units): the score of its best beat.
+
+    Read or not — reading an article doesn't change the story's score, so the
+    row keeps its place while there is still something unread in it.
 
     Nothing is added for outlet count. The queue is one list sorted by the score
     each row shows, and a coverage bonus would float stories above articles that
@@ -1417,8 +1420,8 @@ def _thread_sort_key(row: dict) -> tuple[float, str]:
         "The ranked reading queue: unread entries that clear the radar threshold, with open story "
         "threads folded in as single rows. Entries and threads share one ranking on the stored "
         "priority score, highest first — read-time lifts (stack exposure, learned weights) can admit "
-        "an entry but don't reorder the queue. A thread ranks by the score of its best unread beat, "
-        "and its members are withheld from "
+        "an entry but don't reorder the queue. A thread ranks by the score of its best beat, read or "
+        "not, so reading an article doesn't change it, and its members are withheld from "
         "the queue as standalone entries — the thread row stands for them. Threads with nothing "
         "unread never appear: the queue answers 'what should I read next', and a story you have "
         "finished has no answer to give."
@@ -1478,14 +1481,14 @@ async def build_priority_queue(
         folded = [r for r in rows if (r.get("unread_count") or 0) > 0 and r["id"] not in dismissed]
         for row in folded:
             # Every member of a live thread is withheld, including those on pages
-            # still to come. A thread scores at or above its best unread member, so
+            # still to come. A thread scores at or above every member, so
             # the row is always reached before the articles it stands for — the
             # story is never missing from the queue, only folded.
             member_ids.update(row.get("entry_ids") or [])
-        # A thread whose only unread members are echoes (top_raw is NULL) gets no
+        # A thread whose only unread members are echoes gets no
         # row, but its members stay withheld above: the beats are read, and an
         # echo is a reprint of one, so neither belongs back in the queue alone.
-        live = [r for r in folded if r.get("top_raw") is not None]
+        live = [r for r in folded if (r.get("unread_beats") or 0) > 0]
         live.sort(key=_thread_sort_key)
         pending = [r for r in live if thread_after is None or _thread_sort_key(r) > thread_after]
 
@@ -1517,7 +1520,7 @@ async def build_priority_queue(
 
     # Two-pointer merge: entries keep their ranked order and a thread slots in
     # ahead of the first entry it outranks. Both sides are the stored house
-    # score — an entry's own, a thread's best unread beat — so the merged list
+    # score — an entry's own, a thread's best beat — so the merged list
     # runs highest displayed score first. The merge runs in raw units; each row
     # reports its rank on the 0–10 scale.
     items: list[PriorityQueueRow] = []

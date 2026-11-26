@@ -23,8 +23,9 @@ ranked where it did.
 
 **Story rows.** When several outlets cover the same story, the queue shows it
 once, as one row you can open. The articles inside it are left out of the
-list. A story ranks by the score of its best unread article, and sits in the
-same highest-first list as single articles. Once you've read a story, it
+list. A story ranks by the score of its best article, and sits in the same
+highest-first list as single articles. Reading an article in the story
+doesn't change its score. Once you've read a story, it
 leaves the queue.
 
 What a story row opens into is covered in [Story threads](story-threads.md).

@@ -1084,11 +1084,12 @@ async def list_threads(
 ) -> list[dict]:
     """Threads for the reading surfaces, most recently active first.
 
-    ``top_score`` is the priority score of the best unread, non-echo member —
-    the score the thread row takes in the ranked queue, because that member is
-    what the reader would have read next anyway. ``top_raw`` is that member's
-    raw signal sum, which the queue actually ranks by. ``unread_count`` counts every
-    unread member including echoes, since those are the rows the thread folds.
+    ``top_score`` is the priority score of the best non-echo member, read or
+    not, so reading an article never changes the story's score. ``top_raw`` is
+    that member's raw signal sum, which the queue ranks by, and ``top_entry_id``
+    is that member. ``unread_count`` counts every unread member including
+    echoes, since those are the rows the thread folds; ``unread_beats`` counts
+    the unread non-echo ones, which decide whether the thread gets a queue row.
 
     ``q`` filters on title, for the pickers that need to *find* a named story
     rather than read the most recent ones — following one onto a campaign, say.
@@ -1108,7 +1109,8 @@ async def list_threads(
                    t.echo_count, t.first_seen, t.last_seen, t.peak_at, t.key_entities,
                    t.narrated_at,
                    uts.last_opened_at,
-                   m.unread_count, m.top_score, m.top_raw, m.top_entry_id, m.new_since_opened, m.entry_ids
+                   m.unread_count, m.unread_beats, m.top_score, m.top_raw, m.top_entry_id,
+                   m.new_since_opened, m.entry_ids
             FROM (
                 SELECT id, slug, title, summary, status, entry_count, source_count,
                        echo_count, first_seen, last_seen, peak_at, key_entities,
@@ -1122,14 +1124,13 @@ async def list_threads(
             LEFT JOIN user_thread_states uts ON uts.thread_id = t.id AND uts.user_id = :user_id
             JOIN LATERAL (
                 SELECT COUNT(*) FILTER (WHERE ues.is_read IS NOT TRUE) AS unread_count,
-                       MAX(e.priority_score) FILTER (
+                       COUNT(*) FILTER (
                            WHERE ues.is_read IS NOT TRUE AND ste.role <> 'echo'
-                       ) AS top_score,
-                       MAX(e.priority_raw) FILTER (
-                           WHERE ues.is_read IS NOT TRUE AND ste.role <> 'echo'
-                       ) AS top_raw,
+                       ) AS unread_beats,
+                       MAX(e.priority_score) FILTER (WHERE ste.role <> 'echo') AS top_score,
+                       MAX(e.priority_raw) FILTER (WHERE ste.role <> 'echo') AS top_raw,
                        (ARRAY_AGG(e.id ORDER BY e.priority_raw DESC NULLS LAST)
-                        FILTER (WHERE ues.is_read IS NOT TRUE AND ste.role <> 'echo'))[1] AS top_entry_id,
+                        FILTER (WHERE ste.role <> 'echo'))[1] AS top_entry_id,
                        COUNT(*) FILTER (
                            WHERE uts.last_opened_at IS NULL OR ste.added_at > uts.last_opened_at
                        ) AS new_since_opened,
@@ -1220,6 +1221,7 @@ async def visitor_thread_rows(db: AsyncSession, rows: list[dict]) -> list[dict]:
                     if (chip.get("entity_type"), _as_uuid(chip.get("entity_id"))) in shown
                 ],
                 "unread_count": visible,
+                "unread_beats": seen["beat_count"],
                 "new_since_opened": 0,
             }
         )

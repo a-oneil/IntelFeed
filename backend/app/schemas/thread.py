@@ -72,7 +72,7 @@ class ThreadSummary(BaseModel):
     unread_count: int
     new_since_opened: int = Field(description="Members added since this analyst last opened the thread")
     top_score: float | None = Field(
-        description="Priority score of the best unread non-echo member: the rank the thread row takes"
+        description="Priority score of the best non-echo member, read or not: the rank the thread row takes"
     )
     top_entry_id: uuid.UUID | None
     entry_ids: list[uuid.UUID] = Field(

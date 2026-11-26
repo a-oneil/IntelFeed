@@ -130,7 +130,7 @@ describe("EntryTableView thread rows", () => {
 
     // A thread has no single source, so Source counts them.
     expect(within(row).getByText("11 outlets")).toBeInTheDocument();
-    // Signal is the best unread member's score, not the queue's ranking score.
+    // Signal is the best member's score, not the queue's ranking score.
     expect(within(row).getByText("◆ 7.4")).toBeInTheDocument();
     expect(within(row).getByText("Sandworm")).toBeInTheDocument();
     expect(within(row).getByTitle("11 outlets · 23 articles · 6 new")).toBeInTheDocument();

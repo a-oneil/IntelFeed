@@ -75,7 +75,7 @@ export function ScoreStageConfig() {
       <SystemSettings filterGroups={["scoring"]} flat />
 
       {/* Threads live under Score because they are read in the queue this stage
-          ranks: a thread takes the score of its best unread beat. Its own block
+          ranks: a thread takes the score of its best beat, read or not. Its own block
           so fifteen clustering knobs don't swamp the scoring ones. */}
       <h4 className={styles.heading}>Story threads</h4>
       <SystemSettings filterGroups={["threads"]} flat hideGroupTitle />

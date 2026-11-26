@@ -6,7 +6,7 @@ import { groupConsecutiveEntries, type SingleItem } from "./groupEntries";
 export interface ThreadItem {
   type: "thread";
   thread: StoryThread;
-  /** The row's 0–10 rank — its best unread article's score, which the badge shows. */
+  /** The row's 0–10 rank — its best article's score (read or not), which the badge shows. */
   score: number;
   /** Members the row absorbed (kept out of the list as standalone entries). */
   memberIds: string[];

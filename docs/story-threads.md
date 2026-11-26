@@ -75,7 +75,7 @@ Feed summaries vary in format (raw `<p>` markup, a Google News link wrapped arou
 
 ## Where threads appear
 
-**Priority Queue.** `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1449`) returns entries and threads as one ranked list; `ThreadRow` draws the thread rows. A thread ranks by the score of its best *unread, non-echo* article, and its articles are left out of the list as single rows: the thread row stands for them. A thread with nothing unread does not appear, because the queue lists what to read next.
+**Priority Queue.** `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1452`) returns entries and threads as one ranked list; `ThreadRow` draws the thread rows. A thread ranks by the score of its best *non-echo* article, read or not, so reading one doesn't change it, and its articles are left out of the list as single rows: the thread row stands for them. A thread with nothing unread does not appear, because the queue lists what to read next.
 
 Leaving members out is safe because a thread always scores at least as high as each article it folds, so its row comes before them. With infinite scroll, a thread that outranks nothing on the current page waits for a later page instead of being added at the end. Otherwise the next page would insert it mid-list and shift every row under the reader's cursor. Threads still waiting when the last page loads go at the end. The reader, the CLI and agents all get the same order from this one endpoint.
 
