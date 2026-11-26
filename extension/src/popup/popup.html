@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>IntelFeed</title>
+    <link rel="stylesheet" href="../ui.css" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="head">
+      <div class="brand">
+        <span data-logo></span>
+        <span class="brand-name">Intel<span class="brand-accent">Feed</span></span>
+      </div>
+      <button id="open-settings-icon" class="icon-button" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+      </button>
+    </header>
+
+    <p id="update-banner" class="callout small hidden"></p>
+
+    <div id="outbox-block" class="callout small hidden">
+      <span id="outbox-text"></span>
+      <div class="row outbox-actions">
+        <button id="outbox-send" type="button">Send now</button>
+        <button id="outbox-discard" type="button">Discard</button>
+      </div>
+      <ul id="outbox-failed" class="outbox-failed"></ul>
+    </div>
+
+    <section id="signed-out" class="hidden">
+      <p class="muted">Sign in to your IntelFeed server to add pages to it.</p>
+      <button id="open-settings" class="primary wide">Open settings to sign in</button>
+    </section>
+
+    <section id="main" class="hidden">
+      <div class="page">
+        <div id="page-host" class="page-host"></div>
+        <div id="page-title" class="page-title"></div>
+      </div>
+
+      <div id="status" class="status muted">Checking whether this page is in IntelFeed…</div>
+
+      <a id="thread-block" class="story hidden" target="_blank"></a>
+
+      <details id="results-block" class="expander hidden">
+        <summary>
+          <span class="expander-title">Found in this article</span>
+          <span id="results-summary" class="expander-count"></span>
+        </summary>
+        <div id="results-list" class="chips"></div>
+        <p id="results-state" class="muted small"></p>
+      </details>
+
+      <div id="coverage-block" class="card hidden">
+        <h2 id="coverage-title"></h2>
+        <ul id="coverage-list" class="coverage"></ul>
+        <a id="coverage-thread" class="story hidden" target="_blank"></a>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button id="tab-send" class="tab" role="tab" type="button" aria-selected="true" aria-controls="send-form">
+          Send to IntelFeed
+        </button>
+        <button id="tab-note" class="tab" role="tab" type="button" aria-selected="false" aria-controls="note-form">
+          Save as note
+        </button>
+      </div>
+
+      <figure id="selection-block" class="quote hidden">
+        <blockquote id="selection-text"></blockquote>
+        <figcaption id="selection-caption" class="muted"></figcaption>
+      </figure>
+
+      <div id="send-form" class="panel" role="tabpanel" aria-labelledby="tab-send">
+        <textarea id="note" rows="2" placeholder="Note on the article (optional)"></textarea>
+
+        <details id="tags-block" class="expander hidden">
+          <summary>
+            <span class="expander-title">Tags</span>
+            <span id="tags-summary" class="expander-count"></span>
+          </summary>
+          <div id="tags" class="tags"></div>
+        </details>
+
+        <button id="send" class="primary wide" disabled>Send to IntelFeed</button>
+
+        <div id="report-block" class="report hidden">
+          <span class="muted">Add to report</span>
+          <select id="report-pick"></select>
+          <button id="report-add" type="button">Add</button>
+        </div>
+        <p id="report-result" class="small"></p>
+      </div>
+
+      <div id="note-form" class="panel hidden" role="tabpanel" aria-labelledby="tab-note">
+        <div class="save-to">
+          <span class="muted">Save to</span>
+          <div class="kinds" role="radiogroup" aria-label="Save to">
+            <button type="button" class="kind" role="radio" data-kind="telemetry" aria-checked="false">Telemetry source</button>
+            <button type="button" class="kind" role="radio" data-kind="entity" aria-checked="false">Entity</button>
+            <button type="button" class="kind" role="radio" data-kind="note" aria-checked="true">Notes</button>
+          </div>
+        </div>
+
+        <div id="target-telemetry" class="target hidden">
+          <div class="field-with-badge">
+            <input id="telemetry-source" type="text" list="telemetry-names" autocomplete="off" placeholder="Telemetry source, e.g. AWS GuardDuty" aria-label="Telemetry source" />
+            <span id="telemetry-suggested" class="badge hidden">Suggested</span>
+          </div>
+          <datalist id="telemetry-names"></datalist>
+          <p id="telemetry-unavailable" class="muted small hidden">Couldn’t load the telemetry sources from IntelFeed.</p>
+        </div>
+
+        <div id="target-entity" class="target hidden">
+          <div id="entity-picked" class="picked hidden">
+            <span id="entity-picked-chip" class="chip"></span>
+            <button id="entity-clear" type="button" class="icon-button" aria-label="Pick another entity" title="Pick another entity">×</button>
+          </div>
+          <div id="entity-search-box">
+            <input id="entity-search" type="text" autocomplete="off" placeholder="Search actors, malware, CVEs, techniques…" aria-label="Entity" />
+            <ul id="entity-results" class="options hidden" role="listbox"></ul>
+            <div id="entity-suggest" class="chips hidden"></div>
+          </div>
+        </div>
+
+        <div id="target-note" class="target hidden">
+          <input id="note-title" type="text" placeholder="Title" aria-label="Title" />
+        </div>
+
+        <textarea id="telemetry-note" rows="3" placeholder="Your note (optional)"></textarea>
+        <button id="telemetry-save" class="primary wide" type="button">Save note</button>
+        <p id="telemetry-result" class="small"></p>
+      </div>
+
+      <div id="site-section" class="site-section hidden">
+        <h2 id="site-heading">This site</h2>
+        <ul id="feeds" class="list"></ul>
+
+        <div id="repo-block" class="hidden">
+          <div class="list-row">
+            <span class="list-label">
+              <span id="repo-name" class="repo-name"></span>
+              <span class="muted">GitHub repository</span>
+            </span>
+            <button id="repo-track" type="button">Follow</button>
+          </div>
+          <details class="repo-options">
+            <summary class="muted">Branch and file patterns</summary>
+            <label for="repo-branch">Branch</label>
+            <input id="repo-branch" type="text" />
+            <label for="repo-paths">File patterns <span class="muted">(one per line)</span></label>
+            <textarea id="repo-paths" rows="2"></textarea>
+          </details>
+        </div>
+
+        <div id="site-block" class="list-row hidden">
+          <label for="site-highlight" class="list-label">
+            <span>Highlight known entities</span>
+            <span class="muted">Actors, malware, CVEs and more on this site’s pages</span>
+          </label>
+          <label class="switch"><input id="site-highlight" type="checkbox" /><span></span></label>
+        </div>
+        <p id="all-sites-hint" class="muted small hidden">
+          To highlight threat intel on pages, allow the extension to read all sites in
+          <a href="#" id="all-sites-link">Settings</a>.
+        </p>
+      </div>
+
+      <footer>
+        <span id="who" class="muted"></span>
+      </footer>
+    </section>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

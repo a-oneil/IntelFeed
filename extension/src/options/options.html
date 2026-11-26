@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IntelFeed extension settings</title>
+    <link rel="stylesheet" href="../ui.css" />
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span data-logo></span>
+        <span class="brand-name">Intel<span class="brand-accent">Feed</span></span>
+        <span class="muted brand-sub">Browser extension</span>
+      </div>
+      <div id="connection" class="connection muted">
+        <span id="connection-dot" class="status-dot"></span>
+        <span id="connection-text">Not signed in</span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- Built from the sections below: each <section data-title> is one entry. -->
+      <nav id="nav" class="nav" aria-label="Settings sections"></nav>
+
+      <main id="sections">
+        <!--
+          Adding settings: add a <section class="panel" id="…" data-title="…">.
+          A row is .setting with .setting-text (h3 + p) and a control; a switch
+          bound to a feature flag is <input type="checkbox" id="feature-<flag>">
+          inside .switch, with the flag's default in lib/store.js DEFAULT_FEATURES.
+        -->
+
+        <section class="panel" id="account" data-title="Account">
+          <h2>Account</h2>
+
+          <div id="signed-in" class="hidden">
+            <div class="setting">
+              <div class="setting-text">
+                <h3>Signed in as <span id="who"></span></h3>
+                <p>
+                  Server: <a id="server-link" target="_blank"></a>. You stay signed in as long as you use this browser at
+                  least once a week.
+                </p>
+              </div>
+            </div>
+            <div class="row actions">
+              <button id="test">Test connection</button>
+              <button id="sign-out">Sign out</button>
+              <span id="test-result"></span>
+            </div>
+          </div>
+
+          <form id="sign-in" class="hidden">
+            <p class="muted">
+              Sign in with the username and password you use for IntelFeed. The extension works with any IntelFeed
+              server.
+            </p>
+            <label for="server">Server address</label>
+            <input id="server" type="url" placeholder="https://intel.example.com" required autocomplete="url" />
+            <p class="muted small hint">The address you open IntelFeed at in your browser.</p>
+            <p id="http-warning" class="warn small hidden">
+              This address uses http, which is not encrypted. Anyone on the network between you and the server can read
+              your password and session. Use https unless the server is on a network you trust.
+            </p>
+
+            <label for="username">Username</label>
+            <input id="username" type="text" required autocomplete="username" />
+
+            <label for="password">Password</label>
+            <input id="password" type="password" required autocomplete="current-password" />
+
+            <p class="muted small hint">
+              Your password is sent to your server once, to sign in, and is not saved. The extension saves the same
+              sign-in session the IntelFeed website uses. Your browser will ask you to allow the extension to connect to
+              this server.
+            </p>
+            <div class="row actions">
+              <button class="primary" type="submit">Sign in</button>
+              <span id="sign-in-result"></span>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel" id="pages" data-title="Web pages">
+          <h2>Web pages</h2>
+          <p class="muted">
+            The features in this section work on the websites you visit without you opening the extension. They need
+            permission to read all websites, which you grant once below. They send information only to your IntelFeed
+            server, and they do not run on the IntelFeed website itself.
+          </p>
+
+          <div id="all-sites-off" class="callout hidden">
+            <div>
+              <strong>Permission needed</strong>
+              <p class="muted small">
+                These features need permission to read all websites. Your browser will ask you to confirm.
+              </p>
+            </div>
+            <button id="grant-all-sites" class="primary">Grant permission</button>
+          </div>
+          <p id="grant-result" class="small"></p>
+          <p id="page-status" class="small"></p>
+
+          <div class="setting">
+            <div class="setting-text">
+              <h3>Show a status dot on the IntelFeed toolbar button</h3>
+              <p>
+                The IntelFeed button is the IntelFeed icon in your browser's toolbar, next to the address bar. If you
+                don't see it, open your browser's extensions menu (the puzzle-piece icon) and pin IntelFeed. When this
+                setting is on, a small dot appears on the corner of that icon for the page in the current tab:
+              </p>
+              <ul class="dot-legend">
+                <li><span class="legend-dot ok"></span><strong>Green dot:</strong> this page is already in IntelFeed. Click the icon, then "Open", to go to it.</li>
+                <li><span class="legend-dot accent"></span><strong>Dot in your theme's accent color:</strong> the site has an RSS feed, or is a GitHub repository, that you don't follow yet. Click the icon, then "Follow", to add it to your feeds.</li>
+                <li><span class="legend-dot none"></span><strong>No dot:</strong> neither of the above.</li>
+              </ul>
+              <p>To check, the extension sends the address of each page you open to your server.</p>
+            </div>
+            <label class="switch"><input id="feature-pageDot" type="checkbox" /><span></span></label>
+          </div>
+          <div class="setting">
+            <div class="setting-text">
+              <h3>Highlight threat intelligence on pages</h3>
+              <p>
+                Underlines names IntelFeed already knows (threat actors, malware, CVEs, CWEs, ATT&amp;CK techniques,
+                tools, vendors, products, countries, sectors, mitigations and indicators) in the color IntelFeed uses for each type. Hover over an underlined
+                name to see its description and a link to its page in IntelFeed. From the same card you can add it to
+                your watchlist, copy its name, or add a country to one of your intel profiles. To find the names, the
+                extension sends the visible text of each page, up to 120,000 characters, to your server.
+              </p>
+            </div>
+            <label class="switch"><input id="feature-highlight" type="checkbox" /><span></span></label>
+          </div>
+          <div class="setting">
+            <div class="setting-text">
+              <h3>Show what IntelFeed knows on CVE and ATT&amp;CK pages</h3>
+              <p>
+                On a page about one CVE, such as its page on nvd.nist.gov or cve.org or a vendor's security advisory, a
+                panel in the bottom-right corner of the page shows: the CVSS score, whether it is on the CISA Known
+                Exploited Vulnerabilities (KEV) list, its EPSS score, its exploit status, how many articles in IntelFeed
+                mention it, how many detection rules cover it, and whether it affects a vendor or product in your stack.
+              </p>
+              <p>
+                On an ATT&amp;CK technique page on attack.mitre.org, the panel shows how many detection rules in
+                IntelFeed are mapped to the technique and the most recent articles that mention it. Close the panel
+                with the × in its corner. The CVE or technique ID in the page's address is sent to your server.
+              </p>
+            </div>
+            <label class="switch"><input id="feature-contextPanel" type="checkbox" /><span></span></label>
+          </div>
+          <div id="disabled-sites-block" class="setting hidden">
+            <div class="setting-text">
+              <h3>Sites where highlighting is turned off</h3>
+              <p>
+                You turned highlighting off for these sites from the toolbar popup. Remove a site to turn highlighting
+                back on there.
+              </p>
+              <ul id="disabled-sites" class="chips"></ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" id="menu" data-title="Right-click menu">
+          <h2>Right-click menu</h2>
+          <p class="muted">These items are always in the right-click menu:</p>
+          <ul class="plain-list">
+            <li><strong>Send page to IntelFeed</strong> (right-click anywhere on a page): adds the page to IntelFeed.</li>
+            <li><strong>Send link to IntelFeed</strong> (right-click a link): your server downloads the linked page and adds it.</li>
+            <li>
+              <strong>Save selection as a detection rule</strong> (right-click selected text): opens a window where you
+              check the rule's syntax, save it to IntelFeed's rule library, and convert it to other rule languages.
+            </li>
+          </ul>
+          <div class="setting">
+            <div class="setting-text">
+              <h3>Look up selected text in IntelFeed</h3>
+              <p>
+                Adds "Look up in IntelFeed" to the right-click menu when text is selected. It opens an IntelFeed search
+                for that text in a new tab. Defanged indicators, such as hxxp://example[.]com, are converted back to
+                their normal form before searching.
+              </p>
+            </div>
+            <label class="switch"><input id="feature-lookupMenu" type="checkbox" /><span></span></label>
+          </div>
+        </section>
+
+        <section class="panel" id="sending" data-title="Sending">
+          <h2>Sending</h2>
+          <div class="setting">
+            <div class="setting-text">
+              <h3>Tell me what IntelFeed found</h3>
+              <p>
+                After you send a new page, IntelFeed links its threat actors, malware, CVEs and techniques, and its AI
+                analysis may take a few minutes. When it has finished, a notification says what it found. Clicking the
+                notification opens the article. The extension checks once a minute, for up to 30 minutes.
+              </p>
+            </div>
+            <label class="switch"><input id="feature-notifyResults" type="checkbox" /><span></span></label>
+          </div>
+          <p class="muted">
+            When your server can't be reached, a page you send is kept in the browser and sent once the server answers
+            again. The toolbar button shows how many are waiting, and the popup can send them now or discard them. Up to
+            25 pages are kept. A PDF is not kept: send it again when the server is back.
+          </p>
+        </section>
+
+        <section class="panel" id="address-bar" data-title="Address bar">
+          <h2>Address bar</h2>
+          <p class="muted">
+            To search IntelFeed from the address bar, type <kbd>if</kbd>, then a space, then what you are looking for,
+            and press Enter. For example, <kbd>if APT29</kbd> or <kbd>if CVE-2024-3400</kbd>. The search opens in the
+            current tab. Hold Alt (Option on a Mac) while pressing Enter to open it in a new tab.
+          </p>
+        </section>
+
+        <section class="panel" id="about" data-title="About">
+          <h2>About</h2>
+          <div class="setting">
+            <div class="setting-text">
+              <h3>Version <span id="version"></span></h3>
+              <p>
+                New versions are published on the
+                <a href="https://github.com/a-oneil/IntelFeed/releases" target="_blank" rel="noopener">IntelFeed releases page</a>
+                on GitHub. The extension does not update itself. Once a day it checks that page and tells you here and in
+                the toolbar popup when a newer version is available.
+              </p>
+              <p id="update-status"></p>
+            </div>
+            <button id="check-update">Check now</button>
+          </div>
+          <div class="setting">
+            <div class="setting-text">
+              <h3>Theme</h3>
+              <p id="theme-name">
+                The extension uses the theme selected in your IntelFeed account. Sign in to load it.
+              </p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

@@ -1317,3 +1317,20 @@ async def test_timeline_relationships_follow_the_visitor_rule(
     assert visitor.status_code == 200, visitor.text
     assert "Rumoured Actor" not in visitor.text
     assert "Partner Actor" in visitor.text  # an edge with visible evidence stays
+
+
+@pytest.mark.asyncio
+async def test_entity_entries_window_lists_only_visible_articles(
+    client: AsyncClient, public_mode, canary, auth_headers, no_rate_limit
+):
+    """The route takes query params, so the canary walk only gets its 422; check it directly."""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    url = f"/api/entities/threat_actor/{canary['shared']}/entries-window"
+    params = {"start": (now - timedelta(days=1)).isoformat(), "end": (now + timedelta(days=1)).isoformat()}
+    analyst = await client.get(url, params=params, headers=auth_headers)
+    assert {i["entry_id"] for i in analyst.json()["items"]} >= {str(canary["shown"]), str(canary["hidden"])}
+    visitor = await client.get(url, params=params)
+    assert visitor.status_code == 200, visitor.text
+    assert [i["entry_id"] for i in visitor.json()["items"]] == [str(canary["shown"])]

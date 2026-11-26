@@ -436,20 +436,26 @@ async def entry_pipeline_runs(
     as ``not_run`` so the popover shows the whole pipeline rather than whichever
     stages happened to write a row. Translation is the exception — it only exists
     for non-English feeds — and is listed only when it ran. An entry with no
-    record at all (ingested before run logging) returns an empty list.
+    record at all (ingested before run logging, or not started yet) returns
+    ``{"status": "unknown", "runs": []}``.
     """
     import uuid as _uuid
 
+    try:
+        eid = _uuid.UUID(entry_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid entry id") from None
+    return await entry_pipeline_status(db, eid)
+
+
+async def entry_pipeline_status(db, eid) -> dict:
+    """Return ``{status, runs}`` for one entry. ``status`` is unknown, in_flight, complete or errored."""
     from sqlalchemy import select
 
     from app.models.ai_analysis import AIAnalysisRequest
     from app.models.entry_pipeline_run import EntryPipelineRun
     from app.services.system_settings import get_setting
 
-    try:
-        eid = _uuid.UUID(entry_id)
-    except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid entry id") from None
     rows = (
         (
             await db.execute(

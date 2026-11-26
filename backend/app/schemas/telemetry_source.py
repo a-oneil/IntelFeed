@@ -153,3 +153,54 @@ class TelemetrySyncResponse(BaseModel):
     disabled_count: int
     unchanged_count: int
     total: int
+
+
+# --- Notes and saved links per source -------------------------------------------
+
+
+class TelemetrySourceNoteCreate(BaseModel):
+    source_name: str = Field(min_length=1, max_length=255, description="Catalog or inventory name of the source")
+    url: str | None = Field(default=None, max_length=4000, description="A page about the source")
+    page_title: str | None = Field(default=None, max_length=500)
+    quote: str | None = Field(default=None, max_length=10000, description="A passage quoted from the page")
+    content: str | None = Field(default=None, max_length=20000, description="The note itself")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "source_name": "AWS GuardDuty",
+                "url": "https://docs.aws.amazon.com/guardduty/latest/ug/guardduty_finding-types-active.html",
+                "page_title": "GuardDuty active finding types",
+                "quote": "Runtime Monitoring findings need the GuardDuty security agent on the instance.",
+                "content": "Our EKS clusters run the agent; the EC2 fleet does not yet.",
+            }
+        }
+    )
+
+
+class TelemetrySourceNoteUpdate(BaseModel):
+    url: str | None = Field(default=None, max_length=4000)
+    page_title: str | None = Field(default=None, max_length=500)
+    quote: str | None = Field(default=None, max_length=10000)
+    content: str | None = Field(default=None, max_length=20000)
+
+    model_config = ConfigDict(json_schema_extra={"example": {"content": "The EC2 fleet has the agent too."}})
+
+
+class TelemetrySourceNoteResponse(BaseModel):
+    id: uuid.UUID
+    source_name: str
+    user_id: uuid.UUID
+    username: str | None = None
+    url: str | None
+    page_title: str | None
+    quote: str | None
+    content: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TelemetrySourceSuggestion(BaseModel):
+    name: str
+    category: str | None = None
+    reason: str = Field(description="saved_before (an earlier link from the same part of the site) or name_match")

@@ -4,6 +4,7 @@ import api from "@/api/client";
 import type { Theme } from "@/api/types";
 import { useAuthStore } from "@/stores/authStore";
 import { contrastText, luminance, parseHex } from "@/utils/contrast";
+import { markSvg } from "@/utils/brandMark";
 
 export function useThemes() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated());
@@ -221,22 +222,10 @@ function applyCachedVars(): boolean {
   }
 }
 
+/** The favicon in the theme's accent: public/favicon.svg recoloured. */
 function updateFavicon(color: string | undefined) {
   if (!color) return;
-  const svg = `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M12 2L21.2 7.5V16.5L12 22L2.8 16.5V7.5Z" stroke="${color}" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
-  <path d="M12 2L21.2 16.5L2.8 16.5Z" stroke="${color}" stroke-width="0.7" stroke-linejoin="round" fill="none" opacity="0.6"/>
-  <path d="M21.2 7.5L12 22L2.8 7.5Z" stroke="${color}" stroke-width="0.7" stroke-linejoin="round" fill="none" opacity="0.6"/>
-  <circle cx="12" cy="2" r="1.1" fill="${color}"/><circle cx="21.2" cy="7.5" r="1.1" fill="${color}"/>
-  <circle cx="21.2" cy="16.5" r="1.1" fill="${color}"/><circle cx="12" cy="22" r="1.1" fill="${color}"/>
-  <circle cx="2.8" cy="16.5" r="1.1" fill="${color}"/><circle cx="2.8" cy="7.5" r="1.1" fill="${color}"/>
-  <circle cx="15.5" cy="7.5" r="0.8" fill="${color}"/><circle cx="18.3" cy="12" r="0.8" fill="${color}"/>
-  <circle cx="15.5" cy="16.5" r="0.8" fill="${color}"/><circle cx="8.5" cy="16.5" r="0.8" fill="${color}"/>
-  <circle cx="5.7" cy="12" r="0.8" fill="${color}"/><circle cx="8.5" cy="7.5" r="0.8" fill="${color}"/>
-  <circle cx="8.5" cy="15.5" r="1.3" fill="${color}"/>
-  <path d="M8.5 12.5C10.16 12.5 11.5 13.84 11.5 15.5" stroke="${color}" stroke-width="1.4" stroke-linecap="round" fill="none"/>
-  <path d="M8.5 9.8C11.65 9.8 14.2 12.35 14.2 15.5" stroke="${color}" stroke-width="1.4" stroke-linecap="round" fill="none"/>
-</svg>`;
+  const svg = markSvg(color);
   const blob = new Blob([svg], { type: "image/svg+xml" });
   const url = URL.createObjectURL(blob);
   const link = document.querySelector<HTMLLinkElement>('link[rel="icon"][type="image/svg+xml"]');

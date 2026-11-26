@@ -1174,6 +1174,8 @@ export interface RuleTelemetry {
   collected: string[];
   missing: string[];
   coverage_pct: number | null;
+  /** Single-rule reads only: enabled sources answering the collected tokens. */
+  sources?: { name: string; provides: string[]; note_count: number }[];
 }
 
 export interface FacetBucket {
@@ -2313,6 +2315,27 @@ export interface CatalogItem {
   vendor: string;
   product: string;
   log_types: string[];
+}
+
+/** A note, or a saved link with an optional note, about one telemetry source. */
+export interface TelemetrySourceNote {
+  id: string;
+  source_name: string;
+  user_id: string;
+  username: string | null;
+  url: string | null;
+  page_title: string | null;
+  quote: string | null;
+  content: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TelemetrySourceNoteInput {
+  url?: string | null;
+  page_title?: string | null;
+  quote?: string | null;
+  content?: string | null;
 }
 
 export interface TelemetrySyncResponse {

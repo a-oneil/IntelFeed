@@ -1,16 +1,18 @@
-"""Manual ingest: the two synchronous one-item doors, and batches.
+"""Manual ingest: single items, the browser extension's endpoints, and batches.
 
-``POST /ingest/url`` and ``POST /ingest/pdf`` answer with the entry in the
-same request (the Android client and the ``ingest_url`` registry tool rely on
-that). Everything else is a batch: the request validates and stores, a Celery
-task per item parses, and ``GET /ingest/batches/{id}`` reports one status per
-item. Mounted under ``/api/entries``.
+``POST /ingest/url``, ``POST /ingest/pdf`` and ``POST /ingest/page`` answer
+with the entry in the same request (the Android client, the browser extension
+and the ``ingest_url`` registry tool rely on that). Everything else is a
+batch: the request validates and stores, a Celery task per item parses, and
+``GET /ingest/batches/{id}`` reports one status per item. Mounted under
+``/api/entries``.
 """
 
 import logging
 import uuid
+from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,16 +22,21 @@ from app.database import get_db
 from app.models.ingest_batch import ITEM_CREATED, RETRYABLE_ITEM_STATUSES, IngestBatch, IngestBatchItem
 from app.models.user import User
 from app.schemas.ingest import (
+    EntryByURLResponse,
+    EntryResultsResponse,
     IngestBatchCreate,
     IngestBatchListItem,
     IngestBatchResponse,
     IngestCapabilities,
     IngestFileInfo,
     IngestItemResponse,
+    IngestPageRequest,
+    IngestPageResponse,
     IngestResponse,
     IngestTextRequest,
     IngestURLRequest,
     IngestURLsRequest,
+    PageCoverageResponse,
 )
 from app.services import ingest_batches as batches
 from app.services import ingest_files as store
@@ -39,44 +46,21 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-# --- the one-item doors (unchanged contract) ----------------------------------
+# --- single items: the entry is returned in the same request -----------------
 
 
 @router.post("/ingest/url", response_model=IngestResponse)
 async def ingest_url(
     body: IngestURLRequest,
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Ingest a web page/article URL as a manual entry, synchronously."""
     from app.services.manual_ingest import ingest_url as do_ingest_url
 
-    entry = await do_ingest_url(db, body.url.strip())
+    entry = await do_ingest_url(db, body.url.strip(), user.id)
     await db.commit()
-
-    # Dispatch the full intelligence pipeline
-    from app.workers.feed_tasks import dispatch_entry_pipeline
-
-    dispatch_entry_pipeline(str(entry.id), run_extraction=True)
-
-    # Index in Meilisearch
-    _index_entry(entry)
-
-    # Broadcast SSE event
-    try:
-        from app.api.events import broadcast_event
-
-        broadcast_event(
-            "entry_ingested",
-            {
-                "entry_id": str(entry.id),
-                "feed_id": str(entry.feed_id),
-                "title": entry.title,
-                "source": "url",
-            },
-        )
-    except Exception:
-        logger.debug("Failed to broadcast ingest event", exc_info=True)
+    _after_create(entry, "url")
 
     return IngestResponse(
         id=entry.id,
@@ -89,10 +73,160 @@ async def ingest_url(
     )
 
 
+@router.post("/ingest/page", response_model=IngestPageResponse, status_code=201)
+async def ingest_page(
+    body: IngestPageRequest,
+    response: Response,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create an entry for the page the sender is reading (the browser extension's Send).
+
+    With ``html`` (the page's rendered DOM) the server does not fetch the URL,
+    so pages behind a login, a paywall or robots.txt can be sent. The HTML is
+    extracted and sanitized the same way as a fetched page. Without ``html``
+    the URL is fetched, as ``/ingest/url`` does.
+
+    The entry goes on the shared Manual Uploads feed, which every user can see.
+
+    Sending a page that is already in IntelFeed returns ``200`` with the
+    existing entry and ``created: false``. Tags and the note (saved as a Note
+    on the entry) are applied in both cases.
+    """
+    from app.services.manual_ingest import ingest_page as do_ingest_page
+
+    entry, created = await do_ingest_page(
+        db,
+        url=body.url.strip(),
+        user_id=user.id,
+        html=body.html,
+        title=(body.title or "").strip() or None,
+        selection=body.selection,
+        published_at=body.published_at,
+        author=(body.author or "").strip() or None,
+        client=body.client,
+    )
+    await _apply_send_extras(db, entry, user, tag_ids=body.tag_ids, note=body.note)
+    await db.commit()
+    if created:
+        _after_create(entry, "page")
+    else:
+        response.status_code = 200
+
+    return IngestPageResponse(
+        id=entry.id,
+        title=entry.title,
+        url=entry.url,
+        word_count=entry.word_count,
+        feed_id=entry.feed_id,
+        content_hash=entry.content_hash,
+        message="Entry created" if created else "Already collected",
+        created=created,
+    )
+
+
+@router.get("/ingest/lookup", response_model=EntryByURLResponse)
+async def lookup_entry_by_url(
+    url: str = Query(..., max_length=4000, description="The page URL; a #fragment is ignored"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The newest entry the caller can see for this exact URL, on any feed. 404 when none."""
+    from app.models.feed import Feed
+    from app.services.manual_ingest import find_entry_by_url
+
+    entry = await find_entry_by_url(db, url.strip(), user.id)
+    if entry is None:
+        raise AppError(code="not_found", message="No entry for this URL", status_code=404)
+    from app.services.entry_results import entry_thread
+
+    feed_title = (await db.execute(select(Feed.title).where(Feed.id == entry.feed_id))).scalar_one_or_none()
+    return EntryByURLResponse(
+        id=entry.id,
+        title=entry.title,
+        url=entry.url,
+        feed_id=entry.feed_id,
+        feed_title=feed_title,
+        published_at=entry.published_at,
+        fetched_at=entry.fetched_at,
+        thread=await entry_thread(db, entry.id),
+    )
+
+
+@router.get("/ingest/coverage", response_model=PageCoverageResponse)
+async def page_coverage(
+    title: str = Query(..., max_length=1000, description="The page's title"),
+    url: str | None = Query(None, max_length=4000, description="The page's URL; an entry at this URL is left out"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent entries about the same story as a page that is not in IntelFeed yet.
+
+    Searches entries from the last 14 days for the page title's keywords and
+    keeps those whose titles share at least 40% of the keywords (at least two).
+    Returns up to five of them, how many different sites they come from, and
+    the story thread most of them belong to."""
+    from app.services.entry_results import page_coverage as coverage
+
+    return PageCoverageResponse(**await coverage(db, user.id, title=title.strip(), url=url))
+
+
+async def _apply_send_extras(
+    db: AsyncSession, entry, user: User, *, tag_ids: list[uuid.UUID], note: str | None
+) -> None:
+    """Apply the tags and note sent with a page or PDF: the tags as the sender's
+    own assignments, and the note as a Note on the entry (the same kind the
+    reader's Notes panel makes)."""
+    if tag_ids:
+        from app.services.entry_tags import add_tags_by_id
+
+        await add_tags_by_id(db, entry.id, tag_ids, user.id)
+    if note and note.strip():
+        from app.models.note import Note
+        from app.services.markdown import render_markdown
+
+        content = note.strip()
+        db.add(
+            Note(
+                created_by=user.id,
+                entry_id=entry.id,
+                title=(entry.title or "Untitled")[:500],
+                content_markdown=content,
+                content_html=render_markdown(content),
+            )
+        )
+        await db.flush()
+
+
+def _after_create(entry, source: str) -> None:
+    """After a new entry is committed: start the pipeline, index it in search, and send the SSE event."""
+    from app.workers.feed_tasks import dispatch_entry_pipeline
+
+    dispatch_entry_pipeline(str(entry.id), run_extraction=True)
+    _index_entry(entry)
+    try:
+        from app.api.events import broadcast_event
+
+        broadcast_event(
+            "entry_ingested",
+            {
+                "entry_id": str(entry.id),
+                "feed_id": str(entry.feed_id),
+                "title": entry.title,
+                "source": source,
+            },
+        )
+    except Exception:
+        logger.debug("Failed to broadcast ingest event", exc_info=True)
+
+
 @router.post("/ingest/pdf", response_model=IngestResponse)
 async def ingest_pdf(
     file: UploadFile = File(..., description="The PDF document to ingest"),
     title: str = Form(None, description="Optional title override; defaults to the PDF's metadata title or filename"),
+    url: str = Form(None, description="Where the PDF was opened from; stored as the entry's URL"),
+    note: str = Form(None, description="Saved as a Note on the entry"),
+    tag_ids: list[uuid.UUID] = Form([], description="The sender's tags for the entry (repeat the field)"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -110,6 +244,13 @@ async def ingest_pdf(
     if not content[:5].startswith(b"%PDF-"):
         raise AppError(code="invalid_file", message="File does not appear to be a valid PDF", status_code=400)
 
+    from app.services.manual_ingest import strip_fragment
+
+    source_url = strip_fragment((url or "").strip()) or None
+    if source_url and not source_url.lower().startswith(("http://", "https://")):
+        # Keep only http(s) URLs: file:// and blob: URLs work only on the sender's machine.
+        source_url = None
+
     batch = await batches.create_batch(db, user.id, source="legacy")
     item = await batches.add_file_item(
         db,
@@ -118,12 +259,20 @@ async def ingest_pdf(
         filename=file.filename or "upload.pdf",
         content_type="application/pdf",
         title=(title or "").strip() or None,
+        source_url=source_url,
     )
     if item.status == "too_large":
         raise AppError(code="file_too_large", message=item.error or "PDF is too large", status_code=413)
     await db.commit()
 
     item = await batches.process_item(db, item.id)
+    if item.status == "duplicate" and item.entry_id and (note or tag_ids):
+        from app.models.entry import Entry
+
+        existing = (await db.execute(select(Entry).where(Entry.id == item.entry_id))).scalar_one_or_none()
+        if existing is not None:
+            await _apply_send_extras(db, existing, user, tag_ids=tag_ids, note=note)
+            await db.commit()
     if item.status != ITEM_CREATED:
         code, status = {
             "duplicate": ("duplicate", 409),
@@ -131,11 +280,20 @@ async def ingest_pdf(
             "unsupported": ("invalid_file", 400),
             "too_large": ("file_too_large", 413),
         }.get(item.status, ("ingest_failed", 500))
-        raise AppError(code=code, message=item.error or "Could not ingest this PDF", status_code=status)
+        raise AppError(
+            code=code,
+            message=item.error or "Could not ingest this PDF",
+            status_code=status,
+            # The existing entry, so a client can open it instead.
+            details=[{"entry_id": str(item.entry_id)}] if item.entry_id else None,
+        )
 
     from app.models.entry import Entry
 
     entry = (await db.execute(select(Entry).where(Entry.id == item.entry_id))).scalar_one()
+    if note or tag_ids:
+        await _apply_send_extras(db, entry, user, tag_ids=tag_ids, note=note)
+        await db.commit()
     return IngestResponse(
         id=entry.id,
         title=entry.title,
@@ -441,3 +599,51 @@ def _index_entry(entry):
                 r.close()
         except Exception:
             pass
+
+
+# --- results, for the client that sent a page -------------------------------------
+
+
+@router.get("/ingest/{entry_id}/results", response_model=EntryResultsResponse)
+async def entry_results(
+    entry_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """What the pipeline found in an entry, and whether it is finished.
+
+    The browser extension polls this after a send until ``state`` is no longer
+    ``processing``, then tells the sender what came out of the page.
+    """
+    from app.api.engine import entry_pipeline_status
+    from app.services.entry_results import entry_findings, entry_thread, visible_entry
+
+    entry = await visible_entry(db, entry_id, user.id)
+    if entry is None:
+        raise AppError(code="not_found", message="Entry not found", status_code=404)
+    status = (await entry_pipeline_status(db, entry_id))["status"]
+    state = {"complete": "done", "errored": "errored"}.get(status, "processing")
+    if status == "unknown" and not _recently_created(entry):
+        # No pipeline record yet is normal for a new entry: run rows are written
+        # only when a stage starts, and the queue may be behind.
+        state = "unknown"
+    return EntryResultsResponse(
+        entry_id=entry_id,
+        state=state,
+        thread=await entry_thread(db, entry_id),
+        **await entry_findings(db, entry_id),
+    )
+
+
+# How long a new entry with no pipeline record counts as waiting in the queue.
+# The extension stops polling after 30 minutes.
+PIPELINE_START_GRACE = timedelta(minutes=30)
+
+
+def _recently_created(entry) -> bool:
+    created = entry.created_at or entry.fetched_at
+    if created is None:
+        return False
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    return datetime.now(UTC) - created < PIPELINE_START_GRACE

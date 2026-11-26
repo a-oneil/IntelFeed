@@ -3,11 +3,12 @@
 Bulk ingest (services/ingest_batches.py) builds on the same three pieces this
 module owns: the singleton ``manual://uploads`` feed, ``fetch_url_document``
 (fetch + readability + sanitize, no database), and ``create_manual_entry``
-(dedup by GUID, then one ordinary Entry row). ``ingest_url`` / ``ingest_pdf``
-remain as the synchronous one-item doors the Android client and the
-``ingest_url`` registry tool call.
+(dedup by GUID, then one ordinary Entry row). ``ingest_url`` (used by
+``POST /ingest/url``, the Android client and the ``ingest_url`` registry tool)
+and ``ingest_page`` (the browser extension) each create one entry right away.
 """
 
+import asyncio
 import hashlib
 import logging
 import re
@@ -21,11 +22,7 @@ from app.core.exceptions import AppError
 from app.models.entry import Entry
 from app.models.feed import Feed
 from app.services.dedup import compute_content_hash
-from app.services.ingest_parsers import (
-    ParsedDocument,
-    extract_pdf_content,  # noqa: F401 — re-exported; the PDF extractor lives in ingest_parsers now
-    sanitize_pdf_html,
-)
+from app.services.ingest_parsers import ParsedDocument
 from app.services.sanitizer import (
     extract_first_image,
     extract_og_image,
@@ -36,13 +33,9 @@ from app.services.sanitizer import (
 logger = logging.getLogger(__name__)
 
 MANUAL_FEED_URL = "manual://uploads"
-MAX_PDF_SIZE = 50 * 1024 * 1024  # 50 MB — the legacy single-PDF cap; batches read ingest_max_file_mb
 
 _REL_SRC_RE = re.compile(r'(<(?:img|source|video|audio)\s[^>]*?)src="([^"]+)"', re.IGNORECASE)
 _REL_HREF_RE = re.compile(r'(<a\s[^>]*?)href="([^"]+)"', re.IGNORECASE)
-
-# Kept under the old private name: callers outside this module imported it.
-_sanitize_pdf_html = sanitize_pdf_html
 
 
 class DuplicateEntry(Exception):
@@ -216,8 +209,129 @@ async def create_manual_entry(
     return entry
 
 
-async def ingest_url(db: AsyncSession, url: str) -> Entry:
-    """Fetch a URL and create an entry from its content (the one-item door)."""
+def document_from_html(raw_html: str, url: str, title: str | None = None) -> ParsedDocument:
+    """Extract the article from HTML the client sent and sanitize it, the same
+    way as a fetched page. Client HTML is untrusted.
+
+    CPU-bound on large pages: async callers run it with ``asyncio.to_thread``.
+    """
+    from app.workers.feed_tasks import _pick_article_content
+
+    parsed = urlparse(url)
+    og_image = extract_og_image(raw_html, base_url=url)
+    content_html = _pick_article_content(raw_html, "medium.com" in parsed.netloc) or raw_html
+    content_html = _resolve_relative_urls(content_html, url)
+    sanitized_html = sanitize_html(content_html)
+    content_text = html_to_text(sanitized_html)
+    if not content_text or not content_text.strip():
+        raise AppError(code="extraction_failed", message="The page has no readable text", status_code=422)
+
+    if not title:
+        title_match = re.search(r"<title[^>]*>([^<]+)</title>", raw_html, re.IGNORECASE)
+        title = title_match.group(1).strip() if title_match else f"{parsed.netloc}{parsed.path}"
+    image_url = extract_first_image(sanitized_html) or og_image
+    return ParsedDocument(text=content_text, html=sanitized_html, title=title, meta={"image_url": image_url})
+
+
+def strip_fragment(url: str) -> str:
+    """The URL without its #fragment, so two links to one page match."""
+    return url.split("#", 1)[0]
+
+
+def normalize_page_url(url: str) -> str:
+    """Check the URL is http(s) and drop its #fragment, so two sends of one page make one entry."""
+    validate_http_url(url)
+    return strip_fragment(url)
+
+
+# Dates before 1995 or in the future are treated as wrong and dropped. This is
+# stricter than real_date_or_none (app/adapters/base.py), which drops only the
+# placeholder dates feeds write for "no date": the date tags on a web page are
+# often template defaults, so anything before the web was in common use is
+# not trusted.
+_EARLIEST_PUBLISHED = datetime(1995, 1, 1, tzinfo=UTC)
+
+
+def plausible_published_at(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    if not (_EARLIEST_PUBLISHED <= value <= datetime.now(UTC)):
+        return None
+    return value
+
+
+async def find_entry_by_url(db: AsyncSession, url: str, user_id=None) -> Entry | None:
+    """The newest entry the user can see whose URL is ``url`` (fragment ignored), on any feed."""
+    from app.services.feed_visibility import subscriptions_enabled, visible_feed_ids_query
+
+    url = strip_fragment(url)
+    visible = visible_feed_ids_query(user_id, enabled=await subscriptions_enabled(db), include_muted=True)
+    manual = select(Feed.id).where(Feed.url == MANUAL_FEED_URL)
+    result = await db.execute(
+        select(Entry)
+        .where(Entry.url == url, Entry.feed_id.in_(visible.union(manual)))
+        .order_by(Entry.fetched_at.desc().nulls_last())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def ingest_page(
+    db: AsyncSession,
+    *,
+    url: str,
+    user_id,
+    html: str | None = None,
+    title: str | None = None,
+    selection: str | None = None,
+    published_at: datetime | None = None,
+    author: str | None = None,
+    client: str | None = None,
+) -> tuple[Entry, bool]:
+    """Create an entry for the page the sender is reading. Returns (entry, created).
+
+    If the user can already see an entry for this URL (sent before, or
+    fetched from one of their feeds), that entry is returned with ``created``
+    False. With ``html`` the URL is not fetched, so pages behind a login, a
+    paywall or robots.txt can still be sent. The entry's metadata records
+    ``source: extension_page`` and the sender's user id.
+    """
+    url = normalize_page_url(url)
+    existing = await find_entry_by_url(db, url, user_id)
+    if existing is not None:
+        return existing, False
+
+    doc = await asyncio.to_thread(document_from_html, html, url, title) if html else await fetch_url_document(url)
+    metadata = {
+        "source": "extension_page" if html else "url_ingest",
+        "uploaded_by": str(user_id),
+    }
+    if client:
+        metadata["client"] = client
+    if selection and selection.strip():
+        metadata["excerpt"] = selection.strip()
+    try:
+        entry = await create_manual_entry(
+            db,
+            guid=url_guid(url),
+            title=title or doc.title or url,
+            html=doc.html,
+            text=doc.text,
+            url=url,
+            image_url=doc.meta.get("image_url"),
+            metadata=metadata,
+            author=author,
+            published_at=plausible_published_at(published_at),
+        )
+    except DuplicateEntry as dup:
+        return await db.get(Entry, dup.entry_id), False
+    return entry, True
+
+
+async def ingest_url(db: AsyncSession, url: str, user_id=None) -> Entry:
+    """Fetch a URL and create one entry from its content. 409 if this URL was already ingested."""
     guid = url_guid(url)
     feed = await get_or_create_manual_feed(db)
     existing = await db.execute(select(Entry).where(Entry.feed_id == feed.id, Entry.guid == guid))
@@ -234,46 +348,7 @@ async def ingest_url(db: AsyncSession, url: str) -> Entry:
             text=doc.text,
             url=url,
             image_url=doc.meta.get("image_url"),
-            metadata={"source": "url_ingest"},
+            metadata={"source": "url_ingest", **({"uploaded_by": str(user_id)} if user_id else {})},
         )
     except DuplicateEntry:
         raise AppError(code="duplicate", message="This URL has already been ingested", status_code=409) from None
-
-
-async def ingest_pdf(
-    db: AsyncSession,
-    file_content: bytes,
-    filename: str,
-    title: str | None = None,
-) -> Entry:
-    """Extract text from a PDF and create an entry (the one-item door; no file retained)."""
-    if len(file_content) > MAX_PDF_SIZE:
-        raise AppError(
-            code="file_too_large",
-            message=f"PDF exceeds maximum size of {MAX_PDF_SIZE // (1024 * 1024)} MB",
-            status_code=413,
-        )
-
-    guid = bytes_guid(file_content, kind="pdf")
-    content_text, raw_html = extract_pdf_content(file_content)
-    if not content_text or not content_text.strip():
-        raise AppError(
-            code="extraction_failed",
-            message="Could not extract text from this PDF (it may be a scanned image)",
-            status_code=422,
-        )
-
-    if not title:
-        title = re.sub(r"\.pdf$", "", filename, flags=re.IGNORECASE).strip() or "Untitled PDF"
-
-    try:
-        return await create_manual_entry(
-            db,
-            guid=guid,
-            title=title,
-            html=sanitize_pdf_html(raw_html),
-            text=content_text,
-            metadata={"source": "pdf_upload", "filename": filename},
-        )
-    except DuplicateEntry:
-        raise AppError(code="duplicate", message="This PDF has already been ingested", status_code=409) from None

@@ -937,6 +937,30 @@ export function useEntityTopEntries(
   });
 }
 
+/** The entity's latest articles over the last `days`, newest first — the hover card's list. */
+export function useEntityRecentEntries(
+  entityType: string | undefined,
+  entityId: string | undefined,
+  { days = 90, limit = 4, enabled = true }: { days?: number; limit?: number; enabled?: boolean } = {},
+) {
+  return useQuery({
+    queryKey: ["entity-recent-entries", entityType, entityId, days, limit],
+    queryFn: async () => {
+      const end = new Date(Date.now() + 60_000);
+      const start = new Date(end.getTime() - days * 24 * 3600 * 1000);
+      const { data } = await api.get<{ items: TopEntryItem[] }>(
+        `/entities/${entityType}/${entityId}/entries-window`,
+        { params: { start: start.toISOString(), end: end.toISOString(), limit } },
+      );
+      return data.items;
+    },
+    enabled: enabled && !!entityType && !!entityId,
+    staleTime: 5 * 60 * 1000,
+    // Types without an article list answer 400: show nothing rather than retry.
+    retry: false,
+  });
+}
+
 /** Articles mentioning the entity inside one timeline bucket. */
 export function useEntityEntriesWindow(
   entityType: string | undefined,

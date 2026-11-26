@@ -11,8 +11,8 @@ is — the image itself only carries `./backend`.
 docker compose -f docker-compose.dev.yml exec api python scripts/<folder>/<script>.py
 ```
 
-`ops/`, `dev/` and `build_apk.sh` are the exception: they drive Docker, SSH,
-the API or the Android SDK from outside, so run those from the repo root on
+`ops/`, `dev/`, `build_apk.sh` and `build_extension.sh` are the exception: they drive Docker, SSH,
+the API, the Android SDK or node from outside, so run those from the repo root on
 your own machine.
 
 Every script's docstring carries its exact invocation and flags. Anything that
@@ -98,6 +98,7 @@ are for fixing something by hand.
 | `reconcile_search_index.py` | Deletes Meilisearch documents whose feed no longer exists, after a cascade cleanup missed them. |
 | `refetch_truncated_entries.py` | Re-fetches full text for entries that stored a "continue reading" stub. |
 | `resanitize_entries.py` | Re-runs HTML sanitization to repair broken image-proxy URLs. |
+| `restyle_pdf_entries.py` | Re-runs `sanitize_pdf_html` over stored PDF entries (`manual:pdf:` guids), which removes the PDF's inline fonts, colours and page layout so the text follows the reader's theme. Only `content_html` changes. `--apply`. |
 | `rescan_observable_candidates.py` | Rebuilds the candidate tier under today's scanner rules. Default purge drops regex-origin host-kind candidates; `--purge-all-scan` drops every scan-origin candidate (AI stagings stay); `--purge-invalid` drops candidates of any origin that today's validators reject (stale rows that could never be promoted); `--rescan-days N` / `--rescan-all` re-run the observables scan. `--dry-run`. |
 | `replay_ai_observables.py` | Backfills the ledger from stored `entry_analysis` results through the same `apply_ai_observables` door ingest uses (identical validators and per-kind capture list) and re-asserts the AI's relationship claims — the step after flipping `observables_ai_capture_mode` to `capture`, so earlier judgments land with role, evidence and attribution instead of being promoted blind. `--since`, `--mode`, `--kinds`, `--dry-run`. Never fires automation rules. |
 | `audit_ai_observables.py` | Dumps every indicator the one-pass analysis AI judged (`iocs` / `scripts` arrays of current `entry_analysis` results, plus AI-origin staged candidates) to a CSV with role, evidence and a `verdict` column to label by hand — the precision record that gates `observables_ai_capture_mode`. `--since` / `--sample N` writes a stratified sample too. |
@@ -170,11 +171,27 @@ scripts/build_apk.sh --major    # new major version
 scripts/build_apk.sh --install  # phone plugged in after the build
 ```
 
+## `build_extension.sh` — browser extension build  *(host-side)*
+
+Bumps `version` in `extension/manifest.json`, runs the extension's unit tests
+and writes one zip per browser (Chrome/Edge and Firefox) to `extension/dist/`.
+Merging the bump to `main` makes CI publish the release `extension-v<version>`;
+see [docs/browser-extension.md](../docs/browser-extension.md). Needs node 22+
+and `zip`.
+
+```bash
+scripts/build_extension.sh            # 1.0.x -> 1.0.x+1
+scripts/build_extension.sh --minor    # 1.x.y -> 1.x+1.0
+scripts/build_extension.sh --major    # x.y.z -> x+1.0.0
+scripts/build_extension.sh --no-bump  # test and build the current version
+```
+
 ## `dev/` — developer tooling  *(host-side)*
 
 | Script | What it does |
 | --- | --- |
 | `sync_skill_clis.py` | Regenerate both skill CLIs' `TOOLS` and `WRITE_TOOLS` blocks from the live backend tool registry, which is the single source of truth. `--check` reports drift without writing (exit 1 if out of sync). |
+| `render_icons.cjs` | Renders every icon — favicons, the PWA and iOS icons, the Android launcher's pre-adaptive PNGs, the browser extension's icons — from the IntelFeed mark (hexagon, network lines and nodes, feed signal) in two weights: heavier lines and nodes for 32px and under, the regular weights on the dark tile above that. Also writes `frontend/public/favicon.svg` and the README logo, `docs/assets/intelfeed-logo.svg`. The in-app vector logos (`frontend/src/utils/brandMark.ts`, `extension/src/lib/mark.js`, Android `ic_logo.xml` / `ic_launcher_foreground.xml` / `ic_notification.xml`) draw the same mark by hand; update them when the mark changes. Run with `node`; needs `pnpm install` and `pnpm exec playwright install chromium` in `frontend/` first. |
 | `check_doc_refs.py` | Checks the `path/to/file.py:line` references in the docs against the code and reports the ones whose line number no longer lands on the symbol beside them. `--fix` repairs the unambiguous ones; the rest are left for a human. Exits 1 on drift, so it can gate a pre-release check. |
 | `check_doc_links.py` | Checks the relative links, `#anchors` and images between the Markdown docs: the target file exists, the heading the fragment names exists (GitHub's slug rules, which the in-app docs reader also uses), the image path resolves. External URLs and in-app routes such as `/documentation` are skipped. Exits 1 if anything is broken. |
 | `webhook_proxy.py` | TCP proxy so containers on Docker Desktop for Mac can reach LAN hosts via `host.docker.internal`, for testing webhook deliveries. |
@@ -185,5 +202,6 @@ scripts/build_apk.sh --install  # phone plugged in after the build
 INTELFEED_API_URL=http://localhost:8000 python3 scripts/dev/sync_skill_clis.py --check
 python3 scripts/dev/webhook_proxy.py 10138 192.0.2.10 80
 python3 scripts/dev/check_doc_refs.py          # add --fix to repair what it can
+node scripts/dev/render_icons.cjs                # after changing the mark
 python3 scripts/dev/check_doc_links.py         # broken doc links and anchors
 ```

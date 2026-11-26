@@ -115,6 +115,39 @@
   "mutating": true
  },
  {
+  "name": "add_telemetry_source_note",
+  "description": "Save a note, or a documentation link with an optional note, about one telemetry source (e.g. 'AWS GuardDuty'). The source must be in the telemetry catalog or the inventory. Notes are shared with every user. Text notes on enabled sources are added to the AI prompts for hunts, detection rules and threat assessments.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "source_name": {
+     "type": "string",
+     "description": "Telemetry source name, e.g. AWS GuardDuty"
+    },
+    "content": {
+     "type": "string",
+     "description": "The note"
+    },
+    "url": {
+     "type": "string",
+     "description": "A page about the source (http or https)"
+    },
+    "page_title": {
+     "type": "string",
+     "description": "That page's title"
+    },
+    "quote": {
+     "type": "string",
+     "description": "A passage quoted from the page"
+    }
+   },
+   "required": [
+    "source_name"
+   ]
+  },
+  "mutating": true
+ },
+ {
   "name": "add_to_campaign",
   "description": "Link an entry or entity to a campaign. Linking an entry or entity that is already linked returns already_linked instead of an error. The campaign UI and reports show names only for threat_actor, malware, cve, ttp and ransomware_victim links. Other entity types are stored but show as bare IDs in campaign views.",
   "input_schema": {
@@ -3108,6 +3141,27 @@
      "description": "Maximum threads returned (1-200, default 40)"
     }
    }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_telemetry_source_notes",
+  "description": "Notes and saved documentation links about one telemetry source (e.g. 'AWS GuardDuty'), newest first: what analysts learned about the source, its quirks, and pages about it. Works for any catalog or inventory source, enabled or not.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "source_name": {
+     "type": "string",
+     "description": "Telemetry source name, e.g. AWS GuardDuty"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 50
+    }
+   },
+   "required": [
+    "source_name"
+   ]
   },
   "mutating": false
  },

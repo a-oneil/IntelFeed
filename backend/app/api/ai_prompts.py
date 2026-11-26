@@ -168,6 +168,7 @@ _PLACEHOLDER_VARIABLES: dict = {
     "rule_type": "sigma",
     "rule_formats": ["sigma", "spl"],
     "telemetry_sources": ["process_creation", "network"],
+    "telemetry_notes": [{"source": "AWS GuardDuty", "notes": ["The EC2 fleet has no GuardDuty agent."]}],
     "focus": "lateral movement",
     "entries": [
         {"title": "First sample article", "summary": "Summary of the first article."},

@@ -1,5 +1,6 @@
+import asyncio
 import re
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import feedparser
 import httpx
@@ -7,11 +8,6 @@ import httpx
 from app.config import settings
 from app.core.safe_http import safe_async_client
 from app.schemas.feed import FeedDiscoverResult
-
-FEED_LINK_RE = re.compile(
-    r'<link[^>]+type="application/(rss|atom)\+xml"[^>]+href="([^"]+)"',
-    re.IGNORECASE,
-)
 
 # Attribute-order-independent <link> tag parsing for RSS/Atom autodiscovery
 _LINK_TAG_RE = re.compile(r"<link\b[^>]*>", re.IGNORECASE)
@@ -46,6 +42,53 @@ def extract_feed_links(html: str, base_url: str) -> list[str]:
     return candidates
 
 
+# Where a site that doesn't advertise its feed usually keeps it: WordPress,
+# Ghost, Substack (/feed), Hugo (/index.xml), Jekyll (/feed.xml), Blogger.
+COMMON_FEED_PATHS = (
+    "/feed",
+    "/rss",
+    "/feed.xml",
+    "/rss.xml",
+    "/atom.xml",
+    "/index.xml",
+    "/feed/atom",
+    "/feeds/posts/default",
+)
+
+
+# Content types a feed is served with. Not a bare "xml": application/xhtml+xml
+# is an HTML page.
+_FEED_CONTENT_TYPES = ("rss", "atom", "application/xml", "text/xml")
+
+
+def _looks_like_feed(content_type: str, text: str) -> bool:
+    """True when the response's content type or its first characters say it is RSS/Atom."""
+    content_type = content_type.lower()
+    head = text.lstrip()[:200].lower()
+    return any(ct in content_type for ct in _FEED_CONTENT_TYPES) or head.startswith(("<?xml", "<rss", "<feed"))
+
+
+async def _probe_common_paths(client: httpx.AsyncClient, url: str) -> FeedDiscoverResult | None:
+    """The first of COMMON_FEED_PATHS on the page's site that answers with a feed."""
+    parts = urlsplit(url)
+    origin = f"{parts.scheme}://{parts.netloc}"
+
+    async def probe(path: str) -> FeedDiscoverResult | None:
+        candidate = origin + path
+        try:
+            response = await client.get(candidate, timeout=8.0)
+        except httpx.HTTPError:
+            return None
+        if response.status_code != 200:
+            return None
+        if not _looks_like_feed(response.headers.get("content-type", ""), response.text):
+            return None
+        return _parse_feed(candidate, response.text)
+
+    results = await asyncio.gather(*(probe(path) for path in COMMON_FEED_PATHS))
+    return next((r for r in results if r), None)
+
+
 YOUTUBE_CHANNEL_RE = re.compile(r"youtube\.com/(?:channel|c|@|user)/([^/?\s]+)")
 YOUTUBE_FEED_RE = re.compile(r"youtube\.com/feeds/videos\.xml\?channel_id=([^&\s]+)")
 YOUTUBE_FEED_TEMPLATE = "https://www.youtube.com/feeds/videos.xml?channel_id={}"
@@ -74,28 +117,14 @@ async def discover_feed(url: str) -> FeedDiscoverResult | None:
         except httpx.HTTPError:
             return None
 
-        content_type = response.headers.get("content-type", "")
-
-        # Check if it's directly a feed
-        if any(ct in content_type for ct in ["xml", "rss", "atom"]):
-            return _parse_feed(url, response.text)
-
-        # Check if the content looks like XML
-        text = response.text.strip()
-        if text.startswith("<?xml") or text.startswith("<rss") or text.startswith("<feed"):
-            return _parse_feed(url, text)
+        # The URL is a feed itself
+        if _looks_like_feed(response.headers.get("content-type", ""), response.text):
+            return _parse_feed(url, response.text.strip())
 
         # HTML page — look for feed links
-        links = FEED_LINK_RE.findall(response.text)
+        links = extract_feed_links(response.text, url)
         if links:
-            feed_type, feed_url = links[0]
-            # Handle relative URLs
-            if feed_url.startswith("/"):
-                from urllib.parse import urlparse
-
-                parsed = urlparse(url)
-                feed_url = f"{parsed.scheme}://{parsed.netloc}{feed_url}"
-
+            feed_url = links[0]
             try:
                 feed_response = await client.get(feed_url)
                 feed_response.raise_for_status()
@@ -103,7 +132,8 @@ async def discover_feed(url: str) -> FeedDiscoverResult | None:
             except httpx.HTTPError:
                 return None
 
-    return None
+        # No advertised feed: try the addresses sites usually keep one at
+        return await _probe_common_paths(client, url)
 
 
 async def _discover_youtube_feed(client: httpx.AsyncClient, url: str, channel_id: str) -> FeedDiscoverResult | None:

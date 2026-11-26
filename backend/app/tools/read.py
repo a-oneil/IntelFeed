@@ -1259,6 +1259,52 @@ async def _get_telemetry_sources(db: AsyncSession, user_id: uuid.UUID) -> dict:
     }
 
 
+@_tool(
+    name="get_telemetry_source_notes",
+    description=(
+        "Notes and saved documentation links about one telemetry source (e.g. 'AWS GuardDuty'), newest "
+        "first: what analysts learned about the source, its quirks, and pages about it. Works for any "
+        "catalog or inventory source, enabled or not."
+    ),
+    input_schema={
+        "properties": {
+            "source_name": {"type": "string", "description": "Telemetry source name, e.g. AWS GuardDuty"},
+            "limit": {"type": "integer", "default": 50},
+        },
+        "required": ["source_name"],
+    },
+)
+async def _get_telemetry_source_notes(db: AsyncSession, user_id: uuid.UUID, source_name: str, limit: int = 50) -> dict:
+    from app.models.telemetry_source_note import TelemetrySourceNote
+    from app.models.user import User
+
+    rows = (
+        await db.execute(
+            select(TelemetrySourceNote, User.username)
+            .join(User, User.id == TelemetrySourceNote.user_id)
+            .where(func.lower(TelemetrySourceNote.source_name) == source_name.strip().lower())
+            .order_by(TelemetrySourceNote.created_at.desc())
+            .limit(max(1, min(limit, 200)))
+        )
+    ).all()
+    return {
+        "source_name": source_name,
+        "notes": [
+            {
+                "id": str(n.id),
+                "author": username,
+                "url": n.url,
+                "page_title": n.page_title,
+                "quote": n.quote,
+                "content": n.content,
+                "created_at": n.created_at.isoformat() if n.created_at else None,
+            }
+            for n, username in rows
+        ],
+        "count": len(rows),
+    }
+
+
 # --- New tools (post-March 2026) ---
 
 

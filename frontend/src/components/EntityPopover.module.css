@@ -91,6 +91,28 @@
   line-height: 1.4;
 }
 
+/* The whole description, scrolling past a few lines so the card stays on screen. */
+.metaDescOpen {
+  display: block;
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-line;
+}
+
+.moreBtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.moreBtn:hover {
+  text-decoration: underline;
+}
+
 .exploitValue {
   color: var(--danger);
 }
@@ -159,6 +181,52 @@
   color: var(--text-primary);
   font-family: var(--font-mono, monospace);
   word-break: break-all;
+}
+
+.recent {
+  margin-bottom: var(--sp-3);
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+
+/* Right after the grid (or the artifacts), whose bottom rule already divides them. */
+.metaGrid + .recent,
+.artifacts + .recent {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.recentItem {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  padding: var(--sp-1) 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recentTitle {
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recentItem:hover .recentTitle,
+.recentItem:focus-visible .recentTitle {
+  color: var(--accent);
+}
+
+.recentMeta {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
 }
 
 .actions {

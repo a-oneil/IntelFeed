@@ -1126,3 +1126,42 @@ async def _revoke_report_share_link(db: AsyncSession, user_id: uuid.UUID, report
     share.is_active = False
     await db.flush()
     return {"revoked": True, "report_id": str(report.id), "token": share.token}
+
+
+@_tool(
+    name="add_telemetry_source_note",
+    description=(
+        "Save a note, or a documentation link with an optional note, about one telemetry source "
+        "(e.g. 'AWS GuardDuty'). The source must be in the telemetry catalog or the inventory. "
+        "Notes are shared with every user. Text notes on enabled sources are added to the AI prompts for "
+        "hunts, detection rules and threat assessments."
+    ),
+    input_schema={
+        "properties": {
+            "source_name": {"type": "string", "description": "Telemetry source name, e.g. AWS GuardDuty"},
+            "content": {"type": "string", "description": "The note"},
+            "url": {"type": "string", "description": "A page about the source (http or https)"},
+            "page_title": {"type": "string", "description": "That page's title"},
+            "quote": {"type": "string", "description": "A passage quoted from the page"},
+        },
+        "required": ["source_name"],
+    },
+    mutating=True,
+)
+async def _add_telemetry_source_note(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    source_name: str,
+    content: str | None = None,
+    url: str | None = None,
+    page_title: str | None = None,
+    quote: str | None = None,
+) -> dict:
+    from app.api.telemetry_notes import create_note
+    from app.core.exceptions import AppError
+
+    try:
+        note = await create_note(db, user_id, source_name, url=url, page_title=page_title, quote=quote, content=content)
+    except AppError as e:
+        return {"error": e.message}
+    return {"id": str(note.id), "source_name": note.source_name, "saved": True}

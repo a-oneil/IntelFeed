@@ -5,6 +5,7 @@ import type { DetectionRule, FeasibilityResult } from "@/api/types";
 import type { RelatedRules, RuleFreshIntel } from "@/hooks/useDetectionRules";
 import { useEntryTTPs } from "@/hooks/useIntelligence";
 import DataSourcePicker from "@/components/DataSourcePicker";
+import { TelemetrySourceDrawer } from "@/components/telemetry/TelemetrySourceDrawer";
 import { formatDateTime } from "@/utils/formatDate";
 import bench from "./bench.module.css";
 import styles from "./RuleContextRail.module.css";
@@ -54,6 +55,7 @@ export function RuleContextRail({
   const navigate = useNavigate();
   const { data: entryTtps } = useEntryTTPs(rule?.entry_id || undefined);
   const [editingSources, setEditingSources] = useState(false);
+  const [openSource, setOpenSource] = useState<string | null>(null);
 
   // The quote is the entry_ttps match text for a technique this rule claims —
   // the sentence that caused the rule, not the article's first paragraph.
@@ -190,6 +192,37 @@ export function RuleContextRail({
               </div>
             )}
           </div>
+        </>
+      )}
+
+      {telemetry?.sources && telemetry.sources.length > 0 && (
+        <>
+          <div className={bench.railLabel}>Log sources for this rule</div>
+          <div className={bench.card}>
+            <div className={bench.cardBody}>
+              {telemetry.sources.map((src) => (
+                <button
+                  key={src.name}
+                  type="button"
+                  className={styles.sourceRow}
+                  onClick={() => setOpenSource(src.name)}
+                  title="Notes and links about this source"
+                >
+                  <span className={styles.sourceName}>{src.name}</span>
+                  <span className={styles.sourceMeta}>
+                    {src.provides.join(", ")}
+                    {src.note_count > 0 && (
+                      <b>
+                        {" "}
+                        · {src.note_count} {src.note_count === 1 ? "note" : "notes"}
+                      </b>
+                    )}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          {openSource && <TelemetrySourceDrawer source={{ name: openSource }} onClose={() => setOpenSource(null)} />}
         </>
       )}
 

@@ -38,7 +38,7 @@ export function BrandButton({ className }: BrandButtonProps) {
       aria-label="Go to all items"
       title="All Items"
     >
-      <IntelFeedLogo size={18} className={styles.brandLogo} />
+      <IntelFeedLogo size={24} className={styles.brandLogo} />
       <span>
         Intel<span className={styles.brandAccent}>Feed</span>
       </span>

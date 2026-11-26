@@ -104,6 +104,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "add_requirement_match",
         "add_tag",
         "add_telegram_feed",
+        "add_telemetry_source_note",
         "add_to_campaign",
         "archive_intel_report",
         "bookmark_entry",
@@ -295,6 +296,36 @@ TOOLS: dict[str, dict] = {
                 "default": None,
             },
             "category": {
+                "type": 'str',
+                "default": None,
+            },
+        },
+    },
+    "add_telemetry_source_note": {
+        "description": (
+            "Save a note, or a documentation link with an optional note, about one telemetry source "
+            "(e.g. 'AWS GuardDuty'). The source must be in the telemetry catalog or the inventory. "
+            "Notes are shared with every user. Text notes on enabled sources are added to the AI "
+            "prompts for hunts, detection rules and threat assessments."
+        ),
+        "params": {
+            "source_name": {
+                "type": 'str',
+                "required": True,
+            },
+            "content": {
+                "type": 'str',
+                "default": None,
+            },
+            "url": {
+                "type": 'str',
+                "default": None,
+            },
+            "page_title": {
+                "type": 'str',
+                "default": None,
+            },
+            "quote": {
                 "type": 'str',
                 "default": None,
             },
@@ -2596,6 +2627,23 @@ TOOLS: dict[str, dict] = {
             "limit": {
                 "type": 'int',
                 "default": None,
+            },
+        },
+    },
+    "get_telemetry_source_notes": {
+        "description": (
+            "Notes and saved documentation links about one telemetry source (e.g. 'AWS GuardDuty'), "
+            "newest first: what analysts learned about the source, its quirks, and pages about it. "
+            "Works for any catalog or inventory source, enabled or not."
+        ),
+        "params": {
+            "source_name": {
+                "type": 'str',
+                "required": True,
+            },
+            "limit": {
+                "type": 'int',
+                "default": 50,
             },
         },
     },

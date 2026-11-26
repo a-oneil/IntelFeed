@@ -22,6 +22,7 @@ app/api/telemetry_sources.py, which now delegates here) so both surfaces agree
 on what "satisfiable" means.
 """
 
+import re
 import uuid
 from dataclasses import dataclass
 from functools import lru_cache
@@ -1344,6 +1345,83 @@ async def get_available_telemetry(db: AsyncSession) -> TelemetryProfile:
             # was added since). Derive in place so behaviour matching still works.
             canonical.update(c for lt in source.log_types or [] if (c := canonical_log_type(lt)))
     return TelemetryProfile(frozenset(tokens), frozenset(canonical), frozenset(categories))
+
+
+# Words too common in rule tokens and source names to name a product.
+_NAMING_STOP = frozenset({"logs", "log", "events", "event", "data", "connector", "dataconnector"})
+# Generic log types. Rule tokens expand to these, either next to specific log
+# types or alone (a bare channel like "SecurityEvents"). Almost every product
+# keeps an audit trail and raises alerts, so these match half the catalog.
+_GENERIC_CANONICAL = frozenset({"audit.generic", "threat.detection"})
+SOURCES_ANSWERING_CAP = 8
+
+
+def _naming_words(text: str) -> frozenset[str]:
+    return frozenset(w for w in re.split(r"[^a-z0-9]+", text.lower()) if len(w) > 1 and w not in _NAMING_STOP)
+
+
+async def sources_answering(db: AsyncSession, data_sources: list[str]) -> list[dict]:
+    """The enabled sources that provide each of these data sources, with their note counts.
+
+    Stricter than the coverage check (``_match``), which only asks whether any
+    source collects a data source. A source matches a data source when every
+    main word of it is in the source's name or product ("aws.cloudtrail"
+    matches AWS CloudTrail, "gcp.audit" matches GCP Cloud Audit Logs). Only the
+    sources matched by the data source's most specific token are kept. If no
+    source matches by name, the sources that supply the most of its log types
+    are used instead. A match on category alone is never used, because every
+    source in the category would match. Returns at most SOURCES_ANSWERING_CAP
+    sources, those with notes first. Used by the detection rule page.
+    """
+    from app.models.telemetry_source_note import TelemetrySourceNote
+
+    if not data_sources:
+        return []
+    rows = (await db.execute(select(TelemetrySource).where(TelemetrySource.enabled.is_(True)))).scalars().all()
+    identity = {src.name: _naming_words(f"{src.name} {src.product or ''}") for src in rows}
+    canonical = {
+        src.name: set(src.log_types_canonical or [c for lt in src.log_types or [] if (c := canonical_log_type(lt))])
+        for src in rows
+    }
+    answering: dict[str, list[str]] = {}
+    for ds in data_sources:
+        need = _expand_rule_token(ds)
+        named: list[str] = []
+        best = 0
+        for token in need.tokens:
+            words = _naming_words(token)
+            if not words or len(words) < best:
+                continue
+            hits = [name for name, ident in identity.items() if words <= ident]
+            if hits and len(words) > best:
+                named, best = hits, len(words)
+            elif hits and len(words) == best:
+                named += [h for h in hits if h not in named]
+        if not named:
+            # Generic log types point at no product in particular, so they
+            # are left out of the comparison.
+            wanted = set(need.canonical) - _GENERIC_CANONICAL
+            # Keep the sources that supply the most of the wanted log types:
+            # an EDR, not every product that also logs DNS.
+            overlap = {name: len(given & wanted) for name, given in canonical.items()}
+            most = max(overlap.values(), default=0)
+            named = [name for name, n in overlap.items() if most and n == most]
+        for name in named:
+            answering.setdefault(name, []).append(ds)
+    if not answering:
+        return []
+    note_name = func.lower(TelemetrySourceNote.source_name)
+    counts = dict(
+        (
+            await db.execute(
+                select(note_name, func.count()).where(note_name.in_([n.lower() for n in answering])).group_by(note_name)
+            )
+        ).all()
+    )
+    out = [{"name": n, "provides": p, "note_count": counts.get(n.lower(), 0)} for n, p in answering.items()]
+    # Sources with notes first, then those that provide the most data sources.
+    out.sort(key=lambda s: (-s["note_count"], -len(s["provides"]), s["name"]))
+    return out[:SOURCES_ANSWERING_CAP]
 
 
 def match_data_source(data_source: str, available) -> str | None:

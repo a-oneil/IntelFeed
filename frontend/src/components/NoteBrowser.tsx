@@ -11,10 +11,15 @@ import {
   useDeleteEntityNote,
   useUpdateEntityNote,
 } from "@/hooks/useEntityNotes";
+import {
+  useAllTelemetryNotes,
+  useDeleteTelemetryNote,
+  useUpdateTelemetryNote,
+} from "@/hooks/useTelemetrySources";
 import { useUIStore } from "@/stores/uiStore";
 import { useAuthStore } from "@/stores/authStore";
 import { NoteCard } from "./NoteCard";
-import type { Note, EntityNote } from "@/api/types";
+import type { Note, EntityNote, TelemetrySourceNote } from "@/api/types";
 import type { InlineNoteSubmit } from "./InlineNoteEditor";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import { formatDate } from "@/utils/formatDate";
@@ -23,7 +28,20 @@ import { AsyncStateLoading } from "@/components/AsyncState";
 
 type UnifiedNote =
   | { kind: "note"; data: Note }
-  | { kind: "entity"; data: EntityNote };
+  | { kind: "entity"; data: EntityNote }
+  | { kind: "telemetry"; data: TelemetrySourceNote };
+
+/** A telemetry note's read view: the saved link, the quote, then the note. */
+function telemetryMarkdown(n: TelemetrySourceNote): string {
+  const parts: string[] = [];
+  if (n.url && /^https?:\/\//i.test(n.url)) {
+    const href = n.url.replace(/[()\s<>]/g, (c) => encodeURIComponent(c));
+    parts.push(`[${(n.page_title || n.url).replace(/[[\]]/g, "")}](${href})`);
+  }
+  if (n.quote) parts.push(n.quote.split("\n").map((line) => `> ${line}`).join("\n"));
+  if (n.content) parts.push(n.content);
+  return parts.join("\n\n");
+}
 
 const ENTITY_TYPE_LABELS: Record<string, string> = {
   threat_actor: "Threat Actor",
@@ -45,7 +63,7 @@ const ENTITY_PROFILE_ROUTES: Record<string, string> = {
   product: "/workbench/product",
 };
 
-type SourceFilter = "all" | "notes_only" | "entity_only" | "pinned";
+type SourceFilter = "all" | "notes_only" | "entity_only" | "telemetry_only" | "pinned";
 
 export function NoteBrowser() {
   const [creating, setCreating] = useState(false);
@@ -83,8 +101,10 @@ export function NoteBrowser() {
     clearPendingNoteSearch();
   }, [pendingNoteSearch, clearPendingNoteSearch]);
 
-  const showNotes = sourceFilter !== "entity_only";
-  const showEntity = sourceFilter !== "notes_only" && sourceFilter !== "pinned";
+  const showNotes = sourceFilter === "all" || sourceFilter === "notes_only" || sourceFilter === "pinned";
+  const showEntity = sourceFilter === "all" || sourceFilter === "entity_only";
+  // Telemetry notes have no entity type, so an entity-type filter leaves them out.
+  const showTelemetry = (sourceFilter === "all" && !entityTypeFilter) || sourceFilter === "telemetry_only";
 
   // Fetch regular notes (server-side search)
   const { data, isLoading } = useNotes(
@@ -109,11 +129,19 @@ export function NoteBrowser() {
         : { limit: 0 },
     );
 
+  // Notes and saved links about telemetry sources (shared, like entity notes)
+  const { data: telemetryNotesData, isLoading: telemetryNotesLoading } = useAllTelemetryNotes({
+    q: debouncedSearch || undefined,
+    limit: showTelemetry ? 200 : 0,
+  });
+
   const deleteNote = useDeleteNote();
   const updateNote = useUpdateNote();
   const createNote = useCreateNote();
   const deleteEntityNote = useDeleteEntityNote();
   const updateEntityNote = useUpdateEntityNote();
+  const deleteTelemetryNote = useDeleteTelemetryNote();
+  const updateTelemetryNote = useUpdateTelemetryNote();
   const undoableDelete = useUndoableDelete();
   // The API only lets the author (or an admin) modify a note
   const currentUser = useAuthStore((s) => s.user);
@@ -123,11 +151,11 @@ export function NoteBrowser() {
   const setActivePanel = useUIStore((s) => s.setActivePanel);
   const setActiveReaderPanel = useUIStore((s) => s.setActiveReaderPanel);
 
-  const notes = data?.items || [];
-  const entityNotes = entityNotesData?.items || [];
-
   // Build unified list
   const unified = useMemo<UnifiedNote[]>(() => {
+    const notes = data?.items || [];
+    const entityNotes = entityNotesData?.items || [];
+    const telemetryNotes = telemetryNotesData?.items || [];
     const noteItems: UnifiedNote[] = showNotes
       ? notes.map((n) => ({ kind: "note" as const, data: n }))
       : [];
@@ -135,12 +163,16 @@ export function NoteBrowser() {
       ? entityNotes.map((en) => ({ kind: "entity" as const, data: en }))
       : [];
 
-    return [...noteItems, ...entityItems].sort(
+    const telemetryItems: UnifiedNote[] = showTelemetry
+      ? telemetryNotes.map((tn) => ({ kind: "telemetry" as const, data: tn }))
+      : [];
+
+    return [...noteItems, ...entityItems, ...telemetryItems].sort(
       (a, b) =>
         new Date(b.data.updated_at).getTime() -
         new Date(a.data.updated_at).getTime(),
     );
-  }, [notes, entityNotes, showNotes, showEntity]);
+  }, [data, entityNotesData, telemetryNotesData, showNotes, showEntity, showTelemetry]);
 
   const hasActiveFilters =
     !!debouncedSearch || sourceFilter !== "all" || !!entityTypeFilter;
@@ -166,7 +198,7 @@ export function NoteBrowser() {
     });
   };
 
-  const allLoading = isLoading || entityNotesLoading;
+  const allLoading = isLoading || entityNotesLoading || (showTelemetry && telemetryNotesLoading);
 
   return (
     <div className={styles.browser}>
@@ -186,6 +218,7 @@ export function NoteBrowser() {
           <option value="all">All Sources</option>
           <option value="notes_only">Notes Only</option>
           <option value="entity_only">Entity Notes Only</option>
+          <option value="telemetry_only">Telemetry Source Notes Only</option>
           <option value="pinned">Pinned Only</option>
         </select>
         {showEntity && (
@@ -241,7 +274,38 @@ export function NoteBrowser() {
           )}
 
           {unified.map((item) =>
-            item.kind === "note" ? (
+            item.kind === "telemetry" ? (
+              <NoteCard
+                key={`telemetry-${item.data.id}`}
+                title={null}
+                content={telemetryMarkdown(item.data)}
+                bodyFormat="markdown"
+                editorMarkdown={item.data.content || ""}
+                author={item.data.username}
+                time={formatDate(item.data.updated_at)}
+                linkedLabel={`Telemetry source: ${item.data.source_name}`}
+                onOpenLinked={() =>
+                  navigate(
+                    `/workbench/explore?section=telemetry&source=${encodeURIComponent(item.data.source_name)}`,
+                  )
+                }
+                onSave={(d) =>
+                  // The editor holds the note text; the link and quote stay as saved.
+                  updateTelemetryNote.mutateAsync({ id: item.data.id, content: d.markdown.trim() })
+                }
+                editable={canEdit(item.data.user_id)}
+                onDelete={
+                  canEdit(item.data.user_id)
+                    ? () =>
+                        undoableDelete({
+                          label: "Telemetry source note",
+                          key: `telemetry-note-${item.data.id}`,
+                          onDelete: () => deleteTelemetryNote.mutate(item.data.id),
+                        })
+                    : undefined
+                }
+              />
+            ) : item.kind === "note" ? (
               <NoteCard
                 key={`note-${item.data.id}`}
                 title={item.data.title}

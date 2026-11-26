@@ -151,6 +151,16 @@ def test_pdf_parser_text_and_scanned():
         parsers.parse_document(parsers.KIND_PDF, b"nope", "a.pdf")
 
 
+def test_pdf_html_drops_the_pdfs_fonts_colours_and_layout():
+    doc = parsers.parse_document(parsers.KIND_PDF, _pdf_bytes("Qilin ransomware note"), "a.pdf")
+    assert "Qilin ransomware note" in doc.html
+    for prop in ("color:", "font-family:", "font-size:", "top:", "line-height:"):
+        assert prop not in doc.html
+
+    img = '<img src="data:image/png;base64,AAAA" style="position:absolute;top:1pt;width:10pt;height:5pt">'
+    assert parsers.sanitize_pdf_html(img) == '<img src="data:image/png;base64,AAAA" style="width:10pt;height:5pt">'
+
+
 def test_zip_members_skip_traversal_and_junk_and_enforce_cap():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -469,7 +479,7 @@ async def test_list_batches_and_capabilities(client: AsyncClient, auth_headers, 
     assert "pdf" in caps["extensions"] and "docx" in caps["extensions"] and caps["max_file_mb"] == 50
 
 
-# --- the one-item PDF door now keeps the original --------------------------------------
+# --- POST /ingest/pdf keeps the original ---------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -503,6 +513,55 @@ async def test_legacy_pdf_endpoint_keeps_contract_and_stores_original(
         files={"file": ("scan.pdf", _pdf_bytes(None), "application/pdf")},
     )
     assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_legacy_pdf_endpoint_keeps_source_url_note_tags_and_names_the_duplicate(
+    client: AsyncClient, auth_headers, test_user, db_session, ingest_dir, quiet_worker
+):
+    from app.models.note import Note
+    from app.models.tag import EntryTag, Tag
+
+    tag = Tag(name="pdf-send", color="#123456")
+    db_session.add(tag)
+    await db_session.flush()
+    data = _pdf_bytes("Volt Typhoon advisory")
+    res = await client.post(
+        "/api/entries/ingest/pdf",
+        headers=auth_headers,
+        files={"file": ("aa24.pdf", data, "application/pdf")},
+        data={"url": "https://cisa.example/aa24.pdf#page=2", "note": "From the extension", "tag_ids": str(tag.id)},
+    )
+    assert res.status_code == 200, res.text
+    entry_id = uuid.UUID(res.json()["id"])
+    entry = await db_session.get(Entry, entry_id)
+    assert entry.url == "https://cisa.example/aa24.pdf"
+    notes = (await db_session.execute(select(Note).where(Note.entry_id == entry_id))).scalars().all()
+    assert [n.content_markdown for n in notes] == ["From the extension"]
+    tags = (await db_session.execute(select(EntryTag).where(EntryTag.entry_id == entry_id))).scalars().all()
+    assert [(t.tag_id, t.user_id) for t in tags] == [(tag.id, test_user.id)]
+
+    # The same file again: still 409, but it names the entry and keeps the new note.
+    res = await client.post(
+        "/api/entries/ingest/pdf",
+        headers=auth_headers,
+        files={"file": ("again.pdf", data, "application/pdf")},
+        data={"note": "Second look"},
+    )
+    assert res.status_code == 409
+    assert res.json()["error"]["details"] == [{"entry_id": str(entry_id)}]
+    notes = (await db_session.execute(select(Note).where(Note.entry_id == entry_id))).scalars().all()
+    assert sorted(n.content_markdown for n in notes) == ["From the extension", "Second look"]
+
+    # A file:// URL works only on the sender's machine, so it is not kept.
+    res = await client.post(
+        "/api/entries/ingest/pdf",
+        headers=auth_headers,
+        files={"file": ("local.pdf", _pdf_bytes("Local copy"), "application/pdf")},
+        data={"url": "file:///Users/me/local.pdf"},
+    )
+    assert res.status_code == 200
+    assert res.json()["url"] is None
 
 
 # --- download route -----------------------------------------------------------------------

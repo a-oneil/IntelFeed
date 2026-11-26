@@ -99,6 +99,34 @@ async def create_telemetry_source(
     return TelemetrySourceResponse.model_validate(source)
 
 
+async def _move_notes_on_rename(db: AsyncSession, source: TelemetrySource, new_name: str) -> None:
+    """Move notes saved under a custom source's old name to its new name.
+
+    Notes are keyed by name, not by row. They stay where they are when the old
+    name is a catalog name (those notes belong to the catalog source) or when
+    another inventory row still has the old name.
+    """
+    from sqlalchemy import update
+
+    from app.models.telemetry_source_note import TelemetrySourceNote
+
+    old = source.name.lower()
+    if any(item["name"].lower() == old for item in DATA_SOURCE_CATALOG):
+        return
+    others = await db.execute(
+        select(TelemetrySource.id)
+        .where(func.lower(TelemetrySource.name) == old, TelemetrySource.id != source.id)
+        .limit(1)
+    )
+    if others.scalar_one_or_none() is not None:
+        return
+    await db.execute(
+        update(TelemetrySourceNote)
+        .where(func.lower(TelemetrySourceNote.source_name) == old)
+        .values(source_name=new_name)
+    )
+
+
 @router.put("/{source_id}", response_model=TelemetrySourceResponse)
 async def update_telemetry_source(
     source_id: uuid.UUID = Path(..., description="Telemetry source UUID"),
@@ -111,6 +139,9 @@ async def update_telemetry_source(
     source = result.scalar_one_or_none()
     if not source:
         raise AppError(code="not_found", message="Telemetry source not found", status_code=404)
+
+    if body.name is not None and body.name != source.name:
+        await _move_notes_on_rename(db, source, body.name)
 
     for field in ["name", "category", "vendor", "product", "log_types", "ingested_into", "enabled", "notes"]:
         value = getattr(body, field, None)

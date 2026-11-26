@@ -1,0 +1,74 @@
+body {
+  padding: 0 20px 24px;
+}
+
+.head {
+  margin: 0 -20px 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+
+h2 {
+  margin: 0 0 4px;
+}
+
+select {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.row select {
+  width: auto;
+  flex: 1;
+}
+
+textarea#content {
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.small {
+  font-size: 12px;
+}
+
+.hint {
+  margin: 4px 0 0;
+}
+
+.check {
+  margin-top: 6px;
+}
+
+.errors,
+.converted {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+.errors li {
+  color: var(--error);
+}
+
+.row {
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.convert {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}

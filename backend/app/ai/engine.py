@@ -1017,6 +1017,15 @@ async def run_task(
 
     variables = with_query_language(variables, await preferred_for_user(db, user_id))
 
+    # Analysts' notes about the enabled telemetry sources, for prompts that
+    # use them. Looked up only when a template names the variable.
+    if "telemetry_notes" not in variables and any(
+        "telemetry_notes" in (t or "") for t in (system_template, user_template)
+    ):
+        from app.intelligence.telemetry_context import get_telemetry_notes_for_prompt
+
+        variables = {**variables, "telemetry_notes": await get_telemetry_notes_for_prompt(db)}
+
     # Render both halves with the same variable scope.
     rendered_system = render_prompt(system_template, variables) if system_template else None
     rendered_user = render_prompt(user_template, variables)
