@@ -513,6 +513,7 @@ Write the story line now, under the contract in your instructions.""",
             "linked_rules",
             "existing_hunts",
             "telemetry_inventory",
+            "telemetry_notes",
             "log_types",
         ],
         # Drafted on request from the board's drawer or the profile's Next
@@ -580,6 +581,10 @@ Respond with JSON: {"hypotheses": [{"title": "...", "hypothesis": "Adversaries u
 {% for c in telemetry_inventory %}- {{ c.category }}: {{ c.sources | join("; ") }}{% if c.log_types %} — {{ c.log_types | join(", ") }}{% endif %}
 {% endfor %}No category or source above means the hunter does not collect it.
 
+{% endif %}{% if telemetry_notes %}## Analysts' notes on these telemetry sources
+What the analysts know about how these sources behave in their environment (gaps, delays, fields, deployment). Take it into account.
+{% for s in telemetry_notes %}- {{ s.source }}: {{ s.notes | join(" / ") }}
+{% endfor %}
 {% endif %}## Allowed data_sources ids
 {{ log_types | join(", ") }}
 
@@ -718,6 +723,7 @@ Write the spine now, under the contract in your instructions.""",
             "entry.published_at",
             "entry.feed_title",
             "telemetry_sources",
+            "telemetry_notes",
             "focus",
         ],
         "default_system_template": """You are a senior threat intelligence analyst. You perform "What? So What?" analyses on individual security articles.
@@ -751,6 +757,12 @@ Omit detection_posture when no telemetry sources were provided. The executive_br
 Factor these into your analysis. Recommended actions should prioritize what the analyst can actually detect and monitor with the data sources below. Adjust relevance based on whether the threat is visible in the analyst's environment.
 {% for src in telemetry_sources %}
 - {{ src.name }} ({{ src.category }}{% if src.vendor %}, {{ src.vendor }}{% endif %}): {{ src.log_types | join(', ') }}
+{% endfor %}
+{% endif %}
+{% if telemetry_notes %}
+## Analysts' notes on these telemetry sources
+What the analysts know about how these sources behave in their environment (gaps, delays, fields, deployment). Take it into account.
+{% for s in telemetry_notes %}- {{ s.source }}: {{ s.notes | join(" / ") }}
 {% endfor %}
 {% endif %}
 {% if focus %}
@@ -789,6 +801,7 @@ Produce the "What? So What?" analysis now per the rules in your instructions."""
             "ttps",
             "rule_type",
             "telemetry_sources",
+            "telemetry_notes",
         ],
         "default_system_template": """You are a senior detection engineer. Given a threat intelligence article (plus extracted TTPs and optional telemetry-source context), generate one or more production-ready detection rules in the rule format requested by the caller.
 
@@ -842,6 +855,12 @@ No TTPs extracted.
 The analyst has the following data sources available in their environment. Generate rules that target these sources when possible, and flag if the threat requires data sources not listed here.
 {% for src in telemetry_sources %}
 - {{ src.name }} ({{ src.category }}{% if src.vendor %}, {{ src.vendor }}{% endif %}){% if src.ingested_into %} → {{ src.ingested_into }}{% endif %}: {{ src.log_types | join(', ') }}
+{% endfor %}
+{% endif %}
+{% if telemetry_notes %}
+## Analysts' notes on these telemetry sources
+What the analysts know about how these sources behave in their environment (gaps, delays, fields, deployment). Take it into account.
+{% for s in telemetry_notes %}- {{ s.source }}: {{ s.notes | join(" / ") }}
 {% endfor %}
 {% endif %}
 

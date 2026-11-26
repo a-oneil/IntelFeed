@@ -101,6 +101,7 @@ from app.models.tag import EntryTag, Tag
 # Telegram mentions
 from app.models.telegram_mention import TelegramChannelMention, TelegramLinkMention
 from app.models.telemetry_source import TelemetrySource
+from app.models.telemetry_source_note import TelemetrySourceNote
 
 # Phase 6: Dashboards & Themes
 from app.models.theme import Theme
@@ -207,6 +208,7 @@ __all__ = [
     "EntityNote",
     "EntityFieldClaim",
     "TelemetrySource",
+    "TelemetrySourceNote",
     "RuleCoverage",
     "LogTypeAlias",
     "ThreatBoardState",

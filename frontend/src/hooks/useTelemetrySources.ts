@@ -7,6 +7,8 @@ import type {
   TelemetrySourceUpdate,
   CatalogItem,
   TelemetrySyncResponse,
+  TelemetrySourceNote,
+  TelemetrySourceNoteInput,
 } from "@/api/types";
 
 export function useTelemetrySources(params?: {
@@ -87,5 +89,85 @@ export function useDeleteTelemetrySource() {
       await api.delete(`/telemetry-sources/${id}`);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["telemetry-sources"] }),
+  });
+}
+
+// ── Notes and saved links per source ────────────────────────────────────
+
+export function useTelemetryNotes(source: string | null) {
+  return useQuery({
+    queryKey: ["telemetry-notes", source],
+    queryFn: async () => {
+      const { data } = await api.get<PaginatedResponse<TelemetrySourceNote>>("/telemetry-sources/notes", {
+        params: { source, limit: 200 },
+      });
+      return data;
+    },
+    enabled: !!source,
+  });
+}
+
+/** Number of notes per source name, for the catalog's badges. */
+export function useTelemetryNoteCounts() {
+  return useQuery({
+    queryKey: ["telemetry-notes", "counts"],
+    queryFn: async () => {
+      const { data } = await api.get<Record<string, number>>("/telemetry-sources/notes/counts");
+      return data;
+    },
+  });
+}
+
+export function useCreateTelemetryNote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: TelemetrySourceNoteInput & { source_name: string }) => {
+      const { data } = await api.post<TelemetrySourceNote>("/telemetry-sources/notes", body);
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["telemetry-notes"] });
+      // A rule's page shows each source's note count.
+      qc.invalidateQueries({ queryKey: ["detection-rule"] });
+    },
+  });
+}
+
+export function useUpdateTelemetryNote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...body }: TelemetrySourceNoteInput & { id: string }) => {
+      const { data } = await api.put<TelemetrySourceNote>(`/telemetry-sources/notes/${id}`, body);
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["telemetry-notes"] }),
+  });
+}
+
+export function useDeleteTelemetryNote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/telemetry-sources/notes/${id}`);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["telemetry-notes"] });
+      // A rule's page shows each source's note count.
+      qc.invalidateQueries({ queryKey: ["detection-rule"] });
+    },
+  });
+}
+
+/** Every source's notes, for the Notes page; `limit: 0` skips the request. */
+export function useAllTelemetryNotes(params: { q?: string; limit: number }) {
+  return useQuery({
+    queryKey: ["telemetry-notes", "all", params],
+    queryFn: async () => {
+      const { data } = await api.get<PaginatedResponse<TelemetrySourceNote>>("/telemetry-sources/notes", {
+        params: { q: params.q, limit: params.limit },
+      });
+      return data;
+    },
+    enabled: params.limit > 0,
   });
 }

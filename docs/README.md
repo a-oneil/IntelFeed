@@ -15,6 +15,7 @@ For a project overview and quickstart, see [`../readme.md`](../readme.md). To in
 - **[cli-reference.md](cli-reference.md)** — The `intelfeed_cli.py` tool: 196 tools in the full CLI and 97 in the read-only lite CLI, with arguments, results and examples.
 - **[../intelfeed-mcp/README.md](../intelfeed-mcp/README.md)** — The MCP server for local models (LM Studio and other MCP clients). It offers the same tools behind nine fixed tools, loads task guides on demand and keeps results small to fit a small context window.
 - **[android-app.md](android-app.md)** — The Android app: where to download it, what it does, and how it is built, signed and released.
+- **[browser-extension.md](browser-extension.md)** — The browser extension for Chrome, Edge and Firefox: sending the page you are reading, subscribing to its feed, tracking a GitHub repo, right-click lookup; install, sign-in, what it sends, and releases.
 
 ## For operators
 

@@ -1186,6 +1186,23 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "get_telemetry_source_notes": {
+        "description": (
+            "Notes and saved documentation links about one telemetry source (e.g. 'AWS GuardDuty'), "
+            "newest first: what analysts learned about the source, its quirks, and pages about it. "
+            "Works for any catalog or inventory source, enabled or not."
+        ),
+        "params": {
+            "source_name": {
+                "type": 'str',
+                "required": True,
+            },
+            "limit": {
+                "type": 'int',
+                "default": 50,
+            },
+        },
+    },
     "get_telemetry_sources": {
         "description": (
             "List configured telemetry/log sources and their coverage. Useful for assessing detection "

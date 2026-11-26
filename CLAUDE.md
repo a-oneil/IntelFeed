@@ -68,15 +68,23 @@ cd android
 ./gradlew :app:testDebugUnitTest :app:assembleDebug   # JDK 17 + Android SDK
 ```
 
+### Browser extension (`extension/`)
+Chrome/Edge (MV3) + Firefox extension for any IntelFeed server: send the page being read (its DOM, via `POST /api/entries/ingest/page`), subscribe to the site's feed, track a GitHub repo, right-click lookup. Plain JS, no dependencies; signs in with username/password and keeps the JWT pair, like the Android app. See [docs/browser-extension.md](docs/browser-extension.md). `scripts/build_extension.sh` bumps `extension/manifest.json`; merging the bump makes CI publish the release.
+```bash
+cd extension
+npm test && npm run build    # node 22+, zip
+```
+
 ### CI
 GitHub Actions is **one workflow** (`ci.yml`), because Actions bills by the *job*, rounded up to a whole minute. The previous split — one workflow per area — meant four `changed?` jobs and four aggregate jobs on every commit: eight billed minutes for ~40 seconds of work before a test ran. Measured over two days: 213 minutes of wall time billed as 416.
 
 | Job | Runs when | Does |
 | --- | --- | --- |
-| `changed?` | always | One checkout, one diff; outputs `backend` / `frontend` / `android` / `images` / `python` / `node` |
+| `changed?` | always | One checkout, one diff; outputs `backend` / `frontend` / `android` / `extension` / `images` / `python` / `node` |
 | `backend` | `backend/**` changed | lockfile drift (`./lock.sh` + `git diff`), `ruff check`, `ruff format --check`, alembic (single head, fresh `upgrade head`, `downgrade -1` + re-apply), `pytest` — in that order, cheapest first, on PostgreSQL 16 + pgvector and Redis service containers |
 | `frontend` | `frontend/**` changed | One `pnpm install`, then `eslint`, `pnpm build` (type check), `vitest` |
 | `android` | `android/**` changed (not on the Monday sweep) | Gradle unit tests + debug APK, attached to the run as an artifact. On `main`, publishes the release `android-v<version>` with the APK when `android/version.properties` has a version that has no release yet. Signs with the `ANDROID_DEBUG_KEYSTORE` secret and doesn't publish without it |
+| `extension` | `extension/**` changed (not on the Monday sweep) | `node --test`, both builds, `web-ext lint` on the Firefox build, zips attached to the run. On `main`, publishes `extension-v<version>` when `extension/manifest.json` has a version with no release yet; signs the Firefox build as an unlisted AMO add-on when `AMO_JWT_ISSUER` / `AMO_JWT_SECRET` are set, else attaches it unsigned |
 | `images` | A file feeding an image changed | Builds all three images (per-image `gha` cache scopes), `compose config` on dev + prod |
 | `security` | always (gitleaks, doc checks); audit steps gated on manifests + Monday sweep | `gitleaks`, doc links + `file:line` refs (`scripts/dev/check_doc_*.py`), `pip-audit`, `pnpm audit` |
 | `CI` | always | Aggregate gate |
@@ -118,7 +126,9 @@ scripts/ops/cf-origin-lockdown.sh         # Restrict prod 80/443 to Cloudflare e
 scripts/ops/version.sh                    # Source (don't run) before a build to stamp images with the commit
 scripts/dev/sync_skill_clis.py            # Regenerate skill CLIs from the live tool registry
 scripts/dev/check_doc_refs.py             # Check the file:line references in docs/ against the code (--fix repairs the unambiguous ones)
-scripts/build_apk.sh                    # Bump the Android app version, test, build, install on devices
+node scripts/dev/render_icons.cjs         # Render every icon (web, PWA, Android, extension) from the IntelFeed mark
+scripts/build_apk.sh                      # Bump the Android app version, test, build, install on devices
+scripts/build_extension.sh                # Bump the extension version, test, build both zips
 ```
 `deploy.sh` / `sync_prod_to_dev.sh` require `INTELFEED_PROD_HOST` — there is no default host.
 

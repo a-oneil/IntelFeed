@@ -53,6 +53,34 @@ vi.mock("@/hooks/useExport", () => ({
   exportNote: vi.fn(),
 }));
 
+vi.mock("@/hooks/useTelemetrySources", () => ({
+  useAllTelemetryNotes: () => ({
+    data: {
+      items: [
+        {
+          id: "t1",
+          source_name: "AWS GuardDuty",
+          user_id: "u1",
+          username: "analyst",
+          url: "https://docs.aws.amazon.com/guardduty/x",
+          page_title: "Finding types",
+          quote: "Needs the agent",
+          content: "**EC2** fleet has no agent",
+          created_at: "2026-02-27T00:00:00Z",
+          updated_at: "2026-02-27T00:00:00Z",
+        },
+      ],
+      total: 1,
+      limit: 200,
+      offset: 0,
+      has_more: false,
+    },
+    isLoading: false,
+  }),
+  useDeleteTelemetryNote: () => ({ mutate: vi.fn() }),
+  useUpdateTelemetryNote: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
+}));
+
 vi.mock("@/hooks/useEntityNotes", () => ({
   useAllEntityNotes: () => ({ data: { items: [], total: 0, limit: 50, offset: 0, has_more: false }, isLoading: false }),
   useDeleteEntityNote: () => ({ mutate: vi.fn() }),
@@ -133,8 +161,19 @@ describe("NoteBrowser", () => {
     render(<NoteBrowser />);
     const exportBtns = screen.getAllByText("Export");
     const deleteBtns = screen.getAllByTitle("Delete note");
-    expect(exportBtns.length).toBe(2);
-    expect(deleteBtns.length).toBe(2);
+    expect(exportBtns.length).toBe(3);
+    expect(deleteBtns.length).toBe(3);
+  });
+
+  it("lists telemetry source notes as markdown, with their link, quote and source", () => {
+    render(<NoteBrowser />);
+    expect(screen.getByText("Telemetry source: AWS GuardDuty")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Finding types" })).toHaveAttribute(
+      "href",
+      "https://docs.aws.amazon.com/guardduty/x",
+    );
+    expect(screen.getByText("Needs the agent").closest("blockquote")).not.toBeNull();
+    expect(screen.getByText("EC2").tagName).toBe("STRONG");
   });
 
   it("shows filter dropdown", () => {

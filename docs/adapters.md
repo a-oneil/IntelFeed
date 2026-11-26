@@ -999,6 +999,12 @@ setup or credentials.
 Not everything comes from a feed. Analysts can add material by hand with the
 ingest button in the sidebar: files, a list of URLs, pasted text, or a GitHub
 repository read once.
+The [browser extension](browser-extension.md) adds the page being read
+through `POST /api/entries/ingest/page`. It sends the page's HTML, so the
+server never fetches the URL; the HTML goes through the same readability and
+sanitizer steps as a fetched page (`document_from_html` in
+`manual_ingest.py`). A URL already collected on any feed the sender can see
+returns the existing entry instead of a duplicate.
 
 | File | Role |
 | --- | --- |
@@ -1065,7 +1071,8 @@ entry and its intelligence stay.
 | GitHub repo file | `manual:github:<owner>/<repo>/<path>` |
 
 **Entry metadata:** `source` (`url_ingest`, `pdf_upload`, `file_upload`,
-`text_paste`, `github_repo`), `batch_id`, `ingest_item_id`, `ingest_file_id`,
+`text_paste`, `github_repo`, `extension_page`), `excerpt` (text selected when
+a page was sent), `client` (the sending extension's version), `batch_id`, `ingest_item_id`, `ingest_file_id`,
 `filename`, `file_content_type`, `size_bytes`, `original_retained`,
 `uploaded_by`. The reader shows the original file (name, type, size,
 Download) and a batch chip. The Manual Uploads feed's table view adds File,

@@ -384,6 +384,10 @@ class RuleTelemetry(BaseModel):
     collected: list[str] = []
     missing: list[str] = []
     coverage_pct: float | None = None
+    # Single-rule reads only: the enabled sources that provide the rule's
+    # collected data sources, with how many notes each has.
+    # [{name, provides, note_count}]
+    sources: list[dict] = []
 
 
 class DetectionRuleCreate(BaseModel):

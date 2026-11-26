@@ -237,6 +237,10 @@ Table `detection_summaries`: a saved AI analysis of several entries. Columns: `c
 
 Table `telemetry_sources`: one row per log source you collect. Columns: `name`, `category`, `vendor`, `product`, `log_types`, `log_types_canonical`, `ingested_into`, `enabled`, `notes`, `created_by`, `created_at`.
 
+### TelemetrySourceNote
+
+Table `telemetry_source_notes`: notes and saved links about a telemetry source, shared by every user. Columns: `source_name`, `user_id` (the author), `url`, `page_title`, `quote`, `content`, `created_at`, `updated_at`. A row has a `url`, `content`, or both (check constraint). It is keyed by the source's name, not a `telemetry_sources` row, because a catalog source has no row until someone enables it. Renaming a custom inventory source moves its notes to the new name, unless the old name is a catalog name or another inventory row still has it. See [Notes and links per source](#notes-and-links-per-source).
+
 ### Mitigation
 
 Table `mitigations`: MITRE ATT&CK mitigations. Columns: `mitre_id` (unique M-ID), `name`, `description`, `mitre_url`, `cis_controls`, `nist_controls`, `article_count`, `first_seen_at`, `last_seen_at`, and Wikipedia fields. See [Mitigations](#mitigations-and-attck-integration) for the link tables.
@@ -456,12 +460,27 @@ You list the log sources you collect at Workbench **Detection → Telemetry Sour
 | `GET /telemetry-sources/taxonomy` | A flat list of data-source names by category |
 | `POST /telemetry-sources/check-feasibility` | Which of a list of data sources you collect |
 | `GET /telemetry-sources/telemetry-gaps` | Rules blocked by missing telemetry |
+| `GET`, `POST /telemetry-sources/notes` | A source's notes and saved links (`?source=`), and adding one |
+| `PUT`, `DELETE /telemetry-sources/notes/{id}` | Edit or delete a note (its author or an admin) |
+| `GET /telemetry-sources/notes/counts` | Notes per source name, for the catalog |
+| `GET /telemetry-sources/notes/suggest` | Which sources a page (`?url=&title=`) is probably about, for the browser extension |
 
 ### What a source collects from
 
 The inventory is instance-wide, and a log type alone overstates what it covers: CrowdStrike Falcon gives process creation only where its sensor runs, never on an ESXi host or a vCenter appliance. `app/telemetry_platforms.py` works out which platforms each source collects from, in the vocabulary hunt hypotheses use for their target: Windows, macOS, Linux, ESXi (ESXi hosts and vCenter appliances), Network Devices, Containers, IaaS, SaaS, Identity Provider, Office Suite, or Any for sources that watch from the network or don't depend on the host (firewalls, NDR, DNS, proxies, NetFlow). Nobody assigns it: it follows from the source's category (an EDR: Windows, macOS, Linux; virtualization: ESXi; firewalls: Any), with name hints for the exceptions (Hyper-V is Windows, macOS logs are macOS). Nothing is stored.
 
 A hunt's runs / needs badge uses it: a log type counts as collected for a hunt only when an enabled source that gives it collects from the hunt's platform, and the source the hunt names must collect from it too.
+
+### Notes and links per source
+
+Each catalog item on the Telemetry Sources page has a **Notes** button that opens a side panel: the source's log types, then the links and notes analysts have saved about it, newest first. Notes are markdown, written and shown with the same editor and card as entry and entity notes, and they are listed on the sidebar's **Notes** page with the others (filter: **Telemetry Source Notes Only**; search covers the note, quote, page title, link and source name). Anyone can add one; the author or an admin edits or deletes it. Notes can be added to any catalog or inventory source, enabled or not, so you can write notes about a source before you start collecting its logs. The [browser extension](browser-extension.md) saves the page being read to a source's notes, with any selected text as a quote.
+
+Where the notes are used:
+
+- **Rule detail rail.** `GET /detection-rules/{id}` returns `telemetry.sources`: up to eight enabled sources that provide the rule's collected data sources, each with `provides` and `note_count`, sources with notes first. The rail lists them under **Log sources for this rule**; clicking one opens its notes. `sources_answering()` in `app/services/detection_coverage.py` lists specific sources, so it is stricter than the coverage check. A source is listed when its name or product contains every main word of the rule's most specific data source (`logs-aws.cloudtrail-*` lists AWS CloudTrail). If no source matches by name, it lists the sources that supply the most of that data source's log types (`process_creation` lists the EDRs). Generic data sources (`audit.generic`, `threat.detection`) and matches on category alone list nothing, because every product in the category would qualify. Source names are compared without regard to case.
+- **AI prompts.** `get_telemetry_notes_for_prompt()` (`app/intelligence/telemetry_context.py`) collects the text notes on enabled sources, matching source names without regard to case (a saved link with no note is left out; a link's quote is included with its note), newest first, up to 600 characters per source and 3,000 in all. `run_task` adds them as the `telemetry_notes` variable to any prompt whose template names it. The `hunt_pack`, `detection_rules` and `threat_assessment` default templates do. A prompt customized under Settings → AI Configuration keeps its own text and does not show the notes until `telemetry_notes` is added to it.
+- **Suggestions.** `GET /telemetry-sources/notes/suggest` ranks sources someone already saved a link to from the same part of the site (host plus the first two path segments) first, then catalog products named in the page's address or title. A product shorter than four letters never matches on its own.
+- **Tools.** `get_telemetry_source_notes` and `add_telemetry_source_note` in the tool registry.
 
 The catalog covers virtualization (VMware vCenter Server, ESXi, NSX, Hyper-V, Nutanix Prism, Proxmox VE), web servers (Apache HTTP Server, Nginx, IIS, Tomcat, HAProxy, Envoy), network infrastructure (Cisco IOS/IOS-XE and NX-OS, Junos, Arista EOS, Aruba, F5 BIG-IP, Citrix NetScaler ADC, NetFlow/IPFIX, Infoblox NIOS), backup and storage (Veeam, Rubrik, Cohesity, Commvault, NetApp ONTAP, Dell PowerScale), managed file transfer (MOVEit Transfer, GoAnywhere MFT, Cleo, Kiteworks), RMM tools (ScreenConnect, TeamViewer, AnyDesk), Exchange Server and SQL Server audit, alongside the EDR, Windows, Linux, network, identity, cloud and SaaS sources.
 

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Save as detection rule – IntelFeed</title>
+    <link rel="stylesheet" href="../ui.css" />
+    <link rel="stylesheet" href="rule.css" />
+  </head>
+  <body>
+    <header class="head">
+      <div class="brand">
+        <span data-logo></span>
+        <span class="brand-name">Intel<span class="brand-accent">Feed</span></span>
+      </div>
+    </header>
+
+    <main>
+      <h1>Save as a detection rule</h1>
+      <p id="source" class="muted small"></p>
+      <p id="load-error" class="error hidden"></p>
+
+      <form id="form" class="hidden">
+        <label for="rule-type">Rule language</label>
+        <select id="rule-type" required></select>
+        <p id="guess" class="muted small hint"></p>
+
+        <label for="title">Title</label>
+        <input id="title" type="text" maxlength="500" required />
+
+        <label for="content">Rule</label>
+        <textarea id="content" rows="14" spellcheck="false" required></textarea>
+        <div id="check" class="check muted small">Checking the syntax…</div>
+        <ul id="errors" class="errors"></ul>
+
+        <p class="muted small">
+          The rule is saved as a draft in IntelFeed's rule library, with this page's address as its source. If this page
+          is already in IntelFeed, the rule is also linked to that article.
+        </p>
+        <div class="row">
+          <button id="save" class="primary" type="submit">Save to IntelFeed</button>
+          <span id="save-result" class="small"></span>
+        </div>
+      </form>
+
+      <section id="convert" class="convert hidden">
+        <h2>Convert to another rule language</h2>
+        <p class="muted small">
+          IntelFeed's AI rewrites the rule in the language you choose and saves the result as a separate rule linked to
+          this one. This uses the AI provider set up in IntelFeed and can take a minute.
+        </p>
+        <div class="row">
+          <select id="target-type"></select>
+          <button id="convert-button">Convert</button>
+        </div>
+        <ul id="converted" class="converted"></ul>
+      </section>
+    </main>
+
+    <script type="module" src="rule.js"></script>
+  </body>
+</html>

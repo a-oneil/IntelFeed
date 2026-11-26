@@ -210,6 +210,7 @@ READ_ONLY_TOOLS = frozenset(
         "get_stack_exposure",
         "get_story_thread",
         "get_story_threads",
+        "get_telemetry_source_notes",
         "get_telemetry_sources",
         "get_temporal_clusters",
         "get_threat_actor",

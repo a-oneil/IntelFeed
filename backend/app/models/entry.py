@@ -66,6 +66,10 @@ class Entry(Base):
         # the entry list and count is DISTINCT ON (content_hash) ORDER BY
         # content_hash, created_at, and only this ordering lets it skip the sort.
         Index("ix_entries_content_hash_created_at", "content_hash", "created_at"),
+        # URL lookups (the browser extension checks every page it opens). A
+        # hash index, not a btree: the lookup only tests equality, and a btree
+        # rejects keys longer than about 2.7 kB, which long tracking URLs exceed.
+        Index("ix_entries_url_hash", "url", postgresql_using="hash"),
     )
 
     # Relationships

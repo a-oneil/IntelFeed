@@ -66,6 +66,7 @@ jobs:
       python: ${{ steps.filter.outputs.python }}
       node: ${{ steps.filter.outputs.node }}
       android: ${{ steps.filter.outputs.android }}
+      extension: ${{ steps.filter.outputs.extension }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -84,7 +85,7 @@ jobs:
           emit() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
 
           everything() {
-            for key in backend frontend images python node android; do emit "$key" true; done
+            for key in backend frontend images python node android extension; do emit "$key" true; done
             echo "### $1" >> "$GITHUB_STEP_SUMMARY"
           }
 
@@ -126,6 +127,7 @@ jobs:
           decide backend  "^(backend/$self)"
           decide frontend "^(frontend/$self)"
           decide android  "^(android/$self)"
+          decide extension "^(extension/$self)"
 
           # Deliberately narrower than backend/**: editing a Python module
           # changes what an image *contains*, not how it *builds*, and the
@@ -375,7 +377,11 @@ jobs:
       run:
         working-directory: android
     steps:
+      # The job has contents: write and runs the PR's build; this keeps the
+      # token out of .git/config. `gh` reads GH_TOKEN instead.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # app/build.gradle.kts pins jvmToolchain(17).
       - uses: actions/setup-java@v6
@@ -508,6 +514,145 @@ jobs:
             echo
             echo "APK: $(du -h "$apk" | cut -f1), version $NAME (build $CODE), signed with the shared key: $SHARED_KEY${SHARED_KEY_SHA256:+ (cert SHA-256 \`$SHARED_KEY_SHA256\`)}."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # The browser extension: node's built-in test runner (it has no
+  # dependencies), Mozilla's linter on the Firefox build, and one zip per
+  # browser. Released like the APK: on main, when extension/manifest.json holds
+  # a version with no `extension-v<version>` release yet (bump it with
+  # scripts/build_extension.sh). Never published to a store. Firefox only
+  # keeps signed add-ons installed, so with the AMO_JWT_ISSUER / AMO_JWT_SECRET
+  # secrets the release carries an .xpi Mozilla signed as *unlisted* (signed,
+  # not listed on addons.mozilla.org); without them it carries the unsigned zip.
+  # Skipped on the Monday sweep, like android.
+  extension:
+    name: extension
+    needs: changes
+    if: needs.changes.outputs.extension == 'true' && github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      # `gh release create` on main. PRs only read releases.
+      contents: write
+    defaults:
+      run:
+        working-directory: extension
+    env:
+      # Pinned: a new lint rule in a minor release would turn an unrelated PR red.
+      WEB_EXT_VERSION: "10.8.0"
+    steps:
+      # The job has contents: write and runs the PR's npm scripts; this keeps
+      # the token out of .git/config. `gh` reads GH_TOKEN instead.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint the Firefox build
+        run: npx --yes "web-ext@$WEB_EXT_VERSION" lint --source-dir dist/firefox --warnings-as-errors
+
+      - name: Read the version
+        id: version
+        run: echo "name=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
+
+      # Every build is downloadable from its run, released or not.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: intelfeed-extension-${{ steps.version.outputs.name }}
+          path: extension/dist/*.zip
+          retention-days: 30
+          compression-level: 0
+
+      - name: Check whether this version needs a release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ steps.version.outputs.name }}
+        run: |
+          set -euo pipefail
+          tag="extension-v$NAME"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "### $tag is already released, so this build is not published. Bump extension/manifest.json (scripts/build_extension.sh) to ship it." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "### Version $NAME has no release yet: merging this publishes $tag." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # AMO signs a version only once, so this runs only when the version is
+      # about to ship. The AMO secrets are passed to this step and no other.
+      - name: Sign the Firefox build
+        id: sign
+        if: steps.release.outputs.publish == 'true'
+        env:
+          NAME: ${{ steps.version.outputs.name }}
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "$AMO_JWT_ISSUER" ] || [ -z "$AMO_JWT_SECRET" ]; then
+            echo "::warning::AMO_JWT_ISSUER / AMO_JWT_SECRET are not set: the Firefox build is unsigned."
+            exit 0
+          fi
+          npx --yes "web-ext@$WEB_EXT_VERSION" sign --channel=unlisted --source-dir dist/firefox \
+            --artifacts-dir dist/signed --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET"
+          mv dist/signed/*.xpi "dist/intelfeed-extension-firefox-$NAME.xpi"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      # Uploaded before the release step: AMO will not sign this version again,
+      # so if the release fails, the signed file is still on the run for a
+      # manual upload.
+      - uses: actions/upload-artifact@v7
+        if: steps.sign.outputs.signed == 'true'
+        with:
+          name: intelfeed-extension-firefox-signed-${{ steps.version.outputs.name }}
+          path: extension/dist/*.xpi
+          retention-days: 90
+          compression-level: 0
+
+      - name: Publish a release for a new version
+        if: steps.release.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ steps.version.outputs.name }}
+          SIGNED: ${{ steps.sign.outputs.signed }}
+        run: |
+          set -euo pipefail
+          tag="extension-v$NAME"
+          chrome="dist/intelfeed-extension-chrome-$NAME.zip"
+          if [ "$SIGNED" = "true" ]; then
+            firefox="dist/intelfeed-extension-firefox-$NAME.xpi"
+            firefox_how="\`$(basename "$firefox")\` is signed by Mozilla: open it in Firefox (142 or later) to install. Updates install over it and keep the sign-in."
+          else
+            firefox="dist/intelfeed-extension-firefox-$NAME.zip"
+            firefox_how="\`$(basename "$firefox")\` is unsigned: Firefox loads it only temporarily (about:debugging → This Firefox → Load Temporary Add-on), or permanently in Developer Edition / Nightly."
+          fi
+          what=$(git log -1 --format=%s | sed -E 's/^extension: *//; s/ *\(#[0-9]+\)$//')
+          {
+            echo "**IntelFeed browser extension $NAME**"
+            echo
+            if [ -n "$what" ]; then echo "$what"; echo; fi
+            echo "- **Chrome, Edge, Brave:** unzip \`$(basename "$chrome")\`, open the extensions page, turn on Developer mode, choose **Load unpacked** and pick the folder. To update, unzip the new version over the same folder and press reload on the extension."
+            echo "- **Firefox:** $firefox_how"
+            echo
+            echo "Install steps and what the extension sends: docs/browser-extension.md."
+            echo
+            echo "Built from $GITHUB_SHA."
+            echo
+            for f in "$chrome" "$firefox"; do echo "- \`$(basename "$f")\` SHA-256 \`$(sha256sum "$f" | cut -d' ' -f1)\`"; done
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$tag" "$chrome" "$firefox" \
+            --target "$GITHUB_SHA" \
+            --title "IntelFeed browser extension $NAME" \
+            --notes-file "$RUNNER_TEMP/notes.md"
+          echo "### Published $tag." >> "$GITHUB_STEP_SUMMARY"
 
   # The Dockerfiles are the supported install path for a self-hosted deploy, so
   # a PR that breaks one breaks the product. All three builds share one job and
@@ -679,7 +824,7 @@ jobs:
   # pending. Mark THIS job required, not the ones above.
   ci:
     name: CI
-    needs: [changes, backend, frontend, android, images, security]
+    needs: [changes, backend, frontend, android, extension, images, security]
     if: always()
     runs-on: ubuntu-latest
     steps:

@@ -2418,9 +2418,10 @@ async def get_detection_rule(
     if not rule:
         raise AppError(code="not_found", message="Detection rule not found", status_code=404)
 
-    from app.services.detection_coverage import get_available_telemetry, rule_telemetry_coverage
+    from app.services.detection_coverage import get_available_telemetry, rule_telemetry_coverage, sources_answering
 
     rule.telemetry = rule_telemetry_coverage(rule, await get_available_telemetry(db))
+    rule.telemetry["sources"] = await sources_answering(db, rule.telemetry["collected"])
     return rule
 
 

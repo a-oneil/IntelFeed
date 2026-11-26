@@ -95,6 +95,25 @@ async def ensure_assignment(db: AsyncSession, entry_id: uuid.UUID, tag: Tag, use
     return bool(result.rowcount)
 
 
+async def add_tags_by_id(
+    db: AsyncSession, entry_id: uuid.UUID, tag_ids: Iterable[uuid.UUID], user_id: uuid.UUID | str | None
+) -> int:
+    """Put the tags with these ids on one entry, as `user_id`. Unknown ids and
+    tags the entry already has are skipped. Updates the search index when a
+    tag was added. Returns the number of tags added."""
+    tag_ids = list(tag_ids)
+    if not tag_ids:
+        return 0
+    added = 0
+    for tag in (await db.execute(select(Tag).where(Tag.id.in_(tag_ids)))).scalars().all():
+        if await ensure_assignment(db, entry_id, tag, user_id):
+            added += 1
+    await db.flush()
+    if added:
+        await sync_entry_tags_to_search(db, [entry_id])
+    return added
+
+
 async def load_entry_tags(
     db: AsyncSession, entry_ids: Iterable[uuid.UUID], user_id: uuid.UUID | str | None
 ) -> dict[uuid.UUID, list[dict]]:

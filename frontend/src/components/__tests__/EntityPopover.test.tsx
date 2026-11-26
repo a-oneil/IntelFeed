@@ -11,8 +11,9 @@ class ResizeObserverStub {
 }
 vi.stubGlobal("ResizeObserver", ResizeObserverStub);
 
+const navigateMock = vi.fn();
 vi.mock("react-router-dom", () => ({
-  useNavigate: () => vi.fn(),
+  useNavigate: () => navigateMock,
 }));
 
 const reportMutate = vi.fn();
@@ -27,6 +28,9 @@ vi.mock("@/hooks/useEntityProfile", () => ({
   useConvertEntity: () => ({ mutate: convertMutate, isPending: false }),
   useDeleteEntity: () => deleteEntityMock,
   useUnlinkAllEntries: () => ({ mutate: unlinkAllMutate, isPending: false }),
+  useEntityRecentEntries: (_t: string, _id: string, opts?: { enabled?: boolean }) => ({
+    data: opts?.enabled === false ? undefined : recentData,
+  }),
   MERGEABLE_ENTITY_TYPES: ["threat_actor", "malware", "country", "tool", "vendor", "product"],
 }));
 
@@ -34,6 +38,9 @@ const enrichMutate = vi.fn();
 vi.mock("@/hooks/useEnrichment", () => ({
   useEnrichEntity: () => ({ mutate: enrichMutate, isPending: false }),
 }));
+
+// The entity's recent articles a test hands the popover.
+let recentData: unknown = undefined;
 
 // The glance a test hands the popover; undefined is "not loaded / failed".
 let glanceData: unknown = undefined;
@@ -396,5 +403,53 @@ describe("EntityPopover — delete from the Wrong? menu", () => {
   it("has no delete for a type the shared delete doesn't handle", () => {
     openWrongMenu({ id: "cwe-1", type: "cwe", value: "CWE-79", meta: {} });
     expect(screen.queryByText(/^Delete /)).not.toBeInTheDocument();
+  });
+});
+
+describe("EntityPopover — recent articles and the full description", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authState.user = { id: "u1", role: "admin" };
+    glanceData = undefined;
+    recentData = [
+      { entry_id: "entry-1", title: "The article being read", published_at: "2026-11-20T00:00:00Z", feed_title: "A" },
+      { entry_id: "entry-2", title: "Sprocket patches its scanner", published_at: "2026-11-18T00:00:00Z", feed_title: "B" },
+      { entry_id: "entry-3", title: "Sprocket acquired", published_at: null, feed_title: "C" },
+    ];
+  });
+
+  it("lists the entity's latest articles, less the one being read, and opens one", () => {
+    const onClose = vi.fn();
+    render(
+      <EntityPopover entity={vendorEntity} x={100} y={100} onClose={onClose} onNavigate={vi.fn()} entryId="entry-1" />,
+    );
+    expect(screen.getByText("Recent articles")).toBeInTheDocument();
+    expect(screen.queryByText("The article being read")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Sprocket patches its scanner"));
+    expect(onClose).toHaveBeenCalled();
+    expect(navigateMock).toHaveBeenCalledWith("/?entry=entry-2");
+  });
+
+  it("fetches no articles on public shared pages", () => {
+    render(<EntityPopover entity={vendorEntity} x={100} y={100} onClose={vi.fn()} onNavigate={vi.fn()} readOnly />);
+    expect(screen.queryByText("Recent articles")).not.toBeInTheDocument();
+  });
+
+  it("cuts a long description and shows the rest on Show more", () => {
+    const long = "Sprocket builds attack-surface scanners. ".repeat(10) + "The final sentence.";
+    render(
+      <EntityPopover
+        entity={{ ...vendorEntity, meta: { article_count: 12, description: long } }}
+        x={100}
+        y={100}
+        onClose={vi.fn()}
+        onNavigate={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/The final sentence/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Show more"));
+    expect(screen.getByText(/The final sentence/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Show less"));
+    expect(screen.queryByText(/The final sentence/)).not.toBeInTheDocument();
   });
 });

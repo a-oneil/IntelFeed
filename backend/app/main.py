@@ -814,6 +814,7 @@ from app.api.system_settings import router as system_settings_router
 from app.api.tags import router as tags_router
 from app.api.telegram import router as telegram_router
 from app.api.telegram_media import router as telegram_media_router
+from app.api.telemetry_notes import router as telemetry_notes_router
 from app.api.telemetry_sources import router as telemetry_sources_router
 from app.api.themes import router as themes_router
 from app.api.threads import router as threads_router
@@ -889,6 +890,7 @@ app.include_router(entity_profiles_router, prefix="/api/entities", tags=["entity
 app.include_router(entity_context_router, prefix="/api/entities", tags=["entity-profiles"])
 app.include_router(entity_relationships_router, prefix="/api/entity-relationships", tags=["entity-relationships"])
 app.include_router(entity_links_router, prefix="/api/entity-links", tags=["entity-links"])
+app.include_router(telemetry_notes_router, prefix="/api/telemetry-sources/notes", tags=["telemetry-sources"])
 app.include_router(telemetry_sources_router, prefix="/api/telemetry-sources", tags=["telemetry-sources"])
 app.include_router(threat_board_router, prefix="/api/threat-board", tags=["threat-board"])
 app.include_router(hunt_packs_router, prefix="/api/hunt-packs", tags=["hunt-packs"])

@@ -1,0 +1,257 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --surface: #f4f6f8;
+  --border: #d5dbe1;
+  --text: #1b2430;
+  --muted: #5b6776;
+  --accent: #2563eb;
+  --accent-text: #ffffff;
+  --ok: #2e7d32;
+  --warn: #b45309;
+  --error: #c62828;
+  /* Entity colors, until the user's IntelFeed theme arrives (lib/theme.js). */
+  --entity-threat_actor: #f97316;
+  --entity-malware: #a855f7;
+  --entity-tool: #eab308;
+  --entity-cve: #ef4444;
+  --entity-ttp: #3b82f6;
+  --entity-campaign: #14b8a6;
+  --entity-vendor: #6366f1;
+  --entity-product: #ec4899;
+  --entity-sector: #10b981;
+  --entity-country: #06b6d4;
+  --entity-mitigation: #84cc16;
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14181f;
+    --surface: #1d232c;
+    --border: #2f3946;
+    --text: #e4e9ef;
+    --muted: #96a3b3;
+    --accent: #4f8bff;
+    --ok: #66bb6a;
+    --warn: #f0a04b;
+    --error: #ef6b6b;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+h1,
+h2 {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 15px;
+}
+
+h2 {
+  font-size: 13px;
+}
+
+label {
+  display: block;
+  margin: 10px 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+input[type="text"],
+input[type="url"],
+input[type="password"],
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 52px;
+}
+
+button {
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+a {
+  color: var(--accent);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.ok {
+  color: var(--ok);
+}
+
+.warn {
+  color: var(--warn);
+}
+
+.error {
+  color: var(--error);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ── shared pieces ─────────────────────────────────────────────────── */
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.brand [data-logo] {
+  display: inline-flex;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  color: var(--accent);
+}
+
+.brand [data-logo] svg {
+  width: 100%;
+  height: 100%;
+}
+
+.brand-name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+
+/* "Feed" in the accent, as in the app's header */
+.brand-accent {
+  color: var(--accent);
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.icon-button:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.status-dot.on {
+  background: var(--ok);
+}
+
+.status-dot.off {
+  background: var(--warn);
+}
+
+/* A switch: <label class="switch"><input type="checkbox"><span></span></label> */
+.switch {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+}
+
+.switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.switch span {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background 0.15s;
+  pointer-events: none;
+}
+
+.switch span::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--bg);
+  transition: transform 0.15s;
+}
+
+.switch input:checked + span {
+  background: var(--accent);
+}
+
+.switch input:checked + span::after {
+  transform: translateX(14px);
+}
+
+.switch input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

@@ -60,7 +60,12 @@ ATT&CK Navigator.
 you when a rule needs logs you do not collect, so it could never fire. The
 list is shared by everyone on the instance. Hunts also know what kind of
 system each source collects from, so an EDR's process events never count for
-a hunt on a vCenter appliance or an ESXi host.
+a hunt on a vCenter appliance or an ESXi host. Each source's **Notes** button
+opens the links and notes analysts have saved about it, such as how it is
+deployed or what it misses. Notes on the sources you collect are added to the
+AI prompts for hunts, detection rules and threat assessments. A rule's side
+panel lists the log sources that supply the data the rule needs, with their
+notes.
 
 **Threats**: what is active now, ranked by story rather than article, so ten
 write-ups of one breach count once. Tabs: **All**, **Actors**, **Malware** and

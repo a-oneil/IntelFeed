@@ -344,6 +344,7 @@ Source: `backend/app/tools/read.py`.
 | `get_enrichment_data` | Stored enrichment for a CVE, malware, actor or TTP. | **`entity_type`**, **`entity_id`** | read |
 | `get_attack_layer` | ATT&CK Navigator layer for one article, or for all observed techniques. | `entry_id`, `title` | read |
 | `get_telemetry_sources` | Configured log sources and what they cover. | none | read |
+| `get_telemetry_source_notes` | Notes and saved links about one telemetry source, newest first. Works for any catalog or inventory source. | **`source_name`**, `limit` | read |
 | `get_campaigns` | List campaigns. | `status`, `limit` | read |
 | `get_campaign_timeline` | A campaign's articles, newest first. | **`campaign_id`** | read |
 | `get_campaign_attack_layer` | ATT&CK Navigator layer for a campaign. | **`campaign_id`** | read |
@@ -512,6 +513,7 @@ Source: `backend/app/tools/workspace.py`.
 | `create_report_share_link` | Make a public share link for a report (TLP:CLEAR and TLP:GREEN only). | **`report_id`**, `ttl_days` | write |
 | `get_report_share_link` | Your active share link for a report. | **`report_id`** | read |
 | `revoke_report_share_link` | Turn off your share link for a report. | **`report_id`** | write |
+| `add_telemetry_source_note` | Save a note, or a link with an optional note, about one telemetry source. Notes are shared with every user. | **`source_name`**, `content`, `url`, `page_title`, `quote` | write |
 | `delete_requirement` | Delete a requirement and its matches. Needs confirmation. | **`requirement_id`**, `confirmation_token` | write |
 | `fulfill_requirement` | Mark a requirement fulfilled. | **`requirement_id`**, `report_id` | write |
 | `add_requirement_match` | Match an article to a requirement by hand. | **`requirement_id`**, **`entry_id`**, `relevance` | write |

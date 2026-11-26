@@ -1282,6 +1282,43 @@
   min-width: 0;
 }
 
+/* Opens the source's notes drawer. Quiet until the row is hovered, unless the
+   source already has notes. */
+.telemetryNotesBtn {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 1px 8px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.telemetryItem:hover .telemetryNotesBtn,
+.telemetryNotesBtn:focus-visible,
+.telemetryNotesBtnHas {
+  opacity: 1;
+}
+
+.telemetryNotesBtnHas {
+  color: var(--accent);
+  border-color: var(--border);
+}
+
+.telemetryNotesBtn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+@media (hover: none) {
+  .telemetryNotesBtn {
+    opacity: 1;
+  }
+}
+
 .telemetryItemName {
   font-weight: 500;
   white-space: nowrap;

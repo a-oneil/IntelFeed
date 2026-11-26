@@ -93,3 +93,36 @@
   font-size: var(--fs-2xs);
   color: var(--text-muted);
 }
+
+/* One enabled source that answers the rule's telemetry; opens its notes. */
+.sourceRow {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 3px 0;
+  text-align: left;
+  font: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.sourceName {
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+}
+
+.sourceRow:hover .sourceName {
+  color: var(--accent);
+}
+
+.sourceMeta {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.sourceMeta b {
+  font-weight: 500;
+  color: var(--accent);
+}

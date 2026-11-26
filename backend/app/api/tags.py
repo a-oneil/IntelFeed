@@ -20,6 +20,7 @@ from app.schemas.tag import (
     TagUpdate,
 )
 from app.services.entry_tags import (
+    add_tags_by_id,
     ensure_assignment,
     make_tag_global,
     make_tag_personal,
@@ -313,16 +314,7 @@ async def add_tags_to_entry(
 
     Each assignment is the caller's own unless the tag is global.
     """
-    tags = (await db.execute(select(Tag).where(Tag.id.in_(body.tag_ids)))).scalars().all()
-    added = 0
-    for tag in tags:
-        if await ensure_assignment(db, entry_id, tag, user.id):
-            added += 1
-
-    await db.flush()
-    if added > 0:
-        await _reindex_entries_tags(db, [entry_id])
-    return {"added": added}
+    return {"added": await add_tags_by_id(db, entry_id, body.tag_ids, user.id)}
 
 
 @router.delete("/entries/{entry_id}/{tag_id}", status_code=204)

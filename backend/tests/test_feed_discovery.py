@@ -851,3 +851,66 @@ class TestExtractFeedLinks:
             '<link rel="alternate" type="application/rss+xml" href="ftp://example.com/feed">'
         )
         assert extract_feed_links(html, "https://example.com") == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: probing the usual feed addresses
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestProbeCommonPaths:
+    """A page that advertises no feed: the site's usual feed addresses are tried."""
+
+    async def test_finds_feed_at_common_path(self):
+        mock_client = _mock_async_client(
+            {
+                "/blog/post": _mock_response(HTML_NO_FEEDS),
+                "example.com/index.xml": _mock_response(SAMPLE_RSS, content_type="application/xml"),
+            }
+        )
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await discover_feed("https://example.com/blog/post")
+        assert result is not None
+        assert result.url == "https://example.com/index.xml"
+        assert result.title == "Security Blog"
+
+    async def test_prefers_earlier_path(self):
+        mock_client = _mock_async_client(
+            {
+                "/blog/post": _mock_response(HTML_NO_FEEDS),
+                "example.com/feed.xml": _mock_response(SAMPLE_ATOM, content_type="application/atom+xml"),
+                "example.com/feed": _mock_response(SAMPLE_RSS, content_type="application/rss+xml"),
+            }
+        )
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await discover_feed("https://example.com/blog/post")
+        assert result.url == "https://example.com/feed"
+
+    async def test_html_at_common_path_is_not_a_feed(self):
+        """A site that answers every address with its HTML page (a soft 404) has no feed."""
+        mock_client = _mock_async_client(_mock_response(HTML_NO_FEEDS))
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await discover_feed("https://example.com/")
+        assert result is None
+
+    async def test_xhtml_at_common_path_is_not_a_feed(self):
+        """application/xhtml+xml is an HTML page, even though the type ends in xml."""
+        mock_client = _mock_async_client(_mock_response(HTML_NO_FEEDS, content_type="application/xhtml+xml"))
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await discover_feed("https://example.com/")
+        assert result is None
+
+    async def test_advertised_feed_is_found_whatever_the_attribute_order(self):
+        """A <link> with href before type is an advertised feed: no common paths are probed."""
+        page = '<html><head><link href="/rss/" type="application/rss+xml" rel="alternate"></head></html>'
+        mock_client = _mock_async_client(
+            {
+                "example.com/rss/": _mock_response(SAMPLE_RSS, content_type="application/rss+xml"),
+                "/blog/post": _mock_response(page),
+            }
+        )
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await discover_feed("https://example.com/blog/post")
+        assert result.url == "https://example.com/rss/"
+        assert mock_client.get.await_count == 2

@@ -13,6 +13,7 @@ import { useReportFalsePositive, type FalsePositiveScope } from "@/hooks/useFals
 import {
   useConvertEntity,
   useDeleteEntity,
+  useEntityRecentEntries,
   useUnlinkAllEntries,
   MERGEABLE_ENTITY_TYPES,
 } from "@/hooks/useEntityProfile";
@@ -29,6 +30,25 @@ import { confirmDialog } from "@/utils/dialog";
 
 function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max).trimEnd() + "…" : text;
+}
+
+/** A description cut at `max` characters, with Show more / Show less for the rest. */
+function Description({ text, max = 220 }: { text: string; max?: number }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > max;
+  return (
+    <span className={`${styles.metaDesc} ${open ? styles.metaDescOpen : ""}`}>
+      {open || !long ? text : truncate(text, max)}
+      {long && (
+        <>
+          {" "}
+          <button type="button" className={styles.moreBtn} onClick={() => setOpen(!open)} aria-expanded={open}>
+            {open ? "Show less" : "Show more"}
+          </button>
+        </>
+      )}
+    </span>
+  );
 }
 
 /** Types the shared delete handles (useDeleteEntity); others have no delete here. */
@@ -158,6 +178,12 @@ export function EntityPopover({
   const enrichEntity = useEnrichEntity();
   // Enrichment's few words about this entity; absent until (and unless) it loads.
   const { data: glance } = useEntityGlance(entity.type, entity.id || undefined);
+  // Its latest articles, less the one being read. Visitors get only articles
+  // from feeds shown to them (the server applies the visitor filter).
+  const { data: recentEntries } = useEntityRecentEntries(entity.type, entity.id || undefined, {
+    enabled: !readOnly,
+  });
+  const recent = (recentEntries ?? []).filter((e) => e.entry_id !== entryId).slice(0, 3);
   const reportFalsePositive = useReportFalsePositive();
   const convertEntity = useConvertEntity();
   const unlinkAll = useUnlinkAllEntries();
@@ -508,11 +534,7 @@ export function EntityPopover({
           {cveMeta.description && (
             <div className={`${styles.metaItem} ${styles.metaFull}`}>
               <span className={styles.metaLabel}>Description</span>
-              <span className={styles.metaDesc}>
-                {cveMeta.description.length > 120
-                  ? cveMeta.description.slice(0, 120) + "..."
-                  : cveMeta.description}
-              </span>
+              <Description text={cveMeta.description} max={120} />
             </div>
           )}
           {glanceFacts}
@@ -543,7 +565,7 @@ export function EntityPopover({
           {ttpMeta.description && (
             <div className={`${styles.metaItem} ${styles.metaFull}`}>
               <span className={styles.metaLabel}>Description</span>
-              <span className={styles.metaDesc}>{truncate(ttpMeta.description, 220)}</span>
+              <Description text={ttpMeta.description} />
             </div>
           )}
           {glanceFacts}
@@ -580,7 +602,7 @@ export function EntityPopover({
           {meta.description && (
             <div className={`${styles.metaItem} ${styles.metaFull}`}>
               <span className={styles.metaLabel}>Description</span>
-              <span className={styles.metaDesc}>{truncate(meta.description, 220)}</span>
+              <Description text={meta.description} />
             </div>
           )}
           {glanceFacts}
@@ -598,6 +620,29 @@ export function EntityPopover({
               <span className={styles.artifactKey}>{a.label}</span>
               <span className={styles.artifactVal}>{truncate(a.value, 90)}</span>
             </div>
+          ))}
+        </div>
+      )}
+
+      {recent.length > 0 && (
+        <div className={styles.recent}>
+          <div className={styles.artifactsLabel}>Recent articles</div>
+          {recent.map((e) => (
+            <button
+              key={e.entry_id}
+              type="button"
+              className={styles.recentItem}
+              title={e.title}
+              onClick={() => {
+                onClose();
+                navigate(`/?entry=${e.entry_id}`);
+              }}
+            >
+              <span className={styles.recentTitle}>{e.title || "Untitled"}</span>
+              <span className={styles.recentMeta}>
+                {[e.feed_title, e.published_at ? formatDate(e.published_at) : null].filter(Boolean).join(" · ")}
+              </span>
+            </button>
           ))}
         </div>
       )}

@@ -224,7 +224,13 @@ def extract_pdf_content(content: bytes) -> tuple[str, str]:
 
 
 def sanitize_pdf_html(raw_html: str) -> str:
-    """Sanitize PDF-extracted HTML, allowing data: URIs for embedded images."""
+    """Sanitize PDF-extracted HTML, allowing data: URIs for embedded images.
+
+    PyMuPDF puts the PDF's page layout and fonts in inline styles: a fixed page
+    size, absolute positions, and a font family, size and colour on every
+    span. Those override the reader's theme (black text on a dark background),
+    so text elements keep no styles. Images keep only their width and height.
+    """
     import nh3
 
     return nh3.clean(
@@ -233,12 +239,10 @@ def sanitize_pdf_html(raw_html: str) -> str:
         attributes={
             **ALLOWED_ATTRIBUTES,
             "img": {"src", "alt", "width", "height", "loading", "style"},
-            "span": {"style"},
-            "div": {"style"},
-            "p": {"style"},
         },
         link_rel="noopener noreferrer nofollow",
         url_schemes={"http", "https", "data"},
+        filter_style_properties={"width", "height"},
     )
 
 

@@ -244,7 +244,7 @@ All paths below start with `/api` unless shown otherwise. `{id}`-style names are
 | --- | --- | --- | --- |
 | GET | `/api/feeds` | Visitor | Your feeds with unread counts. `category_id`, `limit` (max 1000), `offset` |
 | POST | `/api/feeds` | User | Add a feed. The category's `feed_defaults` fill any pipeline settings you leave out |
-| POST | `/api/feeds/discover` | User | Find the feed behind a web page URL, without adding it |
+| POST | `/api/feeds/discover` | User | Find the feed behind a web page URL, without adding it: the URL itself, a feed the page advertises, else the first of the site's usual feed addresses (`/feed`, `/rss`, `/feed.xml`, …) that answers with one |
 | GET | `/api/feeds/{feed_id}` | Visitor | One feed |
 | PUT | `/api/feeds/{feed_id}` | User (admin for infrastructure fields) | Change the fields you send. See below |
 | DELETE | `/api/feeds/{feed_id}` | User (admin to delete) | See below |
@@ -434,7 +434,11 @@ Manual ingest adds articles by hand. See [adapters.md](adapters.md#manual-ingest
 | Method | Path | Access | What it does |
 | --- | --- | --- | --- |
 | POST | `/api/entries/ingest/url` | User | Add one web page now (`{"url"}`). Errors: 409 `duplicate`, 422 `extraction_failed`, 400 `invalid_url` |
-| POST | `/api/entries/ingest/pdf` | User | Add one PDF now (multipart `file`, optional `title`). The original is kept for download |
+| POST | `/api/entries/ingest/pdf` | User | Add one PDF now (multipart `file`, optional `title`, `url`, `note`, `tag_ids`). `url` (http or https) is stored as the entry's address; `note` and `tag_ids` are applied as `/ingest/page` applies them, to the existing entry too when the file is a duplicate. A duplicate answers 409 with `details: [{"entry_id"}]`. The original is kept for download |
+| POST | `/api/entries/ingest/page` | User | Add the page a browser is showing (`{"url", "html"?, "title"?, "selection"?, "published_at"?, "author"?, "tag_ids"?, "note"?, "client"?}`). With `html` the URL is not fetched, so pages behind a login or paywall can be sent. 201 with `created: true`, or 200 with the existing entry and `created: false` when the URL is already in IntelFeed; tags and the note (a Note on the entry) are applied in both cases. `html` is capped at 2,000,000 characters; a page with no readable text is a 422 `extraction_failed`. New entries go on the shared Manual Uploads feed, which every user can see, including pages from intranets or behind a login. Used by the [browser extension](browser-extension.md) |
+| GET | `/api/entries/ingest/lookup` | User | The newest entry the caller can see whose URL is `?url=` (fragment ignored), on any feed: `id`, `title`, `feed_title`, `published_at`, and `thread` (the story thread it belongs to, or null). 404 when none |
+| GET | `/api/entries/ingest/coverage` | User | Recent entries telling the same story as a page not yet collected (`?title=`, `url=` to leave that page out): matches from the last 14 days whose titles share at least 40% of the title's search keywords (and at least two), `outlet_count` (distinct sites), up to five `entries`, and the `thread` most of them belong to |
+| GET | `/api/entries/ingest/{entry_id}/results` | User | What the pipeline found in an entry: `state`: `processing` (stages still to run, including a new entry waiting for its first stage), `done`, `errored` (a stage failed), or `unknown` (no pipeline record on an entry older than 30 minutes), and the findings: `actors`, `malware`, `tools`, `cves`, `ttps`, `rule_count`, `observable_count`, `thread`. The browser extension polls it after a send |
 | GET | `/api/entries/ingest/capabilities` | User | Accepted file types and limits (`max_file_mb`, `max_batch_items`, `zip_max_members`) |
 | POST | `/api/entries/ingest/batches` | User | Open a batch (`{"label"}`). Items start processing the moment you add them; there is no submit step |
 | GET | `/api/entries/ingest/batches` | User | Recent batches (`limit`, `mine`) |
@@ -1041,6 +1045,12 @@ Values within one parameter are ORed; different parameters are ANDed. Each facet
 | GET | `/api/telemetry-sources/telemetry-gaps` | User | Rules that need sources you don't have |
 | GET | `/api/telemetry-sources/taxonomy` | User | A flat data-source list by category, for the picker |
 | GET | `/api/telemetry-sources/catalog` | User | The ready-made data-source catalog |
+| GET | `/api/telemetry-sources/notes` | User | Notes and saved links about telemetry sources, newest first: one source's (`?source=`) or all of them, optionally matching `?q=` |
+| POST | `/api/telemetry-sources/notes` | User | Save a note or link (`{"source_name", "url"?, "page_title"?, "quote"?, "content"?}`); the source must be in the catalog or the inventory |
+| PUT | `/api/telemetry-sources/notes/{note_id}` | Author or admin | Edit a note; an empty string clears a field |
+| DELETE | `/api/telemetry-sources/notes/{note_id}` | Author or admin | Delete a note |
+| GET | `/api/telemetry-sources/notes/counts` | User | Notes per source name |
+| GET | `/api/telemetry-sources/notes/suggest` | User | Up to five sources a page (`?url=&title=`) is probably about |
 | POST | `/api/telemetry-sources/sync` | Admin | Save catalog selections as sources |
 
 #### Threats Board & Coverage Workspace

@@ -12,7 +12,13 @@ import { NameCell } from "@/components/table/cells";
 import table from "@/components/table/DataTable.module.css";
 import { useEntitySearch } from "@/hooks/useCorrelation";
 import { useUIStore } from "@/stores/uiStore";
-import { useTelemetrySources, useTelemetryCatalog, useSyncTelemetrySources } from "@/hooks/useTelemetrySources";
+import {
+  useTelemetrySources,
+  useTelemetryCatalog,
+  useSyncTelemetrySources,
+  useTelemetryNoteCounts,
+} from "@/hooks/useTelemetrySources";
+import { TelemetrySourceDrawer } from "@/components/telemetry/TelemetrySourceDrawer";
 import type { CatalogItem } from "@/api/types";
 import {
   useRequirementCoverage,
@@ -2749,6 +2755,20 @@ function TelemetrySourcesSection() {
   const [categoryFilter, setCategoryFilter] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [dirty, setDirty] = useState(false);
+  const { data: noteCounts } = useTelemetryNoteCounts();
+  const [openSource, setOpenSource] = useState<CatalogItem | null>(null);
+  // ?source=AWS%20GuardDuty (the browser extension's link after saving a note)
+  // opens that source's drawer once the catalog is in.
+  const [sourceParams, setSourceParams] = useSearchParams();
+  const linkedSource = sourceParams.get("source");
+  useEffect(() => {
+    if (!linkedSource || !catalog) return;
+    const item = catalog.find((i) => i.name.toLowerCase() === linkedSource.toLowerCase());
+    setOpenSource(item ?? { name: linkedSource, category: "", vendor: "", product: "", log_types: [] });
+    const next = new URLSearchParams(sourceParams);
+    next.delete("source");
+    setSourceParams(next, { replace: true });
+  }, [linkedSource, catalog, sourceParams, setSourceParams]);
 
   // Initialize selected set from existing enabled sources
   useEffect(() => {
@@ -2891,6 +2911,20 @@ function TelemetrySourcesSection() {
                             {item.log_types.length > 0 && ` \u00B7 ${item.log_types.length} log types`}
                           </span>
                         </div>
+                        <button
+                          type="button"
+                          className={`${styles.telemetryNotesBtn} ${noteCounts?.[item.name] ? styles.telemetryNotesBtnHas : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setOpenSource(item);
+                          }}
+                          title="Notes and links about this source"
+                        >
+                          {noteCounts?.[item.name]
+                            ? `${noteCounts[item.name]} ${noteCounts[item.name] === 1 ? "note" : "notes"}`
+                            : "Notes"}
+                        </button>
                       </label>
                     ))}
                   </div>
@@ -2906,6 +2940,7 @@ function TelemetrySourcesSection() {
           </div>
         )}
       </div>
+      {openSource && <TelemetrySourceDrawer source={openSource} onClose={() => setOpenSource(null)} />}
     </>
   );
 }
