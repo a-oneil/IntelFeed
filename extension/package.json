@@ -4,7 +4,7 @@
   "type": "module",
   "description": "IntelFeed browser extension (Chrome, Edge, Firefox). No runtime dependencies.",
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test \"test/*.test.js\"",
     "build": "node scripts/build.mjs"
   }
 }
