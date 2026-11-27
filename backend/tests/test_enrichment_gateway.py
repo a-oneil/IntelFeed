@@ -328,7 +328,7 @@ async def test_a_gateway_built_for_the_backfill_lane_stops_there_too():
     g = _gateway(_Source(), budget=5, lane="backfill")
     for _ in range(3):
         await _get(g)
-    with pytest.raises(BudgetExhausted) as exc:  # BackfillShareUsed is one
+    with pytest.raises(BudgetExhausted) as exc:  # BackfillShareUsed subclasses BudgetExhausted
         await _get(g)
     assert exc.value.status == "backfill_share"
 
@@ -762,7 +762,7 @@ async def test_iocs_sent_raises_when_redis_is_down(monkeypatch):
         return dead
 
     monkeypatch.setattr(gw, "get_redis_bytes", broken)
-    await gw.record_ioc_sent("198.51.100.1")  # only loses the count
+    await gw.record_ioc_sent("198.51.100.1")  # doesn't raise: the count is lost
     with pytest.raises(gw.GatewayUnavailable):
         await gw.iocs_sent()
 

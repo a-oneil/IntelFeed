@@ -17,11 +17,7 @@ function relativeTime(dateStr: string): string {
   return `${Math.floor(days / 30)}mo ago`;
 }
 
-/**
- * "Article Summary" card shown under the article byline when a persisted
- * entry_analysis result exists — the gist without opening any panel.
- * Renders nothing when the entry has no analysis.
- */
+/** "Article Summary" card shown under the article byline when a saved entry_analysis result exists, so the summary is visible without opening any panel. Renders nothing when the entry has no analysis. */
 export function ArticleSummaryCard({ entryId }: ArticleSummaryCardProps) {
   const { data: results } = useAIResults("entry", entryId);
   const collapsed = useUIStore((s) => s.articleSummaryCollapsed);

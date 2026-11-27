@@ -89,51 +89,90 @@ async def _probe_common_paths(client: httpx.AsyncClient, url: str) -> FeedDiscov
     return next((r for r in results if r), None)
 
 
-YOUTUBE_CHANNEL_RE = re.compile(r"youtube\.com/(?:channel|c|@|user)/([^/?\s]+)")
+# /channel/ID, /c/name, /user/name, and the handle form /@name (no slash after @)
+YOUTUBE_CHANNEL_RE = re.compile(r"youtube\.com/(?:(?:channel|c|user)/|@)([^/?\s]+)")
 YOUTUBE_FEED_RE = re.compile(r"youtube\.com/feeds/videos\.xml\?channel_id=([^&\s]+)")
 YOUTUBE_FEED_TEMPLATE = "https://www.youtube.com/feeds/videos.xml?channel_id={}"
+
+# From an EU address (prod's IP geolocates to France) YouTube redirects every
+# page to consent.youtube.com, which has no feed link and no channel ID.
+# SOCS=CAI is the cookie YouTube sets when consent is declined, so the real
+# page comes back. Scoped to youtube.com: no other site receives it.
+YOUTUBE_CONSENT_COOKIE = ("SOCS", "CAI")
+
+
+def _discovery_cookies() -> httpx.Cookies:
+    cookies = httpx.Cookies()
+    name, value = YOUTUBE_CONSENT_COOKIE
+    cookies.set(name, value, domain=".youtube.com")
+    return cookies
+
+
+# How many of a page's advertised feeds discovery fetches. A blog advertises
+# posts and comments; a news site may list one per section.
+MAX_FEED_OPTIONS = 6
 
 
 async def discover_feed(url: str) -> FeedDiscoverResult | None:
     """Discover a feed from a URL. Returns the best candidate or None."""
+    feeds, _ = await discover_feeds(url)
+    return feeds[0] if feeds else None
+
+
+async def discover_feeds(url: str) -> tuple[list[FeedDiscoverResult], str | None]:
+    """Every feed a URL leads to, best first, plus the page HTML when it is a page.
+
+    The HTML comes back so a caller that finds no feed can look at the page
+    itself (the web scraper's link count) without fetching it twice.
+    """
     async with safe_async_client(
         follow_redirects=True,
         timeout=15.0,
         headers={"User-Agent": str(settings.get("user_agent") or settings.user_agent)},
+        cookies=_discovery_cookies(),
     ) as client:
         # Check if it's a YouTube feed XML URL (already resolved)
         yt_feed_match = YOUTUBE_FEED_RE.search(url)
         if yt_feed_match:
-            return await _discover_youtube_feed(client, url, yt_feed_match.group(1))
+            found = await _discover_youtube_feed(client, url, yt_feed_match.group(1))
+            return ([found] if found else []), None
 
         # Check if it's a YouTube channel URL
         yt_match = YOUTUBE_CHANNEL_RE.search(url)
         if yt_match:
-            return await _discover_youtube(client, url)
+            found = await _discover_youtube(client, url)
+            return ([found] if found else []), None
 
         try:
             response = await client.get(url)
             response.raise_for_status()
         except httpx.HTTPError:
-            return None
+            return [], None
 
         # The URL is a feed itself
         if _looks_like_feed(response.headers.get("content-type", ""), response.text):
-            return _parse_feed(url, response.text.strip())
+            found = _parse_feed(url, response.text.strip())
+            return ([found] if found else []), None
 
         # HTML page — look for feed links
-        links = extract_feed_links(response.text, url)
+        page_html = response.text
+        links = extract_feed_links(page_html, url)[:MAX_FEED_OPTIONS]
         if links:
-            feed_url = links[0]
-            try:
-                feed_response = await client.get(feed_url)
-                feed_response.raise_for_status()
+
+            async def fetch(feed_url: str) -> FeedDiscoverResult | None:
+                try:
+                    feed_response = await client.get(feed_url)
+                    feed_response.raise_for_status()
+                except httpx.HTTPError:
+                    return None
                 return _parse_feed(feed_url, feed_response.text)
-            except httpx.HTTPError:
-                return None
+
+            results = await asyncio.gather(*(fetch(link) for link in links))
+            return [r for r in results if r], page_html
 
         # No advertised feed: try the addresses sites usually keep one at
-        return await _probe_common_paths(client, url)
+        found = await _probe_common_paths(client, url)
+        return ([found] if found else []), page_html
 
 
 async def _discover_youtube_feed(client: httpx.AsyncClient, url: str, channel_id: str) -> FeedDiscoverResult | None:

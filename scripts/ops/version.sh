@@ -12,7 +12,7 @@
 # inside a build can work out what it is building.
 #
 # Every var falls back to "dev" / "" in compose, so a bare `docker compose
-# build` without sourcing this still works — it just reports an unknown version.
+# build` without sourcing this still works; the build reports its version as "dev".
 
 # `--tags` counts lightweight tags too, `--always` degrades to a bare short SHA
 # while the repo has no matching tag, and `--dirty` marks a build made from an
@@ -21,10 +21,10 @@
 #
 # `--match` rather than a bare `--tags`, because this repo tags more than one
 # artifact: CI publishes an `android-v<version>` tag for every APK release, and
-# without a filter `git describe` takes whichever tag is nearest — so the web
-# app's footer started reporting "android-v1.2-4-g7990e4d", the Android app's
-# version. An allowlist beats excluding `android-v*` by name: the next artifact
-# to get its own tag namespace will not quietly break this again.
+# without a filter `git describe` takes whichever tag is nearest, and the web
+# app's footer reports the Android app's version ("android-v1.2-4-g7990e4d").
+# An allowlist is used instead of excluding `android-v*` by name so that the
+# next artifact to get its own tag namespace does not break this the same way.
 APP_VERSION=$(git describe --tags --always --dirty --match='v*' 2>/dev/null || echo unknown)
 GIT_SHA=$(git rev-parse --short=8 HEAD 2>/dev/null || echo unknown)
 BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')

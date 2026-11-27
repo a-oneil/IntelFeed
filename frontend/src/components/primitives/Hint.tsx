@@ -48,12 +48,9 @@ const compose = (theirs: Handler, ours: () => void) => (e: unknown) => {
 /**
  * A hover card that explains a control.
  *
- * Wraps the control rather than replacing it — `cloneElement` attaches the
- * handlers and `aria-describedby` to the child, so the DOM keeps exactly the
- * shape the surrounding flex/grid layout already expects.
+ * Wraps the control rather than replacing it — `cloneElement` attaches the handlers and `aria-describedby` to the child, so the DOM keeps exactly the shape the surrounding flex/grid layout already expects.
  *
- * Use a card when the control's name doesn't tell you what happens. For
- * one-word actions (Close, Delete, Star) a native `title` is still right.
+ * Use a card when the control's name doesn't tell you what happens. For one-word actions (Close, Delete, Star) a native `title` is still right.
  */
 export function Hint({
   title,
@@ -97,23 +94,18 @@ export function Hint({
     [disabled],
   );
 
-  // Deliberate delay on hover: instant cards on controls you pass over all day
-  // read as nagging. Keyboard focus is an explicit ask, so it skips the wait.
+  // Hover opens the card after a delay, because cards that appear instantly on controls the pointer passes over all day are distracting. Keyboard focus is deliberate, so it opens the card without waiting.
   const onEnter = useCallback(() => openAfter(delay), [openAfter, delay]);
   const onFocus = useCallback(() => openAfter(0), [openAfter]);
 
   useEffect(() => clearTimer, []);
 
-  // A call site that disables the hint mid-hover (the matrix header does, once
-  // its peek popover owns the explanation) hands back the bare child with no
-  // leave handler, so the open anchor would otherwise survive and bring the
-  // card back the moment the hint re-enables.
+  // A call site that disables the hint mid-hover (the matrix header does, once its peek popover owns the explanation) hands back the bare child with no leave handler, so the open anchor would otherwise survive and bring the card back the moment the hint re-enables.
   useEffect(() => {
     if (disabled) close();
   }, [disabled, close]);
 
-  // A fixed card can't travel with a scrolling container, so close rather than
-  // let it drift away from the control it describes.
+  // A fixed-position card can't follow a scrolling container, so scrolling or resizing closes it rather than leaving it away from the control it describes.
   useEffect(() => {
     if (!anchor) return;
     window.addEventListener("scroll", close, true);
@@ -163,7 +155,7 @@ export function Hint({
   const attachRef = useCallback(
     (node: HTMLElement | null) => {
       triggerRef.current = node;
-      // Don't strand a ref the call site already had on the control.
+      // Keep updating any ref the call site already put on the control.
       const theirs = (children as unknown as { ref?: unknown }).ref;
       if (typeof theirs === "function") (theirs as (n: HTMLElement | null) => void)(node);
       else if (theirs && typeof theirs === "object") {
@@ -174,8 +166,7 @@ export function Hint({
   );
 
   if (!isValidElement(children)) return children;
-  // Touch has no hover: the card would open on the tap that activates the
-  // control and then need a second tap on nothing to dismiss it.
+  // Touch has no hover: the card would open on the tap that activates the control and then need a second tap elsewhere to dismiss it.
   if (disabled || !hoverCards) return children;
 
   const props = children.props as Record<string, unknown>;
@@ -184,7 +175,7 @@ export function Hint({
     "aria-describedby": anchor ? id : props["aria-describedby"],
     onMouseEnter: compose(props.onMouseEnter as Handler, onEnter),
     onMouseLeave: compose(props.onMouseLeave as Handler, close),
-    // Activating the control answers the question the card was asking.
+    // Clicking the control closes the card.
     onClick: compose(props.onClick as Handler, close),
     onFocus: compose(props.onFocus as Handler, onFocus),
     onBlur: compose(props.onBlur as Handler, close),

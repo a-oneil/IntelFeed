@@ -1,9 +1,4 @@
-/**
- * MaintenancePanel — the Engine console's Maintenance drawer: global sweeps
- * (orphan prune, full re-extract, proximity backfill) and the destructive
- * resets, with inline confirm. Native replacement for the last remnant of the
- * old WorkbenchHygiene surface.
- */
+/** MaintenancePanel: the Engine console's Maintenance drawer: global sweeps (orphan prune, full re-extract, proximity backfill) and the destructive resets (correlation reset, delete all rules), each with an inline confirm. */
 import { useState } from "react";
 import { toast } from "sonner";
 

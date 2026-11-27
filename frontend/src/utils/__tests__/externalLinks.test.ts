@@ -138,9 +138,7 @@ describe("findTextMismatch", () => {
     expect(findTextMismatch("setup.py", "github.com")).toBeNull();
   });
 
-  // Regression: every one of these fired the red banner on real feed content
-  // (Krebs, The DFIR Report) — file names in prose and indicator domains linked to
-  // a lookup page.
+  // Regression: every one of these fired the red banner on real feed content (Krebs, The DFIR Report) — file names in prose and indicator domains linked to a lookup page.
   it("does not mistake common file names for hosts", () => {
     for (const name of ["ads.txt", "app-ads.txt", "msimg32.dll", "setup.exe", "report.pdf", "notes.docx"]) {
       expect(findTextMismatch(name, "example.com"), name).toBeNull();

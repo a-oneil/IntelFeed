@@ -122,7 +122,7 @@ def test_html_to_text():
 
 
 def test_html_to_text_keeps_block_and_cell_text_apart():
-    """Neighbouring elements never glue: list items, table cells, captions."""
+    """Neighboring elements never glue: list items, table cells, captions."""
     html = (
         "<ul><li>46.233.40[.]20</li><li>46.233.40[.]21</li></ul>"
         "<table><tr><td>CVE-2026-103849</td><td>10.0</td></tr><tr><td>a</td><td>b</td></tr></table>"

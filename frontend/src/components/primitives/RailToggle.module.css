@@ -1,5 +1,4 @@
-/* The thin vertical rail that collapses/expands an adjacent pane.
-   Five layouts had byte-identical copies of this before it was extracted. */
+/* The thin vertical rail that collapses/expands an adjacent pane, shared by five layouts that each had an identical copy. */
 .rail {
   flex-shrink: 0;
   width: 16px;
@@ -15,8 +14,7 @@
   padding: 0;
 }
 
-/* Sized by the 16px rail rather than by --sz-caret: there is no label here
-   for a caret to track, only the strip itself. */
+/* Sized by the 16px rail rather than by --sz-caret: there is no label here for a caret to track, only the strip itself. */
 .chevron {
   width: 11px;
   height: 11px;
@@ -41,9 +39,7 @@
   border-right: 1px solid var(--border);
 }
 
-/* The rail is a pointer affordance for resizable panes — mobile uses the
-   swipe gestures and the ☰ instead. All five hosts hid it at this
-   breakpoint independently before it was extracted. */
+/* The rail is a pointer affordance for resizable panes — mobile uses the swipe gestures and the ☰ instead. It is hidden at this breakpoint for all five layouts. */
 @media (max-width: 767px) {
   .rail {
     display: none;

@@ -3,9 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { EngineSection } from "../engine/EngineSection";
 
-// The console shell delegates to the matrix (which owns the data views and
-// stage panels) — mock it and the browse-view children, then test the shell's
-// wiring: default matrix, jobs/feeds/plans browse views, legacy deep links.
+// The console shell delegates to the matrix (which owns the data views and stage panels), so the matrix and the browse-view children are mocked and the tests cover the shell's wiring: default matrix, jobs/feeds/plans browse views, legacy deep links.
 vi.mock("../engine/EngineMatrix", () => ({
   MATRIX_VIEWS: ["entries", "entities", "links", "relationships", "review", "feeds"],
   REVIEW_LENSES: ["queue", "entities", "relationships", "history"],

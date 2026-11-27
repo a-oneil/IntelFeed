@@ -17,25 +17,20 @@ import kotlinx.coroutines.sync.withLock
 // One DataStore per file per process: UserPreferences reads and writes this same instance.
 internal val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "intelfeed_prefs")
 
-/**
- * The session: server address, username and the two tokens. The tokens are encrypted at rest with
- * [cipher] (a Keystore key, see TokenCipher); everything else is plain.
- */
+/** The session: server address, username and the two tokens. The tokens are encrypted at rest with [cipher] (a Keystore key, see TokenCipher); everything else is plain. */
 class AuthPreferences(
     private val store: DataStore<Preferences>,
     private val cipher: TokenCipher = TokenCipher.androidKeystore()
 ) {
     constructor(context: Context, cipher: TokenCipher = TokenCipher.androidKeystore()) : this(context.dataStore, cipher)
 
-    // Null until DataStore has been read. Using the public default before that
-    // would send a self-hosted session's first request (and potentially its bearer token) there.
+    // Null until DataStore has been read. Using the public default before that would send a self-hosted session's first request (and potentially its bearer token) there.
     @Volatile private var cachedServerUrl: String? = null
     @Volatile private var cachedAccessToken: String? = null
     @Volatile private var cacheLoaded = false
     private val sessionMutex = Mutex()
 
-    // Decrypting goes through the Keystore (a binder call), and the auth interceptor reads the
-    // token for every request, so the last stored value → plain text pair is cached.
+    // Decrypting goes through the Keystore (a binder call), and the auth interceptor reads the token for every request, so the last stored value → plain text pair is cached.
     private class DecryptCache(private val cipher: TokenCipher) {
         @Volatile private var last: Pair<String, String?>? = null
         fun get(stored: String?): String? {
@@ -56,11 +51,9 @@ class AuthPreferences(
         const val DEFAULT_SERVER_URL = ""
     }
 
-    // Every flow below is distinctUntilChanged: DataStore emits on any write (e.g. each token
-    // refresh), and collectors of isLoggedIn reload the whole app on each emission.
+    // Every flow below is distinctUntilChanged: DataStore emits on any write (e.g. each token refresh), and collectors of isLoggedIn reload the whole app on each emission.
 
-    // Stored values are re-validated so an invalid URL saved by an older build reads as no address
-    // (and the login screen) instead of crashing Retrofit at startup.
+    // Stored values are re-validated so an invalid URL saved by an older build reads as no address (and the login screen) instead of crashing Retrofit at startup.
     val serverUrl: Flow<String> = store.data.map { prefs ->
         prefs[KEY_SERVER_URL]?.let(ServerUrl::normalize) ?: DEFAULT_SERVER_URL
     }.distinctUntilChanged()
@@ -77,8 +70,7 @@ class AuthPreferences(
         prefs[KEY_USERNAME]
     }.distinctUntilChanged()
 
-    // A token that can no longer be decrypted (Keystore key gone), or no valid server address,
-    // counts as signed out, so the login screen shows instead of every request failing.
+    // A token that can no longer be decrypted (Keystore key gone), or no valid server address, counts as signed out, so the login screen shows instead of every request failing.
     val isLoggedIn: Flow<Boolean> = store.data.map { prefs ->
         !accessCache.get(prefs[KEY_ACCESS_TOKEN]).isNullOrBlank() &&
             prefs[KEY_SERVER_URL]?.let(ServerUrl::normalize) != null
@@ -155,11 +147,7 @@ class AuthPreferences(
         }
     }
 
-    /**
-     * Re-saves tokens written by a version before encryption, so an existing session is protected
-     * without signing the user out. Does nothing if they're already encrypted or the Keystore
-     * isn't available.
-     */
+    /** Re-saves tokens written by a version before encryption, so an existing session is protected without signing the user out. Does nothing if they're already encrypted or the Keystore isn't available. */
     suspend fun encryptStoredTokens() {
         val current = store.data.first()
         val pending = listOf(KEY_ACCESS_TOKEN, KEY_REFRESH_TOKEN).mapNotNull { key ->

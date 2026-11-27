@@ -106,9 +106,9 @@ async def _build_research_bundle_zip(db: AsyncSession, entry_ids: list[uuid.UUID
                 if url:
                     ioc_rows.append(("referenced_url", url, entry.title or str(entry.id)))
 
-        # iocs.csv reads the observables ledger — judged rows with dedup and
-        # lifecycle — not a throwaway regex sweep of the prose (the v1 mistake:
-        # that sweep exported private IPs and version strings as indicators).
+        # iocs.csv reads the observables ledger (judged, deduplicated rows with a
+        # lifecycle), not a regex sweep of the article text: a regex sweep exports
+        # private IPs and version strings as indicators.
         from app.models.observable import EntryObservable, Observable
 
         title_by_id = {e.id: (e.title or str(e.id)) for e in entries}

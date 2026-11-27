@@ -49,11 +49,11 @@ def pick_model(preferred: str, available: list[str] | None) -> str:
     """Resolve the model name to assign, given what the provider actually serves.
 
     ``DEFAULT_MODEL_ASSIGNMENTS`` names Claude-family models, so on an Ollama
-    host every one of them is a 404 waiting to happen. Fall back in order:
+    host every one of them would return a 404. Fall back in order:
     the preferred name if the provider serves it, then a model whose id contains
     it (``"sonnet"`` → ``"claude-sonnet-5-5"``), then the first usable model.
 
-    With no model list at all, keep the preferred name: an un-tested provider is
+    With no model list at all, keep the preferred name: an untested provider is
     no reason to invent a model, and the engine's error names the real problem.
     """
     models = usable_models(available)

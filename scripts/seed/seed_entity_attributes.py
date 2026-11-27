@@ -31,7 +31,8 @@ from app.models.threat_actor import ThreatActor
 
 # ---------------------------------------------------------------------------
 # Threat actor motivations
-# Keys are lowercase stripped names for fuzzy matching
+# Keys are lowercase, stripped names; lookups also retry with spaces, hyphens
+# and underscores removed
 # Values: espionage | financial | disruption | hacktivism | sabotage
 # ---------------------------------------------------------------------------
 ACTOR_MOTIVATIONS = {
@@ -2503,7 +2504,7 @@ def find_motivation(name):
     n = normalize(name)
     if n in ACTOR_MOTIVATIONS:
         return ACTOR_MOTIVATIONS[n]
-    # Try without spaces
+    # Retry with spaces, hyphens and underscores removed
     n2 = n.replace(" ", "").replace("-", "").replace("_", "")
     for k, v in ACTOR_MOTIVATIONS.items():
         k2 = k.replace(" ", "").replace("-", "").replace("_", "")

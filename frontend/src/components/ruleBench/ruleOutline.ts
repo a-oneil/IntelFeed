@@ -1,9 +1,7 @@
 /**
  * Parse a rule body into a shallow outline the left rail can jump from.
  *
- * Deliberately regex-level, not a real parser: the outline only has to be good
- * enough to click, and a rule that fails to parse must still render its editor.
- * Anything unrecognised yields an empty outline rather than a wrong one.
+ * Deliberately regex-based, not a real parser: the outline only has to be good enough to click, and a rule that fails to parse must still render its editor. Anything unrecognized yields an empty outline rather than a wrong one.
  */
 
 export interface OutlineNode {
@@ -19,7 +17,7 @@ export interface OutlineNode {
 const YAML_LIKE = new Set(["sigma", "nuclei"]);
 const PIPE_LIKE = new Set(["kql", "splunk_spl", "elastic_ql", "crowdstrike_ql"]);
 
-/** Trailing `:` and quotes carry no information in a nav label. */
+/** Trailing `:`, `{` and `,` and surrounding quotes carry no information in a nav label. */
 function clean(label: string): string {
   return label.replace(/[:{,]+\s*$/, "").replace(/^["']|["']$/g, "").trim();
 }
@@ -59,7 +57,7 @@ function parseYamlLike(lines: string[]): OutlineNode[] {
       current = null;
       if (!key) return;
       nodes.push({ id: `l${i}`, label: clean(key[1]), line: i + 1, depth: 0 });
-      // Only `detection` earns children — logsource keys are noise in a rail.
+      // Only `detection` gets child rows; logsource keys would only clutter the rail.
       if (key[1] === "detection") detectionIndent = 0;
       return;
     }
@@ -75,7 +73,7 @@ function parseYamlLike(lines: string[]): OutlineNode[] {
     }
   });
 
-  // A selection block with no counted children reads better with no badge.
+  // A selection block with no counted children gets no count badge.
   return nodes.map((n) => (n.count === 0 ? { ...n, count: undefined } : n));
 }
 
@@ -157,8 +155,7 @@ export function parseRuleOutline(content: string, ruleType: string): OutlineNode
   if (ruleType === "yara") return parseYara(lines);
   if (ruleType === "snort_suricata") return parseSnort(lines);
   if (ruleType === "panther") return parsePython(lines);
-  // Unknown format: a pipe query is the commonest shape, but only claim an
-  // outline when the body actually looks like one.
+  // Unknown format: a pipe query is the most common shape, but only return an outline when the body actually looks like one (more than one node).
   const piped = parsePipeLike(lines);
   return piped.length > 1 ? piped : [];
 }

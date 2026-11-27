@@ -44,12 +44,7 @@ function threadRow(score: number, overrides: Partial<StoryThread> = {}): Priorit
   };
 }
 
-/**
- * Ranking and folding belong to GET /api/entries/priority-queue (covered by
- * backend/tests/test_priority_queue.py). What is left here is the rendering
- * adapter: the server's order must survive untouched, and flatIndex must keep
- * counting entries only.
- */
+/** Ranking and folding belong to GET /api/entries/priority-queue (covered by backend/tests/test_priority_queue.py). What is left here is the rendering adapter: the server's order must survive untouched, and flatIndex must keep counting entries only. */
 describe("queueItems", () => {
   it("keeps the server's order", () => {
     const out = queueItems([entryRow("x", 9), threadRow(7), entryRow("y", 6)]);
@@ -58,8 +53,7 @@ describe("queueItems", () => {
   });
 
   it("badges a thread with the score it ranks by", () => {
-    // The badge and the queue order use one number, so a story sorts among
-    // articles exactly where its badge says it should.
+    // The badge and the queue order use one number, so a story sorts among articles exactly where its badge says it should.
     const [row] = queueItems([threadRow(7.5)]);
 
     expect(row).toMatchObject({
@@ -114,11 +108,7 @@ describe("queueItems", () => {
   });
 });
 
-/**
- * The magazine grid's own walk: same rows, same order, one card each. The bug
- * it exists to close is silent — the queue withholds a thread's articles, so a
- * grid built from the entry stream loses the whole story without a gap.
- */
+/** The magazine grid's own walk: same rows, same order, one card each. It guards against a silent bug: the queue withholds a thread's articles, so a grid built from the entry stream would drop the whole story and leave no visible gap. */
 describe("magazineQueueItems", () => {
   it("gives a thread a card of its own, in the server's order", () => {
     const out = magazineQueueItems([entryRow("x", 9), threadRow(7), entryRow("y", 6)]);

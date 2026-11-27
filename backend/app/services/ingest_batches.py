@@ -261,8 +261,8 @@ async def add_url_items(
     is_ioc_list: bool = False,
 ) -> list[IngestBatchItem]:
     """One item per distinct URL. A GitHub repo link becomes a ``github_repo``
-    item; a non-http line becomes a ``failed`` row rather than a 400 — the
-    other thirty-nine lines still go through."""
+    item; a non-http line becomes a ``failed`` row rather than a 400, so the
+    other lines still go through."""
     cleaned: list[str] = []
     seen: set[str] = set()
     for raw in urls:
@@ -367,8 +367,9 @@ async def _create_from_document(
         title = re.sub(r"\.[A-Za-z0-9]{1,8}$", "", item.filename or "") or url or "Untitled"
     metadata = _entry_metadata(item, source=source, doc_meta=doc.meta, user_id=user_id)
     if item.is_ioc_list:
-        # store_ioc_list_observables parses metadata.raw_content first; the
-        # pristine text beats HTML-stripped text for a one-value-per-line file.
+        # The observables stage (workers/intel_feed_tasks.py) reads
+        # metadata.raw_content before content_text; the original text is better
+        # than HTML-stripped text for a one-value-per-line file.
         metadata["raw_content"] = doc.text
     return await create_manual_entry(
         db,
@@ -653,7 +654,7 @@ async def retry_item(db: AsyncSession, item: IngestBatchItem) -> IngestBatchItem
 
 
 async def cancel_item(db: AsyncSession, item: IngestBatchItem) -> None:
-    """Drop an item that has not produced an entry. The entry, if any, stays."""
+    """Delete an item and its stored original. An entry it already produced stays."""
     if item.status == ITEM_PARSING:
         raise AppError(
             code="in_progress", message="A worker is parsing this item; wait for it to finish", status_code=409
@@ -670,7 +671,7 @@ async def cancel_item(db: AsyncSession, item: IngestBatchItem) -> None:
 
 
 async def mark_stale_parsing(db: AsyncSession, items: list[IngestBatchItem]) -> bool:
-    """A worker that died leaves ``parsing`` behind. Flip it so retry lights up."""
+    """A worker that died leaves ``parsing`` behind. Mark it failed so it can be retried."""
     cutoff = datetime.now(UTC) - STALE_PARSING_AFTER
     changed = False
     for item in items:

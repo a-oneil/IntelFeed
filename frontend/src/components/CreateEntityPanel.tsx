@@ -14,11 +14,11 @@ import {
 } from "@/hooks/useIntelligence";
 import styles from "./CreateEntityPanel.module.css";
 
-/** The types an analyst can create by hand.
+/**
+ * The types an analyst can create by hand.
  *
- * Deliberately narrower than the platform's EntityType: `cwe` is absent because
- * weaknesses come from the seeded MITRE catalog, so a hand-made one would be
- * either a duplicate or an id that does not exist. */
+ * Deliberately narrower than the platform's EntityType: `cwe` is absent because weaknesses come from the seeded MITRE catalog, so a hand-made one would be either a duplicate or an id that does not exist.
+ */
 export type CreatableEntityType =
   | "threat_actor"
   | "malware"
@@ -60,8 +60,7 @@ const ENTITY_TABS: { key: EntityType; label: string }[] = [
   { key: "product", label: "Product" },
 ];
 
-// Mirrors the backend controlled vocabularies (models/malware_family.py MALWARE_TYPES,
-// models/tool.py TOOL_TYPES) — free text is coerced server-side regardless.
+// Mirrors the backend controlled vocabularies (models/malware_family.py MALWARE_TYPES, models/tool.py TOOL_TYPES) — free text is coerced server-side regardless.
 const MALWARE_TYPES = ["ransomware", "stealer", "loader", "backdoor", "rat", "trojan", "banking_trojan", "botnet", "worm", "wiper", "spyware", "rootkit", "dropper", "downloader", "miner", "keylogger", "webshell", "exploit_kit", "phishing_kit", "implant", "adware", "other"];
 const MOTIVATIONS = ["financial", "espionage", "hacktivism", "sabotage", "unknown"];
 const CVE_SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"];
@@ -94,8 +93,7 @@ export function CreateEntityPanel({ entryId, initialText, initialType, onClose, 
   const [description, setDescription] = useState("");
   const [aliases, setAliases] = useState("");
   const [error, setError] = useState<string | null>(null);
-  // Entity-guardrails rejection (409 entity_creation_gated) — offers the
-  // logged "create anyway" retry with force=true.
+  // Entity-guardrails rejection (409 entity_creation_gated) — offers the logged "create anyway" retry with force=true.
   const [gateWarning, setGateWarning] = useState<string | null>(null);
 
   // Threat actor fields

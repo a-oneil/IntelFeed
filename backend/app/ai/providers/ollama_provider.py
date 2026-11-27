@@ -346,7 +346,7 @@ class OllamaProvider(AIProvider):
           {"kind": "tool_result", "id", "status", "summary"}
           {"kind": "done", "usage": {tokens_input, tokens_output, total_cost_usd}}
 
-        v1: tool rounds run non-streamed; the final (no-tool-call) answer is
+        Tool rounds run non-streamed; the final (no-tool-call) answer is
         emitted as a single text event. Cost is always 0.0 (self-hosted).
         """
         resolved_model = self._resolve_model(model)
@@ -662,9 +662,9 @@ class OllamaProvider(AIProvider):
     async def embed(self, texts: list[str], model: str) -> list[list[float]]:
         """``POST /api/embed`` — one vector per input, in input order.
 
-        Batched by the caller. A partial or reordered response is an error
-        rather than something to paper over: a vector silently attached to the
-        wrong entry would poison every thread it lands in.
+        Batched by the caller. A partial or reordered response raises rather
+        than being patched up: a vector silently attached to the wrong entry
+        would corrupt every story thread it is clustered into.
         """
         if not texts:
             return []

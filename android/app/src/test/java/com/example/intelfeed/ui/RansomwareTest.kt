@@ -36,7 +36,7 @@ class RansomwareTest {
     }
 
     @Test
-    fun groupColoursAndBuckets() {
+    fun groupColorsAndBuckets() {
         assertEquals(ransomwareGroupColor("clop"), ransomwareGroupColor("Cl0p"))
         assertEquals(ransomwareGroupColor("other"), ransomwareGroupColor(null))
         val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }

@@ -69,7 +69,7 @@
   opacity: 0.6;
 }
 
-/* Policy Off: the eligibility table is moot, so it is shown but not live. */
+/* Policy Off: the eligibility table doesn't apply, so it is shown dimmed and can't be edited. */
 .tableOff {
   opacity: 0.45;
   pointer-events: none;

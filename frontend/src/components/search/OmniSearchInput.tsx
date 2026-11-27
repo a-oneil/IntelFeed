@@ -40,10 +40,7 @@ type SharedOptions<S extends OmniSuggestion> = Omit<
 >;
 
 export interface OmniSearchInputProps<S extends OmniSuggestion> extends SharedOptions<S> {
-  /**
-   * Where suggestions come from. A **hook** — stable identity required, and it must
-   * return `NO_SUGGESTIONS` (not a fresh `[]`) when it has nothing. See `SuggestionSource`.
-   */
+  /** Where suggestions come from. A **hook**: it needs a stable identity, and it must return `NO_SUGGESTIONS` (not a fresh `[]`) when it has nothing. See `SuggestionSource`. */
   suggestionSource?: SuggestionSource<S>;
   /** Supply one when the surface needs to focus/blur the input itself. */
   inputRef?: React.RefObject<HTMLInputElement | null>;
@@ -65,19 +62,11 @@ export interface OmniSearchInputProps<S extends OmniSuggestion> extends SharedOp
 }
 
 /**
- * The one search **input** in the app: caret tokenisation, suggestion splice with
- * caret restore, a single selection state machine (`wrap` / `allowDeselect`),
- * debounce, click-outside, the Escape ladder, and an opt-in `/` shortcut.
+ * The one search **input** in the app: tokenizing at the caret, inserting a suggestion and restoring the caret, a single selection state machine (`wrap` / `allowDeselect`), debounce, click-outside, step-by-step Escape handling, and an opt-in `/` shortcut.
  *
- * It owns no results. Fetching and rendering belong to the surface: this draws a
- * flat completion list through `renderSuggestion` and nothing else.
+ * It owns no results. Fetching and rendering belong to the surface: this draws a flat completion list through `renderSuggestion` and nothing else. There is no hook for drawing grouped results inside the dropdown; `/search` renders its own results.
  *
- * It used to carry a `renderDropdown` escape hatch so the workbench overlay
- * could draw grouped entity results inside it. That overlay — and the second
- * search engine behind it — is gone, and `/search` renders its own results, so
- * the hatch went with it.
- *
- * Selection semantics, all expressible through config:
+ * Selection behavior, all set through config:
  *   `{ wrap: false, allowDeselect: true }`  — header search (ArrowUp deselects)
  *   `{ wrap: false, allowDeselect: false }` — command palette (clamped, Enter always acts)
  */

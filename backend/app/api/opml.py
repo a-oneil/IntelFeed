@@ -3,7 +3,7 @@ import uuid
 import xml.etree.ElementTree as ET
 
 import defusedxml.ElementTree as DefusedET
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Body, Depends, File, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,11 +32,11 @@ router = APIRouter()
 
 # Every feed type a plain OPML `type` attribute is allowed to name. Deliberately
 # narrow: these are the four an arbitrary reader's export could plausibly mean,
-# and all four work from a URL alone. The extended types (github_repo, reddit,
-# nvd, web_scraper, telegram, bluesky) are inert without an adapter_config, so a
+# and all four work from a URL alone. Extended types such as github_repo, reddit,
+# nvd, web_scraper, telegram and bluesky are inert without an adapter_config, so a
 # third-party export claiming `type="reddit"` would create a feed that can never
 # fetch. Those types are reachable only through the extension namespace below,
-# which carries the config in the same breath.
+# which carries the config alongside the type.
 PORTABLE_FEED_TYPES = ("rss", "atom", "youtube", "podcast")
 
 
@@ -157,7 +157,7 @@ async def _import_opml_tree(root: ET.Element, user: User, db: AsyncSession, queu
     """Walk a parsed OPML document, creating its categories and feeds.
 
     Shared by the upload endpoint and the starter-pack import so both produce
-    the same categories, the same dedup behaviour and the same initial fetches.
+    the same categories, the same dedup behavior and the same initial fetches.
 
     ``queue_fetches=False`` returns the new feed ids under ``new_feed_ids``
     instead of dispatching, for callers that own their own transaction and want
@@ -214,7 +214,7 @@ def feed_outline_attrs(feed: Feed) -> dict[str, str]:
 
     ``type`` stays within :data:`PORTABLE_FEED_TYPES` so another reader can still
     use the file; anything that would not survive that — the real feed type, the
-    adapter config, the extraction tuning — rides in the extension namespace,
+    adapter config, the extraction tuning — goes in the extension namespace,
     and only when it differs from the column default, to keep the file diffable.
     """
     title = feed.custom_title or feed.title
@@ -252,15 +252,50 @@ def feed_outline_attrs(feed: Feed) -> dict[str, str]:
     return attrs
 
 
+def _pack_outlines(root: ET.Element) -> list[ET.Element]:
+    """Every feed outline in a pack (outlines with an xmlUrl), in file order."""
+    return [o for o in root.iter("outline") if o.get("xmlUrl")]
+
+
+def _read_pack(pack_id: str) -> ET.Element:
+    pack = get_pack(pack_id)
+    if pack is None:
+        raise AppError(code="unknown_feed_pack", message=f"Unknown starter pack: {pack_id}", status_code=404)
+    try:
+        return DefusedET.fromstring(pack.path().read_text())
+    except (OSError, ET.ParseError, DefusedET.DTDForbidden, DefusedET.EntitiesForbidden) as exc:
+        raise AppError(
+            code="feed_pack_unreadable", message=f"Could not read starter pack '{pack_id}'", status_code=500
+        ) from exc
+
+
+async def _followed_urls(db: AsyncSession, user: User, urls: list[str]) -> set[str]:
+    """Which of these feed URLs the user already sees in their feed list."""
+    if not urls:
+        return set()
+    visible = visible_feed_ids_query(user.id, enabled=await subscriptions_enabled(db), include_muted=True)
+    rows = await db.execute(select(Feed.url).where(Feed.url.in_(urls), Feed.id.in_(visible)))
+    return set(rows.scalars().all())
+
+
 @router.get("/starter-packs")
-async def list_starter_packs(user: User = Depends(get_current_user)):
+async def list_starter_packs(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """List the curated starter feed packs this build ships.
 
     A fresh install has no feeds, so the onboarding wizard offers these instead
     of asking the user to go and find sources. ``recommended`` marks the core
     pack the wizard pre-selects; ``requires`` names a prerequisite (an API
     token, say) that the pack needs before its feeds can fetch.
+    ``followed_count`` is how many of the pack's feeds the caller already has.
     """
+    packs = load_packs()
+    urls_by_pack: dict[str, list[str]] = {}
+    for pack in packs:
+        try:
+            urls_by_pack[pack.id] = [o.get("xmlUrl") for o in _pack_outlines(_read_pack(pack.id))]
+        except AppError:
+            urls_by_pack[pack.id] = []
+    followed = await _followed_urls(db, user, sorted({u for urls in urls_by_pack.values() for u in urls}))
     return {
         "packs": [
             {
@@ -268,12 +303,65 @@ async def list_starter_packs(user: User = Depends(get_current_user)):
                 "title": pack.title,
                 "description": pack.description,
                 "feed_count": pack.feed_count,
+                "followed_count": sum(1 for u in urls_by_pack[pack.id] if u in followed),
                 "recommended": pack.recommended,
                 "requires": pack.requires,
             }
-            for pack in load_packs()
+            for pack in packs
         ]
     }
+
+
+@router.get("/starter-packs/{pack_id}/feeds")
+async def list_starter_pack_feeds(
+    pack_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
+    """The feeds in one starter pack, each marked ``followed`` when the caller already has it."""
+    outlines = _pack_outlines(_read_pack(pack_id))
+    followed = await _followed_urls(db, user, [o.get("xmlUrl") for o in outlines])
+    return {
+        "feeds": [
+            {
+                "url": o.get("xmlUrl"),
+                "title": o.get("text") or o.get("title") or o.get("xmlUrl"),
+                "feed_type": o.get(f"{{{INTELFEED_NS}}}feedType") or o.get("type", "rss"),
+                "followed": o.get("xmlUrl") in followed,
+            }
+            for o in outlines
+        ]
+    }
+
+
+@router.post("/starter-packs/{pack_id}/import")
+async def import_starter_pack_feeds(
+    pack_id: str,
+    urls: list[str] = Body(..., embed=True, description="xmlUrl of each pack feed to add"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import the chosen feeds of one starter pack.
+
+    Same categories, settings, dedup and first fetches as importing the whole
+    pack; feeds the list doesn't name are left out.
+    """
+    enabled = await subscriptions_enabled(db)
+    if not enabled and user.role != "admin":
+        raise AppError(code="forbidden", message="Admin access required", status_code=403)
+    root = _read_pack(pack_id)
+    wanted = set(urls)
+    # Prune the outlines not asked for, then any folder left empty.
+    for parent in list(root.iter()):
+        for child in list(parent):
+            if child.tag == "outline" and child.get("xmlUrl") and child.get("xmlUrl") not in wanted:
+                parent.remove(child)
+    body = root.find("body")
+    if body is not None:
+        for folder in list(body):
+            if not folder.get("xmlUrl") and not list(folder):
+                body.remove(folder)
+    stats = await _import_opml_tree(root, user, db)
+    stats["packs"] = [{"id": pack_id, "title": get_pack(pack_id).title, "feeds_added": stats["feeds_added"]}]
+    return stats
 
 
 @router.post("/starter-packs/import")

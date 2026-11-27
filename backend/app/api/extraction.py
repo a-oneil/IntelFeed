@@ -63,15 +63,15 @@ AI_TYPES: dict[str, dict] = {
     "tool": {"model": Tool, "name": "name", "aliases": True, "ac": True, "trgm_table": "tools"},
     "ttp": {"model": TTP, "name": "technique_name", "aliases": False, "ac": True, "second": "technique_id"},
     "cve": {"model": CVE, "name": "cve_id", "aliases": False, "ac": False},
-    # The ledger's AI door: rows the one-pass `iocs` array created. Identity is
+    # Observable ledger rows created by the one-pass `iocs` array. Identity is
     # (kind, value), so `value` is the name column and `label` the second
-    # searchable surface (scripts are sha256-keyed and carry a human label).
+    # searchable column (scripts are keyed by sha256 and carry a readable label).
     "observable": {"model": Observable, "name": "value", "aliases": False, "ac": True, "second": "label"},
 }
 
-# Named catalogue types the delete endpoint accepts: the AI-created set above
+# Named catalog types the delete endpoint accepts: the AI-created set above
 # plus the three the review queues also surface. Observables are handled apart
-# (ledger tombstones); countries are a seeded catalogue, so they are deleted
+# (ledger tombstones); countries are a seeded catalog, so they are deleted
 # but never denylisted.
 DELETABLE_TYPES = (set(AI_TYPES) | {"vendor", "product", "country"}) - {"observable"}
 _NO_DENY_TYPES = {"country"}
@@ -180,8 +180,8 @@ async def _fetch_rows(db: AsyncSession, types: list[str], window_start: datetime
     for t in types:
         spec = AI_TYPES[t]
         m = spec["model"]
-        # Only the columns the table shows: loading whole rows dragged in
-        # CVE.nvd_data and friends and made this the slow half of the tab.
+        # Only the columns the table shows: loading whole rows pulls in large
+        # columns such as CVE.nvd_data and made this the slow half of the tab.
         cols = [
             m.id.label("id"),
             getattr(m, spec["name"]).label("name"),
@@ -207,12 +207,12 @@ async def _fetch_rows(db: AsyncSession, types: list[str], window_start: datetime
         if not spec["ac"]:
             stmt = stmt.outerjoin(live, live.c.cve_id == m.id)
         if t == "observable":
-            # Both AI doors: the iocs array (ai_extraction) and the TTP host
+            # Both AI write paths: the iocs array (ai_extraction) and the TTP host
             # artifacts (ttp_observable) come out of the same one-pass payload,
             # so both belong in the AI-created review table. A denied observable
-            # is a tombstone, not a live row — it stays in the ledger so the
-            # doors keep refusing the value, but it is done with this table
-            # (that is exactly what deleting it here did).
+            # is a tombstone, not a live row: it stays in the ledger so every
+            # write path keeps refusing the value, but it is left out of this
+            # table, since denying it is what this table's delete does.
             stmt = stmt.where(m.created_via.in_(("ai_extraction", "ttp_observable")), m.is_denied.is_(False))
         else:
             stmt = stmt.where(m.created_via == "ai_extraction")
@@ -257,9 +257,9 @@ async def _fetch_rows(db: AsyncSession, types: list[str], window_start: datetime
 
 def _is_orphan(row: dict) -> bool:
     """No article links, though the article it came from still exists: every
-    link was removed, so either the removal or the entity is wrong. A deleted
-    source (its feed went) nulls created_from_entry_id, and the entity is kept
-    as intelligence already extracted, not queued for review."""
+    link was removed, so either the removal or the entity is wrong. Deleting the
+    source article nulls created_from_entry_id, and the entity is then kept as
+    intelligence already extracted, not queued for review."""
     return row["article_count"] == 0 and row["created_from_entry_id"] is not None
 
 
@@ -301,7 +301,7 @@ async def extraction_stats(
         fs = r["first_seen_at"]
         by_status[_status(r, dup)] += 1
         if win_start is None or fs >= win_start:
-            by_type[r["entity_type"]] += 1  # the list's window, so a type's count is what it opens
+            by_type[r["entity_type"]] += 1  # within the list's window, so it matches what the type lists
         if r["needs_review"]:
             needs_review += 1
         else:
@@ -595,10 +595,10 @@ class ExtractionDeleteRequest(BaseModel):
 
 
 async def delete_named_entity(db: AsyncSession, entity_type: str, entity, *, deny: bool, reason: str) -> int:
-    """Delete one catalogue entity the way the review surfaces do: its entry
+    """Delete one catalog entity the way the review surfaces do: its entry
     links and relationships go with it, its pending proposals in both logs
     are cleared, its search document and cache entry are dropped, and (unless
-    ``deny`` is off or the type is a seeded catalogue) its names join the
+    ``deny`` is off or the type is a seeded catalog) its names join the
     do-not-recreate list. Returns the number of denylist rows written. The
     caller commits and refreshes the autolinker vocabulary."""
     from app.services.proposal_dismissals import clear_entity_proposals
@@ -665,7 +665,7 @@ async def extraction_delete(
     # The vocabulary is built from live entities — queue a rebuild so the
     # autolinker stops matching what we just removed within seconds, not at the
     # next sync. Queued rather than inline: a bulk clean-up sends one request per
-    # row, and each inline build was ten seconds of CPU on the event loop.
+    # row, and each inline build takes about ten seconds of CPU on the event loop.
     if rows:
         await schedule_vocabulary_refresh(db)
 

@@ -10,21 +10,16 @@
 .sidebar {
   display: flex;
   flex-direction: column;
-  /* Width rides a custom property so the drag handle can move it while the
-     stacked mobile layout below still takes it back with `flex: 0 0 auto`. */
+  /* The width comes from the --docs-rail-w custom property, which the page sets from the drag handle; 260px is the default. */
   flex: 0 0 var(--docs-rail-w, 260px);
   min-height: 0;
   padding: var(--sp-4) 0;
   border-right: 1px solid var(--border);
-  /* Same panel recipe as the settings nav — two theme-managed tokens mixed so
-     the rail sits a touch darker than a card without pinning a fixed colour.
-     These two rails sit in the same slot on adjacent routes; any divergence
-     reads as two different apps. */
+  /* Same background as the settings nav: two theme tokens mixed so the rail is slightly darker than a card without hard-coding a color. The two rails occupy the same slot on adjacent routes, so they should look identical. */
   background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
 }
 
-/* Collapsed to nothing — the RailToggle strip beside it is the way back,
-   same affordance as the settings nav. */
+/* Fully hidden when collapsed; the RailToggle strip beside it reopens it, as in the settings nav. */
 .sidebarCollapsed {
   display: none;
 }
@@ -160,9 +155,7 @@
   padding: 2rem 2.5rem 5rem;
 }
 
-/* Full-bleed: these docs are dense with wide reference tables, mermaid
-   diagrams and code blocks, and a 76ch column made every one of them scroll
-   inside its own little window while the rest of the pane sat empty. */
+/* Full width: these docs have many wide reference tables, mermaid diagrams and code blocks, and a narrow 76ch column made each of them scroll horizontally while the rest of the pane stayed empty. */
 .article {
   width: 100%;
   font-size: var(--fs-md);
@@ -178,8 +171,7 @@
   border-radius: var(--radius-md, 6px);
 }
 
-/* The line under a screenshot is its caption — markdown spells it as an
-   emphasised paragraph, so style the ones that stand alone. */
+/* The line under a screenshot is its caption, written in markdown as an emphasized paragraph, so style paragraphs that contain only an <em>. */
 .article :global(p > em:only-child) {
   display: block;
   margin-top: -0.5rem;
@@ -284,11 +276,7 @@
   border-top: 1px solid var(--border);
 }
 
-/* Mobile. The contents rail is not rendered at all below this width — it is a
-   MobileNavSheet slide-over instead, the same as the settings nav, so the only
-   thing above the prose is a one-row trigger. Matching Settings' 767px keeps
-   the two adjacent routes on the same breakpoint; between 768 and 900 the rail
-   is still a real column here, as it is there. */
+/* Mobile. Below this width the contents rail is not rendered; a MobileNavSheet slide-over replaces it, as in the settings nav, so the only thing above the prose is a one-row trigger. Using the same 767px breakpoint as Settings keeps the two adjacent routes consistent; from 768px up the rail is a normal column on both. */
 @media (max-width: 767px) {
   .container {
     flex-direction: column;
@@ -311,8 +299,7 @@
     font-size: var(--fs-lg);
   }
 
-  /* margin-top: auto is inert in the sheet body (not a flex column); the rule
-     only does work in the desktop rail. */
+  /* margin-top: auto has no effect in the sheet body (it is not a flex column); it only applies in the desktop rail. */
   .sidebarFooter {
     margin-top: var(--sp-4);
   }

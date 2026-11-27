@@ -34,7 +34,7 @@ function item(over: Partial<EntitySearchResult>): EntitySearchResult {
   } as EntitySearchResult;
 }
 
-/** A co-mention with no typed relationship — the kind that used to rank STRONG. */
+/** A heavy co-mention with no typed relationship: the kind the old strength model ranked STRONG. */
 const coMention = (id: string, name: string) =>
   item({ id, name, strength: strength(40), proximity_entries: entries(40) });
 
@@ -60,8 +60,7 @@ describe("KnownAssociates", () => {
       vi.fn(),
       onTab,
     );
-    // No claim rows — co-mentions stay in the tab — but a way in remains,
-    // because the tab count is otherwise the only entry point.
+    // No claim rows (co-mentions are only listed in the Relationships tab), but the link to the tab remains, because otherwise the tab count is the only way in.
     expect(screen.getByText(/None confirmed yet/)).toBeInTheDocument();
     const link = screen.getByRole("button", { name: /See all 2 related entities/ });
     fireEvent.click(link);
@@ -98,7 +97,7 @@ describe("KnownAssociates", () => {
     // One row for the shared verb, keyed by it, with no source tag.
     expect(screen.getAllByText("Uses")).toHaveLength(1);
     expect(screen.queryByText("MITRE")).toBeNull();
-    // The old co-mention strength words are gone.
+    // Co-mention strength words are never shown.
     expect(screen.queryByText(/STRONG/i)).toBeNull();
   });
 
@@ -141,7 +140,7 @@ describe("KnownAssociates", () => {
         }),
       ],
     } as never);
-    // Every claim filtered → no claim rows; only the escape-hatch link remains.
+    // Every claim is filtered out, so there are no claim rows; only the link to the Relationships tab remains.
     expect(screen.queryByText(/^(Uses|Exploits)$/)).toBeNull();
     expect(screen.getByRole("button", { name: /related entities/ })).toBeInTheDocument();
   });
@@ -165,8 +164,7 @@ describe("KnownAssociates", () => {
       ],
       tools: [mitre({ id: "t1", name: "Impacket", relationship_id: "rt9" })],
     } as never);
-    // Twenty techniques outrank the rest, but the cap keeps room for the other
-    // types: 12 names, 3 of them not techniques.
+    // Twenty techniques outrank the rest, but the cap leaves room for the other types: 12 names, 3 of them not techniques.
     expect(screen.getAllByText(/^T1\d{3} Technique /)).toHaveLength(9);
     expect(screen.getByText("Chaos Ransomware")).toBeTruthy();
     expect(screen.getByText("Impacket")).toBeTruthy();
@@ -190,7 +188,7 @@ describe("KnownAssociates", () => {
     expect(onTab).toHaveBeenCalled();
   });
 
-  it("renders one labelled row per verb", () => {
+  it("renders one labeled row per verb", () => {
     render(
       <KnownAssociates
         entityType="threat_actor"

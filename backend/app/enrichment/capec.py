@@ -157,7 +157,7 @@ async def sync_capec(db: AsyncSession, gateway: SourceGateway) -> dict:
     stats["patterns"] = len(patterns)
 
     by_technique = technique_patterns(patterns)
-    # Techniques that showed patterns before, so one CAPEC no longer maps loses them.
+    # Techniques that had CAPEC context before, so a technique CAPEC no longer maps has its patterns cleared.
     shown = set(
         (
             await db.execute(

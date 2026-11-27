@@ -2,7 +2,7 @@
 
 Every junk name here was deleted from prod in the 2026-11 Review-queue triage.
 The negative lists are the regression guard:
-a rule that eats a real tool, family or group is worse than the junk it stops.
+a rule that blocks a real tool, family or group is worse than the junk it stops.
 """
 
 import importlib.util
@@ -33,7 +33,7 @@ JUNK = [
     ("OpenID Connect", "protocol", AMT),
     ("WebSocket", "protocol", ("threat_actor", "malware")),  # tool: concept_term fires first
     ("Modbus TCP", "protocol", ("threat_actor",)),
-    ("EtherNet/IP", "protocol", ("threat_actor",)),  # path_shape already takes malware/tool
+    ("EtherNet/IP", "protocol", ("threat_actor",)),  # path_shape already blocks malware/tool
     ("MQTT", "protocol", AMT),
     ("SCTP", "protocol", AMT),
     ("SFTP", "protocol", AMT),
@@ -78,7 +78,7 @@ JUNK = [
     ("AppDomainManager", "os_api", ALL4),
     # categories / descriptive phrases
     ("SIEM", "category_phrase", ALL4),
-    ("EDR/XDR", "category_phrase", ("threat_actor", "product")),  # path_shape already takes malware/tool
+    ("EDR/XDR", "category_phrase", ("threat_actor", "product")),  # path_shape already blocks malware/tool
     ("MDR", "category_phrase", ALL4),
     ("ZTNA", "category_phrase", ALL4),
     ("SSO", "category_phrase", ALL4),
@@ -307,7 +307,7 @@ def test_real_products_pass(name):
 
 # ---------------------------------------------------------------------------
 # Shape gates from the 2026-11-02 vet of every AI-created entity.
-# Each junk name was minted on prod.
+# Each junk name was created on prod.
 # ---------------------------------------------------------------------------
 
 SHAPE_JUNK = [
@@ -427,7 +427,10 @@ def test_evidence_names_the_entity_by_name_or_alias():
 
 
 def _purge_module():
-    path = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "maintenance" / "purge_generic_entities.py"
+    # scripts/ is at the repo root on a host checkout; the dev api container bind-mounts it at /app/scripts.
+    backend = pathlib.Path(__file__).resolve().parents[1]
+    rel = pathlib.Path("scripts") / "maintenance" / "purge_generic_entities.py"
+    path = backend / rel if (backend / rel).is_file() else backend.parent / rel
     spec = importlib.util.spec_from_file_location("purge_generic_entities", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -439,7 +442,8 @@ def test_purge_reason_slug_and_default_action():
     assert purge.reason_slug("generic:protocol") == "protocol"
     assert purge.reason_slug("country:Iran") == "country"
     assert purge.reason_slug("denylist") == "denylist"
-    # A heavily linked concept row waits for a read; light ones and old rules delete.
+    # A non-entity row linked to at least min_entries articles goes to review; less-linked rows
+    # and other reasons are deleted.
     assert purge.default_action("generic:protocol", 238, 20) == "review"
     assert purge.default_action("generic:protocol", 3, 20) == "delete"
     assert purge.default_action("generic:generic_head_noun", 500, 20) == "delete"

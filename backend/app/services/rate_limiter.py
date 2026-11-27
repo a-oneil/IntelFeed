@@ -45,7 +45,7 @@ async def acquire_rate_limit(url: str, min_interval: float | None = None) -> boo
     """Acquire a rate limit token for a domain using atomic Redis script.
 
     Returns True if the request can proceed, False if rate limited.
-    Blocks until the token is available if within reasonable wait time.
+    Sleeps until the slot comes up when the wait is 30 seconds or less.
     The slot is claimed atomically so concurrent workers queue up properly.
     """
     domain = _get_domain(url)
@@ -67,8 +67,9 @@ async def acquire_rate_limit(url: str, min_interval: float | None = None) -> boo
     wait_time = float(wait_time_str)
 
     if wait_time > 30:
-        # Too long to wait — release our claim by not proceeding
-        # (the timestamp is already advanced but that's fine, it'll expire)
+        # Too long to wait: refuse. The claimed slot is not given back (the
+        # timestamp is already advanced), so later callers queue behind it
+        # until the key expires.
         return False
 
     if wait_time > 0:

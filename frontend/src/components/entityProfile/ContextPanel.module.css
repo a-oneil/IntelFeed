@@ -1,5 +1,4 @@
-/* Context — the body of the Overview's Context section, flat like its
-   neighbours: quiet text, one accent for links, amber only on "stale". */
+/* Context — the body of the Overview's Context section, flat like its neighbors: quiet text, one accent for links, amber only on "stale". */
 
 .panel {
   min-width: 0;
@@ -13,8 +12,7 @@
   margin-bottom: 6px;
 }
 
-/* The Overview's section row already says "Context": the heading stays for
-   assistive tech and is not painted again. */
+/* The Overview's section row already says "Context": the heading stays for assistive tech but is visually hidden. */
 .title {
   position: absolute;
   width: 1px;
@@ -174,8 +172,7 @@
   margin: 0;
 }
 
-/* Label column then value, read left to right: in a wide column a value
-   pushed to the far edge loses its label. */
+/* Label column then value, read left to right: in a wide column a value pushed to the far edge loses its label. */
 .fact {
   display: grid;
   grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr);

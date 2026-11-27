@@ -7,13 +7,11 @@ rule formats offered when drafting detection rules, and — through
 ``run_task`` — every AI prompt, which receives ``query_language`` and
 ``query_language_name`` as template variables whether or not the caller set
 them. A prompt that produces queries says "write it in {{ query_language_name }}";
-a prompt that does not simply ignores the variables.
+a prompt that does not ignores the variables.
 
 The ids are IntelFeed's own. ``rule_type`` is the library format a language
-maps onto when one exists (``RULE_TYPE_PATTERN`` in schemas/intelligence.py),
-so a preference can pick the default formats for rule generation; languages
-with no library format still get hunts, copilot answers and summaries in
-their syntax.
+maps onto (``RULE_TYPE_PATTERN`` in schemas/intelligence.py), so a preference
+can pick the default formats for rule generation.
 """
 
 import uuid
@@ -60,7 +58,7 @@ SETTING_KEY = "query_language"
 
 # Rule formats offered by default when drafting detection rules: Sigma, which
 # converts everywhere, plus the analyst's own language when the library stores
-# it. Two formats at most, as before — the analyst can add more by hand.
+# it. Two formats at most; the analyst can add more by hand.
 BASE_RULE_TYPE = "sigma"
 
 

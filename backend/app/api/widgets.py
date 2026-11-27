@@ -58,9 +58,9 @@ async def feed_activity(
         start, end = _parse_date_range(date_from, date_to)
         from app.services.feed_visibility import subscriptions_enabled, visible_feed_ids_query
 
-        # include_muted: this chart has always counted every active feed,
-        # muted ones included — it reports what the instance ingested, not what
-        # reaches the unread list. Subscriptions scope it; mute does not.
+        # include_muted: this chart counts every active feed, muted ones
+        # included, because it reports what the instance ingested, not what
+        # reaches the unread list. Subscriptions narrow it; mute does not.
         feed_q = visible_feed_ids_query(
             user.id, enabled=await subscriptions_enabled(db), active_only=True, include_muted=True
         )
@@ -429,7 +429,7 @@ async def detection_coverage(
 
 
 async def _drop_events_naming_hidden(db: AsyncSession, rows):
-    """Events whose source or related entity a visitor can't see go."""
+    """Drop the events whose source or related entity is hidden from visitors."""
     refs = {(e.source_entity_type, e.source_entity_id) for e, _ in rows}
     refs |= {(e.related_entity_type, e.related_entity_id) for e, _ in rows}
     shown = await entities_shown(db, refs)

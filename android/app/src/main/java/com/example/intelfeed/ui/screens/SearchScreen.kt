@@ -331,8 +331,7 @@ private fun SearchResults(uiState: IntelFeedUiState, viewModel: IntelFeedViewMod
     LaunchedEffect(nearEnd, uiState.searchEntries.size, scope) {
         if (nearEnd && scope != SearchScope.ENTITIES && uiState.searchHasMore) viewModel.loadMoreSearchResults()
     }
-    // Only for a new query: the results are re-created when you come back from an article, and
-    // scrolling to the top then lost your place.
+    // Only for a new query: the results are re-created when you come back from an article, and scrolling to the top then would lose your place.
     var scrolledForQuery by rememberSaveable { mutableStateOf(uiState.submittedQuery) }
     LaunchedEffect(uiState.submittedQuery) {
         if (uiState.submittedQuery != scrolledForQuery) {
@@ -572,7 +571,7 @@ private fun SearchFilterSheet(
     onDismiss: () -> Unit,
     onApply: (String) -> Unit
 ) {
-    // It used to read any date filter as "Past 7d", so Apply replaced a 1-day or custom range.
+    // Reads the query's date filter as its matching preset (or Custom), so Apply keeps a 1-day or custom range instead of replacing it with "Past 7d".
     val (initialTime, existingDate) = remember(currentQuery) { timeRangeOf(currentQuery) }
     var selectedTime by remember { mutableStateOf(initialTime) }
     var selectedRead by remember {

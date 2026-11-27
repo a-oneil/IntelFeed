@@ -7,13 +7,10 @@ import org.jsoup.nodes.TextNode
 import java.net.URI
 
 /**
- * Turns feed-supplied article HTML into a small list of blocks the reader renders natively:
- * paragraphs and headings with bold/italic/code/link spans, list items, quotes, code blocks,
- * images and dividers. Scripts, styles, frames and forms are dropped. Nothing here executes or
- * trusts the HTML; links are only ever http(s) and are opened through ExternalLinks.
- *
- * Plain Kotlin with no Compose types, so it can be unit-tested on the JVM.
- */
+Turns feed-supplied article HTML into a small list of blocks the reader renders natively: paragraphs and headings with bold/italic/code/link spans, list items, quotes, code blocks, images and dividers. Scripts, styles, frames, forms and media embeds are dropped. Nothing here executes or trusts the HTML; links are only ever http(s) and are opened through ExternalLinks.
+
+Plain Kotlin with no Compose types, so it can be unit-tested on the JVM.
+*/
 object ArticleHtml {
 
     sealed interface Block
@@ -25,10 +22,7 @@ object ArticleHtml {
     /** [marker] is "•", "◦" or "3."; empty for a second paragraph inside the same item. */
     data class ListItem(val text: RichText, val marker: String, val depth: Int) : Block
 
-    /**
-     * A code block. [breaks] are the text-node boundaries (see [RichText.breaks]); [marks] are the
-     * ENTITY/GLOSSARY spans ArticleLinker adds (the web highlights names inside code too).
-     */
+    /** A code block. [breaks] are the text-node boundaries (see [RichText.breaks]); [marks] are the ENTITY/GLOSSARY spans ArticleLinker adds (the web highlights names inside code too). */
     data class Code(val text: String, val breaks: List<Int> = emptyList(), val marks: List<Span> = emptyList()) : Block
 
     data class Image(val url: String, val alt: String?) : Block
@@ -38,10 +32,7 @@ object ArticleHtml {
     // ENTITY, GLOSSARY and KEYWORD are added by ArticleLinker, not by the HTML parser.
     enum class SpanKind { BOLD, ITALIC, CODE, LINK, STRIKE, UNDERLINE, MARK, ENTITY, KEYWORD, GLOSSARY }
 
-    /**
-     * [url] is set for LINK. For ENTITY, [entityType] (server key, e.g. "threat_actor"),
-     * [entityId] and [entityName] say which entity the phrase is. For GLOSSARY, [glossaryId] is the term.
-     */
+    /** [url] is set for LINK. For ENTITY, [entityType] (server key, e.g. "threat_actor"), [entityId] and [entityName] say which entity the phrase is. For GLOSSARY, [glossaryId] is the term. */
     data class Span(
         val start: Int,
         val end: Int,
@@ -53,11 +44,7 @@ object ArticleHtml {
         val glossaryId: String? = null
     )
 
-    /**
-     * [breaks] are the offsets where one HTML text node ends and the next begins (e.g. at the edges
-     * of a <b> or <a>). The web reader matches entity names one text node at a time, so a name split
-     * across two nodes isn't marked there; ArticleLinker uses these to do the same.
-     */
+    /** [breaks] are the offsets where one HTML text node ends and the next begins (e.g. at the edges of a <b> or <a>). The web reader matches entity names one text node at a time, so a name split across two nodes isn't marked there; ArticleLinker uses these to do the same. */
     data class RichText(val text: String, val spans: List<Span> = emptyList(), val breaks: List<Int> = emptyList())
 
     private val DROP = "script,style,noscript,iframe,svg,form,button,input,select,textarea,object,embed,template,canvas,audio,video"
@@ -66,10 +53,7 @@ object ArticleHtml {
     // Icon fonts put glyphs in the Private Use Area; they render as boxes (e.g. The Hacker News byline).
     private val PRIVATE_USE = Regex("[\\uE000-\\uF8FF]")
 
-    /**
-     * [articleUrl] resolves relative links and images. [serverUrl] resolves the server's own image
-     * proxy paths (/api/proxy/image?...), which need the session token (see ApiClient.imageHttpClient).
-     */
+    /** [articleUrl] resolves relative links and images. [serverUrl] resolves the server's own image proxy paths (/api/proxy/image?...), which need the session token (see ApiClient.imageHttpClient). */
     fun parse(html: String, articleUrl: String?, serverUrl: String?): List<Block> {
         val doc = Jsoup.parseBodyFragment(html, articleUrl.orEmpty())
         doc.select(DROP).remove()
@@ -265,7 +249,7 @@ object ArticleHtml {
             val last = text.lastOrNull()
             if (t.startsWith(' ') && (last == null || last == ' ' || last == '\n')) t = t.trimStart()
             if (t.isEmpty()) return
-            // Every text node after the first starts a new one (see RichText.breaks).
+            // Every text node after the first records a break where it starts (see RichText.breaks).
             if (text.isNotEmpty()) breaks += text.length
             text.append(t)
         }
@@ -309,7 +293,7 @@ object ArticleHtml {
     fun getCached(detail: com.example.intelfeed.data.model.EntryDetail, serverUrl: String?): List<Block>? =
         blocksCache[cacheKey(detail, serverUrl)]
 
-    /** HTML when there is some, otherwise the plain text split into paragraphs, otherwise the summary. */
+    /** The translated HTML or the article HTML when there is some, otherwise the plain text split into paragraphs, otherwise the summary. */
     fun parseBlocks(detail: com.example.intelfeed.data.model.EntryDetail, serverUrl: String?): List<Block> {
         val key = cacheKey(detail, serverUrl)
         blocksCache[key]?.let { return it }

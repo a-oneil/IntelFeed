@@ -1,22 +1,24 @@
-"""Merge endpoints for duplicate threat actors / malware families.
+"""Merge endpoints for duplicate threat actors, malware families, vendors, products and
+tools, plus the cross-type reclassify endpoint.
 
 These are the primitive operations the adjudicate stage calls when the
-reviewer merges an entity the analysis minted into the catalogue name it was
+reviewer merges an entity the analysis minted into the catalog name it was
 shown (``services/entry_adjudication.py``), and that the Proposals queue and
 the workbench call for analyst-driven merges.
 
 A merge does three things atomically:
-  1. Move all junction rows (entry_threat_actors, threat_actor_target_countries
-     for actors; entry_malware for malware) from source → target. Existing
-     (entry_id, target_id) rows survive — source rows on the same entry are
-     just dropped.
+  1. Move all junction rows (the entry junction for every type, plus
+     threat_actor_target_countries for actors and the target-sector junction
+     for actors and malware) from source → target. Existing (entry_id,
+     target_id) rows survive — source rows on the same entry are dropped.
   2. Union source.aliases (plus source.name) into target.aliases (deduped,
      case-insensitive).
   3. Optionally update target.description / target.aliases if the caller
      supplied new values, then delete the source row.
 
-A maintenance-log row is written for every merge (mode = 'shadow' | 'apply'),
-giving the operator full audit + revert capability.
+A maintenance-log row is written for every merge (mode = 'shadow' | 'apply')
+with before/after snapshots, so the operator can audit what changed. There is
+no automatic revert.
 """
 
 from __future__ import annotations
@@ -393,7 +395,7 @@ async def perform_actor_merge(
             applied=False,
         )
 
-    # --- Apply mode: actually mutate.
+    # --- Apply mode: make the changes.
     # entry_threat_actors: move source rows to target, skipping (entry_id, target_id) collisions.
     existing_pairs = await db.execute(
         select(EntryThreatActor.entry_id).where(EntryThreatActor.threat_actor_id == target_id)
@@ -609,9 +611,10 @@ async def perform_same_type_merge(
     """Generic same-type merge for any registered entity_type.
 
     The threat_actor and malware code paths above keep their dedicated
-    helpers because the actor merge also moves threat_actor_target_countries
-    rows. For vendor / product / tool — which only have one junction
-    table each — this generic implementation is the merge primitive.
+    helpers because they also move target-sector rows, and the actor merge
+    moves threat_actor_target_countries rows. For vendor / product / tool —
+    which only have one junction table each — this generic implementation is
+    the merge primitive.
     """
     spec = _get_type_spec(entity_type)
     model = spec["model"]
@@ -977,7 +980,8 @@ async def perform_reclassify(
 
     if body.mode != "apply":
         await db.flush()
-        # In shadow mode we don't actually move anything; report the planned target id (or None for new).
+        # Shadow mode moves nothing; report the given target id, or a random placeholder UUID when a new
+        # entity would be created.
         synthetic_target = body.target_id or uuid.uuid4()
         return ReclassifyResponse(
             action="reclassify",

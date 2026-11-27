@@ -6,11 +6,7 @@ interface SpinnerProps {
   className?: string;
 }
 
-/**
- * The one spinning ring in the app. Always decorative — pair it with real text
- * (or an `aria-live` container) so assistive tech hears what is happening
- * rather than nothing at all.
- */
+/** The one spinning ring in the app. Always decorative — pair it with real text (or an `aria-live` container) so assistive technology announces what is happening. */
 export function Spinner({ size = "md", className }: SpinnerProps) {
   return (
     <span

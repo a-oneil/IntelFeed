@@ -7,10 +7,10 @@ mitigations, severity_assessment, novelty_note). This module:
 - decides whether an entry gets analyzed at all (`enqueue_entry_analysis`:
   flag → dedup → feed policy → junk gate → echo-reuse → queue), and
 - fans a parsed payload out to the existing per-entity store functions
-  (`store_entry_analysis`) so links land exactly as the old per-task
-  extraction calls produced them.
+  (`store_entry_analysis`), so links are stored the same way the per-entity
+  extraction paths store them.
 
-Judging what was written is not this module's job any more: the adjudicate
+Judging what was written is not this module's job: the adjudicate
 stage (services/entry_adjudication.py) reviews every link, minted entity,
 edge and observable after the payload has landed, with the whole output in
 view. The extraction call only extracts.
@@ -36,15 +36,15 @@ from app.services.ai_eligibility import (
 
 logger = logging.getLogger(__name__)
 
-# Quote check for sectors: case, whitespace, curly quotes and dashes are not
-# the model's to get right; the words are.
+# Quote check for sectors ignores case, whitespace, curly quotes and dashes;
+# only the words have to match the article.
 _QUOTE_FOLD = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-", "\u2014": "-"})
 _MIN_EVIDENCE_CHARS = 4
-# A reply naming this many sectors is the schema's list handed back, not a
-# reading of the article: nothing in it is stored.
+# A reply naming this many distinct sectors (or more) is the model echoing the
+# schema's list rather than reading the article, so none of it is stored.
 _ECHO_SECTOR_COUNT = 10
-# One quote names one victim's industry; a sentence pasted under five sectors
-# backs none of them.
+# One quote can back at most this many sectors. A quote attached to more is
+# treated as an echo and backs none of them.
 _MAX_SECTORS_PER_QUOTE = 2
 
 
@@ -56,12 +56,12 @@ def sectors_with_evidence(sectors: list, text: str) -> list[dict]:
     """The sectors whose ``evidence`` is words the article actually contains.
 
     The schema hands the model every sector name; on a two-line leak-site post
-    a small model returns the list back, every name "high" (231 Ransomware.live
-    posts got the same twelve). A quote it cannot copy out of the article is
-    how that shows, so a sector without one is not stored. An ellipsis splits
-    a quote into parts that must each be found. A list as long as the schema's
-    and one quote pasted under several sectors are the same echo, and store
-    nothing.
+    a small model returns the whole list, every name "high" (231 Ransomware.live
+    posts got the same twelve). Such a model cannot quote article text for those
+    sectors, so a sector without a quote found in the article is not stored. An
+    ellipsis splits a quote into parts that must each be found. A reply with
+    ``_ECHO_SECTOR_COUNT`` or more distinct sectors stores nothing, and a quote
+    attached to more than ``_MAX_SECTORS_PER_QUOTE`` sectors stores none of them.
     """
     sectors = [s for s in sectors if isinstance(s, dict)]
     if len({str(s.get("name") or "").strip().lower() for s in sectors}) >= _ECHO_SECTOR_COUNT:
@@ -165,10 +165,10 @@ async def apply_ai_observables(
 
     ``observables_ai_capture_mode`` decides whether the AI's confirmations
     become rows (``capture``) or stay on the entry as promotable candidates
-    (``shadow``, the default). In capture mode only the kinds listed in
-    ``observables_ai_capture_kinds`` are written; anything else the AI
-    reported is still staged, so host kinds can be switched on per kind once
-    the extraction fixture says they are precise. The TTP door
+    (``shadow``); the configured default is ``capture``. In capture mode only
+    the kinds listed in ``observables_ai_capture_kinds`` are written; anything
+    else the AI reported is still staged, so host kinds can be switched on per
+    kind once the extraction fixture says they are precise. The TTP door
     (``EntryTTP.observable_value`` upserts) follows the same switches.
 
     Shared by ingest (``store_entry_analysis``) and the replay script, so a
@@ -380,8 +380,9 @@ async def _current_analysis_result(db: AsyncSession, entry_id: uuid.UUID):
         return None, None
     # Newest-first + limit(1) rather than scalar_one_or_none(): a (target, task)
     # carrying more than one current row must not raise here. This is called
-    # per-entry from submit_analysis_batches' self-healing sweep, so one bad
-    # entry used to abort the whole hourly run and stall every pending analysis.
+    # per-entry from submit_analysis_batches' self-healing sweep, where a raise
+    # on one bad entry would abort the whole hourly run and stall every pending
+    # analysis.
     result = (
         await db.execute(
             select(AIResult)
@@ -440,7 +441,7 @@ async def enqueue_entry_analysis(db: AsyncSession, entry_id: uuid.UUID) -> str |
 
     async def _write_status(status: str, **extra) -> str:
         # Insert, or overwrite a feed-policy skip (the only re-decided status);
-        # any other existing row wins, as before.
+        # any other existing row is kept.
         stmt = pg_insert(AIAnalysisRequest).values(
             id=uuid.uuid4(), entry_id=entry_id, status=status, custom_id=f"ea-{entry_id}", **extra
         )

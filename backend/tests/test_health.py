@@ -188,7 +188,7 @@ async def test_version_endpoint_needs_no_backing_services(client: AsyncClient):
     ):
         resp = await client.get("/api/version")
 
-        # The point of the endpoint: cheap enough to poll.
+        # The endpoint calls no backing service, so it is cheap to poll.
         mock_db.assert_not_called()
         mock_redis.assert_not_called()
         mock_meili.assert_not_called()

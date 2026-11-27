@@ -3,12 +3,13 @@ upgrade and downgrade run against a recording ``alembic.op``, so the
 statements they issue are checked without a database.
 
 - c9v4a1l2s3x7: ``cves.aliases``, an empty array by default.
-- w4k9e2s7v1c3: ``observables.asn`` to bigint, GreyNoise's made-up
-  ``not_seen`` class to NULL with its context row deleted, ``vendors.country_id``.
-  The downgrade empties the ASNs int4 can't hold before narrowing the column.
-- x5n8b2k4c6d1: the IP sources run on their own; the other sharing sources
-  wait to be asked. The downgrade moves back only rows still where the
-  upgrade left them.
+- w4k9e2s7v1c3: ``observables.asn`` to bigint, the ``not_seen`` noise class
+  (not a real GreyNoise class) to NULL with its context row deleted, and a new
+  ``vendors.country_id``. The downgrade empties the ASNs int4 can't hold before
+  narrowing the column.
+- x5n8b2k4c6d1: the IP sources (Shodan, GreyNoise, Cymru) are enabled on auto;
+  the other sharing sources move from auto to manual. The downgrade moves back
+  only rows still where the upgrade left them.
 """
 
 import importlib.util

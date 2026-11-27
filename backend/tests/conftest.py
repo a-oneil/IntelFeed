@@ -94,7 +94,7 @@ def _cheap_bcrypt():
 
 @pytest.fixture(autouse=True)
 def _single_tenant_feed_visibility(monkeypatch):
-    """Run the suite with the legacy every-feed-visible behaviour.
+    """Run the suite with the legacy every-feed-visible behavior.
 
     ``per_user_subscriptions_enabled`` ships on (issue #15), under which a
     user sees only the feeds they are subscribed to. Most tests create feeds
@@ -274,9 +274,9 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
 
     app.dependency_overrides[get_db] = override_get_db
     # Unauthenticated requests are rate limited per client IP over a sliding
-    # window. Now that tests run in milliseconds rather than seconds, a shared
-    # IP makes later tests fail with 429 on the login/register routes, so give
-    # every test its own address.
+    # window. Tests run in milliseconds, so with a shared IP later tests would
+    # fail with 429 on the login/register routes; give every test its own
+    # address.
     n = next(_client_ips)
     peer = (f"10.{n >> 16 & 0xFF}.{n >> 8 & 0xFF}.{n & 0xFF}", 50000)
     transport = ASGITransport(app=app, client=peer)

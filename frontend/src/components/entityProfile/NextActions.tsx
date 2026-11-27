@@ -1,17 +1,7 @@
 /**
- * NextActions — the "Next steps" panel that closes the Overview's brief.
- * Computed, not curated: every line is a signal the backend already emits.
- * Actors and malware lead with their detection coverage (techniques with a
- * rule, with a rule whose log source isn't collected, with none) and the
- * Review gaps / Download hunt package buttons; a KEV CVE leads with its patch
- * deadline and rule count. Under that, one line per remaining job (claims to
- * corroborate, a missing assessment, a campaign's suggestions and standing
- * searches), each with its explanation and a text link. Lines disappear as the
- * work gets done.
+ * NextActions — the "Next steps" panel at the end of the Overview's brief. Computed, not curated: every line is a signal the backend already emits. Actors and malware lead with their detection coverage (techniques with a rule, with a rule whose log source isn't collected, with none) and the Review gaps / Download hunt package buttons; a KEV CVE leads with its patch deadline and rule count. Under that, one line per remaining job (claims to corroborate, a missing assessment, a campaign's suggestions and standing searches), each with its explanation and a text link. Lines disappear as the work gets done.
  *
- * Download hunt package drafts the profile's hunts first when there are none
- * (an AI job on the worker; a line here shows it running), then downloads the
- * zip. For types without hunts it downloads the research bundle as before.
+ * Download hunt package drafts the profile's hunts first when there are none (an AI job on the worker; a line here shows it running), then downloads the zip. For types without hunts it downloads the research bundle.
  */
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -99,9 +89,7 @@ export function NextActions({
   const hunts = useHuntPackageDownload(entityType, entityId, displayName);
   const huntElapsed = useElapsed(hunts.status === "drafting" ? hunts.startedAt : null);
 
-  // A campaign's next actions are the two tabs it used to carry — Suggestions
-  // and Searches — plus the one thing nothing ever told you: that it has gone
-  // quiet. All three are work, which is what this row is for.
+  // A campaign's next actions are its suggestions and its standing searches, plus a line when it has gone quiet (no new articles for a while), which nothing else on the profile reports. All three are pending work, which is what this panel lists.
   const isCampaign = entityType === "campaign";
   const campaignId = isCampaign ? entityId : undefined;
   const { data: campaignSuggestions } = useCampaignSuggestions(campaignId);
@@ -281,8 +269,7 @@ export function NextActions({
             <div className={styles.moveHead}>
               How your detection rules cover its {coverage.total_ttps} known techniques
             </div>
-            {/* Proportions by count, not a percentage: tag equality reads
-                88-90% for every actor, so the missing counts are the point. */}
+            {/* Proportions by count, not a percentage: tag equality reads 88-90% for every actor, so the missing counts are the point. */}
             <div className={styles.meter} aria-hidden="true">
               <i className={styles.meterCovered} style={{ flexGrow: coverage.covered_count }} />
               <i className={styles.meterBlind} style={{ flexGrow: coverage.library_only_count }} />
@@ -343,7 +330,7 @@ export function NextActions({
               disabled={withHunts ? hunts.busy : exporting}
               title={
                 withHunts
-                  ? "One zip: ATHF hunt files and queries, rules, a coverage-coloured ATT&CK layer, entities, IOCs and the key articles. Drafts the hunts first if there are none."
+                  ? "One zip: ATHF hunt files and queries, rules, a coverage-colored ATT&CK layer, entities, IOCs and the key articles. Drafts the hunts first if there are none."
                   : "One zip with the most recent articles, the entities in them, their IOCs as CSV, and an ATT&CK Navigator layer"
               }
             >

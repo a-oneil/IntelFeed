@@ -78,7 +78,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-/** The web matrix's layer modes: heat by article frequency, colour by rule coverage, or both. */
+/** The web matrix's layer modes: heat by article frequency, color by rule coverage, or both. */
 enum class MatrixLayer(val label: String) { HEAT("Feed heat"), COVERAGE("Coverage"), BOTH("Both") }
 
 data class AttackMatrixState(
@@ -167,11 +167,7 @@ fun matrixHeat(count: Int, max: Int): Float =
 
 private data class MatrixTap(val tech: AttackTechnique, val tacticName: String)
 
-/**
- * The web Workbench's ATT&CK Matrix: one column per tactic (scroll sideways), each technique
- * shaded by how often it appeared in the feeds and edged by rule coverage. Tap a technique to
- * open its profile, long-press for its numbers; parents with sub-techniques expand.
- */
+/** The web Workbench's ATT&CK Matrix: one column per tactic (scroll sideways), each technique shaded by how often it appeared in the feeds with a left-edge bar in its rule-coverage color. Tap a technique to open its profile, long-press for its numbers; parents with sub-techniques expand. */
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun AttackMatrixView(vm: AttackMatrixViewModel, state: AttackMatrixState, onOpenEntity: (EntityRef) -> Unit) {

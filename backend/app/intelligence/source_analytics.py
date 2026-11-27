@@ -82,7 +82,7 @@ async def compute_source_overlap(db: AsyncSession, min_overlap: float = 0.1, lim
     """Compute entity overlap between feeds to identify redundant sources.
 
     Returns pairs of feeds with their shared entity percentage.
-    Uses TTPs as the overlap metric since IOCs have been removed.
+    Overlap is measured on shared TTPs only.
     """
     # Get all feeds with at least 1 TTP
     feed_ttps: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
@@ -242,7 +242,7 @@ async def compute_feed_value_scores(
         for fid, cnt in rows:
             entity_counts[fid] += cnt
 
-    # 4. Entity introductions — entities whose EARLIEST entry belongs to this feed
+    # 3. Entity introductions — entities whose EARLIEST entry belongs to this feed
     #    For each entity type, find the min(fetched_at) entry per entity, then group by feed.
     intro_counts: dict[uuid.UUID, int] = defaultdict(int)
     for LinkModel, id_col in [
@@ -281,7 +281,7 @@ async def compute_feed_value_scores(
         for fid, cnt in rows:
             intro_counts[fid] += cnt
 
-    # 5. Correlation events per feed (via entry_id → entries.feed_id)
+    # 4. Correlation events per feed (via entry_id → entries.feed_id)
     correlation_counts = dict(
         (
             await db.execute(
@@ -296,7 +296,7 @@ async def compute_feed_value_scores(
         ).all()
     )
 
-    # 6. Detection rules per feed (via entry_id → entries.feed_id)
+    # 5. Detection rules per feed (via entry_id → entries.feed_id)
     detection_counts = dict(
         (
             await db.execute(
@@ -312,7 +312,7 @@ async def compute_feed_value_scores(
         ).all()
     )
 
-    # 7. PIR matches per feed (requirement_matches → entries.feed_id)
+    # 6. PIR matches per feed (requirement_matches → entries.feed_id)
     pir_counts = dict(
         (
             await db.execute(

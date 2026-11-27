@@ -45,8 +45,7 @@
   color: var(--accent);
 }
 
-/* Rendered as a Chip — the default tone already is this box. Margin is the
-   one thing Chip never declares, so there is no specificity race. */
+/* Rendered as a Chip, whose default tone already draws this box. Chip never sets margin, so this rule has no specificity conflict with it. */
 .sharedBadge {
   margin-left: var(--sp-3);
 }

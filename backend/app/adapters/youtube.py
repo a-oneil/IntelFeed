@@ -8,7 +8,7 @@ import feedparser
 
 from app.adapters.base import BaseAdapter, ParsedEntry, ParsedFeedMeta, ParsedMedia
 
-# YouTube Atom namespace prefixes
+# Match the "yt:video:<id>" and "yt:channel:<id>" IDs in YouTube's Atom feed
 YT_VIDEO_RE = re.compile(r"yt:video:(.+)")
 YT_CHANNEL_RE = re.compile(r"yt:channel:(.+)")
 

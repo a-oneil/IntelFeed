@@ -65,9 +65,7 @@ object ArticleTranslator {
         cache["$entryId:$targetCode"] = result
     }
 
-    /**
-     * Returns a sorted list of all languages supported by ML Kit on-device translation.
-     */
+    /** Returns a sorted list of all languages supported by ML Kit on-device translation. */
     fun getSupportedLanguages(): List<SupportedLanguage> {
         return TranslateLanguage.getAllLanguages().map { code ->
             val locale = Locale.forLanguageTag(code)
@@ -88,10 +86,7 @@ object ArticleTranslator {
         }.sortedBy { it.displayName }
     }
 
-    /**
-     * Identifies the language of the given text using ML Kit.
-     * Returns BCP-47 tag, e.g. "uk", "ru", "zh", "en", or "und".
-     */
+    /** Identifies the language of the given text using ML Kit. Returns a BCP-47 tag, e.g. "uk", "ru", "zh", "en", or "und" when it can't tell. */
     suspend fun identifyLanguage(text: String): String = withContext(Dispatchers.Default) {
         val sample = text.take(500)
         val identifier = LanguageIdentification.getClient()
@@ -128,10 +123,7 @@ object ArticleTranslator {
         }
     }
 
-    /**
-     * Translates an article's title and blocks to the specified target language on-device. The
-     * read-aloud text is built from the translated blocks.
-     */
+    /** Translates an article's title and blocks to the specified target language on-device. The read-aloud text is built from the translated blocks. */
     suspend fun translateArticle(
         entryId: String,
         title: String,
@@ -144,7 +136,7 @@ object ArticleTranslator {
 
             getCached(entryId, targetCode)?.let { return@runCatching it }
 
-            // Sample text from title and first body blocks to identify language
+            // Sample text from the title and first body blocks to identify the language.
             val sample = buildString {
                 append(title).append("\n")
                 blocks.take(3).forEach { block ->
@@ -174,14 +166,14 @@ object ArticleTranslator {
 
             val translator = Translation.getClient(options)
             try {
-                // Ensure model is downloaded
+                // Download the language model if it isn't on the device yet.
                 val conditions = DownloadConditions.Builder().build()
                 translator.downloadModelIfNeeded(conditions).awaitTask()
 
-                // Translate title
+                // Translate the title.
                 val translatedTitle = translator.translate(title).awaitTask()
 
-                // Translate blocks while preserving formatting, images, code, and dividers
+                // Translate paragraph and list text (inline spans such as bold and links are dropped); code, images and dividers are kept as they are.
                 val translatedBlocks = blocks.map { block ->
                     when (block) {
                         is ArticleHtml.Paragraph -> {
@@ -198,8 +190,7 @@ object ArticleTranslator {
                     }
                 }
 
-                // Text for read-aloud, built from the translated blocks. It used to translate the
-                // article's contentText as well, which ran the whole article through the model twice.
+                // Text for read-aloud, built from the translated blocks rather than by translating contentText separately, which would run the whole article through the model twice.
                 val translatedText = translatedBlocks.mapNotNull { block ->
                     when (block) {
                         is ArticleHtml.Paragraph -> block.text.text

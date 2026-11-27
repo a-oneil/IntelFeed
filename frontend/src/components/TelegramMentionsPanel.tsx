@@ -50,8 +50,7 @@ export function TelegramMentionsPanel() {
     }
   };
 
-  // Rebuilt when a mutation's pending state flips, so an in-flight action
-  // can't be fired twice from the row.
+  // Rebuilt when a mutation's pending state flips, so an in-flight action can't be fired twice from the row.
   const columns: DataTableColumn<TelegramMention>[] = useMemo(() => [
     {
       key: "handle", label: "Channel", width: 220, minWidth: 130, flex: true,

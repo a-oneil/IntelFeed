@@ -37,7 +37,7 @@ VALIDATABLE_RULE_TYPES = sorted(re.sub(r"[\^\$\(\)]", "", RULE_TYPE_PATTERN).spl
         },
         "required": ["entry_id", "rule_types"],
     },
-    # Persists (stored links / AI results / draft rules): a write, whatever it reads.
+    # Mutating: the tool stores links, AI results or draft rules, even though it also reads.
     mutating=True,
 )
 async def _generate_detection_rules(db: AsyncSession, user_id: uuid.UUID, entry_id: str, rule_types: list[str]) -> dict:

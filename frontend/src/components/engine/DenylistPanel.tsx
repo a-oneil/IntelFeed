@@ -12,8 +12,7 @@ import styles from "./DenylistPanel.module.css";
 
 const PAGE_SIZE = 25;
 
-/** "any" is a wildcard row — the name is banned whatever type an article
- *  implies. It's the default for a hand-added name. */
+/** "any" is a wildcard row: the name is banned whatever type an article implies. It is the default for a hand-added name. */
 type DenyType = ExtractionType | "any";
 
 const TYPES: { key: DenyType; label: string }[] = [
@@ -27,9 +26,7 @@ const TYPES: { key: DenyType; label: string }[] = [
 
 const TYPE_LABEL = Object.fromEntries(TYPES.map((t) => [t.key, t.label]));
 
-/** Names the extract stage refuses to mint. Rows land here from the Engine ›
- *  Entities table's delete, the entity profile's delete popover, or the box below —
- *  every name is mirrored into Autolink → False Positive Names too. */
+/** Names the extract stage refuses to create as entities. Rows are added by a delete in the Engine › Entities table, the entity profile's delete popover, or the box below; every name is also copied into Autolink → False Positive Names. */
 export function DenylistPanel() {
   const [q, setQ] = useState("");
   const [type, setType] = useState<DenyType | "">("");

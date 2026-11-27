@@ -27,12 +27,10 @@ export function useUnifiedSearch(
         q: query,
         limit: options?.limit ?? 20,
         offset: options?.offset ?? 0,
-        // The server's own defaults (200 total / 25 per type) are the right
-        // ones for a plain call; only pass an override when one is given.
+        // The server's own defaults (200 total / 25 per type) are the right ones for a plain call; only pass an override when one is given.
         ...(options?.entityLimit != null ? { entity_limit: options.entityLimit } : {}),
         ...(options?.entityGroupLimit != null ? { entity_group_limit: options.entityGroupLimit } : {}),
-        // Read state is per-user and lives in Postgres, so only the server can
-        // apply it across the whole match set rather than the fetched page.
+        // Read state is per-user and lives in Postgres, so only the server can apply it across the whole match set rather than the fetched page.
         ...(options?.hideRead ? { hide_read: true } : {}),
       });
       return res.data;

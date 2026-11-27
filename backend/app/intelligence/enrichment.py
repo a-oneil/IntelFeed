@@ -147,8 +147,8 @@ async def _resolve_entity_id(
     return None
 
 
-# Relationship verbs the AI may assert — the co-occurrence verb map plus the
-# same-type verbs statistics can never produce (actor↔actor, malware↔malware).
+# Relationship verbs the AI may assert: the co-occurrence verb map plus the
+# same-type verbs co-occurrence never produces (actor↔actor, malware↔malware).
 _AI_RELATIONSHIP_TYPES = {
     "uses",
     "targets",
@@ -355,9 +355,10 @@ async def store_ai_relationships(
     return stored
 
 
-# A co-occurrence verb the analysis's verb for the same pair replaces: the
-# guess from the two types was the wrong reading of the sentence. Any verb
-# replaces related_to, which said nothing.
+# (co-occurrence verb, analysis verb) pairs where the analysis's verb for the
+# same pair replaces the co-occurrence edge: the verb guessed from the two
+# entity types misread the sentence. Any analysis verb replaces a related_to
+# edge, since related_to carries no meaning.
 _SUPERSEDED_COOCCURRENCE_VERBS = {
     ("targets", "attributed_to"),
 }
@@ -539,8 +540,9 @@ async def store_threat_actors(
         )
 
         # Provenance: record what this article asserted about the actor, whether
-        # or not the value won the "don't overwrite an existing value" contest.
-        # A claim that lost still explains why a competing value is on record.
+        # or not the value was stored (existing values are never overwritten).
+        # A claim whose value was not stored still explains why a competing
+        # value is on record.
         await record_claims(
             db,
             entity_type=entity_types.THREAT_ACTOR,
@@ -962,8 +964,8 @@ _VALID_PATCH_STATUS = {"available", "workaround", "none", "unknown"}
 def normalize_article_metadata(raw: dict | None) -> dict:
     """Coerce AI article-metadata output to a stored shape, dropping junk.
 
-    Powers plan items 3.9.6 (patch availability), 3.9.7 (victim orgs),
-    3.9.8 (timeline anchors), 3.9.9 (report-type classification).
+    Covers patch availability, victim organizations, timeline anchors, and
+    report-type classification.
     """
     raw = raw or {}
 

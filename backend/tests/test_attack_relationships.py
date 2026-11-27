@@ -1,4 +1,4 @@
-"""ATT&CK `uses` relationship import — the authority layer of the trust ladder."""
+"""ATT&CK `uses` relationship import: MITRE's edges are stored as confirmed relationships, the highest trust level."""
 
 import pytest
 from sqlalchemy import select
@@ -94,7 +94,7 @@ async def test_sync_creates_confirmed_edges_for_existing_entities(db_session):
     assert ("threat_actor", "uses", "malware") in triples
     assert ("threat_actor", "uses", "tool") in triples
     assert ("malware", "uses", "ttp") in triples
-    # tools relate to techniques — the matrix reserves `uses` for operators
+    # tools relate to techniques — the relationship matrix reserves `uses` for operators
     assert ("tool", "related_to", "ttp") in triples
     assert all(r.source == "external_feed" and r.confidence == "confirmed" for r in rows)
     assert all(r.description == "MITRE ATT&CK" for r in rows)

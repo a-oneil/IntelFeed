@@ -8,8 +8,7 @@ data class UnifiedSearchRequest(
     val q: String,
     val limit: Int = 20,
     val offset: Int = 0,
-    // The web's values: up to 200 entities in all, with no practical cap per type (500). The app
-    // asked for 25 per type, so a search matching 200 CVEs could only ever list 25 of them.
+    // The web's values: up to 200 entities in all, with no practical cap per type (500). A cap of 25 per type would let a search matching 200 CVEs list only 25 of them.
     @SerialName("entity_limit") val entityLimit: Int = 200,
     @SerialName("entity_group_limit") val entityGroupLimit: Int = 500
 )

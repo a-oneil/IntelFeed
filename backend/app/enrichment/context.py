@@ -63,7 +63,7 @@ def _cell(value) -> str | int | float | None:
 
 
 def _url(value) -> str | None:
-    # Third-party text becomes an href: only web links.
+    # Third-party text becomes an href, so only http(s) links are accepted.
     return value if isinstance(value, str) and value.startswith(("https://", "http://")) else None
 
 
@@ -204,8 +204,8 @@ async def entity_context(
     ``observed_at`` null); for an observable, only sources that take its
     ``kind``. A source missing a requirement is listed in
     ``unavailable`` for admins, and in ``sources`` only while it has stored
-    items. Visitors never see a source that sends observables off the box or
-    whose license bars commercial use.
+    items. Visitors never see a source that sends observables to an outside
+    service or whose license bars commercial use.
     """
     from app.enrichment.pipeline import resolve_api_key
     from app.enrichment.registry import SOURCE_REGISTRY

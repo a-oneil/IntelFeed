@@ -76,10 +76,7 @@ function WidgetContent({ widget, timeRange, timeRangeStart, timeRangeEnd }: Prop
   }
 
   const Component = def.component;
-  // Precedence (lowest → highest): registry defaults (configPatch) → the
-  // user's saved per-widget config → the dashboard's global time range.
-  // User config must beat configPatch so the settings popover works; the
-  // global range stays authoritative over both ("one range, one truth").
+  // Precedence (lowest → highest): registry defaults (configPatch) → the user's saved per-widget config → the dashboard's global time range. User config must beat configPatch so the settings popover works; the global range overrides both so every widget shows the same range.
   const finalConfig = def.configPatch ? { ...def.configPatch, ...configWithTime } : configWithTime;
   return <Component config={finalConfig} />;
 }

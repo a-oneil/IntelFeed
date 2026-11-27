@@ -95,7 +95,7 @@ async def test_a_source_that_is_off_says_nothing(db_session):
 
 
 async def test_a_visitor_never_sees_sources_that_share_indicators(db_session):
-    # GreyNoise sends the IP off the box; Team Cymru doesn't.
+    # GreyNoise receives the IP being looked up (it shares indicators); Team Cymru doesn't.
     await _on(db_session, "greynoise", "cymru")
     obs = Observable(
         kind="ipv4", value="198.51.100.10", base_confidence=0.8, current_confidence=0.8, noise_class="benign", asn=64501
@@ -300,8 +300,9 @@ async def test_a_glance_keeps_two_chips_and_three_facts_and_says_a_thing_once(db
     await db_session.flush()
 
     # Four rules return a chip (malware, scanner, new domain, popular site) and
-    # six a fact: the first two and three win, in rule order, and the family
-    # ThreatFox and MalwareBazaar both name shows once.
+    # six return a fact. Only the first two chips and the first three facts are
+    # kept, in rule order, and the family ThreatFox and MalwareBazaar both name
+    # appears once.
     chips, facts = _texts(await glance(db_session, "observable", obs, ADMIN))
     assert (MAX_CHIPS, MAX_FACTS) == (2, 3)
     assert chips == ["Serving malware", "Benign scanner"]

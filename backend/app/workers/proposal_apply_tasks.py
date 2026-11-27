@@ -8,7 +8,7 @@ progress goes to Redis so the console can show "Applying 1,240 / 5,249" and
 know when it is done. Runs on the default queue: nothing here calls an AI
 provider.
 
-Every row is tried once, so a row that fails or has nothing to do cannot pin
+Every row is tried once, so a row that fails or has nothing to do cannot stall
 the loop. Proposals filed after the job started wait for the next run.
 """
 

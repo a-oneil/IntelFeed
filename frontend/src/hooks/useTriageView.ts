@@ -52,11 +52,7 @@ export function useTriageView(convergenceDefaults: ConvergenceDefaults = { windo
     [userSettings, convergenceDefaults.windowHours, convergenceDefaults.minShared],
   );
 
-  // First mount (or after settings refetch when nothing is in the store yet):
-  // hydrate the store from the server-side saved view. When the persisted
-  // store belongs to a different account (shared browser), replace it with
-  // this account's server copy instead of merging — the leftover view must
-  // never be auto-saved onto this user's profile.
+  // First mount (or after settings refetch when nothing is in the store yet): hydrate the store from the server-side saved view. When the persisted store belongs to a different account (shared browser), replace it with this account's server copy instead of merging, so the leftover view is never auto-saved onto this user's profile.
   useEffect(() => {
     if (!user) return;
     if (viewOwnerId && viewOwnerId !== user.id) {
@@ -71,14 +67,11 @@ export function useTriageView(convergenceDefaults: ConvergenceDefaults = { windo
     }
   }, [user, viewOwnerId, storeView, savedView, setStoreView, takeOverView]);
 
-  // Until the takeover has run, a foreign store view must not be displayed
-  // (or diffed for auto-save) — fall back to this user's server copy.
+  // Until the takeover has run, another account's store view must not be displayed (or diffed for auto-save); fall back to this user's server copy.
   const foreignStore = Boolean(user && viewOwnerId && viewOwnerId !== user.id);
   const view = (!foreignStore ? storeView : null) ?? savedView;
 
-  // Shallow settings patch, not a whole-blob PUT: other auto-savers (table
-  // column layouts) write the same settings object, and a merge from this
-  // hook's captured snapshot would silently drop their writes.
+  // Shallow settings patch, not a whole-blob PUT: other auto-savers (table column layouts) write the same settings object, and a merge from this hook's captured snapshot would silently drop their writes.
   const saveSettings = useMutation({
     mutationFn: async (payload: Record<string, unknown>) => {
       const res = await api.patch<User>("/auth/me/settings", { settings: payload });
@@ -90,13 +83,10 @@ export function useTriageView(convergenceDefaults: ConvergenceDefaults = { windo
     },
   });
 
-  // Debounce auto-save: each edit pushes the timer out; when it fires we
-  // diff against the last persisted view to avoid no-op writes.
+  // Debounced auto-save: each edit restarts the timer, and the view is compared against the last persisted view to avoid no-op writes.
   const persistedRef = useRef<TriageView | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Tracks consecutive save failures so we can back off the debounce window
-  // and avoid hammering the API (and re-spinning the infinite re-save loop
-  // when persistedRef stays out of sync with the store).
+  // Counts consecutive save failures so the debounce delay can back off, instead of retrying the API rapidly in an endless loop while persistedRef stays out of sync with the store.
   const failureCountRef = useRef(0);
 
   useEffect(() => {
@@ -105,12 +95,9 @@ export function useTriageView(convergenceDefaults: ConvergenceDefaults = { windo
 
   useEffect(() => {
     if (!storeView) return;
-    // A visitor's view changes live in the store only: there is no account to
-    // save them to, and the refused write would toast and retry forever.
+    // A visitor's view changes stay in the store only: there is no account to save them to, and the refused write would toast and retry forever.
     if (isVisitorNow()) return;
-    // Never auto-save a view that belongs to a different account (pre-takeover
-    // render on a shared browser) — that would write their config onto this
-    // user's profile.
+    // Never auto-save a view that belongs to a different account (a render before the takeover on a shared browser); that would write their config onto this user's profile.
     if (foreignStore) return;
     if (persistedRef.current && viewsEqual(storeView, persistedRef.current)) return;
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -125,9 +112,7 @@ export function useTriageView(convergenceDefaults: ConvergenceDefaults = { windo
           failureCountRef.current = 0;
         },
         onError: (err) => {
-          // Do NOT update persistedRef — leaving it on the last successfully
-          // saved view means the next debounce run will retry the same diff
-          // instead of treating the failed write as committed.
+          // Do NOT update persistedRef: leaving it on the last successfully saved view means the next debounce run retries the same diff instead of treating the failed write as saved.
           failureCountRef.current += 1;
           console.warn("[useTriageView] auto-save failed", err);
           if (failureCountRef.current === 1) {
@@ -139,9 +124,7 @@ export function useTriageView(convergenceDefaults: ConvergenceDefaults = { windo
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-    // saveSettings is stable across renders (returned from useMutation); the
-    // store view and its ownership are the only things that should re-arm the
-    // save timer.
+    // saveSettings is stable across renders (returned from useMutation); the store view and its ownership are the only things that should restart the save timer.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeView, foreignStore]);
 
@@ -170,8 +153,7 @@ export function useTriageView(convergenceDefaults: ConvergenceDefaults = { windo
     [patchStoreView],
   );
 
-  // First render before hydration: surface the server-side default rather than
-  // showing nothing.
+  // First render before hydration: show the server-side saved view (or the built-in default) rather than nothing.
   if (!storeView) {
     return {
       view: savedView ?? buildDefaultView(),

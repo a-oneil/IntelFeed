@@ -15,12 +15,8 @@ const PLAN_SCOPE_LABEL: Record<string, string> = {
 };
 
 /**
- * What the ingest pipeline does with this feed's articles.
- *
- * Replaces the five-way "Intelligence Extraction" preset, three of whose
- * labels no longer described anything real — see pipelineStages.ts for which
- * ones and why. Each row names a stage that actually runs and the field that
- * drives it; rows this pane cannot change say who holds them instead.
+ * Shows what the ingest pipeline does with this feed's articles.
+ * Replaces the five-way "Intelligence Extraction" preset, three of whose labels did not match any real behavior (see pipelineStages.ts for which ones and why). Each row names a stage that actually runs and the field that drives it; rows this pane cannot change say what controls them instead.
  */
 export function PipelinePane({ feedId, form }: { feedId: string; form: FeedForm }) {
   const { data: settings } = useSystemSettings();
@@ -28,9 +24,7 @@ export function PipelinePane({ feedId, form }: { feedId: string; form: FeedForm 
   const bulkTranslate = useBulkTranslate();
   const { data: pipeline } = useFeedPipeline(feedId);
 
-  // Absent (not yet loaded, or a non-admin who can't read settings): assume the
-  // AI runs, which is the shipped default — better to over-warn than to tell
-  // someone nothing will be created when it will.
+  // When settings are absent (not loaded yet, or a non-admin who can't read them), assume the AI runs, which is the default; it is better to over-warn than to tell someone nothing will be created when it will.
   const aiEnabled = settings ? Boolean(settings.settings.ai_one_pass_enabled?.value) : true;
   const ctx = { aiEnabled, pipeline };
 
@@ -40,9 +34,7 @@ export function PipelinePane({ feedId, form }: { feedId: string; form: FeedForm 
 
   return (
     <div className={styles.stack}>
-      {/* The sentence leads: it is the only part of this pane you can read
-          without already knowing the pipeline, and it answers the question the
-          checkboxes are an answer to. */}
+      {/* The summary sentence comes first: it is the only part of this pane you can read without already knowing the pipeline, and it states the overall result the checkboxes below produce. */}
       <div className={styles.summaryBox}>
         <span className={styles.summaryLabel}>In short</span>
         <span className={styles.summaryText}>{summary}</span>
@@ -94,14 +86,10 @@ export function PipelinePane({ feedId, form }: { feedId: string; form: FeedForm 
         })}
       </div>
 
-      {/* The rating is set under Assessment but acts here, on the confidence
-          of every catalog match — say so where the tags are made. */}
+      {/* The reliability rating is set under Assessment but affects the confidence of every catalog match made here, so this pane says so. */}
       <p className={styles.note}>{reliabilityNote(form.values.reliability_rating)}</p>
 
-      {/* Changing a switch only affects what arrives next. These two reach back
-          over what is already here — the question you have the moment you turn
-          one of the stages above on. They were only in the sidebar's context
-          menu, which you cannot get to from inside this dialog. */}
+      {/* Changing a switch only affects articles that arrive next. These two actions reprocess the articles already stored, which is what you need right after turning on one of the stages above. They are also in the sidebar's context menu, which cannot be reached from inside this dialog. */}
       <div className={styles.field}>
         <span className={styles.sectionLabel}>Catch up on articles already here</span>
         <div className={styles.actionRow}>
@@ -131,7 +119,7 @@ export function PipelinePane({ feedId, form }: { feedId: string; form: FeedForm 
               )
             }
           >
-            {bulkExtract.isPending ? "Starting…" : "Re-analyse past articles"}
+            {bulkExtract.isPending ? "Starting…" : "Re-analyze past articles"}
           </button>
           <button
             type="button"
@@ -157,8 +145,7 @@ export function PipelinePane({ feedId, form }: { feedId: string; form: FeedForm 
       </div>
 
       {planned.length > 0 && (
-        // Plans layer over the Feed booleans, so for these stages a checkbox
-        // here would write a value nothing reads. Say where they live instead.
+        // Pipeline plans take priority over the Feed booleans, so for these stages a checkbox here would write a value nothing reads. Point to where they are set instead.
         <p className={styles.note}>
           {planned.length === 1 ? "One setting above is" : `${planned.length} settings above are`}{" "}
           controlled by a pipeline plan, which takes priority over this feed&rsquo;s

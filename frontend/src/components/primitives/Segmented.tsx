@@ -17,21 +17,13 @@ interface SegmentedProps<T extends string> {
   onChange: (value: T) => void;
   /** Names the group for screen readers, e.g. "Matrix domain". */
   label: string;
-  /**
-   * "tab" when the segments swap the whole view below (Ransomware, Vendor
-   * Watch), "group" when they only reshape it (matrix window, rule lens).
-   */
+  /** "tablist" when the segments swap the whole view below (Ransomware, Vendor Watch), "group" when they only reshape it (matrix window, rule lens). */
   role?: "tablist" | "group";
   size?: "md" | "sm";
   className?: string;
 }
 
-/**
- * The app's one segmented switch. Four near-identical copies of this markup
- * existed — ExposurePage `.seg`, AttackMatrixSection `.segmented`,
- * RuleLibrary `.lens`, RansomwareSection `.tabs` — at three different paddings
- * and two radii, all sitting in page headers next to each other.
- */
+/** The app's one segmented switch. It replaces four near-identical copies (ExposurePage `.seg`, AttackMatrixSection `.segmented`, RuleLibrary `.lens`, RansomwareSection `.tabs`) that used three different paddings and two radii in neighboring page headers. */
 export function Segmented<T extends string>({
   options,
   value,

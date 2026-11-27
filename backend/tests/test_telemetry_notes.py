@@ -213,7 +213,7 @@ async def test_sources_answering_names_products_not_whole_categories(db_session:
 
     # Named by its product, not every cloud source.
     assert await names("logs-aws.cloudtrail-*") == ["AWS CloudTrail"]
-    # Named by behaviour: the EDR gives process creation, the DNS product does not.
+    # Named by behavior: the EDR gives process creation, the DNS product does not.
     assert await names("process_creation") == ["CrowdStrike Falcon"]
     # A catch-all channel names nothing in particular.
     assert await names("SecurityEvents") == []

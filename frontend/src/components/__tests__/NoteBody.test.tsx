@@ -64,9 +64,7 @@ describe("NoteBody", () => {
   });
 
   it("renders the copilot 'hybrid' note: <p>-wrapped markdown mixed with real inline HTML", () => {
-    // The block structure is markdown-in-<p>, but the copilot emitted a few
-    // genuine inline tags (<code>, <a>). Previously the <a>/<code> tripped the
-    // HTML detector and the whole note rendered as raw markdown.
+    // The block structure is markdown-in-<p>, but the copilot also emitted a few real inline tags (<code>, <a>). Those tags must not make the HTML detector treat the note as HTML, which would render the whole note as raw markdown.
     const { container } = renderBody({
       content:
         "<p># FortiBleed</p>" +
@@ -75,7 +73,7 @@ describe("NoteBody", () => {
         "<p>**Critical**</p>" +
         "<p>| Metric | Figure |</p><p>| --- | --- |</p><p>| Devices | 75000 |</p>",
     });
-    // Block markdown now renders...
+    // Block markdown renders...
     expect(container.querySelector("h1")?.textContent).toContain("FortiBleed");
     expect(container.querySelector("strong")?.textContent).toBe("Critical");
     // ...and the real inline tags survive as formatted output.

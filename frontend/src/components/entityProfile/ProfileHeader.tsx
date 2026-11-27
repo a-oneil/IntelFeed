@@ -1,10 +1,4 @@
-/**
- * ProfileHeader — the dossier hero: stacked identity (type chip, display name,
- * aka line, signal badges + activity status, action row) with a portrait tile
- * on the right, washed in the entity's intel-panel color. The bottom row holds
- * first / last seen, with the activity sparkline (`aside`) at its right end. Scrolls with the page;
- * the tab bar below it is the sticky element.
- */
+/** ProfileHeader — the top of the entity profile: stacked identity (type chip, display name, aka line, signal badges + activity status, action row) with a portrait tile on the right, tinted with the entity's intel-panel color. The bottom row holds first / last seen, with the activity sparkline (`aside`) at its right end. Scrolls with the page; the tab bar below it is the sticky element. */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -86,18 +80,15 @@ export function ProfileHeader({
   const isVisitor = useIsVisitor();
   // Manifest badges (noise class, SSVC, EOL) — same query as the Context panel.
   const { data: context } = useEntityContext(entityType, entityId);
-  // A CVE affecting an end-of-life product gets "no patch coming" — same
-  // query as the Overview's Affected panel.
+  // A CVE affecting an end-of-life product gets "no patch coming" — same query as the Overview's Affected panel.
   const { data: affectedRows } = useCveAffectedRows(entityType === "cve" ? entityId : undefined);
   const noPatch = entityType === "cve" ? noPatchBadge(affectedRows) : null;
   const aliases = entity.aliases ?? [];
-  // Catalog-keyed types (ttp, cwe) lead with the id in mono, then the name.
-  // Which field holds the id is config, not a branch per type here.
+  // Catalog-keyed types (ttp, cwe) lead with the id in mono, then the name. Which field holds the id is config, not a branch per type here.
   const monoId = config.monoIdKey ? entity[config.monoIdKey] : undefined;
   const monoIdName = config.monoIdKey === "technique_id" ? entity.technique_name : entity.name;
 
-  // Faded wash of the entity's intel-panel color behind the identity block —
-  // hex + alpha suffix keeps it subtle on the dark ground in every theme.
+  // Faded tint of the entity's intel-panel color behind the identity block; the low hex alpha suffix keeps it subtle in every theme.
   const headerWash = {
     backgroundImage: `radial-gradient(ellipse 640px 300px at 8% -10%, ${accent}30, transparent 68%), radial-gradient(ellipse 420px 260px at 92% -15%, ${accent}16, transparent 62%)`,
   };
@@ -258,20 +249,14 @@ export function ProfileHeader({
             <span className={styles.metaLabel}>Last seen</span> {formatDate(entity.last_seen_at)}
           </span>
         )}
-        {/* External pivot links moved to the Overview's Sources card — the
-            header meta row keeps only identity facts. */}
+        {/* External pivot links are in the Overview's Sources card (SourcesCard); the header meta row keeps only identity facts. */}
         {aside && <div className={styles.heroAside}>{aside}</div>}
       </div>
     </div>
   );
 }
 
-/**
- * Click-to-edit display name. Renders the entity name as an <h1>-styled button;
- * clicking swaps in an input. Enter/blur commits, Escape cancels. A rejected
- * save (e.g. 409 name-already-taken) is surfaced as a toast and the editor stays
- * open so the operator can pick another name.
- */
+/** Click-to-edit display name. Renders the entity name as an <h1>-styled button; clicking swaps in an input. Enter/blur commits, Escape cancels. A rejected save (e.g. 409 name-already-taken) is surfaced as a toast and the editor stays open so the operator can pick another name. */
 function InlineEditableName({
   name,
   onSave,

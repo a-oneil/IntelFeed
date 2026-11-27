@@ -44,12 +44,9 @@ export function useUpdateSystemSettings() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["system-settings"] });
-      // Surfaces that summarize settings (Engine › Publishing policy line)
-      // read their own endpoints — refresh them with the save.
+      // Views that summarize settings (the Engine › Publishing policy line) read their own endpoints, so refresh them with the save.
       qc.invalidateQueries({ queryKey: ["publish-status"] });
-      // The personal-key policy is a system setting too: My AI, the reader
-      // panel's key dots and the copilot header all read it from their own
-      // endpoints.
+      // The personal-key policy is a system setting too: My AI, the reader panel's key dots and the copilot header all read it from their own endpoints.
       qc.invalidateQueries({ queryKey: ["my-ai"] });
       qc.invalidateQueries({ queryKey: ["copilot-config"] });
     },

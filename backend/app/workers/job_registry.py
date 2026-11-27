@@ -164,8 +164,8 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         ),
         "category": "intelligence",
         "uses_ai": True,
-        # After the 04:00 link validator; per-entity tasks queue serially on
-        # the ai worker so the daily batch paces itself.
+        # Per-entity tasks queue serially on the ai worker, so the daily batch
+        # paces itself.
         "default_schedule": {"type": "crontab", "minute": "45", "hour": "5"},
     },
     "review-relationships": {
@@ -198,7 +198,7 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         ],
         "task": "app.workers.entity_maintenance_tasks.review_duplicate_entities",
         "description": (
-            "Send the catalogue's most likely duplicate pairs of actors, malware and tools to the model "
+            "Send the catalog's most likely duplicate pairs of actors, malware and tools to the model "
             "(similar names, a shared alias, or the same articles) and file a Merge proposal on the "
             "Review tab for each pair it calls the same. Nothing is merged until a person applies it. "
             "A pair judged different is not asked again until the retry window passes."
@@ -316,7 +316,7 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "description": "Pre-warm correlation cache for high-activity entities",
         "category": "maintenance",
         # Hourly: the cache lives `correlation_cache_ttl_seconds` (3600 s), so
-        # warming it four times an hour just redid the same work.
+        # warming it more often than hourly repeats the same work.
         "default_schedule": {"type": "crontab", "minute": "10"},
     },
     "sync-entity-search-indexes": {

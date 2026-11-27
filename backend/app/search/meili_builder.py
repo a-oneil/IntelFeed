@@ -23,8 +23,8 @@ _SORT_MAP = {
 }
 
 # A multi-branch query has to over-fetch from each branch to page correctly,
-# since the union is assembled here rather than in the index. This bounds the
-# damage a deep offset can do.
+# since the union is assembled here rather than in the index. This caps the
+# cost of a deep offset.
 _MAX_BRANCH_FETCH = 1000
 
 
@@ -175,13 +175,13 @@ def execute_entry_search(
         "attributesToCrop": ["content_text"],
         "cropLength": 200,
         # Terms are ANDed. Meilisearch's default ("last") drops trailing words
-        # when strict matching runs short, which made `a AND b` return very
+        # when strict matching runs short, which makes `a AND b` return very
         # nearly what `a` alone returns.
         "matchingStrategy": "all",
         # Everything the search page's Entries facets offer. feed_title rather
         # than feed_id so the counts arrive already human-readable; the index's
         # maxValuesPerFacet is 5000, well clear of the feed count. With a viewer,
-        # `user_tags` rides along so their personal tags can be folded into the
+        # `user_tags` is requested too so their personal tags can be folded into the
         # `tags` facet before the response leaves the server.
         "facets": meilisearch_client.viewer_facets(
             ["feed_type", "feed_title", "tags", "media_type", "language"], plan.viewer_id
@@ -211,10 +211,9 @@ def execute_entry_search(
         params["limit"] = branch_limit
         params["offset"] = branch_offset
         # A caller that skipped resolve_feed_filters/resolve_entry_filters leaves
-        # placeholders behind. Dropping those clauses degrades to "filter
-        # ignored", which is what such a caller got before the filter could take
-        # part in an OR — far better than handing Meilisearch a filter it cannot
-        # parse and losing the whole search.
+        # placeholders behind. Dropping those clauses means that filter is
+        # ignored, which is far better than handing Meilisearch a filter it
+        # cannot parse and losing the whole search.
         filters = [f for f in shared + branch.filters if "\x00pending:" not in f]
         if filters:
             params["filter"] = " AND ".join(filters)

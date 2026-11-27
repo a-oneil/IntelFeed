@@ -47,18 +47,11 @@ import type { EntityType } from "@/utils/entityTheme";
 import type { WorkspaceSection } from "@/stores/intelStore";
 
 /**
- * The app's command vocabulary — everything ⌘K can take you to or do.
+ * The app's command list: everything the ⌘K palette can navigate to or do.
  *
- * The palette is a *command* launcher only: it never queries the server. Entity
- * and entry lookup lives on the /search route (reachable from here via the
- * "Search" command), so this list is the palette's entire universe and has to
- * stay in step with the routes in `App.tsx`, the workbench rail in
- * `WorkbenchPage.SECTION_CONFIG`, and the settings rail in
- * `SettingsPage.NAV_GROUPS`.
+ * The palette is a *command* launcher only: it never queries the server. Entity and entry lookup lives on the /search route (reachable from here via the "Search" command), so this list is everything the palette can offer and has to stay in step with the routes in `App.tsx`, the workbench rail in `WorkbenchNav.SECTION_CONFIG`, and the settings rail in `SettingsPage.NAV_GROUPS`.
  *
- * Everything in this file is pure data or a pure function: how a command is
- * *performed* (navigate / open a modal / switch workbench section) stays with
- * whichever surface renders it.
+ * Everything in this file is pure data or a pure function: how a command is *performed* (navigate / open a modal / switch workbench section) stays with whichever surface renders it.
  */
 
 export interface QuickAction {
@@ -66,17 +59,17 @@ export interface QuickAction {
   path: string;
   /** Row icon. Entity-type commands set `entityType` instead. */
   icon?: TablerIcon;
-  /** Shown as that type's colour dot, the same marker the workbench rail uses. */
+  /** Shown as that type's color dot, the same marker the workbench rail uses. */
   entityType?: EntityType;
   category: ActionCategory;
   keywords?: string[];
-  /** If set, navigate to path AND set this workbench section before navigating */
+  /** If set, set this workbench section before navigating to `path`. */
   workbenchSection?: WorkspaceSection;
   /** Non-navigation action id, handled specially instead of navigating to `path`. */
   special?: SpecialAction;
-  /** Hidden from non-admins — the destination would bounce them anyway. */
+  /** Hidden from non-admins, since the destination would reject them anyway. */
   adminOnly?: boolean;
-  /** Keyboard shortcut shown on the right — the palette doubles as a cheat sheet. */
+  /** Keyboard shortcut shown on the right of the row, so the palette also teaches the shortcuts. */
   shortcut?: string;
 }
 
@@ -96,7 +89,7 @@ export const ACTION_CATEGORY_LABELS: Record<ActionCategory, string> = {
   manage: "MANAGE",
 };
 
-/** Render order for the empty-query menu; also the order fuzzy ties break in. */
+/** Render order for the empty-query menu; also the tie-break order for equal fuzzy scores. */
 export const ACTION_CATEGORY_ORDER: ActionCategory[] = [
   "run",
   "create",
@@ -105,9 +98,7 @@ export const ACTION_CATEGORY_ORDER: ActionCategory[] = [
   "manage",
 ];
 
-// The workbench rail is a single route whose active section is store state, so
-// its entries deep-link through ?section= — WorkbenchPage activates it and then
-// strips the param.
+// The workbench rail is a single route whose active section is store state, so its entries deep-link through ?section=; WorkbenchPage activates that section and then removes the param.
 const explore = (section: WorkspaceSection) => `/workbench/explore?section=${section}`;
 
 export const QUICK_ACTIONS: QuickAction[] = [
@@ -160,8 +151,7 @@ export const QUICK_ACTIONS: QuickAction[] = [
   { label: "Glossary", icon: IconVocabulary, path: explore("glossary"), category: "workbench", workbenchSection: "glossary", keywords: ["terms", "definitions", "glossary", "acronym"] },
 
   // --- Manage (settings rail + engine views) -------------------------------
-  // Engine deep links go through the console's legacy ?tab= / ?section= map —
-  // that mapping is the only URL surface EngineMatrix exposes for its views.
+  // Engine deep links use the older ?tab= / ?section= form, which EngineSection maps onto the console's current views (it also accepts ?view=).
   { label: "Account settings", icon: IconUserCircle, path: "/settings?section=account", category: "manage", keywords: ["account", "profile", "password", "email", "api key", "token"] },
   { label: "Appearance & themes", icon: IconPalette, path: "/settings?section=appearance", category: "manage", keywords: ["theme", "appearance", "dark", "light", "colors", "font", "look"] },
   { label: "Reading preferences", icon: IconBook, path: "/settings?section=reading", category: "manage", keywords: ["reading", "reader", "translate", "tts", "read aloud", "speech", "density"] },
@@ -209,7 +199,7 @@ export function fuzzyScore(query: string, target: string, keywords?: string[]): 
   }
 
   if (qi === q.length) {
-    // All chars matched — base score + consecutive bonus
+    // All chars matched: base score + consecutive bonus + a share for how much of the target the query covers
     return 30 + consecutiveBonus + (q.length / t.length) * 20;
   }
 

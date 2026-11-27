@@ -1,8 +1,4 @@
-/**
- * Cleans article text for the Web Speech API. Without this, security articles
- * are read terribly: URLs are spelled character by character, CVE IDs are
- * mispronounced, IP addresses run together, and code blocks are read literally.
- */
+/** Cleans article text for the Web Speech API. Without this, security articles read aloud badly: URLs are spelled character by character, CVE IDs are mispronounced, IP addresses run together, and code blocks are read literally. */
 
 const URL_REGEX = /\b(?:https?:\/\/|www\.)\S+/gi;
 const EMAIL_REGEX = /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi;
@@ -33,11 +29,7 @@ export function cleanForSpeech(text: string): string {
 
 const BLOCK_SELECTOR = "p, h1, h2, h3, h4, h5, h6, li, blockquote, td, pre";
 
-/**
- * Pull readable paragraphs out of an article container for read-aloud.
- * Replaces &lt;pre&gt; blocks with a stub so the synthesizer doesn't enumerate
- * every character of source code.
- */
+/** Pull readable paragraphs out of an article container for read-aloud. Replaces &lt;pre&gt; blocks with a stub so the synthesizer doesn't read out every character of source code. */
 export function extractSpeechParagraphs(
   container: Element | null,
   title?: string | null,
@@ -51,8 +43,7 @@ export function extractSpeechParagraphs(
 
   const blocks = container.querySelectorAll(BLOCK_SELECTOR);
   blocks.forEach((block) => {
-    // Skip blocks that are nested inside an already-emitted block (e.g. a <p>
-    // inside a <li>) so content isn't read twice.
+    // Skip blocks that are nested inside an already-emitted block (e.g. a <p> inside a <li>) so content isn't read twice.
     for (const ancestor of pushed) {
       if (ancestor.contains(block)) return;
     }

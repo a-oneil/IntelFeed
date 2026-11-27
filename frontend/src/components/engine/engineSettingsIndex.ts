@@ -2,8 +2,7 @@ import type { SettingValue } from "@/hooks/useSystemSettings";
 
 import type { BrowseView, MatrixView } from "./EngineMatrix";
 
-/** Where in the console a setting lives. The Engine spreads its knobs across
- *  stage panels, table views and browse screens — this is the map back. */
+/** Where in the console a setting lives. The Engine spreads its settings across stage panels, table views and browse screens; this type points a setting back to the place that edits it. */
 export type EngineDest =
   | { kind: "stage"; stage: string }
   | { kind: "view"; view: MatrixView }
@@ -20,9 +19,7 @@ export interface SettingHit {
   score: number;
 }
 
-/** Setting group → the console surface that renders it. Mirrors every
- *  `<SystemSettings filterGroups={…}>` call under components/engine/ plus the
- *  two groups that only exist on the Settings page. */
+/** Setting group → the console surface that renders it. Mirrors every `<SystemSettings filterGroups={…}>` call under components/engine/ plus the two groups that only exist on the Settings page. */
 const GROUP_DEST: Record<string, EngineDest> = {
   autolink: { kind: "stage", stage: "autolink" },
   ai: { kind: "stage", stage: "analyze" },
@@ -49,9 +46,7 @@ const GROUP_DEST: Record<string, EngineDest> = {
   public_rss: { kind: "settings", section: "feeds" },
 };
 
-/** The `ai` group's people-facing keys: the personal-key policy, the
- *  per-person allowance and the share-link limit. They render on the User keys
- *  tab of AI Configuration and are excluded from the Analyze stage panel. */
+/** The `ai` group's people-facing keys: the personal-key policy, the per-person allowance and the share-link limit. They render on the User keys tab of AI Configuration and are excluded from the Analyze stage panel. */
 export const USER_AI_SETTING_KEYS = [
   "allow_user_ai_providers",
   "require_user_ai_provider",
@@ -62,13 +57,10 @@ export const USER_AI_SETTING_KEYS = [
   "share_ai_daily_requests",
 ] as const;
 
-/** The `ai` group's copilot keys: edited on the copilot's Prompt Workspace
- *  page ("Skip Confirm for"), not the Analyze stage panel. */
+/** The `ai` group's copilot keys: edited on the copilot's Prompt Workspace page ("Skip Confirm for"), not the Analyze stage panel. */
 export const COPILOT_AI_SETTING_KEYS = ["copilot_auto_approve_tools"] as const;
 
-/** Key-level exceptions to GROUP_DEST: the observables publish knobs render
- *  on the Publishing browse screen, not the stage panel; the personal-key
- *  settings on the User keys tab. */
+/** Key-level exceptions to GROUP_DEST: the observables publish settings render on the Publishing browse screen, not the stage panel; the personal-key settings on the User keys tab. */
 const KEY_DEST: Record<string, EngineDest> = {
   allow_user_ai_providers: { kind: "settings", section: "ai", tab: "keys" },
   require_user_ai_provider: { kind: "settings", section: "ai", tab: "keys" },
@@ -117,8 +109,7 @@ export function destLabel(dest: EngineDest): string {
   }
 }
 
-/** Configuration that isn't a system setting — hand-written so "denylist" or
- *  "schedule" finds the panel that owns it. */
+/** Configuration that isn't a system setting — hand-written so "denylist" or "schedule" finds the panel that owns it. */
 const PANELS: { label: string; hint: string; terms: string; dest: EngineDest }[] = [
   {
     label: "Extraction denylist",
@@ -182,8 +173,7 @@ const PANELS: { label: string; hint: string; terms: string; dest: EngineDest }[]
   },
 ];
 
-/** Underscores and hyphens read as spaces on both sides, so a pasted setting
- *  key ("thread_join_similarity") and its prose label both match. */
+/** Underscores and hyphens read as spaces on both sides, so a pasted setting key ("thread_join_similarity") and its prose label both match. */
 function norm(text: string): string {
   return text.toLowerCase().replace(/[_-]+/g, " ");
 }

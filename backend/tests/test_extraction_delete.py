@@ -3,7 +3,7 @@
 A plain entity delete leaves nothing behind, so the next article mentioning the
 name re-mints it. POST /api/engine/extraction/delete also writes an
 ``analyst_delete`` denylist row, which the resolver and the CVE/TTP store paths
-honour regardless of the entity-creation-gate mode.
+honor regardless of the entity-creation-gate mode.
 """
 
 import uuid
@@ -474,7 +474,7 @@ async def test_delete_from_review_clears_pending_proposals_and_takes_vendors(
     # Applied history stays; only the pending proposal is cleared.
     assert [(r.action, r.applied) for r in left] == [("reclassify", True)]
 
-    # A seeded catalogue is deleted but never denylisted.
+    # A seeded catalog is deleted but never denylisted.
     country = Country(name="Freedonia", iso_code="FD", aliases=[])
     db_session.add(country)
     await db_session.flush()

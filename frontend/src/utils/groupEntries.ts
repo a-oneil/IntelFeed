@@ -26,9 +26,7 @@ export interface GroupItem {
 
 export type DisplayItem = SingleItem | GroupItem;
 
-/**
- * Strip the CVE ID and leading punctuation from a title.
- */
+/** Strip the CVE ID and leading punctuation from a title. */
 function stripCveId(title: string): string {
   return title
     .replace(CVE_PATTERN, "")
@@ -36,12 +34,7 @@ function stripCveId(title: string): string {
     .trim();
 }
 
-/**
- * Extract a product/vendor name from a CVE title by finding the longest
- * sequence of capitalized words (proper nouns = product/vendor names).
- * e.g. "A security flaw in Tiandy Easy7 Integrated Management Platform 7.17.0"
- *   → "Tiandy Easy7 Integrated Management Platform"
- */
+/** Extract a product/vendor name from a CVE title by finding the longest sequence of capitalized words (proper nouns are usually product/vendor names). For example, "A security flaw in Tiandy Easy7 Integrated Management Platform 7.17.0" → "Tiandy Easy7 Integrated Management Platform" */
 function extractProductSignature(title: string): string {
   const desc = stripCveId(title);
   // Match sequences of capitalized words (allowing digits, e.g. Easy7, V8)
@@ -53,15 +46,11 @@ function extractProductSignature(title: string): string {
   return "";
 }
 
-/**
- * Find the best product label for a group of CVE titles.
- * Uses the longest common capitalized sequence across all titles.
- */
+/** Find the best product label for a group of CVE titles. Uses the longest common capitalized sequence across all titles. */
 function extractGroupLabel(titles: string[]): string {
   const signatures = titles.map(extractProductSignature);
 
-  // Find the signature that appears (case-insensitive) in all titles
-  // Try the longest signatures first
+  // Find the signature that appears (case-insensitive) in all titles, trying the longest signatures first
   const candidates = [...new Set(signatures)].sort((a, b) => b.length - a.length);
 
   for (const candidate of candidates) {
@@ -71,15 +60,12 @@ function extractGroupLabel(titles: string[]): string {
     if (allMatch) return candidate;
   }
 
-  // Fallback: use the most common signature
+  // Fallback: use the first title's signature
   if (signatures[0]) return signatures[0];
   return "";
 }
 
-/**
- * Groups consecutive CVE entries from the same feed into collapsed groups.
- * Only groups 2+ consecutive CVE entries; singles pass through unchanged.
- */
+/** Groups consecutive CVE entries from the same feed into collapsed groups. Only runs of at least `minGroupSize` (default 2) CVE entries with matching product signatures are grouped; everything else passes through as singles. */
 export function groupConsecutiveEntries(
   entries: Entry[],
   minGroupSize = 2,
@@ -97,8 +83,7 @@ export function groupConsecutiveEntries(
       continue;
     }
 
-    // Start of a potential CVE run — collect consecutive same-feed CVE entries
-    // that share a product signature (capitalized proper noun sequence)
+    // Start of a potential CVE run — collect consecutive same-feed CVE entries that share a product signature (capitalized proper noun sequence)
     const sig = extractProductSignature(entry.title);
     const runStart = i;
     const run: Entry[] = [entry];

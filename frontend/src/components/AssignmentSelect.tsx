@@ -1,12 +1,9 @@
 import type { AIProvider } from "@/api/types";
 
 /**
- * Provider/model picker for AI task assignments. Options come from each
- * provider's cached model list (populated by running Test on the provider).
- * Value format is "providerId|model", "" = unassigned.
+ * Provider/model picker for AI task assignments. Options come from each provider's cached model list (populated by running Test on the provider). Value format is "providerId|model", "" = unassigned.
  *
- * When `requiresTools` is set (agentic tasks), providers without tool support
- * are disabled — the backend rejects those assignments with 400 anyway.
+ * When `requiresTools` is set (agentic tasks), providers without tool support are disabled; the backend rejects those assignments with a 400 anyway.
  */
 export default function AssignmentSelect({
   providers,

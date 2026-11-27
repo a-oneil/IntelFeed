@@ -16,7 +16,7 @@ export function Sparkline({
   const step = width / (values.length - 1);
   const points = values.map((v, i) => `${(i * step).toFixed(1)},${(height - (v / max) * height).toFixed(1)}`).join(" ");
 
-  // Spiking this week vs. the trailing average — a simple, cheap "is this hot" signal.
+  // Spiking: this week is at least 3 and at least twice the average of the earlier weeks.
   const last = values[values.length - 1];
   const priorAvg = values.slice(0, -1).reduce((a, b) => a + b, 0) / Math.max(values.length - 1, 1);
   const isSpiking = last > 0 && last >= priorAvg * 2 && last >= 3;

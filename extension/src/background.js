@@ -1,7 +1,4 @@
-// The background worker: the only part of the extension that talks to the
-// server (see lib/api.js), plus the right-click menus, the toolbar dot and
-// badge, the page script's registration, the user's theme, and the alarm that
-// keeps the session fresh.
+// The background worker: the only part of the extension that talks to the server (see lib/api.js), plus the right-click menus, the toolbar dot and badge, the page script's registration, the user's theme, and the alarm that keeps the session fresh.
 
 import { ApiError, NotSignedIn, originPattern, refreshSession, request, signIn, signOut, unlessSignedOut } from "./lib/api.js";
 import { capturePage } from "./lib/capture.js";
@@ -24,16 +21,13 @@ const REFRESH_ALARM = "refresh-session";
 const UPDATE_ALARM = "check-for-update";
 const RESULTS_ALARM = "watch-results";
 const OUTBOX_ALARM = "flush-outbox";
-// The toolbar dot and highlighting need to see every page: an optional
-// permission the user grants on the settings page.
+// The toolbar dot and highlighting need to see every page: an optional permission the user grants on the settings page.
 const ALL_SITES = { origins: ["http://*/*", "https://*/*"] };
 const PAGE_SCRIPT = "page";
 
 // ── session upkeep ────────────────────────────────────────────────────
 //
-// A refresh token is good for 7 days and each refresh issues a new one, so
-// refreshing twice a day (and when the browser starts) keeps the extension
-// signed in for as long as the browser gets used at least once a week.
+// A refresh token is good for 7 days and each refresh issues a new one, so refreshing twice a day (and when the browser starts) keeps the extension signed in for as long as the browser gets used at least once a week.
 
 async function keepFresh() {
   const { refresh } = await store.load();
@@ -82,8 +76,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // ── update check ──────────────────────────────────────────────────────
 //
-// Once a day: the newest extension-v* release on GitHub. The extension never
-// updates itself; the popup and settings page say when a newer one exists.
+// Once a day: the newest extension-v* release on GitHub. The extension never updates itself; the popup and settings page say when a newer one exists.
 
 async function checkForUpdate() {
   const resp = await fetch(RELEASES_API, { headers: { Accept: "application/vnd.github+json" } });
@@ -118,8 +111,7 @@ chrome.omnibox.onInputEntered.addListener(async (text, disposition) => {
   else chrome.tabs.create({ url, active: disposition !== "newBackgroundTab" });
 });
 
-// Signed out (a refused refresh, or Sign out): say so on the toolbar button
-// for every tab, instead of the page features quietly stopping.
+// Signed out (a refused refresh, or Sign out): say so on the toolbar button for every tab, instead of the page features quietly stopping.
 async function showSessionState() {
   const { access, server, outbox } = await store.load();
   const signedOut = Boolean(server) && !access;
@@ -274,13 +266,9 @@ const repoUrl = (repo) => `https://github.com/${repo.owner}/${repo.repo}`;
 
 // ── the toolbar dot and badge ─────────────────────────────────────────
 //
-// Per tab: a green dot when the page is already in IntelFeed, an
-// accent-colored one when the site offers a feed (or is a GitHub repo) the
-// user doesn't follow yet. A send flashes ✓ or ! for a few seconds, then the
-// dot comes back.
+// Per tab: a green dot when the page is already in IntelFeed, an accent-colored one when the site offers a feed (or is a GitHub repo) the user doesn't follow yet. A send flashes ✓ or ! for a few seconds, then the dot comes back.
 
-// Per tab: {url, collected, followable}, kept in storage.session under
-// `tab:<id>` so it survives the worker being stopped between events.
+// Per tab: {url, collected, followable}, kept in storage.session under `tab:<id>` so it survives the worker being stopped between events.
 const tabKey = (tabId) => `tab:${tabId}`;
 const getTab = async (tabId) => (await chrome.storage.session.get(tabKey(tabId)))[tabKey(tabId)];
 const setTab = (tabId, state) => chrome.storage.session.set({ [tabKey(tabId)]: state });
@@ -310,9 +298,7 @@ async function setDot(tabId) {
     }
   }
   try {
-    // No dot: the same badge showSessionState sets for every tab, since a
-    // tab's own badge hides it. Signed out shows !, else the number of sends
-    // waiting for the server, if any.
+    // No dot: the same badge showSessionState sets for every tab, since a tab's own badge hides it. Signed out shows !, else the number of sends waiting for the server, if any.
     if (!text && server && !access) {
       text = "!";
       color = "#c62828";
@@ -352,8 +338,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
   if (state && stripHash(state.url) === stripHash(changeInfo.url)) return;
   await dropTab(tabId);
   setDot(tabId);
-  // A page that changes its URL without loading (a single-page app) keeps the
-  // same page script: ask it to look again once the new view has rendered.
+  // A page that changes its URL without loading (a single-page app) keeps the same page script: ask it to look again once the new view has rendered.
   setTimeout(() => chrome.tabs.sendMessage(tabId, { type: "rescan" }).catch(() => {}), 1500);
 });
 
@@ -361,12 +346,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
 
 let pageScriptQueue = Promise.resolve();
 
-/**
- * Register the page script when the user has allowed it and wants the dot or
- * highlighting; else remove it. Several events can ask at once (a settings
- * save and its storage change), so the calls run one after another: two
- * overlapping unregister/register runs fail with a duplicate script id.
- */
+/** Register the page script when the user has allowed it and wants the dot or highlighting; else remove it. Several events can ask at once (a settings save and its storage change), so the calls run one after another: two overlapping unregister/register runs fail with a duplicate script id. */
 function syncPageScript() {
   const run = pageScriptQueue.then(registerPageScript);
   pageScriptQueue = run.catch(() => {});
@@ -485,9 +465,7 @@ async function watchModes({ fresh = false } = {}) {
 
 async function setWatch({ entityType: type, id, on }) {
   const key = `${type}:${id}`;
-  // The watchlist keeps one mode per entity, so watching a muted entity or one
-  // in My Stack would replace that mode. The card offers no button for them;
-  // this refuses a stale card's click.
+  // The watchlist keeps one mode per entity, so watching a muted entity or one in My Stack would replace that mode. The card offers no button for them; this refuses a stale card's click.
   if (!WATCHABLE.has(type)) throw new Error("This type of entity can't be added to the watchlist.");
   const modes = await watchModes({ fresh: true });
   if (!watchState(type, modes.get(key)).watchable) {
@@ -635,7 +613,7 @@ async function sendToReport({ tabId, reportId, note, tagIds }) {
 async function pendingRule({ key }) {
   const data = (await chrome.storage.session.get(`rule:${key}`))[`rule:${key}`];
   if (!data) throw new Error("The selected text is no longer available. Select it again and use the right-click menu.");
-  // The rule window keeps it from here.
+  // The rule window holds the text from here on, so the session copy is removed.
   await chrome.storage.session.remove(`rule:${key}`);
   let entry = null;
   try {
@@ -705,9 +683,7 @@ async function servesPdf(url) {
 
 async function pageStatus(tabId) {
   const page = await readTab(tabId, false);
-  // The popup still opens, with Send on, when the server can't be reached or
-  // can't look the page up (an address over 4000 characters): the send then
-  // waits in the outbox or gets the server's own error.
+  // The popup still opens, with Send on, when the server can't be reached or can't look the page up (an address over 4000 characters): the send then waits in the outbox or gets the server's own error.
   let lookupError = null;
   const [entry, tags, follows, { features, disabledSites }, allSites] = await Promise.all([
     unlessSignedOut(lookupEntry(page.url), (err) => {
@@ -786,10 +762,7 @@ async function sendLink(url, title) {
 
 // ── PDFs ──────────────────────────────────────────────────────────────
 //
-// The browser's PDF viewer can't be read by an extension, so the file itself
-// is fetched (with the browser's cookies, so signed-in and intranet PDFs
-// work) and uploaded. PDFs are not queued when the server is down: they can
-// be tens of megabytes.
+// The browser's PDF viewer can't be read by an extension, so the file itself is fetched (with the browser's cookies, so signed-in and intranet PDFs work) and uploaded. PDFs are not queued when the server is down: they can be tens of megabytes.
 
 let capabilities = null; // {maxBytes, at}
 
@@ -837,9 +810,7 @@ async function sendPdf(page, { note, tagIds }) {
 
 // ── the outbox ────────────────────────────────────────────────────────
 //
-// A page or link send that can't reach the server waits in storage and goes
-// out, oldest first, after the next successful session renewal, on startup,
-// every 5 minutes while anything waits, or from the popup's Send now.
+// A page or link send that can't reach the server waits in storage and goes out, oldest first, after the next successful session renewal, on startup, every 5 minutes while anything waits, or from the popup's Send now.
 
 async function queueSend(item) {
   const { outbox } = await store.load();
@@ -887,9 +858,7 @@ async function outboxStatus() {
 
 // ── results after a send ──────────────────────────────────────────────
 //
-// A new page goes through the pipeline (linking, AI analysis, scoring) over
-// the next minutes. Poll each one once a minute for up to 30 minutes and say
-// what came out of it.
+// A new page goes through the pipeline (linking, AI analysis, scoring) over the next minutes. Poll each one once a minute for up to 30 minutes and say what came out of it.
 
 const WATCH_FOR = 30 * 60 * 1000;
 
@@ -1033,8 +1002,7 @@ async function saveTelemetryNote({ sourceName, url, pageTitle, quote, content })
   };
 }
 
-// A site that advertises no feed: the server looks at its usual feed
-// addresses (POST /api/feeds/discover). One answer per site for a day.
+// A site that advertises no feed: the server looks at its usual feed addresses (POST /api/feeds/discover). One answer per site for a day.
 const DISCOVER_MAX_AGE = 24 * 60 * 60 * 1000;
 const discovered = new Map(); // origin → {feed, at}
 
@@ -1136,9 +1104,7 @@ const PAGE_HANDLERS = {
   convertRule: (message) => convertRule(message),
 };
 
-// From the page script running in a web page. Web pages themselves can't
-// reach these (only the extension's own script in the page can), and none of
-// them take a tab id from the page.
+// From the page script running in a web page. Web pages themselves can't reach these (only the extension's own script in the page can), and none of them take a tab id from the page.
 const CONTENT_HANDLERS = {
   pageSeen: (message, sender) => pageSeen(sender.tab.id, message),
   scan: (message) => scan(message),

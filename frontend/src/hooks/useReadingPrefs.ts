@@ -6,11 +6,7 @@ import { DEFAULT_QUERY_LANGUAGE, isQueryLanguage, type QueryLanguage } from "@/u
 /**
  * The Settings → Reading preferences, with the shipped defaults.
  *
- * These live on the account (`users.settings`), so they follow the analyst
- * between devices, while the toolbar toggles they seed (`uiStore`) stay per
- * browser. The defaults are what a fresh account gets; they match what the
- * UI store starts with on a fresh browser, so changing a default here is the
- * one place to change first-run behaviour.
+ * These live on the account (`users.settings`), so they follow the analyst between devices, while the toolbar toggles they seed (`uiStore`) stay per browser. The defaults are what a fresh account gets; they match what the UI store starts with on a fresh browser, so changing a default here is the one place to change first-run behavior.
  */
 export interface ReadingPrefs {
   /** Which entries a feed opens on: everything, or unread only. */
@@ -29,8 +25,7 @@ export interface ReadingPrefs {
   compact_view: boolean;
   /** Show the summary line under each entry title. */
   show_entry_preview: boolean;
-  /** The query language IntelFeed writes queries and detection logic in for
-      this analyst: hunt packs, default rule formats, copilot and summaries. */
+  /** The query language IntelFeed writes queries and detection logic in for this analyst: hunt packs, default rule formats, copilot and summaries. */
   query_language: QueryLanguage;
 }
 
@@ -77,11 +72,7 @@ export function currentReadingPrefs(): ReadingPrefs {
   return readingPrefs(useAuthStore.getState().user?.settings as Record<string, unknown> | undefined);
 }
 
-/**
- * The four preferences that are really defaults for toolbar toggles: push
- * them into the UI store. Compact view only moves the list between compact
- * and magazine rows — an analyst on table or expanded view keeps it.
- */
+/** The four preferences that are really defaults for toolbar toggles: push them into the UI store. Compact view only switches the list between compact and magazine rows; an analyst on table or expanded view stays there. */
 export function applyReadingPrefsToUI(prefs: ReadingPrefs): void {
   useUIStore.setState((state) => ({
     showUnreadOnly: prefs.default_view === "unread",
@@ -100,10 +91,7 @@ export function readingPrefsStamp(userId: string, prefs: ReadingPrefs): string {
 /**
  * Seed this browser's toolbar toggles from the account's Reading preferences.
  *
- * Mount once, app-wide. It applies when the account's preferences differ from
- * the ones this browser last applied — first sign-in here, a different user
- * signing in, or a preference changed in Settings on any device. Between
- * those moments the toolbar toggles are the analyst's own, per browser.
+ * Mount once, app-wide. It applies when the account's preferences differ from the ones this browser last applied: first sign-in here, a different user signing in, or a preference changed in Settings on any device. In between, the analyst sets the toolbar toggles freely, per browser.
  */
 export function useReadingPrefsSync(): void {
   const userId = useAuthStore((s) => s.user?.id);
@@ -115,7 +103,7 @@ export function useReadingPrefsSync(): void {
     if (!stamp || stamp === applied) return;
     applyReadingPrefsToUI(prefs);
     useUIStore.setState({ readingPrefsApplied: stamp });
-    // `prefs` is derived from the same settings the stamp summarises.
+    // `prefs` is derived from the same settings the stamp summarizes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stamp, applied]);
 }

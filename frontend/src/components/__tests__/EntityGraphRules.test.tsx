@@ -8,8 +8,7 @@ class ResizeObserverStub {
   disconnect() {}
 }
 vi.stubGlobal("ResizeObserver", ResizeObserverStub);
-// React Flow reads the viewport transform through DOMMatrixReadOnly, which
-// jsdom lacks.
+// React Flow reads the viewport transform through DOMMatrixReadOnly, which jsdom lacks.
 class DOMMatrixReadOnlyStub {
   m22: number;
   constructor(transform?: string) {

@@ -58,11 +58,10 @@ class ThreatActor(Base):
     def _normalize_motivation(self, _key: str, value):
         """Fold the motivation vocabulary on the way in, whoever is writing.
 
-        `coerce_motivation` has existed since the reference-feed importer
-        landed, but only that one caller used it — AI extraction, the tool
-        registry, the profile editor and the AI field-fill each wrote raw, so a
-        third of actors carried a motivation the facet couldn't group. The
-        check belongs on the column, not on whichever caller remembers it.
+        Only the reference-feed importer called `coerce_motivation`; AI
+        extraction, the tool registry, the profile editor and the AI field-fill
+        each wrote raw values, so a third of actors carried a motivation the
+        facet couldn't group. Coercing on the column covers every writer.
         """
         return normalize_motivation(value)
 

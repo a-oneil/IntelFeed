@@ -244,6 +244,8 @@ All paths below start with `/api` unless shown otherwise. `{id}`-style names are
 | --- | --- | --- | --- |
 | GET | `/api/feeds` | Visitor | Your feeds with unread counts. `category_id`, `limit` (max 1000), `offset` |
 | POST | `/api/feeds` | User | Add a feed. The category's `feed_defaults` fill any pipeline settings you leave out |
+| POST | `/api/feeds/preview` | User | Say what a pasted link is before subscribing (what the Add Feed window shows): a site's feeds, a YouTube channel, a GitHub repo and whether it holds detection rules, a Bluesky account, feed or search, a Telegram channel, a Mastodon hashtag, or a page with no feed and how many article links it has. Also returns the suggested category and the poll interval subscribing would use. 422 when the link leads nowhere |
+| GET | `/api/feeds/category-suggestion?feed_type=` | User | The category most feeds of that type are in (what a create without a category uses) |
 | POST | `/api/feeds/discover` | User | Find the feed behind a web page URL, without adding it: the URL itself, a feed the page advertises, else the first of the site's usual feed addresses (`/feed`, `/rss`, `/feed.xml`, …) that answers with one |
 | GET | `/api/feeds/{feed_id}` | Visitor | One feed |
 | PUT | `/api/feeds/{feed_id}` | User (admin for infrastructure fields) | Change the fields you send. See below |
@@ -311,8 +313,10 @@ All paths below start with `/api` unless shown otherwise. `{id}`-style names are
 | --- | --- | --- | --- |
 | POST | `/api/opml/import` | User (admin unless per-user subscriptions are on) | Import an OPML file (multipart field `file`, max 10 MB). Returns `feeds_added`, `feeds_skipped`, `categories_created`, `errors` |
 | GET | `/api/opml/export` | User | All feeds as OPML XML |
-| GET | `/api/opml/starter-packs` | User | The curated starter feed packs |
+| GET | `/api/opml/starter-packs` | User | The curated starter feed packs, each with how many of its feeds you already follow (`followed_count`) |
 | POST | `/api/opml/starter-packs/import` | User (admin unless per-user subscriptions are on) | Import starter packs by id |
+| GET | `/api/opml/starter-packs/{pack_id}/feeds` | User | One pack's feeds, each marked `followed` when you already have it |
+| POST | `/api/opml/starter-packs/{pack_id}/import` | User (admin unless per-user subscriptions are on) | Import the chosen feeds of one pack: `{"urls": [...]}` |
 | GET | `/api/onboarding/status` | User | Whether this install is seeded, fetching feeds and linking entities |
 
 ---
@@ -381,7 +385,7 @@ An entry is one article (or post, video, file) pulled from a feed.
 | GET | `/api/entries/{entry_id}/similar` | Visitor | Related articles. Uses embeddings when the article has one (`method: "embedding"`), else keyword overlap in Meilisearch (`method: "keyword"`) |
 | GET | `/api/entries/{entry_id}/media` | User | Attached images, audio and video |
 | GET | `/api/entries/{entry_id}/urls` | Visitor | Links found in the article |
-| GET | `/api/entries/{entry_id}/article-metadata` | Visitor | Report type, victim organisations, timeline dates, patch availability |
+| GET | `/api/entries/{entry_id}/article-metadata` | Visitor | Report type, victim organizations, timeline dates, patch availability |
 | POST | `/api/entries/{entry_id}/run-ai-task` | User | Run any AI task (for example `article_summary`) on the article |
 | POST | `/api/entries/bulk-summarize` | User | One AI briefing over several articles |
 | POST | `/api/entries/intel-counts` | Visitor | Entity counts for a batch of entries (for list badges) |
@@ -399,7 +403,7 @@ An entry is one article (or post, video, file) pulled from a feed.
 | POST | `/api/notes/entry/{entry_id}` | User | Add a note to an article |
 | GET | `/api/tags` | Visitor | All tags with entry counts |
 | POST | `/api/tags` | User | Create a tag (409 if the name exists) |
-| PUT | `/api/tags/{tag_id}` | User | Rename, recolour, describe, show as a chip, or switch `is_global` |
+| PUT | `/api/tags/{tag_id}` | User | Rename, recolor, describe, show as a chip, or switch `is_global` |
 | DELETE | `/api/tags/{tag_id}` | User | Delete a tag everywhere |
 | POST | `/api/tags/merge` | User | Merge `source_ids` into `target_id` |
 | GET | `/api/tags/entries/{entry_id}` | Visitor | An article's tags as you see them |
@@ -1064,8 +1068,8 @@ All User.
 | GET | `/api/threat-board/precedent` | Past stories similar to this one |
 | GET | `/api/threat-board/{entity_type}/{entity_key}/rules` | Rules that match a board row |
 | PUT | `/api/threat-board/{entity_type}/{entity_key}/state` | Mark a row `open`, `handled`, `muted` (dismissed) or `tracked` (pinned); the decision also covers the CVEs grouped onto the row |
-| GET | `/api/coverage-workspace/{entity_type}/{entity_key}` | Articles and behaviours for one threat |
-| GET | `/api/coverage-workspace/{entity_type}/{entity_key}/behaviours/{technique_id}/rules` | Rules for one behaviour |
+| GET | `/api/coverage-workspace/{entity_type}/{entity_key}` | Articles and behaviors for one threat |
+| GET | `/api/coverage-workspace/{entity_type}/{entity_key}/behaviours/{technique_id}/rules` | Rules for one behavior |
 | GET, POST | `/api/coverage-workspace/{entity_type}/{entity_key}/sets` | List or save rule sets for the threat |
 | POST | `/api/coverage-workspace/sets/{summary_id}/export` | Export a set |
 | GET | `/api/coverage-workspace/sets/{summary_id}/export.zip` | A set as a ZIP, one file per rule |
@@ -1080,7 +1084,7 @@ One service for the Threats board drawer and the profile. `scope` is a board win
 | GET | `/api/hunt-packs/{entity_type}/{entity_key}` | The pack for a scope and language, telemetry checked at read time. `status` is `none`, `drafting` (poll; `pack` keeps the previous one), `ready` or `failed` (reason in `error`). Each hypothesis carries `technique_refs` (catalog name and profile id, read live) |
 | POST | `/api/hunt-packs/{entity_type}/{entity_key}` | Queue a draft on the AI worker and return 202 with `status: drafting`. A window drafts one to three hypotheses; `all` up to five, claimed techniques and techniques with no rule first. `?more=true` keeps the existing hypotheses, shows them to the model as hunts not to repeat, and adds the new ones after them (H6, H7…, up to 20). 409 when there is nothing to hunt from or the engine is stopped, 422 when `hunt_pack` has no provider |
 | GET | `/api/hunt-packs/{entity_type}/{entity_key}/hunts/{hypothesis_id}.md` | One hypothesis as an ATHF hunt file: YAML frontmatter and the LOCK body, Keep left empty. `?hunt_id=H-0042` numbers it so `athf hunt validate` passes as exported; without it the id stays the `H-XXXX` placeholder |
-| GET | `/api/hunt-packs/{entity_type}/{entity_key}/package.zip` | The hunt package: README, profile, one ATHF file per hypothesis (profile and board packs), queries, telemetry, rules written for the entity and saved rule sets, coverage-coloured ATT&CK layers, entities (claimed apart from co-mentioned), IOCs as CSV and STIX, a timeline and the key articles. Never calls a model |
+| GET | `/api/hunt-packs/{entity_type}/{entity_key}/package.zip` | The hunt package: README, profile, one ATHF file per hypothesis (profile and board packs), queries, telemetry, rules written for the entity and saved rule sets, coverage-colored ATT&CK layers, entities (claimed apart from co-mentioned), IOCs as CSV and STIX, a timeline and the key articles. Never calls a model |
 
 #### Tools (Registry Execution)
 
@@ -1129,7 +1133,7 @@ What Settings > My AI reads and writes. All User.
 
 #### AI Tasks
 
-A task is one AI job (summarise an article, extract entities, write a report section).
+A task is one AI job (summarize an article, extract entities, write a report section).
 
 | Method | Path | Access | What it does |
 | --- | --- | --- | --- |
@@ -1468,7 +1472,7 @@ Files: `app.log`, `error.log`, `http.log`, `jobs.log`, `audit.log`, `update.log`
 | --- | --- | --- | --- |
 | GET | `/api/themes` | Visitor | All themes |
 | GET | `/api/themes/{theme_id}` | Visitor | One theme |
-| GET | `/api/themes/schema` | Public | Colour names and default theme values |
+| GET | `/api/themes/schema` | Public | Color names and default theme values |
 | GET | `/api/themes/default` | Public | The instance default theme (styles the sign-in page) |
 | GET | `/api/themes/default.css` | Public | The same as a stylesheet |
 | POST | `/api/themes` | User | Create a theme |

@@ -55,7 +55,7 @@ def context_filters(request: Request) -> dict[str, str]:
 async def context_columns(db: AsyncSession, entity_type: str, user) -> list[dict]:
     """The context columns ``user`` can see for ``entity_type``: each enabled
     source's table-sized outputs, in source then manifest order. Visitors never
-    see a source that sends observables off the box or bars commercial use —
+    see a source that sends observables to an outside service or bars commercial use —
     the same rule as the profile's Context panel."""
     from app.enrichment.registry import SOURCE_REGISTRY
 

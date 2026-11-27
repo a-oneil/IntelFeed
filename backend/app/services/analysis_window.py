@@ -5,10 +5,10 @@ article text. Threat-research write-ups (Talos, Unit 42, Huntress, Datadog,
 Bitdefender, DFIR Report) run 20k–80k characters and put the part a detection
 engineer wants — the indicator appendix, the hash table, the command-line
 code blocks — at the very end. A plain head slice never shows the model any
-of it, which is why the ``iocs`` array stayed empty for exactly the feeds
-that publish indicators.
+of it, so the ``iocs`` array comes back empty for exactly the feeds that
+publish indicators.
 
-Two fixes live here:
+This module handles that in two parts:
 
 * ``html_to_analysis_text`` renders article HTML with structure the model
   can use: table rows become ``cell | cell`` lines (so a hash stays next to
@@ -111,7 +111,7 @@ def html_to_analysis_text(html: str | None) -> str:
     text = _TAG_RE.sub("", text)
     text = html_mod.unescape(text).replace("\xa0", " ")
 
-    # Per-line whitespace collapse, then paragraph normalisation.
+    # Per-line whitespace collapse, then paragraph normalization.
     lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines()]
     # A table row rendered as " | cell | cell | " → "cell | cell".
     lines = [re.sub(r"^\|\s*|\s*\|$", "", line) for line in lines]
@@ -218,7 +218,7 @@ def find_indicator_section(text: str) -> tuple[int, int] | None:
 
 def _tail_candidate_start(text: str, from_offset: int) -> int | None:
     """Start offset of the trailing region that carries indicator candidates,
-    when the article has no recognisable IOC heading. Precision-first: needs
+    when the article has no recognizable IOC heading. Precision-first: needs
     at least three hash/IP/defanged nominations past ``from_offset``."""
     from app.intelligence.observables import scan_candidates
 
@@ -322,7 +322,7 @@ def analysis_content_window(text: str, max_chars: int, *, tail_reserve: float = 
       the budget is spent on the section (no marker: contiguous text).
     * No heading, but the trailing text carries ≥3 indicator candidates →
       same head + marker + tail treatment from the first candidate's paragraph.
-    * Otherwise → plain head slice (today's behaviour).
+    * Otherwise → plain head slice.
     """
     if max_chars <= 0 or len(text) <= max_chars:
         return text
@@ -362,8 +362,8 @@ def analysis_content_window(text: str, max_chars: int, *, tail_reserve: float = 
 # ---------------------------------------------------------------------------
 
 #: Scan-origin kinds that never belong in the hint block: the code-block
-#: scanner nominates them from <pre> text and a bulletin's preformatted prose
-#: used to fill all 40 slots with "Patch Instructions:"-shaped lines.
+#: scanner nominates them from <pre> text, and a bulletin's preformatted prose
+#: would otherwise fill all 40 slots with "Patch Instructions:"-shaped lines.
 _HINT_EXCLUDED_SCAN_KINDS = frozenset({"cmdline", "path", "registry"})
 _HINT_KIND_CAP = 15
 
@@ -372,7 +372,7 @@ def rank_candidate_hints(candidates: list[dict] | None, limit: int = 40) -> list
     """Order entry candidates for the prompt's CANDIDATE OBSERVABLES block.
 
     AI-origin stagings first (the previous judge's own confirmations), then
-    author-defanged tokens, then hashes, public IPs and the rest; scan-origin
+    author-defanged tokens, then hashes, IPs and the rest; scan-origin
     host kinds are excluded; no kind takes more than 15 slots so a hash dump
     leaves room for the domain the article actually called C2.
     """

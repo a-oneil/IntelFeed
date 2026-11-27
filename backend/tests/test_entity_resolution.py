@@ -73,7 +73,7 @@ def test_f2_leetspeak_variants_share_norm_exact(a, b):
         ("Interlock ransomware group", "threat_actor", "interlock"),
         ("DOUBLECUP operators", "threat_actor", "doublecup"),
         ("xaknet team", "threat_actor", "xaknet"),
-        ("764 splinter group", "threat_actor", "tea"),  # 7->t 6 stays... see note below
+        ("764 splinter group", "threat_actor", "tea"),  # placeholder: the test replaces it, see the note there
         ("Pegasus Spyware", "malware", "pegasus"),
         ("Mars Stealer", "malware", "mars"),
         ("Dysphoria Botnet", "malware", "dysphoria"),
@@ -160,7 +160,7 @@ def test_f5_real_actor_names_pass(name):
 
 
 @pytest.mark.parametrize("entity_type", ["malware", "tool", "vendor", "product"])
-def test_region_names_are_junk_for_every_catalogue_but_countries(entity_type):
+def test_region_names_are_junk_for_every_catalog_but_countries(entity_type):
     assert generic_name_reason(entity_type, "North America") == "region_name"
     assert generic_name_reason("country", "North America") is None
 
@@ -247,7 +247,7 @@ TOOL_SEMANTIC_JUNK = [
     "mlflow.pyfunc.load_model",
     "LogRule::matches",
     "workbench.extensions.installExtension",
-    # file artefacts
+    # file artifacts
     "epdlpdrv.sys",
     "DukeQt.dll",
     "fileupload.class.php",
@@ -290,8 +290,8 @@ def test_tool_semantic_gates_allow_lolbas_and_script_tools(name):
     assert generic_name_reason("tool", name) is None
 
 
-# Regression guard for the shapes real offensive tooling actually has. A gate
-# that eats these is worse than the bloat it prevents.
+# Regression guard: real offensive tool names with these shapes must pass. A
+# gate that rejects them does more harm than the junk names it keeps out.
 @pytest.mark.parametrize(
     "name",
     [
@@ -528,7 +528,7 @@ async def test_f5_generic_names_blocked_when_gates_on(db_session, gates_on, test
 
 async def test_country_names_never_become_actors_malware_or_tools(db_session, gates_on, test_entry):
     """An article attributes to a country; it does not name one as the
-    adversary. The catalogue country (name, alias or demonym, any casing,
+    adversary. The catalog country (name, alias or demonym, any casing,
     with or without a leading article) is held off every creator type."""
     db_session.add(Country(name="North Korea", aliases=["DPRK", "North Korean"]))
     await db_session.flush()
@@ -607,8 +607,8 @@ async def test_cve_named_actor_and_tool_blocked_with_gates_off(db_session, monke
 
 
 async def test_cve_named_manual_creation_is_overridable(db_session, gates_on):
-    """The hard block is for automated sources only — an analyst still gets the
-    warning-plus-override path rather than a wall."""
+    """The hard block is for automated sources only — a manual creation is blocked
+    with a warning the analyst can override."""
     decision = await resolve_entity_creation(db_session, "malware", "CVE-2026-18297", source="manual")
     assert decision.action == "blocked" and decision.reason == "generic_name:cve_id"
 
@@ -667,7 +667,7 @@ async def test_f7_cross_type_hold_links_the_entry_to_the_survivor(db_session, ga
     """A held cross-type duplicate must not cost the entry its mention.
 
     "Qilin" the gang already exists; an article calling Qilin a ransomware
-    family must not mint a second profile, but the entry still belongs on the
+    family must not create a second profile, but the entry still belongs on the
     actor — otherwise turning the gates on quietly drops links.
     """
     actor = ThreatActor(name="Qilin", aliases=[])
@@ -893,8 +893,8 @@ async def test_store_tools_coerces_type_and_keeps_raw(db_session, test_entry):
 async def test_store_tools_evidence_gate_drops_unwielded(db_session, test_entry):
     """A tool the article never shows anyone using is not stored.
 
-    This is the door that closes the advisory flood: an NVD entry names the
-    affected package but no operator, so nothing should be created.
+    This keeps vulnerability advisories from creating tools: an NVD entry names
+    the affected package but no one using it, so nothing should be created.
     """
     from app.intelligence.tool import store_tools
 
@@ -911,8 +911,9 @@ async def test_store_tools_evidence_gate_drops_unwielded(db_session, test_entry)
 
 
 async def test_store_tools_never_mints_defender_software(db_session, test_entry):
-    """New tools are attacker tools. A defender's tool links when the catalogue
-    already has it, but the vet's Ghidra/FakeNet-NG rows are never minted."""
+    """New tools are attacker tools. A defender's tool links when the catalog
+    already has it, but a new one (like the Ghidra and FakeNet-NG rows the entity
+    review found) is never created."""
     from app.intelligence.tool import store_tools
 
     db_session.add(Tool(name="Velociraptor", aliases=[]))
@@ -943,7 +944,7 @@ async def test_store_tools_needs_evidence_that_names_the_tool(db_session, test_e
 
 
 async def test_actor_and_malware_need_evidence_naming_them(db_session, test_entry, monkeypatch):
-    """With the evidence door on, a new actor or family needs a quoted sentence
+    """With ai_entity_evidence_required on, a new actor or family needs a quoted sentence
     that names it; an existing one still links without."""
     monkeypatch.setattr(settings, "ai_entity_evidence_required", True)
     db_session.add(ThreatActor(name="Lazarus Group", aliases=[]))
@@ -1062,7 +1063,7 @@ async def test_manual_create_by_alias_on_already_linked_entry(db_session, client
     )
 
     assert resp.status_code == 201
-    # Upsert path: resolved to the existing actor, no duplicate minted.
+    # Upsert path: resolved to the existing actor, no duplicate created.
     assert resp.json()["id"] == str(actor.id)
     assert await _actor_count(db_session, "Yemen Cell") == 1
 
@@ -1075,7 +1076,7 @@ async def test_manual_create_by_alias_on_already_linked_entry(db_session, client
 
 
 async def test_manual_create_malware_by_alias_on_already_linked_entry(db_session, client, admin_headers, test_entry):
-    """Same guard on the malware endpoint, which shared the unguarded insert."""
+    """Same guard on the malware endpoint, which had the same unguarded insert."""
     malware = MalwareFamily(name="SnakeKeylogger", aliases=["404 Keylogger"])
     db_session.add(malware)
     await db_session.flush()

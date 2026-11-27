@@ -1,20 +1,12 @@
-// Renders every IntelFeed icon from the mark below, so the web app, the PWA,
-// the Android app and the browser extension share one set of artwork.
+// Renders every IntelFeed icon from the mark below, so the web app, the PWA, the Android app and the browser extension share one set of artwork.
 //
-// The mark is a hexagon with the hexagram of network lines inside it, nodes
-// where the lines cross, and a feed signal whose dot sits on the bottom-left
-// crossing. It comes in two weights:
-//   SMALL — heavier lines and nodes, for anything drawn at 32px or smaller
-//           (favicons, the extension's toolbar icon), where FULL's thin lines blur.
+// The mark is a hexagon with a hexagram of network lines inside it, nodes where the lines cross, and a feed signal whose dot sits on the bottom-left crossing. It comes in two weights:
+//   SMALL — heavier lines and nodes, for anything drawn at 32px or smaller (favicons, the extension's toolbar icon), where FULL's thin lines blur.
 //   FULL  — on the app's dark tile, for launcher, home-screen and store icons.
 //
-// The in-app logos draw the same mark as vectors, from their own copies of the
-// coordinates and weights: frontend/src/utils/brandMark.ts, extension/src/lib/mark.js,
-// and android/app/src/main/res/drawable/ic_logo.xml, ic_notification.xml and
-// ic_launcher_foreground.xml. When the mark changes, update all of them.
+// The in-app logos draw the same mark as vectors, from their own copies of the coordinates and weights: frontend/src/utils/brandMark.ts, extension/src/lib/mark.js, and android/app/src/main/res/drawable/ic_logo.xml, ic_notification.xml and ic_launcher_foreground.xml. When the mark changes, update all of them.
 //
-// Dev-only: uses Playwright's Chromium from the frontend's node_modules, so run
-// `pnpm install` and `pnpm exec playwright install chromium` in frontend/ first.
+// Dev-only: uses Playwright's Chromium from the frontend's node_modules, so run `pnpm install` and `pnpm exec playwright install chromium` in frontend/ first.
 //   node scripts/dev/render_icons.cjs
 
 const path = require("path");
@@ -36,8 +28,7 @@ const WEIGHTS = {
   SMALL: { hex: 1.7, net: 0.85, netOpacity: 0.65, node: 0.95, feed: 1.5, wave: 1.65 },
   FULL: { hex: 1.35, net: 0.7, netOpacity: 0.6, node: 0.8, feed: 1.3, wave: 1.4 },
 };
-// Crossings that carry a node. Bottom-left is the feed dot; left and
-// bottom-right are left bare, where they would crowd the feed signal.
+// Crossings that carry a node. Bottom-left is the feed dot; left and bottom-right are left bare, because a node there would crowd the feed signal.
 const NODES = [[8.5, 7.5], [15.5, 7.5], [18.3, 12]];
 
 function mark(w, color = ACCENT) {
@@ -60,8 +51,7 @@ const sized = (svg, px) => svg.replace("<svg", `<svg width="${px}" height="${px}
 /**
  * One icon's page.
  *   bare:  the small mark, no background
- *   tile:  the full mark on the dark tile. radius is a fraction of the size
- *          ("50%" for a circle); mark is how much of the tile it fills.
+ *   tile:  the full mark on the dark tile. radius is a fraction of the size ("50%" for a circle); mark is how much of the tile it fills.
  */
 function page(size, { bare, radius = 0.2, mark = 0.8 }) {
   const body = (inner) => `<body style="margin:0;background:transparent">${inner}</body>`;
@@ -93,10 +83,7 @@ const ICONS = [
   ]),
 ];
 
-/**
- * The README's logo: the full mark and the wordmark. "Intel" is a mid grey
- * that reads on GitHub's light and dark pages alike, "Feed" the accent.
- */
+/** The README's logo: the full mark and the wordmark. "Intel" is a mid gray that is readable on both GitHub's light and dark pages, "Feed" is the accent color. */
 function docsLogo() {
   const inner = FULL.replace(/^<svg[^>]*>\n?/, "")
     .replace(/<\/svg>$/, "")
@@ -121,7 +108,7 @@ ${inner}
   fs.writeFileSync(path.join(ROOT, "docs/assets/intelfeed-logo.svg"), docsLogo());
   console.log("docs/assets/intelfeed-logo.svg");
 
-  // The scalable favicon is the small mark itself; useThemes.ts recolours it to the theme's accent.
+  // The scalable favicon is the small mark itself; useThemes.ts recolors it to the theme's accent.
   fs.writeFileSync(path.join(ROOT, "frontend/public/favicon.svg"), sized(SMALL, 32) + "\n");
   console.log("frontend/public/favicon.svg");
 

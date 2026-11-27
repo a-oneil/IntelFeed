@@ -21,8 +21,7 @@ import table from "@/components/table/DataTable.module.css";
 import styles from "@/pages/WorkbenchPage.module.css";
 import { confirmDialog } from "@/utils/dialog";
 
-// Re-exported so entity column definitions can live next to the sections that
-// use them without importing the table module directly.
+// Re-exported so entity column definitions can live next to the sections that use them without importing the table module directly.
 export type { DataTableColumn as ColumnDef, SortDir };
 
 const relLabel = (t: RelationshipSignalTop) =>
@@ -105,20 +104,16 @@ export function EntityTableSection<T>({
   const [sort, setSort] = useState<{ key: string; dir: SortDir }>(defaultSort);
   const [serverFilters, setServerFilters] = useState<Record<string, string>>({});
   const selectEntity = useIntelStore((s) => s.selectEntity);
-  // Gated: the EntityType union outgrew CreateEntityPanel (observables are
-  // promoted from articles, CWEs come from the catalog) — an ungated button
-  // silently opened a Threat Actor form for those types.
+  // Gated because CreateEntityPanel does not cover every EntityType (observables are promoted from articles, CWEs come from the catalog); without the gate the button opened a Threat Actor form for those types.
   const openCreateEntity = useIntelStore((s) => s.openCreateEntity);
   const canCreate = isCreatableEntityType(entityType);
   const isMobile = useIsMobile();
-  // Mobile: header actions (export, filters) fold behind a ⋯ menu so the
-  // section header stays a single pinned row.
+  // Mobile: header actions (export, filters) go behind a ⋯ menu so the section header stays a single pinned row.
   const [actionsOpen, setActionsOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollRestoredRef = useRef(false);
 
-  // Callers pass these as inline arrows, so pin the identity — they feed
-  // memoised columns and the batched relationship-signals request.
+  // Callers pass these as inline arrows, so keep a stable identity: they feed memoized columns and the batched relationship-signals request.
   const accessorsRef = useRef({ getId, getLabel });
   accessorsRef.current = { getId, getLabel };
   const rowId = useCallback((item: T) => accessorsRef.current.getId(item), []);
@@ -173,23 +168,19 @@ export function EntityTableSection<T>({
   const denyObservable = useDenyObservable();
   const [mergeSelectionOpen, setMergeSelectionOpen] = useState(false);
 
-  // Merging folds N profiles into one, so it needs two or more checked rows of a
-  // type the merge engine supports — and merge is an admin-only endpoint.
+  // Merging combines N profiles into one, so it needs two or more checked rows of a type the merge engine supports, and merge is an admin-only endpoint.
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
-  // A visitor browses: no create/export/delete, no selection, and no rule
-  // coverage (detection is signed-in only).
+  // A visitor can only browse: no create/export/delete, no selection, and no rule coverage (detection is signed-in only).
   const isVisitor = useIsVisitor();
   const canMergeSelection =
     isAdmin &&
     MERGEABLE_ENTITY_TYPES.includes(entityType as (typeof MERGEABLE_ENTITY_TYPES)[number]) &&
     selectedIds.size >= 2;
 
-  // The ledger's tombstone rung sits beside delete for observables; denying is
-  // an admin endpoint.
+  // Observables get a "Never capture" (tombstone) action beside delete; denying is an admin endpoint.
   const canTombstone = isAdmin && entityType === "observable" && selectedIds.size > 0;
 
-  // The checked rows as merge candidates, in table order. Selection only ever
-  // holds loaded rows, so every id resolves.
+  // The checked rows as merge candidates, in table order. Selection only ever holds loaded rows, so every id resolves.
   const selectedForMerge = useMemo<MergeSelectionEntity[]>(
     () =>
       items
@@ -206,8 +197,7 @@ export function EntityTableSection<T>({
     [items, selectedIds, rowId]
   );
 
-  // Batched rather than all-at-once so a large selection doesn't open a
-  // hundred simultaneous requests.
+  // Runs five at a time so a large selection doesn't open a hundred simultaneous requests.
   const runOnSelection = async (ids: string[], run: (id: string) => Promise<unknown>) => {
     let failed = 0;
     for (let i = 0; i < ids.length; i += 5) {
@@ -240,8 +230,7 @@ export function EntityTableSection<T>({
     reportBulk("Deleted", ids, failed, word);
   };
 
-  // Observables only: the tombstone rung. Keeps every row but slams the capture
-  // doors shut on its value, which a delete deliberately does not do.
+  // Observables only: tombstone the selection. Keeps every row but stops its value from being captured again, which a delete deliberately does not do.
   const handleTombstoneSelected = async () => {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
@@ -275,13 +264,10 @@ export function EntityTableSection<T>({
     }
   };
 
-  // Batched relationship signals for the "Linked" / "Top link" columns (one
-  // request per loaded page of rows, cached a minute).
+  // Batched relationship signals for the "Linked" / "Top link" columns (one request per loaded page of rows, cached a minute).
   const signals = useRelationshipSignals(entityType, pageIds);
 
-  // Telemetry-aware rule coverage, batched the same way. Only TTP rows carry
-  // technique IDs, so every other table passes an empty list and the query stays
-  // disabled — the hook must still be called unconditionally.
+  // Telemetry-aware rule coverage, batched the same way. Only TTP rows carry technique IDs, so every other table passes an empty list and the query stays disabled; the hook must still be called unconditionally.
   const techniqueIds = useMemo(
     () =>
       entityType === "ttp" && !isVisitor
@@ -295,8 +281,7 @@ export function EntityTableSection<T>({
     [coverage]
   );
 
-  // Enrichment values as columns, one per source output the type has
-  // (hidden until picked in the Columns menu). Sorted and filtered on the server.
+  // Enrichment values as columns, one per source output the type has (hidden until picked in the Columns menu). Sorted and filtered on the server.
   const { data: contextColumns } = useContextColumns(entityType);
   const contextValues = useContextValues(entityType, pageIds, !!contextColumns?.length);
   const contextDefs = useMemo<DataTableColumn<T>[]>(() => {
@@ -318,8 +303,7 @@ export function EntityTableSection<T>({
     }));
   }, [contextColumns, contextValues, rowId]);
 
-  // These columns are appended rather than declared per entity type: every
-  // entity has relationships, and coverage comes from one shared batched hook.
+  // These columns are appended rather than declared per entity type: every entity has relationships, and coverage comes from one shared batched hook.
   const allColumns = useMemo<DataTableColumn<T>[]>(
     () => [
       ...columns,
@@ -453,8 +437,7 @@ export function EntityTableSection<T>({
     [selectEntity, entityType]
   );
 
-  // Save scroll position (throttled via rAF) and restore it once per sort/filter
-  // combination, so returning from an entity profile lands where you left off.
+  // Save scroll position (throttled via rAF) and restore it once per sort/filter combination, so returning from an entity profile lands where you left off.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -472,9 +455,7 @@ export function EntityTableSection<T>({
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       el.removeEventListener("scroll", onScroll);
-      // Flush any pending rAF synchronously before the DOM is torn down so the
-      // last good scroll position survives the unmount (e.g. user scrolls then
-      // immediately clicks a row).
+      // Flush any pending rAF synchronously before the DOM is torn down so the last scroll position survives the unmount (e.g. user scrolls then immediately clicks a row).
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
         save();
@@ -493,8 +474,7 @@ export function EntityTableSection<T>({
 
   return (
     <>
-      {/* No total in the header: DataTable's own bar already reports
-          "N loaded · M total" a few pixels below. */}
+      {/* No total in the header: DataTable's own bar already reports "N loaded · M total" just below. */}
       <PageHeader
         title={title}
         count={selectedIds.size > 0 ? `${selectedIds.size} selected` : undefined}
@@ -656,8 +636,7 @@ export function EntityTableSection<T>({
         scrollRef={scrollRef}
         emptyState={
           isError ? (
-            // A failed request is not an empty table — saying "No X yet" over
-            // a 4xx once masked an unsupported sort key as missing data.
+            // A failed request is not an empty table: showing "No X yet" on a 4xx made an unsupported sort key look like missing data.
             <div className={styles.emptyState}>
               <div className={styles.emptyTitle}>Couldn't load {nounPlural ?? `${noun}s`}</div>
               <div className={styles.emptyDesc}>

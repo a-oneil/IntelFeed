@@ -1,9 +1,9 @@
 """Feed / category / automation / webhook-preset / note / campaign management tools.
 
-Coverage-build module: mirrors the corresponding API routers (app/api/feeds.py,
-categories.py, automation.py, webhook_presets.py, notes.py, entity_notes.py,
-campaigns.py) so the agent CLI can manage these objects with the same semantics
-and side effects as the web UI.
+Mirrors the corresponding API routers (app/api/feeds.py, categories.py,
+automation.py, webhook_presets.py, notes.py, entity_notes.py, campaigns.py) so
+the agent CLI can manage these objects with the same semantics and side effects
+as the web UI.
 """
 
 import uuid
@@ -363,8 +363,8 @@ async def _delete_feed(
     if not _verify_token(confirmation_token, "feed", feed_id, user_id):
         return {"error": "Invalid or expired confirmation token. Please request a new confirmation."}
 
-    # Archived, as the feeds API does (services/feed_archive.py): its entries
-    # are intelligence, not the feed's to take with it.
+    # The feed is archived, not deleted, as the feeds API does
+    # (services/feed_archive.py): its entries stay as evidence for entities.
     from app.api.feeds import _invalidate_unread_cache
     from app.services.feed_archive import archive_feed
 

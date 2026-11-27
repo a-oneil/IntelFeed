@@ -20,10 +20,9 @@ from app.models.ttp import TTP, EntryTTP
 
 # 6 report templates with section definitions
 REPORT_TEMPLATES = {
-    # NOTE: the "iocs" data section is the observables ledger (judged rows
-    # sighted in the report's sources, defanged, with attribution claims).
-    # The name matches the builtin ReportTemplate DB rows seeded in 050 —
-    # which carried these sections for months while nothing filled them.
+    # The "iocs" data section is filled from the observables ledger (judged
+    # rows sighted in the report's sources, defanged, with attribution claims).
+    # The name matches the builtin ReportTemplate DB rows seeded in migration 050.
     "flash_alert": {
         "name": "Flash Alert",
         "sections": ["summary", "key_findings", "iocs", "recommended_actions", "references"],
@@ -191,8 +190,8 @@ async def collect_entity_ids_for_entries(db: AsyncSession, entry_ids: list[uuid.
         ("actors", EntryThreatActor, EntryThreatActor.threat_actor_id),
         ("malware", EntryMalware, EntryMalware.malware_family_id),
         ("countries", EntryCountry, EntryCountry.country_id),
-        # Ledger sightings ride along; denied tombstones are filtered where
-        # the rows are fetched (collect_report_observables).
+        # Observable sightings are collected too; denied observables are
+        # filtered out where the rows are fetched (collect_report_observables).
         ("observables", EntryObservable, EntryObservable.observable_id),
     ]
 
@@ -313,7 +312,7 @@ async def collect_report_observables(
         }
         for o in observables
     ]
-    # Attribution-backed rows lead; then by confidence within kind order.
+    # Rows with attribution claims first, then by kind, then by confidence (highest first).
     items.sort(key=lambda i: (not i["claimed_by"], i["kind"], -i["confidence"]))
     return items
 
@@ -485,7 +484,7 @@ async def generate_report_content(
         elif section in ("observables", "iocs", "ioc_table"):
             # Judged ledger rows sighted in the report's sources, with their
             # attribution claims. Values render defanged; denied rows never
-            # appear. Empty gets an honest note rather than a bare header.
+            # appear. An empty section gets a short note rather than a bare header.
             # ("iocs"/"ioc_table" are the same section under the names some DB
             # templates already use — country_threat_brief predates the ledger.)
             obs_items = await collect_report_observables(db, entry_ids, entity_ids)
@@ -502,10 +501,9 @@ async def generate_report_content(
                 "body": "",
             }
 
-    # Detections are evidence no template asks for by name: every template
-    # predates rule attachment, so gating the section on the template's section
-    # list would make attaching rules a silent no-op. The section appears when
-    # — and only when — rules are actually attached.
+    # No template lists a "detections" section (every template predates rule
+    # attachment), so gating it on the template's section list would silently
+    # drop attached rules. The section is added only when rules are attached.
     if rules and "detections" not in content["sections"]:
         content["sections"]["detections"] = _detections_section(rules)
 
@@ -513,11 +511,11 @@ async def generate_report_content(
 
 
 def _detections_section(rules: list) -> dict:
-    """The adopted-rule table: what you would deploy, and under whose licence.
+    """The adopted-rule table: what you would deploy, and under whose license.
 
-    Attribution is not decoration here. These rules come from SigmaHQ, Elastic
-    and Azure-Sentinel under DRL/Elastic/MIT terms, and a report that hands them
-    on without naming the repo and licence is passing along someone else's work
+    Each row names its repo and license because these rules come from SigmaHQ,
+    Elastic and Azure-Sentinel under DRL/Elastic/MIT terms, and a report that
+    passes them on without that attribution reuses someone else's work
     unattributed.
     """
     return {
@@ -776,7 +774,7 @@ async def generate_section_content(
 def _obs_value_cell(item: dict) -> str:
     """A table-safe, share-safe rendering of an observable value: defanged for
     network kinds, code-quoted (values are attacker-controlled strings), pipes
-    escaped so the table survives, long values clipped."""
+    escaped so they do not break the table, long values clipped."""
     from app.intelligence.observables import defang
 
     value = defang(item.get("kind", ""), str(item.get("value", "")))
@@ -840,11 +838,11 @@ def _render_threat_surface_table(items: list[dict]) -> list[str]:
 def _render_detections_table(items: list[dict]) -> list[str]:
     """Adopted rules as a markdown table, attribution included.
 
-    Licence and source repo are columns rather than a footnote: the rules are
+    License and source repo are columns rather than a footnote: the rules are
     other people's work, and a report that passes them on has to say whose.
     """
     lines = [
-        "| Rule | Format | Source | Licence | ATT&CK |",
+        "| Rule | Format | Source | License | ATT&CK |",
         "|---|---|---|---|---|",
     ]
     for item in items:
@@ -852,9 +850,9 @@ def _render_detections_table(items: list[dict]) -> list[str]:
         draft = " *(draft)*" if item.get("is_draft") else ""
         fmt = _escape_md(item.get("rule_type", ""))
         repo = _escape_md(item.get("repo", "local"))
-        licence = _escape_md(item.get("license") or "unstated")
+        license_text = _escape_md(item.get("license") or "unstated")
         techniques = ", ".join(_escape_md(t) for t in item.get("techniques") or []) or "—"
-        lines.append(f"| **{title}**{draft} | {fmt} | {repo} | {licence} | {techniques} |")
+        lines.append(f"| **{title}**{draft} | {fmt} | {repo} | {license_text} | {techniques} |")
     return lines
 
 
@@ -1211,8 +1209,8 @@ def export_report(report, fmt: str) -> tuple[bytes | str, str, str]:
             return note + html_content, "text/html; charset=utf-8", name("html")
         # WeasyPrint's default fetcher follows any URL in the document,
         # file:// included, and a <link rel="attachment"> embeds whatever
-        # it fetched in the PDF. render_html sanitizes the body, and this
-        # is the second wall: nothing but inline data: URIs is loaded.
+        # it fetched in the PDF. render_html sanitizes the body; as a second
+        # safeguard, the fetcher loads nothing but inline data: URIs.
         fetcher = weasyprint.URLFetcher(allowed_protocols={"data"})
         pdf_bytes = weasyprint.HTML(string=html_content, url_fetcher=fetcher).write_pdf()
         return pdf_bytes, "application/pdf", name("pdf")

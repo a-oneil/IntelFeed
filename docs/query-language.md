@@ -41,7 +41,7 @@ This is the reference for the search box at the top of IntelFeed. Read it to lea
 
 ### Core Fields
 
-The list of fields the search understands is `ENTRY_FIELDS` and `ENTITY_FIELDS` in `backend/app/search/query_planner.py`. A field name that is not on that list is not an error: its value is searched as plain text, and the results page tells you the field was not recognised.
+The list of fields the search understands is `ENTRY_FIELDS` and `ENTITY_FIELDS` in `backend/app/search/query_planner.py`. A field name that is not on that list is not an error: its value is searched as plain text, and the results page tells you the field was not recognized.
 
 | Field | Kind | Example |
 |-------|------|---------|
@@ -152,7 +152,7 @@ The list of fields the search understands is `ENTRY_FIELDS` and `ENTITY_FIELDS` 
 | `ransomware_victim.sector` | exact | `ransomware_victim.sector:healthcare` |
 | `ransomware_victim.domain` | exact | `ransomware_victim.domain:acme.com` |
 | `ransomware_victim.group` | linked table | `ransomware_victim.group:lockbit` |
-| **Shared suffixes** ([not on every type](#catalogue-suffixes)) | | |
+| **Shared suffixes** ([not on every type](#catalog-suffixes)) | | |
 | `<type>.articles` | number | `threat_actor.articles:>100` |
 | `<type>.seen` | date | `malware.seen:>2026-01-01` |
 | `<type>.first_seen` | date | `ttp.first_seen:>2026-06` |
@@ -398,7 +398,7 @@ Three types have no article links, so they return only the records: `ransomware_
 
 #### Entity Properties
 
-`<type>.<property>` filters narrow the records. The articles returned are the ones linked to the records that are left. `mitigation` has only the [shared suffixes](#catalogue-suffixes).
+`<type>.<property>` filters narrow the records. The articles returned are the ones linked to the records that are left. `mitigation` has only the [shared suffixes](#catalog-suffixes).
 
 **CVE**
 
@@ -534,7 +534,7 @@ ransomware_victim.domain:acme.com        # victim domain
 ransomware_victim.group:lockbit          # group that posted the victim, as the leak site spelled it
 ```
 
-#### Catalogue Suffixes
+#### Catalog Suffixes
 
 These suffixes work on several entity types:
 

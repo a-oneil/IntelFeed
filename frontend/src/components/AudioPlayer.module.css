@@ -95,8 +95,7 @@
   background: var(--bg-tertiary);
 }
 
-/* 1.1rem (17.6px) sits 1.6px off --fs-lg (16px) — outside the 1px
-   conversion tolerance, and this is the player's primary glyph. Left raw. */
+/* The play button is the player's primary control, so its glyph uses the larger --fs-lg size. */
 .playBtn {
   font-size: var(--fs-lg);
   padding: 6px var(--sp-4);
@@ -124,7 +123,7 @@
   -webkit-appearance: none;
   appearance: none;
   height: 4px;
-  /* --r-full on a 4px-tall bar renders identically to the old 2px. */
+  /* --r-full on a 4px-tall bar gives the same fully rounded ends as a 2px radius. */
   border-radius: var(--r-full);
   background: linear-gradient(
     to right,
@@ -170,7 +169,7 @@
   -webkit-appearance: none;
   appearance: none;
   height: 3px;
-  /* Pill radius; on a 3px-tall track this is what 2px already clamped to. */
+  /* Pill radius; on a 3px-tall track this gives the same result as a 2px radius, which the browser clamps to 1.5px. */
   border-radius: var(--r-full);
   background: var(--bg-tertiary);
   cursor: pointer;

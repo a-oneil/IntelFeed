@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { apiErrorInfo, hasErrorEnvelope, isTimeout } from "@/api/errors";
 import { selectIsAdmin, useAuthStore } from "@/stores/authStore";
 
-/** The toast text: the same reading of the error envelope the inline errors use. */
+/** The toast text, read from the error envelope the same way the inline errors read it. */
 function extractErrorMessage(error: unknown): string {
   if (hasErrorEnvelope(error)) return apiErrorInfo(error).message;
   if (error instanceof Error) return error.message;
@@ -31,12 +31,7 @@ export function timeoutDetail(error: unknown): string | undefined {
   return `${method} ${config.url} gave up${waited}.`;
 }
 
-/**
- * A timeout is the server being slow, not the app being broken, and the page
- * usually fills in on its own once the server catches up. Say that once, in
- * plain words, for everyone; an admin also gets the route and the wait, which
- * is what they need to go and look at the server.
- */
+/** A timeout means the server is slow, not that the app is broken, and the page usually fills in on its own once the server catches up. Show one plain message to everyone; an admin also gets the route and the wait time, which is what they need to investigate the server. */
 export function toastTimeout(error: unknown, kind: "query" | "mutation"): void {
   const message =
     kind === "mutation"
@@ -65,7 +60,7 @@ function silenced(meta: Record<string, unknown> | undefined): boolean {
 }
 
 function shouldShowToast(error: unknown): boolean {
-  // A visitor's refused write (api/client.ts) has already said so once.
+  // A visitor's refused write already showed its own message (api/client.ts).
   if (error instanceof Error && error.name === "ReadOnlyViewError") return false;
   if (error && typeof error === "object" && "response" in error) {
     const axiosErr = error as { response?: { data?: { error?: { code?: string } }; status?: number } };
@@ -100,9 +95,7 @@ export const queryClient = new QueryClient({
         }
         return failureCount < 1;
       },
-      // A timed-out request usually means a stalled server, not a lost one; a
-      // few seconds' pause before the one retry lets it clear, where the
-      // default one-second wait mostly re-queued into the same stall.
+      // A timed-out request usually means a stalled server, not an unreachable one. A 3-second pause before the one retry gives it time to clear; the default one-second wait mostly retried into the same stall.
       retryDelay: (attempt, error) => (isTimeout(error) ? 3000 : Math.min(1000 * 2 ** attempt, 30000)),
       staleTime: 30_000,
       refetchOnWindowFocus: false,

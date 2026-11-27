@@ -20,7 +20,8 @@ async def entity_trending(
     days: int = 30,
     limit: int = 20,
 ) -> list[dict]:
-    """Top entities by article count over the time window."""
+    """Entities seen in the last ``days`` days, ranked by their all-time article
+    count (CVEs: first seen in the window, newest first)."""
     cutoff = datetime.now(UTC) - timedelta(days=days)
 
     if entity_type == "threat_actor":
@@ -118,8 +119,8 @@ async def entity_trending(
 
 
 async def detection_coverage(db: AsyncSession, include_gaps: bool = True) -> dict:
-    """ATT&CK coverage analysis — observed TTPs vs active detection rules."""
-    # Get all observed TTPs
+    """ATT&CK coverage analysis — every TTP in the catalog vs non-draft detection rules."""
+    # Get every TTP row (the hydrated catalog plus any extracted ones)
     ttp_result = await db.execute(select(TTP.id, TTP.technique_id, TTP.technique_name, TTP.tactic))
     all_ttps = ttp_result.all()
 

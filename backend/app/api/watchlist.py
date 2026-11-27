@@ -30,8 +30,8 @@ router = APIRouter()
 
 # Weaknesses are watchable for the same reason CVEs are: new vulnerabilities
 # land under a class continuously, so "boost anything new under CWE-502" is a
-# standing interest. TTPs and mitigations stay out — they don't accrete new
-# members the way a weakness class does.
+# standing interest. TTPs and mitigations are not watchable: they don't gain new
+# members over time the way a weakness class does.
 WATCHABLE_ENTITY_TYPES = {
     "threat_actor",
     "malware",
@@ -149,10 +149,11 @@ async def upsert_watch(
     )
     await db.execute(stmt)
 
-    # Watch IS the board's Track: watching a threat pins it to the Threats
-    # page (insert-if-absent — a handled or muted row was a human decision and
-    # a watch doesn't outrank it). One verb, one mental model; the nightly
-    # promote task remains the backfill for activity-gated cases.
+    # Watching a threat is the same as Track on the Threats board: it pins the
+    # threat to the board. The insert skips an existing row, because a handled or
+    # muted row is an analyst's decision and a watch does not override it. The
+    # nightly promote_watchlist_threats task also pins watched threats that have
+    # activity in the window.
     if body.mode == "watch":
         await _pin_watched_threat(db, body.entity_type, body.entity_id)
 
@@ -169,7 +170,8 @@ async def upsert_watch(
     return row
 
 
-# Entity types the Threats board ranks; their rule_coverage/board key shape.
+# Entity types the Threats board ranks. _board_key gives each one's key in
+# threat_board_state / rule_coverage.
 _BOARD_TYPES = {"threat_actor", "malware", "cve"}
 
 

@@ -7,8 +7,7 @@ object PriorityAlerts {
 
     /** The default cut-off: the red score band, the same as the red badge (EntryCards.scoreColor). */
     const val DEFAULT_CUTOFF = 9.5
-    // The queue only holds items that clear the Radar threshold (around 8), so a lower cut-off
-    // would change nothing.
+    // The queue only holds items that clear the Radar threshold (around 8), so a lower cut-off would change nothing.
     const val MIN_CUTOFF = 7.0
     const val MAX_CUTOFF = 10.0
     const val CUTOFF_STEP = 0.5
@@ -27,13 +26,9 @@ object PriorityAlerts {
     data class Outcome(val alerts: List<EntryItem>, val record: List<String>)
 
     /**
-     * Picks the unread [rows] scoring at least [cutoff] that haven't alerted yet. [notified] holds
-     * the keys of alerts already posted ("e:<entry id>", "t:<story slug>").
+     * Picks the unread [rows] scoring at least [cutoff] that haven't alerted yet. [notified] holds the keys of alerts already posted ("e:<entry id>", "t:<story slug>").
      *
-     * A story alerts once, keyed by its slug, however much it grows. It doesn't alert when one of
-     * its articles already did, and its articles are recorded with it, so none of them alerts on
-     * its own later. With [baseline] (the first check, or after the cut-off was lowered) everything
-     * is recorded and nothing alerts, so the items already waiting in the queue don't flood in.
+     * A story alerts once, keyed by its slug, however much it grows. It doesn't alert when one of its articles already did, and its articles are recorded with it, so none of them alerts on its own later. With [baseline] (the first check, or after the cut-off was lowered) everything is recorded and nothing alerts, so the items already waiting in the queue don't flood in.
      */
     fun plan(rows: List<EntryItem>, cutoff: Double, notified: Set<String>, baseline: Boolean = false): Outcome {
         val seen = notified.toHashSet()

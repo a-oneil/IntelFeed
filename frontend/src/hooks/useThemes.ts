@@ -39,10 +39,7 @@ export function useSetThemePreference() {
   });
 }
 
-/**
- * Admin-only: set or clear the instance-wide default theme.
- * The default applies to any user who hasn't picked a theme of their own.
- */
+/** Admin-only: set or clear the instance-wide default theme. The default applies to any user who hasn't picked a theme of their own. */
 export function useSetDefaultTheme() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -107,13 +104,7 @@ export function useDuplicateTheme() {
   });
 }
 
-/**
- * Parse a hex color (#rgb or #rrggbb) into [r, g, b] (0-255).
- */
-
-/**
- * Darken or lighten a hex color by a ratio (-1..1). Negative = darken, positive = lighten.
- */
+/** Darken or lighten a hex color by a ratio (-1..1). Negative = darken, positive = lighten. */
 function adjustColor(hex: string, amount: number): string {
   const rgb = parseHex(hex);
   if (!rgb) return hex;
@@ -124,12 +115,7 @@ function adjustColor(hex: string, amount: number): string {
   return `#${adjusted.map((c) => Math.max(0, Math.min(255, c)).toString(16).padStart(2, "0")).join("")}`;
 }
 
-/**
- * Which choice the cached palette came from. A palette the person picked for
- * themselves ("user") survives logout — they see their own colors on the login
- * screen. A palette that only reflects the admin-set instance default
- * ("default") does not, so this browser follows the default when it changes.
- */
+/** Which choice the cached palette came from. A palette the person picked for themselves ("user") is kept after logout, so they see their own colors on the login screen. A palette that only reflects the admin-set instance default ("default") is not, so this browser follows the default when it changes. */
 export type ThemeSource = "user" | "default";
 
 const THEME_SOURCE_KEY = "intelfeed-theme-source";
@@ -137,9 +123,7 @@ const THEME_SOURCE_KEY = "intelfeed-theme-source";
 export function applyTheme(theme: Theme, source?: ThemeSource) {
   const root = document.documentElement;
 
-  // Accumulate every variable we set so we can persist the exact same set for
-  // pre-render application by theme-init.js (prevents a flash of the baked-in
-  // default palette on hard refresh).
+  // Collect every variable set here so the exact same set can be persisted for theme-init.js to apply before render (prevents a flash of the built-in default palette on hard refresh).
   const vars: Record<string, string> = { ...theme.css_variables };
 
   // Auto-compute contrast-safe text colors for any color used as a background
@@ -153,10 +137,7 @@ export function applyTheme(theme: Theme, source?: ThemeSource) {
     }
   }
 
-  // Filled severity chips need a foreground that contrasts with the fill — and
-  // the fills are theme-controlled, so a static token can't be right across all
-  // 48 themes. Derive them the same way accent-text is derived above. Falls back
-  // to the index.css default fill when a theme doesn't override that severity.
+  // Filled severity chips need a foreground that contrasts with the fill, and the fills are theme-controlled, so a static token can't be right across every theme. Derive them the same way accent-text is derived above. Falls back to the index.css default fill when a theme doesn't override that severity.
   const SEVERITY_FALLBACKS: Record<string, string> = {
     "severity-critical": "#dc2626",
     "severity-high": "#fb923c",
@@ -168,23 +149,19 @@ export function applyTheme(theme: Theme, source?: ThemeSource) {
     vars[`${key}-fg`] = contrastText(vars[key] ?? fallback);
   }
 
-  // Same problem one level up: --danger is theme-managed and is used as a FILL
-  // by delete/confirm buttons, which were painting #fff on it (3.35:1 on the
-  // default #f85149). --accent-text can't serve there — it is derived from the
-  // accent, not from this fill — so --danger gets its own derived foreground.
+  // The same applies to --danger: it is theme-managed and is used as a fill by delete/confirm buttons, where white text gives only 3.35:1 contrast on the default #f85149. --accent-text can't be used there because it is derived from the accent, not from this fill, so --danger gets its own derived foreground.
   vars["danger-fg"] = contrastText(vars["danger"] ?? "#f85149");
 
   for (const [key, value] of Object.entries(vars)) {
     root.style.setProperty(`--${key}`, value);
   }
 
-  // Persist the applied theme ID + full variable set for instant, flash-free
-  // restore before React mounts (see public/theme-init.js)
+  // Persist the applied theme ID + full variable set for instant, flash-free restore before React mounts (see public/theme-init.js)
   localStorage.setItem("intelfeed-theme-id", theme.id);
   try {
     localStorage.setItem("intelfeed-theme-vars", JSON.stringify(vars));
   } catch {
-    // Quota or serialization failure is non-fatal — we just lose the fast path
+    // Quota or serialization failure is non-fatal; only the pre-render restore is lost
   }
   // Update PWA status bar / title bar color to match theme background
   const bgPrimary = theme.css_variables["bg-primary"];
@@ -192,18 +169,13 @@ export function applyTheme(theme: Theme, source?: ThemeSource) {
     document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute("content", bgPrimary);
     localStorage.setItem("intelfeed-theme-bg", bgPrimary);
   }
-  // Omitted source = "keep whatever this browser already recorded" (theme
-  // edits re-apply the active theme without changing where it came from).
+  // An omitted source keeps whatever this browser already recorded (theme edits re-apply the active theme without changing where it came from).
   if (source) localStorage.setItem(THEME_SOURCE_KEY, source);
   // Update favicon to match theme accent color
   updateFavicon(theme.css_variables["accent"]);
 }
 
-/**
- * Re-assert the cached palette from localStorage. Used on logout: the themes
- * endpoint needs auth, so the signed-out app can't re-fetch the theme the user
- * picked — but the exact variable set it applied is already cached here.
- */
+/** Re-apply the cached palette from localStorage. Used on logout: the themes endpoint needs auth, so the signed-out app can't re-fetch the theme the user picked, but the exact variable set it applied is already cached here. */
 function applyCachedVars(): boolean {
   const raw = localStorage.getItem("intelfeed-theme-vars");
   if (!raw) return false;
@@ -222,7 +194,7 @@ function applyCachedVars(): boolean {
   }
 }
 
-/** The favicon in the theme's accent: public/favicon.svg recoloured. */
+/** The favicon in the theme's accent: public/favicon.svg recolored. */
 function updateFavicon(color: string | undefined) {
   if (!color) return;
   const svg = markSvg(color);
@@ -262,10 +234,7 @@ export function clearTheme() {
 
 const DEFAULT_THEME_NAME = "GitHub Dark";
 
-/**
- * Public (no auth): the instance default theme, fetched to style pre-auth
- * pages like login and register. Resolves to null when no default is set.
- */
+/** Public (no auth): the instance default theme, fetched to style pre-auth pages like login and register. Resolves to null when no default is set. */
 function usePublicDefaultTheme(enabled: boolean) {
   return useQuery({
     queryKey: ["default-theme-public"],
@@ -279,16 +248,11 @@ function usePublicDefaultTheme(enabled: boolean) {
 }
 
 /**
- * Auto-applies the user's saved theme on login. Users without a theme of their
- * own get the admin-set instance default, then the localStorage cache, then
- * GitHub Dark as the last resort.
+ * Auto-applies the user's saved theme on login. Users without a theme of their own get the admin-set instance default, then the localStorage cache, then GitHub Dark as the last resort.
  *
  * Logged out (login/register), two cases:
- *   - This browser remembers a palette its user picked for themselves: keep it,
- *     so signing out doesn't repaint the app in someone else's colors.
- *   - Anyone else — a first visit, or a browser that was only ever following
- *     the instance default: apply the instance default from the public
- *     endpoint, so a fresh user meets the app the way the admin dressed it.
+ *   - This browser remembers a palette its user picked for themselves: keep it, so signing out doesn't repaint the app in someone else's colors.
+ *   - Anyone else (a first visit, or a browser that only ever followed the instance default): apply the instance default from the public endpoint, so a new user sees the app styled the way the admin set it.
  */
 export function useAutoTheme() {
   const user = useAuthStore((s) => s.user);
@@ -300,12 +264,9 @@ export function useAutoTheme() {
     if (isAuthenticated) return;
     const source = localStorage.getItem(THEME_SOURCE_KEY);
     const cachedId = localStorage.getItem("intelfeed-theme-id");
-    // Browsers cached from before the source marker existed: a cached theme
-    // that isn't the instance default can only have come from a personal pick.
+    // Browsers cached from before the source marker existed: a cached theme that isn't the instance default can only have come from a personal pick.
     const legacyPersonal = source === null && !!cachedId && !!publicDefault && cachedId !== publicDefault.id;
-    // Logging out is a client-side route change, not a reload, so the palette
-    // is still on <html> — but re-assert it from cache so this path is the same
-    // whether the user logged out or arrived on /login cold.
+    // Logging out is a client-side route change, not a reload, so the palette is still on <html>; re-apply it from cache anyway so this path behaves the same whether the user logged out or opened /login fresh.
     if ((source === "user" || legacyPersonal) && applyCachedVars()) return;
     if (publicDefault) applyTheme(publicDefault, "default");
   }, [isAuthenticated, publicDefault]);
@@ -322,8 +283,7 @@ export function useAutoTheme() {
       }
     }
 
-    // User is loaded and has no theme of their own (or it no longer exists):
-    // the admin-set instance default wins over any stale local cache
+    // User is loaded and has no theme of their own (or it no longer exists): the admin-set instance default wins over any stale local cache
     if (user) {
       const instanceDefault = themes.find((t) => t.is_default);
       if (instanceDefault) {

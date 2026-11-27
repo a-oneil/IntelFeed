@@ -1,8 +1,8 @@
 """Threats page board.
 
-Its own router rather than another block in api/intelligence.py (4,632 lines).
-The old coverage-board endpoint stays where it is and keeps its response shape
-until the frontend moves over.
+A separate router rather than another block in api/intelligence.py, which is
+already very large. The older coverage-board endpoint stays in intelligence.py
+and keeps its response shape until the frontend stops using it.
 """
 
 from fastapi import APIRouter, Body, Depends, Path, Query
@@ -29,9 +29,9 @@ from app.services.threat_brief import get_cached_briefs
 
 router = APIRouter()
 
-# A thread below this cosine is the closest thing in the index rather than a
-# precedent. Same bar as "more like this", applied to thread centroids —
-# imported rather than restated so one tuning pass moves both.
+# A thread whose centroid cosine similarity is below this is only the nearest
+# match in the index, not a real precedent. Same floor as "more like this",
+# applied to thread centroids; imported rather than copied so one change tunes both.
 PRECEDENT_FLOOR = SIMILAR_FLOOR
 
 
@@ -182,17 +182,17 @@ async def set_threat_state(
         board = await build_threat_board(db, window=window, limit=200, min_attention=1, include_handled=True)
     row = next((r for r in board if r.entity_type == entity_type and r.entity_key == entity_key), None)
     if row is not None and entity_type in (entity_types.THREAT_ACTOR, entity_types.MALWARE):
-        # The All view folds claimed CVEs onto this row, so the decision has to
-        # reach them too — or the CVE pops out as its own open row the moment
-        # the threat it rode on is handled.
+        # The All view folds claimed CVEs into this row, so the decision has to
+        # apply to them too. Otherwise the CVE reappears as its own open row as
+        # soon as the threat it was folded into is handled.
         cves = await build_cve_board(
             db, window=window, limit=200, min_attention=1, include_handled=True, user_id=user.id
         )
         (row,), _ = await fold_claimed_cves(db, [row], cves, window=window)
     if row is None and body.state == "tracked":
-        # The pull path: tracking is exactly for threats the ranking hasn't
-        # surfaced. Validate the entity exists and pin it with empty counts —
-        # the next board read computes the real ones.
+        # Tracking is meant for threats the ranking has not surfaced, so a row
+        # missing from the board is allowed here. Check that the entity exists and
+        # pin it with zero counts; the next board read computes the real ones.
         label = None
         if entity_type == "cve":
             label = (
@@ -227,9 +227,9 @@ async def set_threat_state(
     if row is None:
         raise AppError(code="not_found", message="Threat not on the board", status_code=404)
 
-    # A row that folded others carries their decision too. The analyst handled
-    # one row because the board showed one row; leaving the absorbed entities
-    # open would pop them back out as their own rows the moment the fold stops
+    # A row that folded others in applies the decision to them too. The analyst
+    # handled one row because the board showed one row; leaving the folded-in
+    # entities open would bring them back as their own rows once the fold stops
     # applying, asking again about work that was already decided.
     decided = [(entity_type, entity_key), *((m["entity_type"], m["entity_key"]) for m in row.merged_from)]
     for et, ek in decided:
@@ -251,8 +251,8 @@ async def set_threat_state(
                 "et": et,
                 "ek": ek,
                 "state": body.state,
-                # The merged row's count, for every entity it spoke for: they
-                # share a story, so new tradecraft on it reopens all of them.
+                # The merged row's count, stored for every entity folded into it:
+                # they share a story, so new techniques on it reopen all of them.
                 "n": row.new_techniques,
                 "uid": user.id,
                 "note": body.note,

@@ -1,16 +1,9 @@
 /**
  * WeaknessesTab — how NVD classified this CVE, and how good that classification is.
  *
- * One section per weakness assignment, and deliberately only three things in it:
- * the weakness itself (the heading, linked), what it means (its description),
- * and where it sits on the abstraction ladder (one breadcrumb line).
+ * One section per weakness assignment, with only three things in it: the weakness itself (the heading, linked), what it means (its description), and where it sits in the abstraction hierarchy (one breadcrumb line).
  *
- * Everything else is a chip on the heading. MITRE's mapping guidance was a
- * full-width banner and read as an alert, which it isn't — it is a qualifier on
- * the classification, so it belongs on the line the classification is stated.
- * Sibling weaknesses and an "open the profile" row were cut outright: the
- * heading is already the link, and neighbours are a question the CWE profile
- * answers, not one a reader of a single CVE is asking.
+ * Everything else is metadata on the heading line. MITRE's mapping guidance is a chip there rather than a full-width banner, because a banner reads as an alert and the guidance is a qualifier on the classification. Sibling weaknesses and an "open the profile" row are left out: the heading is already the link, and neighboring weaknesses are a question for the CWE profile, not for a reader of a single CVE.
  */
 import { Link } from "react-router-dom";
 import { Chip } from "@/components/primitives";
@@ -74,8 +67,7 @@ function WeaknessSection({ row }: { row: CVEWeaknessRow }) {
 
       {family && family.lineage.length > 0 && (
         <div className={styles.tagRow}>
-          {/* The ladder reads as a path, not as rows — root-first, ending on
-              this weakness, which is where the reader already is. */}
+          {/* The hierarchy renders as one path rather than rows: root first, ending on this weakness, which is the one the reader is looking at. */}
           <span className={styles.metaLabel}>Hierarchy</span>
           {family.lineage.map((a) => (
             <span key={a.cwe_id}>

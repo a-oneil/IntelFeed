@@ -1,7 +1,4 @@
-/* Every fallback below was dead: --bg-secondary / --border / --bg-tertiary /
-   --text-primary / --bg-hover are all defined on :root in index.css, so the
-   literal after the comma never rendered. (The #111827 on .chipRemove was a
-   light-theme value that disagreed with its siblings — further proof.) */
+/* No var() fallbacks below: --bg-secondary / --border / --bg-tertiary / --text-primary / --bg-hover are all defined on :root in index.css, so a fallback literal would never render. */
 .chipsContainer {
   display: flex;
   flex-wrap: wrap;
@@ -11,8 +8,7 @@
   border-bottom: 1px solid var(--border);
 }
 
-/* Chips alone, for placement inside an existing toolbar row — no ground of its
-   own, so it inherits whatever surface the caller already painted. */
+/* Chips alone, for placement inside an existing toolbar row. It has no background of its own, so it inherits the caller's surface. */
 .chipsInline {
   display: flex;
   flex-wrap: wrap;
@@ -27,8 +23,7 @@
   gap: 5px;
   padding: 3px var(--sp-3) 3px 6px;
   border: 1px solid var(--border);
-  /* 14px already exceeded half the ~25px chip height, so this rendered as a
-     full pill; --r-full is the same shape on the scale. */
+  /* A 14px radius already exceeded half the ~25px chip height and rendered as a full pill; --r-full is the same shape on the radius scale. */
   border-radius: var(--r-full);
   font-size: var(--fs-base);
   background: var(--bg-tertiary);

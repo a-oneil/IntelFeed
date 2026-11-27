@@ -13,12 +13,7 @@ interface SlashCommandMenuProps {
   onHover: (index: number) => void;
 }
 
-/**
- * Floating menu of preset copilot slash commands, rendered above the input when
- * the user types "/" at the start of an empty input. Purely presentational:
- * keyboard handling (arrows/Enter/Esc) lives in the parent's key handler; this
- * component only renders rows and reports hover/click.
- */
+/** Floating menu of preset copilot slash commands, rendered above the input when the user types "/" at the start of an empty input. Purely presentational: keyboard handling (arrows/Enter/Esc) lives in the parent's key handler; this component only renders rows and reports hover/click. */
 export function SlashCommandMenu({
   commands,
   activeIndex,

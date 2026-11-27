@@ -112,7 +112,7 @@ class CampaignSavedSearch(Base):
 
 
 class CampaignSource(Base):
-    """Something a campaign feeds on, beyond a linked saved search.
+    """A source a campaign pulls articles from, beyond a linked saved search.
 
     A *linked saved search* is a query kept in parallel with the campaign, owned
     by whoever saved it and invisible to their teammates. These sources are the
@@ -122,8 +122,8 @@ class CampaignSource(Base):
       mentioning it join, which is what makes curating the primary role worth
       doing.
     * ``story`` — a thread it has already accepted part of. Later waves of a
-      story you are already tracking are the clearest case of "obviously yes",
-      and before this they arrived as a suggestion to re-accept every time.
+      story you are already tracking clearly belong to the campaign; without
+      this source they would arrive as a suggestion to re-accept every time.
     * ``query`` — a query-language string typed into the campaign. Same reach as
       a saved search, but campaign-owned: every analyst on the campaign can read
       it, pause it and edit it, and nobody's personal saved-search list fills up

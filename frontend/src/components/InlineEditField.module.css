@@ -102,9 +102,7 @@
   font-size: var(--fs-base);
 }
 
-/* :where() keeps zero specificity for `.markdownDisplay` so EntityLinkedMarkdown's
-   entity-link styling (inherited text color + 2px dotted underline) wins, matching
-   how entities look in notes and the AI summary. Plain links still match. */
+/* :where() keeps zero specificity for `.markdownDisplay` so EntityLinkedMarkdown's entity-link styling (inherited text color + 2px dotted underline) wins, matching how entities look in notes and the AI summary. Plain links still match. */
 :where(.markdownDisplay) a {
   color: var(--accent);
   text-decoration: none;

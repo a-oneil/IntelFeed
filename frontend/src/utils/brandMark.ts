@@ -1,11 +1,7 @@
 /**
- * The IntelFeed mark: a hexagon with the hexagram of network lines inside it,
- * nodes where the lines cross, and a feed signal whose dot sits on the
- * bottom-left crossing. The same drawing scripts/dev/render_icons.cjs
- * renders the favicons and app icons from.
+ * The IntelFeed mark: a hexagon with the hexagram of network lines inside it, nodes where the lines cross, and a feed signal whose dot sits on the bottom-left crossing. The same drawing scripts/dev/render_icons.cjs renders the favicons and app icons from.
  *
- * Two weights: SMALL (heavier lines and nodes) for 32px and below, where the
- * thin lines of FULL blur; FULL above that.
+ * Two weights: SMALL (heavier lines and nodes) for 32px and below, where the thin lines of FULL blur; FULL above that.
  */
 
 export interface MarkWeights {
@@ -24,8 +20,7 @@ export const MARK_WEIGHTS: Record<"SMALL" | "FULL", MarkWeights> = {
 
 export const HEXAGON = "M12 2L21.2 7.5V16.5L12 22L2.8 16.5V7.5Z";
 export const HEXAGRAM = ["M12 2L21.2 16.5L2.8 16.5Z", "M21.2 7.5L12 22L2.8 7.5Z"];
-/** Crossings of the hexagram that carry a node. Bottom-left is the feed dot;
- *  left and bottom-right are left bare, where they would crowd the feed signal. */
+/** Crossings of the hexagram that carry a node. Bottom-left is the feed dot; left and bottom-right are left bare, where they would crowd the feed signal. */
 export const NODES: [number, number][] = [[8.5, 7.5], [15.5, 7.5], [18.3, 12]];
 export const FEED_DOT: [number, number] = [8.5, 16.5];
 export const WAVES = ["M8.5 13.5C10.16 13.5 11.5 14.84 11.5 16.5", "M8.5 10.8C11.65 10.8 14.2 13.35 14.2 16.5"];

@@ -45,8 +45,8 @@ async def list_categories(
 
     # A visitor sees a folder only if it holds a feed they can see (the count
     # above already went through the visitor filter), or a child folder that
-    # does; the names of the rest say what an instance follows. Pipeline
-    # defaults are an admin's ingest settings, not theirs to read.
+    # does; the other folder names would reveal what the instance follows.
+    # Pipeline defaults are an admin's ingest settings, not for visitors to read.
     if user.is_anonymous:
         shown = {cid for cid, n in count_map.items() if n}
         shown |= {cat.parent_id for cat in categories if cat.id in shown and cat.parent_id}
@@ -133,8 +133,9 @@ async def update_category(
     if request.position is not None:
         category.position = request.position
     if request.feed_defaults is not None:
-        # The defaults decide what every future feed in the folder runs —
-        # instance plumbing, like the bulk update that also writes them.
+        # The defaults decide what every future feed in the folder runs, an
+        # instance-wide setting, so admin only, like the bulk update that also
+        # writes them.
         if user.role != "admin":
             raise AppError(
                 code="forbidden",

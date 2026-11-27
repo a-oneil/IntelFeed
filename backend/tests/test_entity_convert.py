@@ -1,6 +1,6 @@
-"""POST /entities/convert — the generalized any-to-any entity type converter.
+"""POST /entities/convert — the any-to-any entity type converter.
 
-Covers the newly-supported pairs (vendor/product, →cve with an external id),
+Covers vendor/product conversion, →cve with an external id,
 entry-link migration, the reclassify tombstone that stops the autolinker from
 recreating the folded source, and the identifier/collision guards.
 """

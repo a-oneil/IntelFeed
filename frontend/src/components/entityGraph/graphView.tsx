@@ -1,11 +1,7 @@
 /**
  * React Flow node and edge components for the entity graph.
  *
- * Display settings that rarely change (labels, seed, coverage facts, link
- * mode) come from one context. Hover, selection and search change on every
- * mouse move, so they sit in a small store instead: each node and edge
- * subscribes to the yes/no values about itself, and a hover re-renders only
- * the nodes and edges whose dimming or highlight actually changes.
+ * Display settings that rarely change (labels, seed, coverage facts, link mode) come from one context. Hover, selection and search change on every mouse move, so they sit in a small store instead: each node and edge subscribes to the yes/no values about itself, and a hover re-renders only the nodes and edges whose dimming or highlight actually changes.
  */
 import { createContext, memo, useContext, useSyncExternalStore } from 'react';
 import {
@@ -83,8 +79,7 @@ export class GraphUiStore {
 
 export const GraphUiContext = createContext<GraphUiStore | null>(null);
 
-/** Subscribe to one value derived from the UI state. Return a primitive, so
- * the component re-renders only when that value changes. */
+/** Subscribe to one value derived from the UI state. Return a primitive, so the component re-renders only when that value changes. */
 function useGraphUi<T extends string | number | boolean | null>(select: (s: GraphUi) => T): T {
   const store = useContext(GraphUiContext);
   if (!store) throw new Error('GraphUiContext missing');
@@ -128,9 +123,7 @@ function shape(type: string, c: number, r: number, color: string, className: str
   }
 }
 
-// Handles fill the node so a Shift+drag can start anywhere on it and drop
-// anywhere on another node. Outside Shift they ignore the pointer, so a
-// plain drag moves the node.
+// Handles fill the node so a Shift+drag can start anywhere on it and drop anywhere on another node. Outside Shift they ignore the pointer, so a plain drag moves the node.
 const handleStyle = (live: boolean): React.CSSProperties => ({
   inset: 0,
   width: '100%',
@@ -254,8 +247,7 @@ export type EntityFlowEdge = Edge<{ edge: LayoutEdge; spoke?: boolean; story?: b
 
 type Internal = NonNullable<ReturnType<typeof useInternalNode>>;
 
-/** Where the line from (fx, fy) toward the node's center leaves the node:
- * its border for a story box, its shape (a circle) for everything else. */
+/** Where the line from (fx, fy) toward the node's center leaves the node: its border for a story box, its shape (a circle) for everything else. */
 function anchor(n: Internal, fx: number, fy: number, gap: number): { x: number; y: number; cx: number; cy: number } {
   const w = n.measured.width ?? 0;
   const h = n.measured.height ?? 0;
@@ -272,8 +264,7 @@ function anchor(n: Internal, fx: number, fy: number, gap: number): { x: number; 
   return { x: cx + (dx / d) * r, y: cy + (dy / d) * r, cx, cy };
 }
 
-/** Straight line between node centers, trimmed to each node's shape so it
- * meets the shape edge instead of running under it. */
+/** Straight line between node centers, trimmed to each node's shape so it meets the shape edge instead of running under it. */
 export const FloatingEdgeView = memo(function FloatingEdgeView({ id, source, target, data }: EdgeProps<EntityFlowEdge>) {
   const view = useGraphView();
   const s = useInternalNode(source);
@@ -309,16 +300,13 @@ export const FloatingEdgeView = memo(function FloatingEdgeView({ id, source, tar
 
   const dimmed = (anyHover && !inHover) || (searching && !endMatches);
   const highlighted = inHover;
-  // Width encodes relationship strength (0–1 composite) when present;
-  // legacy weights fall back to the old scaling. Inferred (engine-only)
-  // relationships render dashed; analyst-touched ones solid.
+  // Width encodes relationship strength (0–1 composite) when present; legacy weights fall back to the old scaling. Inferred (engine-only) relationships render dashed; analyst-touched ones solid.
   const strength = edge.proximity_score;
   const w = strength != null
     ? Math.max(1, Math.min(4, 1 + strength * 3))
     : Math.max(1, Math.min(4, edge.weight <= 2 ? edge.weight * 2 : edge.weight));
   const inferred = !edge.provenance || edge.provenance === 'co_occurrence';
-  // Signal-tier claims stay visible but quiet — same dimming the claims list
-  // gives signal rows.
+  // Signal-tier claims stay visible but quiet — same dimming the claims list gives signal rows.
   const quiet = edge.confidence === 'possible' && !highlighted && !selected;
   const entryCount = edge.entries?.length ?? 0;
 

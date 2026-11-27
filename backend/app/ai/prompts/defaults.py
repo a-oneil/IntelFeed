@@ -55,16 +55,16 @@ DEFAULT_MODEL_ASSIGNMENTS: dict[str, str] = {
     "cve_brief": "claude-sonnet-5-5",
     "hunt_pack": "claude-sonnet-5-5",
     "story_thread_spine": "claude-sonnet-5-5",
-    # Generation → Opus
+    # Generation → Opus (report_section runs on Sonnet)
     "detection_rules": "claude-opus-5-5",
     "report_section": "claude-sonnet-5-5",
     # Digest → Sonnet
     "reddit_digest": "claude-sonnet-5-5",
     # Conversational → Opus
     "entry_qa": "claude-opus-5-5",
-    # Global copilot (streaming, tool-calling) → Sonnet on the CLI; uses the
-    # read-only intelfeed skill to search/look up data. Sonnet balances latency
-    # with reasoning for interactive chat.
+    # Global copilot (streaming, tool-calling) → Sonnet on the CLI; uses
+    # IntelFeed's read-only tools to search and look up data. Sonnet balances
+    # latency with reasoning for interactive chat.
     "copilot": "sonnet",
     "actor_profile_refresh": "sonnet",
     "entity_name_normalization": "sonnet",
@@ -98,12 +98,12 @@ DEFAULT_PROVIDER_TYPE_ASSIGNMENTS: dict[str, str] = {
 # via the intelfeed skill need explicit tool allowlists (the provider's
 # default is to disable ALL tools).
 DEFAULT_ASSIGNMENT_CONFIGS: dict[str, dict] = {
-    # 10000: the payload ends with relationships, so any truncation drops
-    # that trailing key entirely. Measured output on real
-    # articles is 1900-3251 tokens, but TTP-dense advisories (CISA
-    # #StopRansomware bulletins enumerate a dozen technique IDs) blow past
-    # 4096 on every local model — and an overflow is a terminal parse_error,
-    # not a partial result.
+    # 10000: measured output on real articles is 1900-3251 tokens, but
+    # TTP-dense advisories (CISA #StopRansomware bulletins enumerate a dozen
+    # technique IDs) blow past 4096 on every local model. An overflow cuts the
+    # payload from the end, and parse_ai_json keeps only the complete elements
+    # before the cut; the schema puts iocs, scripts and relationships ahead of
+    # ttps (see _front_load_schema_keys below) so those survive.
     "entry_analysis": {"max_tokens": 10000},
     # A verdict list is a few hundred tokens; 4096 leaves room for a long
     # manifest's worth of one-sentence reasons without inviting rambling.
@@ -148,7 +148,8 @@ DEFAULT_ASSIGNMENT_CONFIGS: dict[str, dict] = {
     },
     # Up to five hypotheses (a profile pack) each carrying a multi-line query:
     # a KQL hunt with two joins is 300-400 tokens on its own, and a truncated
-    # query is worse than none because it parses and then lies.
+    # query is worse than none because it still parses but no longer tests
+    # the hypothesis.
     "hunt_pack": {"max_tokens": 10000},
 }
 
@@ -255,7 +256,7 @@ Return the CVE list now.""",
         "description": "Generate a concise summary",
         "category": "analysis",
         "variables": ["entry.title", "entry.content_text", "entry.feed_title", "focus"],
-        # Entry-shaped: it summarises one article, so it has no place on an
+        # Entry-shaped: it summarizes one article, so it has no place on an
         # entity profile's AI tab.
         "show_in_entity_actions": False,
         # The instruction is the stable, cacheable part; the article is the
@@ -408,7 +409,7 @@ Write the briefing now per the structure and rules in your instructions. Remembe
 CONTRACT — every rule here is load-bearing:
 - Use ONLY the supplied articles. No background knowledge of this threat, no history, no attribution beyond what the articles state. If it is not in the window's articles, it does not exist.
 - Two to three sentences, plain prose, no markdown, no lists.
-- Be specific: name victims or sectors, the access vector, tooling, and any concrete artefact (a domain pattern, a file path, a client id) when an article documents one. Concrete artefacts are the most valuable thing you can surface — a detection engineer reads this to decide whether there is something to write a rule against. Prefer artefacts that describe behavior or a reusable pattern (a command line, a file path, a domain pattern) over a single hash or IP.
+- Be specific: name victims or sectors, the access vector, tooling, and any concrete artifact (a domain pattern, a file path, a client id) when an article documents one. Concrete artifacts are the most valuable thing you can surface — a detection engineer reads this to decide whether there is something to write a rule against. Prefer artifacts that describe behavior or a reusable pattern (a command line, a file path, a domain pattern) over a single hash or IP.
 - Preserve uncertainty markers from the sources: if an article says "claims" or "reportedly", so do you. Never upgrade a claim to a fact.
 - NO counts or quantities of articles/outlets/techniques ("six reports", "several outlets") — the row renders the numbers. Victim counts and record counts FROM the articles (e.g. "284M patient records") are content, not metadata, and belong in the brief.
 - No filler ("this week saw", "activity continues"), no threat-actor boilerplate ("known for", "active since"). Start with what happened.
@@ -447,10 +448,10 @@ Write the story line now, under the contract in your instructions.""",
 A vulnerability row answers a different question than a threat row. The reader is deciding whether to write detection for this CVE **this week**, so the brief must settle, in this order:
 1. What it actually is — the affected product and component, and the bug class or the capability it hands an attacker (pre-auth RCE, auth bypass, sandbox escape).
 2. Whether it is being exploited, and by whom — in-the-wild exploitation, a named actor or campaign, a public PoC, or nothing beyond the vendor advisory. This is the single most important distinction on the row; never blur it.
-3. What that means to write against — the vector reaching the bug (an exposed endpoint, a file type, a request shape) and any concrete artefact an article documents.
+3. What that means to write against — the vector reaching the bug (an exposed endpoint, a file type, a request shape) and any concrete artifact an article documents.
 
 CONTRACT — every rule here is load-bearing:
-- Use ONLY the supplied articles and the supplied facts block. No background knowledge of this CVE, no vendor advisory you remember, no severity judgement of your own. If it is not in the input, it does not exist.
+- Use ONLY the supplied articles and the supplied facts block. No background knowledge of this CVE, no vendor advisory you remember, no severity judgment of your own. If it is not in the input, it does not exist.
 - Two to three sentences, plain prose, no markdown, no lists.
 - NEVER upgrade exploitation status. "PoC published" is not "exploited in the wild"; "researchers demonstrated" is not "attackers used". If the articles only describe a patch release, say that the reporting is advisory-level and no exploitation is described. An overstated exploitation claim is the worst failure mode of this brief.
 - Preserve uncertainty markers from the sources: if an article says "claims" or "reportedly", so do you.
@@ -556,7 +557,7 @@ Respond with JSON: {"hypotheses": [{"title": "...", "hypothesis": "Adversaries u
 {% for c in claimed %}- {{ c.verb }} {{ c.name }} ({{ c.type }}, {{ c.confidence }}){% if c.description %} — {{ c.description }}{% endif %}
 {% endfor %}
 {% endif %}## Techniques{% if scope == "profile" %} (claimed first, then no rule first){% else %} extracted from the window{% endif %}
-{% if behaviours %}{% for b in behaviours %}- {{ b.technique_id }} {{ b.technique_name }}{% if b.tactic %} ({{ b.tactic }}){% endif %} — {{ b.entry_count }} article{{ "s" if b.entry_count != 1 else "" }}{% if b.is_new %}, NEW{% endif %}{% if b.claimed is defined %}; claimed: {{ "true" if b.claimed else "false" }}; rule_status: {{ b.rule_status }}{% endif %}; telemetry_collected: {{ "true" if b.telemetry_collected else "false" }}{% if b.channels %}; ATT&CK data sources: {{ b.channels | join(", ") }}{% endif %}
+{% if behaviors %}{% for b in behaviors %}- {{ b.technique_id }} {{ b.technique_name }}{% if b.tactic %} ({{ b.tactic }}){% endif %} — {{ b.entry_count }} article{{ "s" if b.entry_count != 1 else "" }}{% if b.is_new %}, NEW{% endif %}{% if b.claimed is defined %}; claimed: {{ "true" if b.claimed else "false" }}; rule_status: {{ b.rule_status }}{% endif %}; telemetry_collected: {{ "true" if b.telemetry_collected else "false" }}{% if b.channels %}; ATT&CK data sources: {{ b.channels | join(", ") }}{% endif %}
 {% for q in b.quotes %}  > {{ q.text }}{% if q.observable_value %} [{{ q.observable_type }}: {{ q.observable_value }}]{% endif %}
 {% endfor %}{% endfor %}{% else %}(none extracted — hypothesize only from the articles below){% endif %}
 
@@ -655,10 +656,10 @@ CONTRACT — every rule here is load-bearing:
 - Produce a SUMMARY: one sentence stating what this story is.
 - Produce BEATS, oldest first, one per WAVE of coverage — never one per article. A wave is a moment where the story changed: first disclosure, a new technique or payload, a scope jump, a vendor response, an arrest. Articles that merely restate a previous wave do not earn a beat.
 - Most stories have two to five beats. Fewer is normal. Do not manufacture a beat to fill the shape.
-- Each beat carries: `kind`, a `headline` (one line under 15 words, what changed), a `body` (one or two sentences, **40 words maximum** — the payload name, the access vector, the affected count, the concrete artefact), and `entry_indexes` listing the numbered articles that carry it.
+- Each beat carries: `kind`, a `headline` (one line under 15 words, what changed), a `body` (one or two sentences, **40 words maximum** — the payload name, the access vector, the affected count, the concrete artifact), and `entry_indexes` listing the numbered articles that carry it.
 - LENGTH IS A HARD LIMIT, not a style note: title 8 words maximum, summary ONE sentence of 30 words maximum. A local model asked for "a summary" writes six sentences and overruns its token budget mid-JSON, which throws the whole answer away.
 - `kind` is one of: `first_disclosure` (the story breaking), `new_tradecraft` (technique, tooling or payload not previously reported), `peak` (the wave where coverage converged), `update` (everything else).
-- `new_tradecraft` is the most valuable label you can apply and the easiest to over-apply. Use it ONLY when an article documents behaviour the earlier articles did not. A bigger victim count is not new tradecraft.
+- `new_tradecraft` is the most valuable label you can apply and the easiest to over-apply. Use it ONLY when an article documents behavior the earlier articles did not. A bigger victim count is not new tradecraft.
 - Preserve uncertainty from the sources: if an article says "claims" or "reportedly", so do you. Never upgrade a claim to a fact.
 - NO article, outlet or wave counts anywhere in your text — the page renders those. Victim and package counts from the articles are content, not metadata, and belong in the body.
 - No filler ("the story continues to develop"), no advice, no markdown.
@@ -677,7 +678,7 @@ Respond with JSON: {"title": "...", "summary": "...", "beats": [{"kind": "...", 
 {% endfor %}
 
 Write the spine now, under the contract in your instructions.""",
-        # Every bound here is load-bearing, not decoration. Ollama compiles this
+        # Every length bound here is required. Ollama compiles this
         # schema into a decoding grammar, and without the lengths qwen3.5:9b
         # writes a six-sentence "summary", runs to the 4096-token ceiling and
         # never closes the JSON — 224s of GPU time thrown away for a parse
@@ -815,7 +816,7 @@ General requirements that apply to every call:
 7. Detect BEHAVIOR, not atomic indicators. Build each rule on what the attacker does — process lineage, command-line patterns, file/registry/API activity, authentication sequences, protocol misuse — so it still fires after the attacker rotates hashes, IPs and domains. Use the extracted TTPs as the starting point.
 8. Hashes, IPs, domains and URLs may narrow or enrich a behavioral rule, but a rule that only matches a list of them is a last resort: write one only when the article describes no detectable behavior, and say in its description that it is IOC-only and short-lived.
 9. For YARA, prefer code structure and distinctive strings over values that change with every build.
-10. Write the exact syntax of the requested format, never a neighbouring one:
+10. Write the exact syntax of the requested format, never a neighboring one:
    - sigma: a YAML rule with title, logsource (product/category/service), detection (named selections and a condition) and level.
    - splunk_spl: an SPL search (index/sourcetype or a data model via tstats), pipes, no SQL.
    - kql: a Kusto query starting from a table (DeviceProcessEvents, SecurityEvent, SigninLogs …) with | where / | project / | summarize.
@@ -1366,7 +1367,7 @@ Produce the detection engineering summary JSON now per the schema in your instru
         "display_name": "Video/Podcast Summary",
         "description": "Summarize a video or podcast transcript with key security takeaways",
         "category": "analysis",
-        # Entry-shaped: it summarises one transcript.
+        # Entry-shaped: it summarizes one transcript.
         "show_in_entity_actions": False,
         "variables": ["entry.title", "entry.content_text", "entry.published_at", "entry.feed_title", "focus"],
         "default_system_template": """You are a cyber threat intelligence analyst. Summarize video or podcast transcripts, focusing on security-relevant content.
@@ -2027,7 +2028,7 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 		- web shells
 		- backdoors
 		- PyYAML deserialization payload
-- `tools`: software deliberately WIELDED in an intrusion — offensive/dual-use (Cobalt Strike, Mimikatz, Sliver, Impacket, BloodHound, Rubeus) and legitimate software an attacker abuses (AnyDesk, rclone, certutil). Distinct from malware families. Defensive tooling (Velociraptor, YARA, Volatility) may be listed only with `wielded_by` "the defender"; it is linked when the catalogue already has it and never added as a new tool.
+- `tools`: software deliberately WIELDED in an intrusion — offensive/dual-use (Cobalt Strike, Mimikatz, Sliver, Impacket, BloodHound, Rubeus) and legitimate software an attacker abuses (AnyDesk, rclone, certutil). Distinct from malware families. Defensive tooling (Velociraptor, YARA, Volatility) may be listed only with `wielded_by` "the defender"; it is linked when the catalog already has it and never added as a new tool.
 	- **THE TEST — answer it before you extract anything.** For every candidate you must fill two fields:
 		- `wielded_by` — WHO operates it in this article: the named actor, the malware, "the attacker", or "the defender"/"responders". If no one in the article operates it, there is no tool: drop it. Security products, vendor platforms and research or analysis tools the article only describes, sells or reviews have no operator in an intrusion: drop them.
 		- `evidence` — the exact sentence showing that operator USING it. Not a sentence that merely names the software, lists it among affected products, or says it has a vulnerability. Copy the sentence VERBATIM.
@@ -2038,7 +2039,7 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 	- **DO NOT**: extract programming functions, code symbols, or file paths
 	- **DO NOT**: extract services, platforms, SaaS or cloud offerings
 	- **DO NOT**: extract software that is the VICTIM of a vulnerability — a library or application being exploited is not a tool. Extract nothing for it; there is no field for it in this schema.
-	- **DO NOT**: extract operating system binaries or DLLs merely named in passing (dependencies, sideload targets, crash artefacts)
+	- **DO NOT**: extract operating system binaries or DLLs merely named in passing (dependencies, sideload targets, crash artifacts)
 		- ONE EXCEPTION: a signed system binary the article describes attackers ABUSING to execute code, download payloads, or bypass controls is a genuine LOLBAS tool (rundll32.exe, mshta.exe, regsvr32.exe, certutil.exe). Name the binary exactly. If the article does not describe such abuse, skip it.
 	- Various examples of bad extractions:
 		- cJSONUtils_MergePatch
@@ -2058,9 +2059,9 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 		- Info-ZIP Zip 3.0
 - `ttps`: 
 	- MITRE ATT&CK technique IDs only when the article describes the actual behavior; include the exact source_text sentence, cut to its first 160 characters.
-	- At most 20 techniques per article — the ones with a concrete artefact first — and never the same technique twice. The output has a hard size budget; a runaway `ttps` list is how an analysis gets cut off and lost.
-	- When that sentence documents a concrete artefact, also fill `observable_type` (domain_pattern, path, cmdline, registry, client_id, header, hash, or other) and observable_value with the artefact VERBATIM (the actual path, domain pattern, command line, registry key, client id, header value or hash — never a paraphrase). 
-	- The observable is the single most valuable output: it is what a detection rule is written from. Leave both empty when the article gives no concrete artefact for the technique.
+	- At most 20 techniques per article — the ones with a concrete artifact first — and never the same technique twice. The output has a hard size budget; a runaway `ttps` list is how an analysis gets cut off and lost.
+	- When that sentence documents a concrete artifact, also fill `observable_type` (domain_pattern, path, cmdline, registry, client_id, header, hash, or other) and observable_value with the artifact VERBATIM (the actual path, domain pattern, command line, registry key, client id, header value or hash — never a paraphrase). 
+	- The observable is the single most valuable output: it is what a detection rule is written from. Leave both empty when the article gives no concrete artifact for the technique.
 	- A report covering several malware families often has one ATT&CK table per family. A table belongs to the family whose section it sits under; never credit its techniques to the other families in the report.
 	- Also set `telemetry` to where a defender would SEE this activity: endpoint, dns, netflow, proxy, firewall, vpn, identity, cloudtrail, email_gw, or ot. Cloud/identity/network activity is not an endpoint story — "attackers created a malicious OAuth app" is identity, "beacons over TLS" is netflow. Empty string only when genuinely unclear.
 - `countries`: role must be one of origin, target, infrastructure, mentioned.
@@ -2071,7 +2072,7 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 - `novelty_note`: one sentence on what is NEW in this article versus generally-known information (or empty string).
 - `information_rating`: how credible THIS article's information is, judged from the article alone — not from the outlet's reputation, and not from what you know elsewhere. You cannot see other sources, so never answer 1 ("confirmed"); the platform awards that itself when an independent outlet reports the same story.
 	- `access` — how close the author is to what they report: "firsthand" (their own incident response, telemetry, malware samples, research or disclosure), "secondhand" (relaying another party's report, a press release, a court filing, a leak-site post), or "unclear".
-	- `score` — 2 Probably true: logical, specific and backed by evidence the article shows (artefacts, data, named primary sources), claims hedged where they should be. 3 Possibly true: reasonably logical but thin — secondhand with attribution, few specifics, some claims unsupported. 4 Doubtfully true: possible but unsupported or poorly reasoned — anonymous claims, a threat actor's own boasts, speculation presented as fact, certainty the evidence does not carry. 5 Improbable: illogical or contradicts itself. 6 Cannot be judged: nothing to judge (a product page, an opinion piece, a bare headline or link, a job post).
+	- `score` — 2 Probably true: logical, specific and backed by evidence the article shows (artifacts, data, named primary sources), claims hedged where they should be. 3 Possibly true: reasonably logical but thin — secondhand with attribution, few specifics, some claims unsupported. 4 Doubtfully true: possible but unsupported or poorly reasoned — anonymous claims, a threat actor's own boasts, speculation presented as fact, certainty the evidence does not carry. 5 Improbable: illogical or contradicts itself. 6 Cannot be judged: nothing to judge (a product page, an opinion piece, a bare headline or link, a job post).
 	- `rationale` — one short sentence naming what decided the score.
 - `summary`: 2-3 sentences, factual, no hype.
 - `report_type`: one of news, advisory, incident_report, malware_analysis, research, vendor_marketing, opinion.
@@ -2079,8 +2080,8 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 - `timeline` dates as YYYY-MM-DD when stated; patch.status is available, workaround, none, or unknown.
 
 **Observables (the "iocs" list) — exact-match atoms a defender can search telemetry for:**
-- Every value must appear in the article text (defanged or not). Never build one: an organisation's name is not its domain ("Aave" is not aave.com), and a victim's or exchange's site is not attacker infrastructure.
-- Public services the malware merely contacts are not indicators: STUN and NTP servers, DNS resolvers, IP-lookup sites, blockchain RPC endpoints, CDN edge addresses. Neither is anything on a reference page — a detection rule, a test catalogue (Atomic Red Team), a driver or binary database (LOLDrivers, LOOBins): its values are examples, not sightings.
+- Every value must appear in the article text (defanged or not). Never build one: an organization's name is not its domain ("Aave" is not aave.com), and a victim's or exchange's site is not attacker infrastructure.
+- Public services the malware merely contacts are not indicators: STUN and NTP servers, DNS resolvers, IP-lookup sites, blockchain RPC endpoints, CDN edge addresses. Neither is anything on a reference page — a detection rule, a test catalog (Atomic Red Team), a driver or binary database (LOLDrivers, LOOBins): its values are examples, not sightings.
 - Victims are not indicators. Leave out the targets of an attack, even when the article lists them like indicators: a DDoS botnet's target list (DDoSia, NoName057(16)), a victim device's or victim server's IP, a hacked or defaced victim site (fbijobs.gov), a breached company's domain. A compromised legitimate site counts only for the attacker-planted page or file on it that served the attack (the full URL), never for the site itself.
 - NETWORK kinds (ipv4, ipv6, domain, url, uri_path, email, ja3, ja4, cert_fingerprint) and HASH kinds (md5, sha1, sha256): report a value ONLY when the article presents it as attacker infrastructure or attack material — C2 addresses, malicious domains/URLs, implant check-in or exploit URI paths, malware file hashes, phishing sender addresses, TLS client or certificate fingerprints. `uri_path` is the path (+ query template) without the host, when the author presents it as the implant's endpoint.
 - HOST kinds — the behavioral observables a write-up quotes from the intrusion:
@@ -2441,19 +2442,19 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
         ),
         "category": "extraction",
         "variables": ["entry.title", "entry.feed_title", "entry.content_text", "manifest_block", "item_count"],
-        "default_system_template": """You are a senior cyber-threat-intelligence analyst REVIEWING another analyst's work. An automated pass has already read one security article and written structured records for it: entity links, newly created catalogue entities, relationship claims and indicators. You get the same article and a list of those records, one per line with an item_id. For each item decide whether it is right. You create nothing; you only judge what is there.
+        "default_system_template": """You are a senior cyber-threat-intelligence analyst REVIEWING another analyst's work. An automated pass has already read one security article and written structured records for it: entity links, newly created catalog entities, relationship claims and indicators. You get the same article and a list of those records, one per line with an item_id. For each item decide whether it is right. You create nothing; you only judge what is there.
 
 RETURN ONLY THE ITEMS YOU WOULD CHANGE. Every item_id you leave out of the verdicts list is kept exactly as it is, which is the right outcome for most of them — a clean review on a well-extracted article returns verdicts for its edges and NEW entities and nothing else. Do not echo back the links and iocs you agree with: a list with one line per item wastes the response budget and gets truncated on a long article, which throws the whole review away.
 
 THREE EXCEPTIONS:
   - Every `edge:` item needs a verdict: keep, reverb or demote. A keep on an edge is a positive claim that THIS article states the relationship, exactly as printed, and it counts toward confirming it. Each edge prints the sentence to judge it by (the analysis's evidence, or the article's sentence naming both ends). Read that sentence: keep only when it states the claim with that verb and that direction; reverb when it relates the two by another verb or the other way round; demote when it relates nothing. When no sentence names both, keep only if another passage of the article plainly states the claim, and quote it. There are at most ten edges in a list.
-  - Every link marked "NEW, created by this article" needs a verdict: keep, veto or merge. The automated pass just added that entity to the catalogue on the strength of this one article, so silence is not good enough — say whether it should exist.
+  - Every link marked "NEW, created by this article" needs a verdict: keep, veto or merge. The automated pass just added that entity to the catalog on the strength of this one article, so silence is not good enough — say whether it should exist.
   - Every `ioc:` item marked CANDIDATE needs a verdict: capture or drop. A candidate is a value nothing has captured yet — the pattern scan spotted it, or the automated pass staged it without capturing it — and this review is the only judgment it gets.
 
 WHAT A LINK MEANS
-  A link says only that this article is about, or meaningfully involves, the entity. It is NOT a claim that the entity is an adversary. The catalogue deliberately holds defenders and bystanders too:
+  A link says only that this article is about, or meaningfully involves, the entity. It is NOT a claim that the entity is an adversary. The catalog deliberately holds defenders and bystanders too:
   - vendor / product: the company or software the article is about, patches, or reports as affected. A vendor is a company that makes products — never a catch-all for "not an adversary": a government body, alliance, person, criminal group or command-line tool is not a vendor.
-  - tool: software someone in the article operates, attacker or defender (Cobalt Strike, PowerShell abused by malware, Sysmon, VirusTotal, Microsoft Defender). Being legitimate or defensive is never a reason to remove a tool link. Commercial platforms and services (SharePoint, Slack, Microsoft Graph) are products; reclassify them to product. A NEW tool is different: the catalogue only adds attacker tools, so a new tool that only defenders, researchers, vendors or ordinary users operate in this article is a veto.
+  - tool: software someone in the article operates, attacker or defender (Cobalt Strike, PowerShell abused by malware, Sysmon, VirusTotal, Microsoft Defender). Being legitimate or defensive is never a reason to remove a tool link. Commercial platforms and services (SharePoint, Slack, Microsoft Graph) are products; reclassify them to product. A NEW tool is different: the catalog only adds attacker tools, so a new tool that only defenders, researchers, vendors or ordinary users operate in this article is a veto.
   - sector: the industry of the victims or targets. Sector links come from the analysis's judgment, so the article often never uses the word: a dental practice on a leak site is Healthcare, a rail operator is Transportation.
   - country: a place the article's events involve (victim location, attribution, target).
   - ttp: a technique the article describes or maps. A detection rule's ATT&CK tags are the rule's own mapping, not "metadata": keep them. A technique in the report's own ATT&CK table (the item's "listed in:" line) is mapped by the report: keep it, whatever the context line shows.
@@ -2465,11 +2466,11 @@ VERDICTS (keep is the default for anything you omit; state it explicitly only to
   keep        — the record is correct for this article.
   remove      — (links only) the article does not actually involve the entity:
                 · the only mention is boilerplate: a "Related:" / "Read more" headline, an advert or webinar promo, an author bio or site footer, a CVSS-source or vendor list, a user-agent string, a sector or industry dropdown that lists every option;
-                · the name is used in an unrelated sense: a common English word, a different organisation or product sharing the name, a substring of an unrelated term (cmd in TX_CMD), an acronym in a non-security sense;
+                · the name is used in an unrelated sense: a common English word, a different organization or product sharing the name, a substring of an unrelated term (cmd in TX_CMD), an acronym in a non-security sense;
                 · a sector that fits neither the victims nor the targets (a construction firm filed under Healthcare).
                 When the link came through an alias (the item's "matched as:" line) and that alias is not a name for this entity anywhere — a common word, a label, another product's name ("crypto" on crypto24, "New Group", "EOS" meaning end of support, "ClickFix" on a different lure) — also set bad_alias to that alias exactly as printed. Leave bad_alias empty when the alias is fine and only this article's use of it is wrong.
-  reclassify  — (links only) a real reference, but the entity sits under the wrong catalogue type; set suggested_type to one of threat_actor, malware, tool, vendor, product, country. Never use remove for type confusion. A type change applies to the entity everywhere, so judge what the entity IS, not how this one article uses the name: a person nicknamed "Prometheus" does not make the Prometheus monitoring product a threat actor — that article's link is a remove.
-  veto        — (links marked "NEW, created by this article" only) the entity should not exist at all: a description instead of a name ("Chinese espionage group"), a victim organisation, a vendor or researcher, a product that is not malware or a tool, a generic term. Also: a file, package or plugin name from an IoC table filed as malware; a vulnerability or exploit nickname filed as malware or a tool (Spring4Shell, EternalBlue); a built-in command, shell or developer tool nobody abuses here (/bin/sh, cron, Vite); a security product or analysis tool only defenders run; a political or military body with no cyber operations in the article. A new malware or tool that is really the other type is a reclassify, not a veto.
+  reclassify  — (links only) a real reference, but the entity sits under the wrong catalog type; set suggested_type to one of threat_actor, malware, tool, vendor, product, country. Never use remove for type confusion. A type change applies to the entity everywhere, so judge what the entity IS, not how this one article uses the name: a person nicknamed "Prometheus" does not make the Prometheus monitoring product a threat actor — that article's link is a remove.
+  veto        — (links marked "NEW, created by this article" only) the entity should not exist at all: a description instead of a name ("Chinese espionage group"), a victim organization, a vendor or researcher, a product that is not malware or a tool, a generic term. Also: a file, package or plugin name from an IoC table filed as malware; a vulnerability or exploit nickname filed as malware or a tool (Spring4Shell, EternalBlue); a built-in command, shell or developer tool nobody abuses here (/bin/sh, cron, Vite); a security product or analysis tool only defenders run; a political or military body with no cyber operations in the article. A new malware or tool that is really the other type is a reclassify, not a veto.
   merge       — (links marked "NEW, created by this article" only) the entity duplicates one of the names printed after "nearest existing names:"; set merge_into to that name EXACTLY as printed. If the right match is not among those names you cannot merge; use keep or veto.
   link        — (`held:` items only) the item is NOT linked: its name is also an ordinary word, and the analysis did not name it in this article. Use link when the article is in fact about this entity (the context line uses the name for the threat actor, malware, tool or country, not in its ordinary sense: "the Royal ransomware gang", not "the Royal Navy"). Omit the item when the ordinary sense is meant, which is most of the time.
   demote      — (edges only) the article names both but never relates them as claimed: roundups, lists, separate stories in one digest, detection-rule tags and references, generic defensive advice ("watch for Cobalt Strike beacons"), or the relationship is denied ("separate from", "not linked to"). Also demote when one end is the wrong entity: an alias that means something else here, a different group or product with the same name.
@@ -2490,7 +2491,7 @@ RULES
   - A `held:` item is the other side of that: a held word the extraction did not name, so it was never linked. Link it only on a clear mention of the entity itself, and name the entity in the reason.
   - A link marked "an analyst restored this link recently" is a strong keep; remove only on an unambiguous name collision.
   - Article counts and ages are context about how established an entity is: a one-article entity created by this very article deserves scrutiny; a 200-article entity usually does not.
-  - For NEW entities, the "nearest existing names" line is what the catalogue already holds. Prefer merge over veto when one of them is the same thing under another name.
+  - For NEW entities, the "nearest existing names" line is what the catalog already holds. Prefer merge over veto when one of them is the same thing under another name.
   - For edges, the verb means what the subject did to the object in this article:
       uses — the subject itself used or deployed it (not "could use", not "detects", not a researcher's tool);
       delivers / drops — a loader, dropper or actor installed that malware; a payload is not "used" by its loader;
@@ -2641,17 +2642,17 @@ Return strict JSON matching the provided schema: decision, suggested_verb ("" un
         ),
         "category": "extraction",
         "variables": ["pairs_block", "pair_count"],
-        "default_system_template": """You are a senior cyber-threat-intelligence analyst curating a catalogue of threat actors, malware families and tools. You are shown pairs of catalogue entries that an automated check flagged as possible duplicates. For each pair decide whether the two entries describe the SAME real-world thing under two names, or two DIFFERENT things.
+        "default_system_template": """You are a senior cyber-threat-intelligence analyst curating a catalog of threat actors, malware families and tools. You are shown pairs of catalog entries that an automated check flagged as possible duplicates. For each pair decide whether the two entries describe the SAME real-world thing under two names, or two DIFFERENT things.
 
 Use what you know about the threat landscape: vendor naming schemes (APT29 = Cozy Bear = The Dukes = Midnight Blizzard = NOBELIUM), version and variant names that are still the same family or operation (Qakbot = QBot = Pinkslipbot, LockBit 2.0 = LockBit 3.0), and the many names that only look alike but are not (APT28 vs APT29, Emotet vs Dridex, Cobalt Strike vs Cobalt Group, Conti vs Ryuk).
 
 VERDICTS
-  same       — the two entries are one thing. Also say which side to KEEP as the canonical record: prefer the entry with the name the community actually uses, the fuller profile, more articles, and a catalogue origin over an AI-created one. The other side is merged into it (its name becomes an alias, its articles move).
+  same       — the two entries are one thing. Also say which side to KEEP as the canonical record: prefer the entry with the name the community actually uses, the fuller profile, more articles, and a catalog origin over an AI-created one. The other side is merged into it (its name becomes an alias, its articles move).
   different  — two distinct things, even if related (a tool and the group that uses it; a loader and the payload it drops; a successor family with its own codebase; a product and the vendor).
   unsure     — the evidence shown does not settle it. Prefer unsure over a guess: a wrong merge destroys a profile, a missed one just waits.
 
 RULES
-  - Your own knowledge comes first. The aliases are this catalogue's data, and many were added by AI extraction from a single article — a wrong one makes two unrelated entries look identical (Ryuk carrying "ALPHV", which is BlackCat's name). When a shared alias contradicts what you know, the alias is wrong: answer different.
+  - Your own knowledge comes first. The aliases are this catalog's data, and many were added by AI extraction from a single article — a wrong one makes two unrelated entries look identical (Ryuk carrying "ALPHV", which is BlackCat's name). When a shared alias contradicts what you know, the alias is wrong: answer different.
   - Each shared name is listed with where it came from. An alias from mitre_attack, malpedia, an analyst or seed data is strong evidence of same. An UNSOURCED alias proves nothing on its own: say same only if you know independently that the two names are one thing; otherwise unsure.
   - Different mitre_ids mean MITRE tracks two entries (such pairs are not shown). The same mitre_id on both is strong evidence of same.
   - Vendor names for overlapping clusters are not the same group unless the vendors say so: "overlaps with" or "shares infrastructure with" is different or unsure, not same.

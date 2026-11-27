@@ -124,7 +124,7 @@ async def correlate_new_entities(db: AsyncSession, entry_id: uuid.UUID) -> list[
     Returns correlation events for patterns like:
     - New TTP for a known actor or malware family
     - New malware for a known actor
-    - Coverage gaps (TTP with no active detection rule)
+    - Coverage gaps (TTP with no detection rule, draft or published)
     - Actor-malware co-occurrence
     """
     events: list[CorrelationEvent] = []
@@ -244,7 +244,7 @@ async def correlate_new_entities(db: AsyncSession, entry_id: uuid.UUID) -> list[
                 )
 
     # --- new_intel_for_rule ---
-    # New TTPs that already have active detection rules (useful for rule tuning)
+    # TTPs in this entry that already have a non-draft detection rule (useful for rule tuning)
     if ttps:
         from app.models.detection_rule import DetectionRule
 

@@ -1,20 +1,12 @@
 /**
  * Layout engine for the entity graph.
  *
- * Two layouts, both run d3-force to a settled state synchronously (no
- * animation) with collision forces, so nodes, labels and story boxes never
- * overlap:
+ * Two layouts, both run d3-force to a settled state synchronously (no animation) with collision forces, so nodes, labels and story boxes never overlap:
  *
- * - Story: each story cluster is a box with its members in a grid inside it.
- *   The seed, the boxes and any story-less nodes the user chose to show are
- *   then spread around the seed by the force simulation.
- * - Network: every visible node is a body in the simulation, pulled together
- *   along edges, with the seed pinned at the origin. Nodes per type are
- *   capped; the rest are reported as overflow.
+ * - Story: each story cluster is a box with its members in a grid inside it. The seed, the boxes and any story-less nodes the user chose to show are then spread around the seed by the force simulation.
+ * - Network: every visible node is a body in the simulation, pulled together along edges, with the seed pinned at the origin. Nodes per type are capped; the rest are reported as overflow.
  *
- * Positions are centers in graph coordinates. A previous layout can be passed
- * in so nodes that were already on screen start where they were, which keeps
- * the picture stable when an expansion adds nodes.
+ * Positions are centers in graph coordinates. A previous layout can be passed in so nodes that were already on screen start where they were, which keeps the picture stable when an expansion adds nodes.
  *
  * Pure functions: no React, no DOM, deterministic for the same input.
  */
@@ -36,8 +28,7 @@ export interface LayoutNode {
   type: string;
   label: string;
   size: number;
-  /** Serialized entity payload from the graph endpoint (technique_id,
-   * cve_id, …) — carried through for inspector lookups, unused by layout. */
+  /** Serialized entity payload from the graph endpoint (technique_id, cve_id, …) — carried through for inspector lookups, unused by layout. */
   data?: unknown;
 }
 
@@ -53,9 +44,7 @@ export interface LayoutEdge {
   entries?: Array<{ entry_id: string; title: string; score: number }>;
 }
 
-/** A story (incident) grouping for the story layout — nodeIds in graph id
- * format (`${type}-${id}`). Supplied by the relationships tab from the
- * pivot's evidence structure. */
+/** A story (incident) grouping for the story layout — nodeIds in graph id format (`${type}-${id}`). Supplied by the relationships tab from the pivot's evidence structure. */
 export interface GraphStoryCluster {
   id: string;
   heading: string;
@@ -66,8 +55,7 @@ export interface GraphStoryCluster {
   slug?: string | null;
   /** The story's articles, newest first where known — listed in the inspector. */
   entries?: Array<{ entry_id: string; title: string }>;
-  /** True for clusters belonging to an EXPANDED node — their members aren't
-   * rows in the viewed profile's list, so "filter list" doesn't apply. */
+  /** True for clusters belonging to an EXPANDED node — their members aren't rows in the viewed profile's list, so "filter list" doesn't apply. */
   external?: boolean;
 }
 
@@ -152,9 +140,7 @@ interface Body extends SimulationNodeDatum {
 
 const TICKS = 300;
 
-/** Push overlapping bodies apart along the axis of least overlap. Circles
- * collide as their bounding squares here — close enough, and it lets wide
- * story boxes pack without the empty corners a circle around them leaves. */
+/** Push overlapping bodies apart along the axis of least overlap. Circles collide as their bounding squares here — close enough, and it lets wide story boxes pack without the empty corners a circle around them leaves. */
 function separateRects(bodies: Body[], pad: number, strength = 1): void {
   for (let i = 0; i < bodies.length; i++) {
     const a = bodies[i];
@@ -190,11 +176,9 @@ function settle(
     linked.add(typeof l.source === 'string' ? l.source : (l.source as Body).id);
     linked.add(typeof l.target === 'string' ? l.target : (l.target as Body).id);
   }
-  // Nodes with no visible connection are pulled in hard, so they sit near
-  // the rest instead of drifting to the edges and stretching the view.
+  // Nodes with no visible connection are pulled in hard, so they sit near the rest instead of drifting to the edges and stretching the view.
   const pull = (b: Body) => (linked.has(b.id) ? 0.03 : 0.25);
-  // A wide panel pulls harder vertically, so the graph spreads sideways to
-  // match the space it is drawn in.
+  // A wide panel pulls harder vertically, so the graph spreads sideways to match the space it is drawn in.
   const aspect = Math.max(0.5, Math.min(4, opts.aspect ?? 1));
   const sim = forceSimulation(bodies)
     .force(
@@ -219,9 +203,7 @@ function settle(
   if (opts.rects) for (let i = 0; i < 60; i++) separateRects(bodies, opts.pad ?? 16);
 }
 
-/** Start position for a body: where it was last time, or a spot on an
- * ellipse around the seed shaped like the panel (wide panel, wide ellipse).
- * The spot is index-based so output is deterministic. */
+/** Start position for a body: where it was last time, or a spot on an ellipse around the seed shaped like the panel (wide panel, wide ellipse). The spot is index-based so output is deterministic. */
 function startAt(id: string, i: number, n: number, radius: number, previous?: Map<string, Point>, aspect = 1): Point {
   const prev = previous?.get(id);
   if (prev) return { x: prev.x, y: prev.y };
@@ -241,11 +223,9 @@ export interface StoryLayoutInput {
   hiddenNodes: Set<string>;
   /** Story-less types the user chose to show on the graph. */
   expandedGhostTypes: Set<string>;
-  /** Nodes brought in by expanding another node → the node expanded. They
-   * are always drawn, next to that node, never pooled into a type pill. */
+  /** Nodes brought in by expanding another node → the node expanded. They are always drawn, next to that node, never pooled into a type pill. */
   anchorOf?: Map<string, string>;
-  /** Story clusters from an expansion → the node expanded. They sit next
-   * to that node and don't count toward the story cap. */
+  /** Story clusters from an expansion → the node expanded. They sit next to that node and don't count toward the story cap. */
   clusterAnchor?: Map<string, string>;
   /** Spacing multiplier, 0.5–8. */
   spacing: number;
@@ -291,8 +271,7 @@ export function computeStoryLayout(input: StoryLayoutInput): StoryLayout | null 
     });
   }
 
-  // Story-less nodes: one ghost entry per type; shown types get laid out
-  // as free bodies.
+  // Story-less nodes: one ghost entry per type; shown types get laid out as free bodies.
   const provenance = new Map<string, string | null | undefined>();
   for (const e of edges) {
     if (e.source === seedId) provenance.set(e.target, e.provenance);
@@ -326,8 +305,7 @@ export function computeStoryLayout(input: StoryLayoutInput): StoryLayout | null 
   loose.forEach((n, j) => {
     bodies.push({ id: n.id, r: bodyRadius(n, false, labels), ...startAt(n.id, boxes.length + j, total, ring * 1.4, previous, aspect) });
   });
-  // Each body hangs off the seed, except what an expansion brought in: that
-  // hangs off the expanded node (its story box when it sits in one).
+  // Each body hangs off the seed, except what an expansion brought in: that hangs off the expanded node (its story box when it sits in one).
   const boxOf = new Map<string, string>();
   for (const b of boxes) for (const id of b.members) boxOf.set(id, `story:${b.cluster.id}`);
   const bodyById = new Map(bodies.map((b) => [b.id, b]));

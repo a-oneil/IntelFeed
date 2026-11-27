@@ -166,8 +166,7 @@ export const TriggerNode = memo(function TriggerNode({ data }: NodeProps) {
           value={triggerType}
           onChange={(e) => {
             const next = e.target.value;
-            // Saved-search match defaults to batch (digest) mode unless the
-            // user explicitly picks something else.
+            // Saved-search match defaults to batch (digest) mode unless the user explicitly picks something else.
             if (next === "on_saved_search_match" && !triggerConfig?.execution_mode) {
               onUpdate?.({
                 triggerType: next,

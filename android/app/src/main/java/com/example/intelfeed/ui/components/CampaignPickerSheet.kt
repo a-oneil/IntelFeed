@@ -107,8 +107,7 @@ fun CampaignPickerSheet(
     fun attachTo(campaignId: String, campaignName: String) {
         actionInProgress = true
         scope.launch {
-            // One request for the whole selection (it used to send one request per article and
-            // could half-succeed).
+            // One request for the whole selection (one request per article could half-succeed).
             repository.attachEntriesToCampaign(campaignId, entryIds).fold(
                 onSuccess = {
                     actionInProgress = false

@@ -194,8 +194,8 @@ def autolink_entry_task(self, entry_id: str):
 
     Retries on transient database failures (serialization/deadlock). This task is
     a chord header: if it raises, Celery skips the chord callback outright, so the
-    entry loses co-occurrence, correlation, requirements and scoring for good. A
-    retry is far cheaper than that silent hole.
+    entry permanently loses co-occurrence, correlation, requirements and scoring,
+    with no error shown. A retry is far cheaper than that.
     """
     start = time.monotonic()
     try:
@@ -368,10 +368,10 @@ async def _scan_entry_observables(entry_id: str):
         # A feed set to "none" is out of the intel system entirely, and that has
         # to include the ledger: the curated ioc_list door below creates rows
         # from a body, so without this check a feed the operator switched off
-        # could still mint observables. Checked here rather than at dispatch for
+        # could still create observables. Checked here rather than at dispatch for
         # the same reason `_autolink_entry` does it — the legacy path dispatches
         # every parallel stage unconditionally — and with the same precedence: a
-        # feed marked "do not analyse" outranks a plan that enables the stage.
+        # feed marked "do not analyze" outranks a plan that enables the stage.
         mode = (
             await db.execute(select(Feed.intel_extraction_mode).where(Feed.id == entry.feed_id))
         ).scalar_one_or_none()
@@ -512,9 +512,8 @@ async def _extract_entry_intel(entry_id: str):
         # This task is dispatched when EITHER flag is on
         # (`auto_extract_on_ingest or extract_detection_rules`), so each half
         # has to check its own. Without the regex check below, turning off
-        # "look up CVEs in NVD" did nothing at all as long as detection-rule
-        # extraction was on — the regex passes ran regardless, and the setting
-        # was decorative.
+        # "look up CVEs in NVD" would have no effect while detection-rule
+        # extraction is on, because the regex passes would run regardless.
         feed_row = (
             await db.execute(
                 select(Feed.intel_extraction_mode, Feed.auto_extract_on_ingest, Feed.extract_detection_rules).where(
@@ -522,7 +521,7 @@ async def _extract_entry_intel(entry_id: str):
                 )
             )
         ).one_or_none()
-        # "Analyse this feed" off (mode none) outranks both flags and the
+        # "Analyze this feed" off (mode none) outranks both flags and the
         # GitHub import: nothing is tagged or created. Dispatch already skips
         # the stage for these feeds; this catches plan overlays, forced
         # dispatches and the Engine's re-run button.
@@ -605,11 +604,11 @@ async def _extract_entry_intel(entry_id: str):
 
         await db.commit()
 
-        # Refresh only the docs for the entities this entry touched. This used
-        # to dispatch the full sync_entity_search_indexes, which re-pushed all
-        # ~50k entity documents because one entry linked one CVE — it fired on
-        # nearly every ingested entry and pinned Meilisearch at a core. The
-        # scheduled 4-hourly full sweep still heals any drift. Detection rules
+        # Refresh only the docs for the entities this entry touched. Running the
+        # full sync_entity_search_indexes here would re-push all ~50k entity
+        # documents whenever one entry linked one CVE, which happens on nearly
+        # every ingested entry and keeps Meilisearch at a full core. The
+        # scheduled 4-hourly full sync repairs any drift. Detection rules
         # index themselves in store_extracted_rules / process_github_entry.
         if touched:
             from app.services.entity_indexer import index_entities
@@ -1000,13 +999,13 @@ async def _bulk_extract(entry_ids: list[str], extract_types: list[str], user_id:
                 stats["mitigations"] += len(stored)
 
             if use_ai:
-                # One consolidated entry_analysis call replaces the old per-task
-                # AI extraction calls (threat_actor_id, malware_id, tool_extraction,
-                # country_id, sector_id, article_metadata — now deprecated seeds).
+                # One consolidated entry_analysis call covers the separate AI
+                # extraction tasks (threat_actor_id, malware_id, tool_extraction,
+                # country_id, sector_id, article_metadata, all deprecated seeds).
                 # A person clicked Extract, but the result is shared state and
-                # the run is a batch: pipeline spend, with the clicker kept as
-                # provenance. Derive first so a since-deleted account never
-                # reaches the result's foreign key.
+                # the run is a batch, so it is billed as system (pipeline) spend
+                # with the user who clicked kept as provenance. derive_caller runs
+                # first so a deleted account never reaches the result's foreign key.
                 from app.ai.engine import derive_caller
                 from app.services.entry_analysis import analyze_entry
 
@@ -1148,7 +1147,7 @@ async def _rebuild_profiles():
 
 @celery_app.task(name="app.workers.intel_feed_tasks.archive_correlation_events", soft_time_limit=120, time_limit=180)
 def archive_correlation_events():
-    """Archive read correlation events older than 90 days."""
+    """Delete read correlation events older than 90 days."""
     start = time.monotonic()
     try:
         count = run_async(_archive_events())
@@ -1463,8 +1462,8 @@ def sync_read_state_to_search(entry_ids: list[str], is_read: bool):
     """Batch-sync is_read for the given entries to Meilisearch, off the request path.
 
     Dispatched by mark_all_read so the API request commits and returns quickly
-    instead of blocking on a large synchronous search sync (which previously
-    exceeded the client timeout and rolled the read-state write back).
+    instead of blocking on a large synchronous search sync (which can exceed
+    the client timeout and roll the read-state write back).
     """
     from app.services import meilisearch_client
 

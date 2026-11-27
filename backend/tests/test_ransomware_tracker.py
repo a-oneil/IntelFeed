@@ -247,7 +247,7 @@ async def test_watchlist_alert_emission(db_session, monkeypatch):
     db_session.add_all(
         [
             UserEntityWatch(created_by=user.id, entity_type="ransomware_victim", entity_id=victim.id, mode="watch"),
-            # Sector interest is a per-user watch like any other (the global my_sectors setting is gone).
+            # Sector interest is a per-user watch like any other, not a global my_sectors setting.
             UserEntityWatch(
                 created_by=sector_watcher.id, entity_type="sector", entity_id=sector_uuid("healthcare"), mode="watch"
             ),

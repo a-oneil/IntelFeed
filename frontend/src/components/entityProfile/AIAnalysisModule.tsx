@@ -1,10 +1,4 @@
-/**
- * AIAnalysisModule — the AI tab folded into the Overview's Workspace section.
- * Run and read are split: persisted results render as cards (AIResultsDisplay
- * hides itself when there are none), and the task-runner list stays behind a
- * "Run a task" toggle so an unused module costs one slim header row. The old
- * standalone AI tab is gone; this is its home.
- */
+/** AIAnalysisModule — the AI tab folded into the Overview's Workspace section. Run and read are split: persisted results render as cards (AIResultsDisplay hides itself when there are none), and the task-runner list stays behind a "Run a task" toggle so an unused module takes up only one header row. There is no separate AI tab. */
 import { useState } from "react";
 import { AIAnalysisSection } from "@/components/AIAnalysisSection";
 import { AIResultsDisplay } from "@/components/AIResultsDisplay";

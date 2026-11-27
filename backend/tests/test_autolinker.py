@@ -212,9 +212,9 @@ def test_single_dotted_segment_still_matches():
 
 
 def test_word_boundary_prevents_partial_alias_match():
-    """Aliases must be word-boundary checked just like names — an alias 'foxx'
-    must not match inside 'firefoxx'."""
-    # Use a non-ambiguous alias (>4 chars, alpha-only would be ambiguous so add digit)
+    """Aliases must be word-boundary checked just like names — an alias 'foxx7'
+    must not match inside 'firefoxx7'."""
+    # The digit keeps the alias out of the ambiguous class (short alpha-only names), which has its own rules
     actor = _make_actor("ActorOne", aliases=["foxx7"])
     _build_and_activate(actors=[actor])
 

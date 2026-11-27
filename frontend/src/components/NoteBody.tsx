@@ -1,18 +1,14 @@
 /**
- * NoteBody — renders a note's saved content as formatted text.
+ * NoteBody: renders a note's saved content as formatted text.
  *
- * Note content is inconsistent across how notes were authored:
- *  - pure markdown source (entity notes, CLI notes)
+ * Note content comes in different shapes depending on how the note was written:
+ *  - plain markdown source (entity notes, CLI notes)
  *  - real rendered HTML (`content_html`, legacy WYSIWYG notes)
- *  - markdown blocks each wrapped in <p>…</p> (AI copilot output) — the markdown
- *    syntax (#, **, |, ---) is intact but buried inside HTML block tags, which
- *    neither a markdown parser nor an HTML renderer will format on its own.
+ *  - markdown blocks each wrapped in <p>…</p> (AI copilot output): the markdown syntax (#, **, |, ---) is intact but sits inside HTML block tags, which neither a markdown parser nor an HTML renderer formats on its own.
  *
- * So we look for *rich* HTML tags (headings, strong, tables, lists, links…):
- *  - present  → it's genuinely rendered HTML → sanitize + show via SafeHTML.
- *  - absent   → treat as markdown; first unwrap any <p>/<br> block wrappers back
- *               into plain markdown, then render via EntityLinkedMarkdown, which
- *               formats it *and* auto-links known intelligence entities.
+ * So the component looks for rich HTML tags (headings, strong, tables, lists, links…):
+ *  - present → real rendered HTML → sanitize and show via SafeHTML.
+ *  - absent → treat as markdown: first unwrap any <p>/<br> block wrappers back into plain markdown, then render via EntityLinkedMarkdown, which formats it and also links known intelligence entities.
  * Shared by the read view and the editor's live preview.
  */
 import { useMemo } from "react";

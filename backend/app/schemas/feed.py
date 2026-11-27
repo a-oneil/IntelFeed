@@ -34,6 +34,8 @@ class FeedCreateRequest(BaseModel):
     extract_tools: bool | None = None
     ai_analysis_enabled: bool | None = None
     exclude_title_patterns: str | None = None
+    # YouTube only: None leaves it to the user's default (Settings → Feeds).
+    exclude_shorts: bool | None = None
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -198,6 +200,32 @@ class FeedDiscoverResult(BaseModel):
     description: str | None
 
 
+class LinkPreviewRequest(BaseModel):
+    url: str
+
+    model_config = ConfigDict(json_schema_extra={"example": {"url": "https://www.youtube.com/@BlackHatOfficialYT"}})
+
+
+class LinkPreviewResponse(BaseModel):
+    """What a pasted link is, for the Add Feed dialog (see services/link_preview.py)."""
+
+    kind: str = Field(description="feed, github, bluesky, bluesky_feed, bluesky_search, telegram, mastodon_tag or page")
+    title: str
+    feed_type: str = Field(description="The feed type subscribing creates (the first feed's, for kind=feed)")
+    url: str
+    feeds: list[FeedDiscoverResult] = Field(default_factory=list, description="kind=feed: every feed found, best first")
+    github: dict | None = Field(
+        default=None, description="owner, repo, default_branch, has_releases, rules {label, paths, folders, branch}"
+    )
+    bluesky: dict | None = None
+    telegram: dict | None = None
+    mastodon: dict | None = None
+    page: dict | None = Field(default=None, description="kind=page: article_links found by the web scraper")
+    warning: str | None = Field(default=None, description="Set when subscribing would not work yet")
+    suggested_category_id: uuid.UUID | None = None
+    fetch_interval_minutes: int
+
+
 class BulkIntelModeRequest(BaseModel):
     intel_extraction_mode: str = Field(pattern=r"^(full|selective|manual|none)$")
 
@@ -212,7 +240,7 @@ class BulkCategoryUpdateRequest(BaseModel):
     timeliness_rating: str | None = Field(default=None, pattern=r"^(excellent|good|fair|poor)$")
     relevance_rating: str | None = Field(default=None, pattern=r"^(high|medium|low)$")
     # Deliberately no analyst_notes. One value applied across a category would
-    # replace the per-source judgement on every feed in it, with nothing to undo
+    # replace the per-source judgment on every feed in it, with nothing to undo
     # — notes are written one feed at a time, in the feed modal.
     intel_extraction_mode: str | None = Field(default=None, pattern=r"^(full|selective|manual|none)$")
     ai_analysis_enabled: bool | None = None

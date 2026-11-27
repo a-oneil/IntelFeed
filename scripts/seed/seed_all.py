@@ -167,8 +167,8 @@ def main() -> int:
 
     print(f"\n\033[1m{'Step':<15}{'Result':<10}{'Time':>8}\033[0m")
     for step, status, elapsed in results:
-        colour = {OK: "\033[32m", FAILED: "\033[31m", SKIPPED: "\033[33m"}[status]
-        print(f"{step.name:<15}{colour}{status:<10}\033[0m{elapsed:>7.1f}s")
+        color = {OK: "\033[32m", FAILED: "\033[31m", SKIPPED: "\033[33m"}[status]
+        print(f"{step.name:<15}{color}{status:<10}\033[0m{elapsed:>7.1f}s")
 
     failed = [s.name for s, status, _ in results if status == FAILED]
     succeeded = sum(1 for _, status, _ in results if status == OK)

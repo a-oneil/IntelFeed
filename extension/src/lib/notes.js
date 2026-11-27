@@ -1,10 +1,8 @@
-// Saving a page as a note: on a telemetry source, on an entity, or as a note
-// of its own. No browser APIs.
+// Saving a page as a note: on a telemetry source, on an entity, or as a note of its own. No browser APIs.
 
 const NOTE_KINDS = ["telemetry", "entity", "note"];
 
-// The entity types an entity note can be on (EntityNoteCreate's pattern),
-// in the order the search lists them.
+// The entity types an entity note can be on (EntityNoteCreate's pattern), in the order the search lists them.
 export const NOTE_ENTITY_TYPES = [
   "threat_actor",
   "malware",

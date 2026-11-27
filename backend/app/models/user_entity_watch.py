@@ -25,9 +25,9 @@ class UserEntityWatch(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     entity_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    # threat_actor, malware, cve, tool, vendor, product, country
+    # One of WATCHABLE_ENTITY_TYPES in app/api/watchlist.py (threat_actor, malware, cve, product, sector, ...)
     entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    mode: Mapped[str] = mapped_column(String(10), nullable=False)  # watch | mute
+    mode: Mapped[str] = mapped_column(String(10), nullable=False)  # watch | mute | stack
     boost: Mapped[float] = mapped_column(Float, default=1.0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

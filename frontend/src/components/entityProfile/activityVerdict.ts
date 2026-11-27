@@ -1,9 +1,4 @@
-/**
- * activityVerdict — a short plain phrase for the shape of the last 90 days of reporting,
- * read from the daily mentions series. The header's Active / Dormant chip only
- * knows the last sighting; a group that surged in September and went silent in
- * November is still "Active" there. This reads the curve instead.
- */
+/** activityVerdict: a short phrase describing the trend of the last 90 days of reporting, computed from the daily mentions series. The header's Active / Dormant chip only looks at the last sighting, so a group with a burst of reporting in September and none in November still shows "Active" there; this compares the last 21 days against the days before them instead. */
 import type { MentionsTimeseriesPoint } from "@/hooks/useEntityProfile";
 
 /** The recent stretch compared against everything before it. */

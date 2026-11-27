@@ -1,18 +1,11 @@
 import type { Root, Text, Parent, RootContent } from "mdast";
 
 /**
- * Remark plugin: render single newlines as hard line breaks, the way GitHub
- * comments do (equivalent to the `remark-breaks` package, inlined to avoid a
- * dependency).
+ * Remark plugin: render single newlines as hard line breaks, the way GitHub comments do (equivalent to the `remark-breaks` package, inlined to avoid a dependency).
  *
- * Markdown normally collapses a soft break (a lone `\n`) into a space, so a
- * pasted plaintext note — or a markdown note that relies on line breaks rather
- * than blank-line paragraphs — renders as one run-on blob. Splitting `text`
- * nodes on `\n` into `break` nodes keeps those line breaks while still letting
- * real markdown syntax (headings, lists, emphasis, links) render.
+ * Markdown normally collapses a soft break (a lone `\n`) into a space, so a pasted plaintext note — or a markdown note that relies on line breaks rather than blank-line paragraphs — renders as one long paragraph. Splitting `text` nodes on `\n` into `break` nodes keeps those line breaks while still letting real markdown syntax (headings, lists, emphasis, links) render.
  *
- * Only `text` nodes are touched, so newlines inside fenced `code` / `inlineCode`
- * (distinct node types) are left untouched.
+ * Only `text` nodes are touched, so newlines inside fenced `code` / `inlineCode` (distinct node types) are left untouched.
  */
 export function remarkSoftBreaks() {
   return (tree: Root) => {

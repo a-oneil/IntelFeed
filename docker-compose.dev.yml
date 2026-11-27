@@ -1,8 +1,8 @@
 services:
   db:
     restart: unless-stopped
-    # postgres:16-alpine + pgvector, built from ./db/Dockerfile. Same base image
-    # as before, so the existing pgdata volume needs no migration.
+    # postgres:16-alpine + pgvector, built from ./db/Dockerfile. It keeps the
+    # postgres:16-alpine base, so the existing pgdata volume needs no migration.
     build:
       context: ./db
     image: intelfeed-postgres:16
@@ -27,7 +27,7 @@ services:
 
   redis:
     image: redis:7.4.12-alpine3.21
-    # Same protection prod already has: redis is the broker for the whole stack,
+    # Same protection as prod: redis is the broker for the whole stack,
     # so when the Docker VM runs low the global OOM killer picks it and every
     # service degrades silently — tests crawl on connection timeouts and the
     # failures look like application bugs. Cap its memory, deprioritize it as an

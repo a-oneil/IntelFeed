@@ -19,7 +19,7 @@ up to five hypotheses. Both are cached in ``ai_results`` keyed by entity,
 scope and query language, so the board's 14-day pack and the profile's pack
 never overwrite each other.
 
-What happens next is not IntelFeed's business. The analyst copies a query, or
+IntelFeed does not track what happens next. The analyst copies a query, or
 downloads a hypothesis as an ATHF hunt file — ``H-XXXX-<slug>.md``, YAML
 frontmatter plus the LOCK body (Learn / Observe / Check / Keep) with Keep left
 for the hunt itself — and drops it in the ATHF workspace. One file per
@@ -77,16 +77,16 @@ MAX_PROFILE_HYPOTHESES = 5
 # Draft more appends to a pack; past this many there is little left the
 # evidence supports that isn't already a hunt.
 MAX_PACK_HYPOTHESES = 20
-# Behaviours the prompt sees. Board: new-this-window first, then the most
+# Behaviors the prompt sees. Board: new-this-window first, then the most
 # reported. Profile: techniques without a rule first.
-BEHAVIOUR_CAP = 12
-PROFILE_BEHAVIOUR_CAP = 15
+BEHAVIOR_CAP = 12
+PROFILE_BEHAVIOR_CAP = 15
 PROFILE_ENTRY_CAP = 12
 LINKED_RULE_CAP = 25
 
 # Quote texts that are bookkeeping, not article sentences: the linker's and
 # the reclassifier's notes, and mappings copied off a detection rule. A model
-# handed one as "evidence" hunts for the note.
+# given one as evidence writes a hunt for the note text.
 _JUNK_QUOTE_PREFIXES = ("auto_link:", "reclassified from", "att&ck mapping from")
 # Ransomware leak-site posts name the actor and carry nothing to hunt from.
 LEAK_SITE_TITLE = "%published a new victim%"
@@ -125,7 +125,7 @@ async def resolve(db: AsyncSession, entity_type: str, entity_key: str):
 # ── inputs ───────────────────────────────────────────────────────────────────
 
 
-def _behaviour_dict(b, *, rule_status: str | None = None, claimed: bool = False) -> dict:
+def _behavior_dict(b, *, rule_status: str | None = None, claimed: bool = False) -> dict:
     out = {
         "technique_id": b.technique_id,
         "technique_name": b.technique_name,
@@ -168,11 +168,12 @@ async def evidence_entry_ids(db: AsyncSession, entity_type: str, row_id: str) ->
 
 
 # Entries for a profile pack, or a window pack for a type the brief does not
-# cover. The articles naming the entity in their title come first, then the
-# ones a claim rests on (an evidence list also carries other groups'
-# profiles that mention it in passing), then the most techniques: a roundup that mentions a
-# group once and lists thirty techniques from other intrusions is not about it,
-# and a leak-site post carries nothing to hunt from at all.
+# cover. Articles naming the entity in their title come first, then the ones a
+# confirmed or probable relationship cites as evidence (an evidence list also
+# carries other groups' profiles that mention it in passing), then those with
+# the most techniques. Title first because a roundup that mentions a group once
+# and lists thirty techniques from other intrusions is not about it. Leak-site
+# posts are excluded: they carry nothing to hunt from.
 _ENTRIES_SQL = """
 SELECT e.id, e.title, e.summary, e.published_at, f.title AS source,
        coalesce((SELECT array_agg(DISTINCT t.technique_id || ' ' || t.technique_name)
@@ -280,8 +281,8 @@ async def _claimed(db: AsyncSession, entity_type: str, row_id: str) -> list[dict
 async def linked_rules(db: AsyncSession, entity_type: str, resolved, limit: int = LINKED_RULE_CAP) -> list[dict]:
     """Rules written for this entity: attributed to it, or extracted from its articles.
 
-    The same two roads the profile's Detection count takes, minus library
-    rules that merely share a technique — those say nothing about this threat.
+    The same two sources the profile's Detection count uses, minus library
+    rules that only share a technique, which say nothing about this threat.
     """
     from sqlalchemy import or_, type_coerce
     from sqlalchemy.dialects.postgresql import JSONB
@@ -385,7 +386,7 @@ async def collect_hunt_inputs(db: AsyncSession, entity_type: str, entity_key: st
     """Everything the prompt may use for one entity and scope, and nothing else.
 
     Returns None when the entity cannot be resolved. A resolved entity with no
-    articles and no behaviours comes back with empty lists, and the caller
+    articles and no behaviors comes back with empty lists, and the caller
     decides there is nothing to draft from.
     """
     from app.services.coverage_workspace import build_workspace
@@ -398,20 +399,20 @@ async def collect_hunt_inputs(db: AsyncSession, entity_type: str, entity_key: st
 
     if scope != PROFILE_SCOPE:
         hours = WINDOW_HOURS.get(scope, WINDOW_HOURS["14d"])
-        ws = await build_workspace(db, entity_type, key, window=scope, article_limit=BEHAVIOUR_CAP)
+        ws = await build_workspace(db, entity_type, key, window=scope, article_limit=BEHAVIOR_CAP)
         if ws is None:
             return None
         if entity_type in (entity_types.THREAT_ACTOR, entity_types.MALWARE, entity_types.CVE):
             entries = await collect_brief_entries(db, entity_type, key, hours)
         else:
             since = datetime.now(UTC) - timedelta(hours=hours)
-            entries = await _ranked_entries(db, entity_type, resolved.row_id, ws.label, since, BEHAVIOUR_CAP)
-        behaviours = sorted(ws.behaviours, key=lambda b: (not b.is_new, -b.entry_count))[:BEHAVIOUR_CAP]
+            entries = await _ranked_entries(db, entity_type, resolved.row_id, ws.label, since, BEHAVIOR_CAP)
+        behaviours = sorted(ws.behaviours, key=lambda b: (not b.is_new, -b.entry_count))[:BEHAVIOR_CAP]
         return {
             "key": key,
             "label": ws.label,
             "entries": entries,
-            "behaviours": [_behaviour_dict(b) for b in behaviours],
+            "behaviours": [_behavior_dict(b) for b in behaviours],
             "facts": facts,
             "claimed": [],
             "linked_rules": [],
@@ -434,7 +435,7 @@ async def collect_hunt_inputs(db: AsyncSession, entity_type: str, entity_key: st
     ranked = sorted(
         ws.behaviours,
         key=lambda b: (b.technique_id not in claimed_ttps, rank.get(_status(b), 0), -b.entry_count),
-    )[:PROFILE_BEHAVIOUR_CAP]
+    )[:PROFILE_BEHAVIOR_CAP]
     entries = await _ranked_entries(
         db, entity_type, resolved.row_id, ws.label, datetime(1970, 1, 1, tzinfo=UTC), PROFILE_ENTRY_CAP
     )
@@ -444,7 +445,7 @@ async def collect_hunt_inputs(db: AsyncSession, entity_type: str, entity_key: st
         "label": ws.label,
         "entries": entries,
         "behaviours": [
-            _behaviour_dict(b, rule_status=_status(b), claimed=b.technique_id in claimed_ttps) for b in ranked
+            _behavior_dict(b, rule_status=_status(b), claimed=b.technique_id in claimed_ttps) for b in ranked
         ],
         "facts": facts,
         "claimed": [c for c in claimed if c["type"] != entity_types.TTP],
@@ -540,8 +541,8 @@ async def _current_result(db: AsyncSession, target_id: uuid.UUID):
     ).scalar_one_or_none()
 
 
-# Pipe languages: one stage per line reads as a query; one line of 400
-# characters is a scrollbar. Sigma is YAML and SQL has no pipes.
+# Pipe languages: one stage per line is easier to read than a single
+# 400-character line. Sigma is YAML and SQL has no pipes.
 _PIPED = {"kql", "spl", "esql", "eql", "cql", "yaral", "aql", "sumo"}
 
 
@@ -587,7 +588,7 @@ def _pack_from_result(row, entity_type: str, entity_key: str, scope: str, lang: 
     hypotheses = parsed.get("hypotheses_clean")
     if not isinstance(hypotheses, list) or not hypotheses:
         return None
-    # Formatted at read time so packs drafted before this read the same way.
+    # Formatted at read time, so packs cached before formatting existed get the same layout.
     hypotheses = [{**h, "query": format_query(h.get("query") or "", lang)} for h in hypotheses]
     return {
         "entity_type": entity_type,
@@ -642,7 +643,7 @@ async def generate_hunt_pack(
 
     Returns the pack, or None when the task has no provider assigned or the
     model returned nothing usable (nothing new, when appending). Raises NothingToHunt when the scope has no
-    articles and no extracted behaviours; LookupError when the entity does
+    articles and no extracted behaviors; LookupError when the entity does
     not resolve.
     """
     inputs = await collect_hunt_inputs(db, entity_type, entity_key, scope)
@@ -899,9 +900,9 @@ async def annotate_telemetry(db: AsyncSession, pack: dict) -> dict:
             if tier is None:
                 return False
             # Per platform: some source must give this log type AND see the
-            # hunt's target. Falcon's process creation is no use on ESXi. A
-            # type no source lists canonically (a legacy free-text match)
-            # keeps the old answer.
+            # hunt's target: Falcon's process creation events do not cover
+            # ESXi. A type no source lists canonically (a free-text match)
+            # counts as collected on any platform.
             givers = [plats for _n, types, plats in sources if ds in types]
             return not givers or any(covers(plats, platform) for plats in givers)
 
@@ -909,8 +910,8 @@ async def annotate_telemetry(db: AsyncSession, pack: dict) -> dict:
             {"source": ds, "have": _have(ds, tier)} for ds, tier in classify_data_sources(h["data_sources"], profile)
         ]
         h["runnable"] = all(t["have"] for t in h["telemetry"]) if h["telemetry"] else True
-        # Packs drafted before the log_source field have none: judged by log
-        # type alone, as they always were.
+        # A hypothesis without log_source (drafted before the field existed)
+        # is judged by log type alone.
         if h.get("log_source"):
             plats = platforms_by_name.get(_source_key(h.get("source_name")))
             have = plats is not None and covers(plats, platform)
@@ -922,9 +923,9 @@ async def annotate_telemetry(db: AsyncSession, pack: dict) -> dict:
 async def annotate_techniques(db: AsyncSession, pack: dict) -> dict:
     """Give each hypothesis its techniques' names and profile ids, for links.
 
-    Read time, like the telemetry check: a technique renamed in the catalog
-    reads right without a redraft. An id the catalog doesn't have keeps no
-    name and no link.
+    Done at read time, like the telemetry check, so a technique renamed in the
+    catalog shows its current name without a redraft. An id the catalog
+    doesn't have gets no name and no link.
     """
     from app.models.ttp import TTP
 

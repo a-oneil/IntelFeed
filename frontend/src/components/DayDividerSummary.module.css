@@ -62,11 +62,7 @@
 }
 
 .panel {
-  /* The summary block lives _inside_ the day divider but wraps onto its own row.
-     The divider's flex container hosts the header row and this panel side by
-     side, but flex-basis:100% pushes the panel to its own line and lets it
-     occupy the full width. order: 3 keeps it last — below the meta/action row
-     (order 0) and the intel chip strip (order 2). */
+  /* The summary block lives _inside_ the day divider but wraps onto its own row. The divider's flex container hosts the header row and this panel side by side, but flex-basis:100% pushes the panel to its own line and lets it occupy the full width. order: 3 keeps it last — below the meta/action row (order 0) and the intel chip strip (order 2). */
   flex-basis: 100%;
   order: 3;
   margin: 6px 0 4px;
@@ -82,9 +78,7 @@
   letter-spacing: 0;
   white-space: normal;
   overflow: visible;
-  /* The parent .dayDivider sets user-select: none so the date/count chips
-     can't be selected. The AI summary is real prose users want to copy, so
-     re-enable selection here. */
+  /* The parent .dayDivider sets user-select: none so the date/count chips can't be selected. The AI summary is real prose users want to copy, so re-enable selection here. */
   user-select: text;
 }
 
@@ -148,10 +142,7 @@
   color: var(--text-primary);
 }
 
-/* The model sometimes inserts `---` as a section separator between TL;DR /
-   Key Developments / etc. We already render section breaks via styled h2s,
-   so the markdown hr is redundant — and when collapsed it appears as a
-   dangling rule below the TL;DR paragraph. */
+/* The model sometimes inserts `---` as a section separator between TL;DR / Key Developments / etc. We already render section breaks via styled h2s, so the markdown hr is redundant — and when collapsed it appears as a dangling rule below the TL;DR paragraph. */
 .body hr {
   display: none;
 }
@@ -170,9 +161,7 @@
   margin-top: 0;
 }
 
-/* Section divider line only makes sense when multiple sections are visible
-   (i.e. expanded view). When collapsed, only the TL;DR section renders so
-   the underline would be a dangling rule with nothing below it. */
+/* Section divider line only makes sense when multiple sections are visible (i.e. expanded view). When collapsed, only the TL;DR section renders so the underline would be a dangling rule with nothing below it. */
 .bodyExpanded h2 {
   border-bottom: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
 }
@@ -196,9 +185,7 @@
 }
 
 .entityLink {
-  /* border-bottom-color is set inline per-entity-type so one class supports
-     every color in ENTITY_COLOR_MAP. Dotted (solid reads too busy) but 2px so
-     it's clearly visible; entity-colored to match the entry-body highlight. */
+  /* border-bottom-color is set inline per-entity-type so one class supports every color in ENTITY_COLOR_MAP. Dotted (solid reads too busy) but 2px so it's clearly visible; entity-colored to match the entry-body highlight. */
   color: inherit;
   text-decoration: none;
   border-bottom: 2px dotted currentColor;
@@ -237,7 +224,7 @@
     height: 14px;
   }
 
-  /* Keep the divider compact on phones — the sparkle carries it there. */
+  /* On phones the button shows only its sparkle icon, to keep the divider compact. */
   .generateLabel {
     display: none;
   }

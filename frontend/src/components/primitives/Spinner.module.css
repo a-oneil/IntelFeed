@@ -36,7 +36,7 @@
 @media (prefers-reduced-motion: reduce) {
   .spinner {
     animation: none;
-    /* Static ring reads as a placeholder rather than a stalled spinner. */
+    /* A ring with no accent arc looks like a placeholder rather than a stalled spinner. */
     border-top-color: var(--text-muted);
   }
 }

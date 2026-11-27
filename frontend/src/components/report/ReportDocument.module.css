@@ -33,22 +33,18 @@
   border-bottom: 1px solid var(--border);
 }
 
-/* Markdown written by the analyst or the AI. Wide content (code, tables)
-   scrolls inside the sheet instead of running past its edge. */
+/* Markdown written by the analyst or the AI. Wide content (code, tables) scrolls inside the sheet instead of running past its edge. */
 .docSection {
   min-width: 0;
 }
 
 
-/* Rendered markdown, styled to match the HTML export: body-font headings
-   with rules under h1 and h2, 1.6 line height, real paragraph and list
-   spacing. The app-wide reset zeroes every margin and padding, so all of
-   the rhythm is set here. */
+/* Rendered markdown, styled to match the HTML export: body-font headings with rules under h1 and h2, 1.6 line height, paragraph and list spacing. The app-wide reset zeroes every margin and padding, so all of the spacing is set here. */
 .docProse {
   min-width: 0;
   max-width: 860px;
   overflow-wrap: anywhere;
-  /* Between the app's body size and the old 16px: 14px at default scale. */
+  /* Between the app's body size and 16px: 14px at default scale. */
   font-size: calc(var(--fs-md) * 1.08);
   line-height: 1.6;
 }

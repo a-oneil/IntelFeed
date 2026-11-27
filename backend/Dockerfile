@@ -28,7 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 # postgresql-client-16 provides pg_dump/pg_restore matching the PostgreSQL 16 server.
 # Must match the server major version — pg_dump refuses to dump a newer server.
-# Used by scripts/backup.sh, scripts/restore.sh, and the backup_database Celery task.
+# Used by the backup_database Celery task. scripts/ops/backup.sh and restore.sh run
+# pg_dump/psql in the db container instead.
 
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH=/opt/venv/bin:$PATH

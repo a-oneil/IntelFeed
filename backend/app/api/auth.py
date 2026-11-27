@@ -141,7 +141,7 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
 
     # Seed the newcomer with the instance's default feed list (the earliest
     # admin's subscriptions). Done regardless of the per-user-subscriptions
-    # flag so the table stays consistent for a later flip.
+    # flag so the table is already filled in if the flag is turned on later.
     from app.services.feed_visibility import seed_subscriptions_for_new_user
 
     await seed_subscriptions_for_new_user(db, user.id)

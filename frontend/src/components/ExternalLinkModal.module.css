@@ -1,8 +1,7 @@
 .overlay {
   position: fixed;
   inset: 0;
-  /* Above every other modal and the copilot dock: this can be raised from a
-     link inside any of them. */
+  /* Above every other modal and the copilot dock, because this can be raised from a link inside any of them. */
   z-index: 2000;
   display: flex;
   align-items: center;
@@ -90,8 +89,7 @@
   background: var(--bg-primary);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  /* Long URLs wrap instead of scrolling sideways, and one click selects the
-     whole thing for copying. */
+  /* Long URLs wrap instead of scrolling sideways, and one click selects the whole thing for copying. */
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-all;
@@ -126,8 +124,7 @@
   padding: 0.5rem 1rem;
   font-size: var(--fs-md);
   font-weight: 600;
-  /* --accent-text is derived from the accent fill by applyTheme (plain #fff
-     measured 2.53:1 against the default accent). */
+  /* --accent-text is derived from the accent fill by applyTheme (plain #fff measured 2.53:1 against the default accent). */
   color: var(--accent-text);
   background: var(--accent);
   border: none;

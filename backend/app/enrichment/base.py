@@ -180,7 +180,8 @@ class EnrichmentAdapter(Source, ABC):
         ...
 
     async def check_health(self) -> bool:
-        """Verify the source is reachable and API key is valid."""
+        """Whether the source is reachable and its API key valid. Adapters
+        override this; the base implementation always returns True."""
         try:
             return True
         except Exception:

@@ -48,11 +48,7 @@ export interface CopilotConfig {
   default_tools?: string[];
   /** Writes the "Skip Confirm for" setting may name: never admin-only tools or deletes. */
   auto_approvable_tools?: string[];
-  /**
-   * The assignment's actual effective tool allowlist (override or default),
-   * or null when the provider is unrestricted. Used to hide "/" commands in
-   * the dock whose backing tool isn't currently enabled.
-   */
+  /** The assignment's effective tool allowlist (override or default), or null when the provider is unrestricted. Used to hide "/" commands in the dock whose backing tool isn't currently enabled. */
   enabled_tools?: string[] | null;
   /** Whose provider answers: a personal key ("user") or the instance's ("site"). */
   source?: "site" | "user" | null;
@@ -65,11 +61,7 @@ export interface CopilotConfig {
   refused?: { reason: string; message: string } | null;
 }
 
-/**
- * Reports the copilot's assigned provider so the dock can decide whether the
- * Claude-Code OAuth re-auth banner is relevant (only for provider_type
- * "claude_code"). On Ollama there is no OAuth session to expire.
- */
+/** Reports the copilot's assigned provider so the dock can decide whether the Claude Code OAuth re-auth banner is relevant (only for provider_type "claude_code"). Other providers, such as Ollama, have no OAuth session to expire. */
 export function useCopilotConfig() {
   return useQuery({
     queryKey: ["copilot-config"],

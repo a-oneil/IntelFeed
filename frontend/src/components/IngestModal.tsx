@@ -28,7 +28,7 @@ const MODE_OPTIONS = [
   { value: "paste" as const, label: "Paste", title: "A report body, an advisory, a chat log, an indicator list" },
 ];
 
-/** A file still travelling to the server — shown in the queue before its item row exists. */
+/** A file still traveling to the server — shown in the queue before its item row exists. */
 interface PendingUpload {
   key: string;
   name: string;
@@ -51,12 +51,7 @@ function getErrorMessage(err: unknown): string {
   );
 }
 
-/**
- * The ingest door. One batch per open modal: files, URLs and pastes all land in
- * it, each one queued the moment it is added, and the queue list below the
- * inputs shows one row per item with its live outcome. Nothing here waits on
- * a parse — the request stores and returns, the worker does the rest.
- */
+/** The ingest modal. One batch per open modal: files, URLs and pastes all go into it, each one queued the moment it is added, and the queue list below the inputs shows one row per item with its live outcome. Nothing here waits on a parse: the request stores the item and returns, and the worker does the rest. */
 export function IngestModal({ onClose }: Props) {
   const [mode, setMode] = useState<IngestMode>("files");
   const [batchId, setBatchId] = useState<string | null>(null);
@@ -87,8 +82,7 @@ export function IngestModal({ onClose }: Props) {
 
   const manualFeedId = feedsData?.items.find((f) => f.url === MANUAL_FEED_URL)?.id ?? null;
   const createdCount = batch?.summary.created ?? 0;
-  // The very first batch on an instance mints the Manual Uploads feed; the
-  // sidebar's feed list does not know about it until it is refetched.
+  // The very first batch on an instance creates the Manual Uploads feed; the sidebar's feed list does not know about it until it is refetched.
   useEffect(() => {
     if (createdCount > 0 && !manualFeedId) refetchFeeds();
   }, [createdCount, manualFeedId, refetchFeeds]);
@@ -122,8 +116,7 @@ export function IngestModal({ onClose }: Props) {
         setPending((p) => p.filter((x) => !stamped.some((s) => s.key === x.key)));
         return;
       }
-      // One request per file, in order: a slow link finishes the first PDF
-      // and the worker starts parsing it while the rest are still uploading.
+      // One request per file, in order: on a slow connection the first PDF finishes uploading and the worker starts parsing it while the rest are still uploading.
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const key = stamped[i].key;

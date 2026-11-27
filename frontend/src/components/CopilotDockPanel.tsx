@@ -68,9 +68,7 @@ export function CopilotDockPanel() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
 
-  // The copilot prompt asks the model to cite IntelFeed objects as relative
-  // links (/?entry=…, /workbench/cve/…). Route those through the SPA router so
-  // pivoting doesn't reload the app; everything else opens in a new tab.
+  // The copilot prompt asks the model to cite IntelFeed objects as relative links (/?entry=…, /workbench/cve/…). Route those through the SPA router so pivoting doesn't reload the app; everything else opens in a new tab.
   const markdownComponents = useMemo<Components>(
     () => ({
       a: ({ href, children, ...props }) => {
@@ -101,24 +99,16 @@ export function CopilotDockPanel() {
   );
 
   const [contextDismissed, setContextDismissed] = useState(false);
-  // A context pinned by a seed ("Ask Copilot" buttons). When set, it overrides
-  // the route-derived ambient context for the whole seeded thread until the
-  // user starts a new thread or dismisses the context pill.
+  // A context pinned by a seed ("Ask Copilot" buttons). When set, it overrides the route-derived ambient context for the whole seeded thread until the user starts a new thread or dismisses the context pill.
   const [lockedContext, setLockedContext] = useState<CopilotContext | null>(
     null,
   );
-  // Human-readable name for the pinned entity/entry/campaign (from the seed), so
-  // the ContextPill shows "Threat Actor: Qilin" instead of a raw UUID.
+  // Human-readable name for the pinned entity/entry/campaign (from the seed), so the ContextPill shows "Threat Actor: Qilin" instead of a raw UUID.
   const [lockedLabel, setLockedLabel] = useState<string | undefined>(undefined);
-  // Effective context: the locked (seeded) context wins; otherwise the ambient
-  // route context. Null once the user dismisses it for this thread.
+  // Effective context: the locked (seeded) context wins; otherwise the ambient route context. Null once the user dismisses it for this thread.
   const context = contextDismissed ? null : (lockedContext ?? ambientContext);
 
-  // Copilot Claude sign-in health — surfaces an inline re-auth banner when the
-  // OAuth session has expired (admin-only, since only admins can re-auth).
-  // Only relevant when copilot runs on the Claude Code CLI: other providers
-  // (e.g. Ollama) have no OAuth session, so the status check + banner are
-  // skipped entirely for them.
+  // Copilot Claude sign-in health: shows an inline re-auth banner when the OAuth session has expired (admin-only, since only admins can re-auth). Only checked when copilot runs on the Claude Code CLI; other providers (e.g. Ollama) have no OAuth session, so the status check and banner are skipped for them.
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   const { data: copilotConfig } = useCopilotConfig();
   const usesClaudeCode = copilotConfig?.provider_type === "claude_code";
@@ -143,8 +133,7 @@ export function CopilotDockPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
-  // Mirrors `streaming` so the re-entrancy guard reads live state even when
-  // called from an effect whose closure predates the latest setStreaming.
+  // Mirrors `streaming` so the re-entrancy guard reads live state even when called from an effect whose closure predates the latest setStreaming.
   const streamingRef = useRef(false);
   streamingRef.current = streaming;
 
@@ -177,8 +166,7 @@ export function CopilotDockPanel() {
       const question = raw.trim();
       if (!question || streamingRef.current) return;
       streamingRef.current = true;
-      // A seeded auto-submit passes its context explicitly to avoid racing the
-      // still-committing `lockedContext` state; otherwise use effective context.
+      // A seeded auto-submit passes its context explicitly to avoid racing the still-committing `lockedContext` state; otherwise use effective context.
       const effectiveContext =
         contextOverride !== undefined ? contextOverride : context;
 
@@ -238,8 +226,7 @@ export function CopilotDockPanel() {
             }));
           },
           onConfirmRequest: (req) => {
-            // Attach the proposed write to the current assistant turn and seed
-            // its lifecycle so a ConfirmCard renders after the message.
+            // Attach the proposed write to the current assistant turn and seed its lifecycle so a ConfirmCard renders after the message.
             updateAssistant((m) => ({ ...m, confirms: [...(m.confirms ?? []), req] }));
             setConfirmStates((prev) => ({
               ...prev,
@@ -267,16 +254,12 @@ export function CopilotDockPanel() {
       setStreaming(false);
       abortRef.current = null;
 
-      // Backend is authoritative for persistence: it appends both turns and
-      // owns the conversation id (adopted above via `onDone`). Just refresh the
-      // History list so the new/updated thread shows up.
+      // Backend is authoritative for persistence: it appends both turns and owns the conversation id (adopted above via `onDone`). Here we only refresh the History list so the new or updated thread shows up.
       if (!errored && assistantText.trim()) {
         queryClient.invalidateQueries({ queryKey: ["ai-conversations"] });
       }
 
-      // A failed or empty turn is often an expired Claude sign-in — re-check the
-      // auth status so the re-auth banner appears right when it's relevant.
-      // Only meaningful on the Claude Code CLI provider.
+      // A failed or empty turn is often an expired Claude sign-in — re-check the auth status so the re-auth banner appears right when it's relevant. Only meaningful on the Claude Code CLI provider.
       if (isAdmin && usesClaudeCode && (errored || !assistantText.trim())) {
         refetchAuthStatus();
       }
@@ -284,8 +267,7 @@ export function CopilotDockPanel() {
     [conversationId, context, queryClient, setConversationId, isAdmin, usesClaudeCode, refetchAuthStatus],
   );
 
-  // Consume a seed from external "Ask Copilot" buttons. Keyed on the nonce so a
-  // repeat seed with the same shape still fires; guarded against the initial 0.
+  // Consume a seed from external "Ask Copilot" buttons. Keyed on the nonce so a repeat seed with the same shape still fires; guarded against the initial 0.
   const lastSeedNonce = useRef(0);
   useEffect(() => {
     if (copilotSeedNonce === 0 || copilotSeedNonce === lastSeedNonce.current) {
@@ -295,8 +277,7 @@ export function CopilotDockPanel() {
     const seed = copilotSeed;
     if (!seed) return;
 
-    // Abort any in-flight stream so the seeded turn isn't dropped by the
-    // re-entrancy guard in submitQuestion, and reset the local thread view.
+    // Abort any in-flight stream so the seeded turn isn't dropped by the re-entrancy guard in submitQuestion, and reset the local thread view.
     abortRef.current?.abort();
     abortRef.current = null;
     streamingRef.current = false;
@@ -307,9 +288,7 @@ export function CopilotDockPanel() {
     setShowHistory(false);
     setSlashOpen(false);
 
-    // Pin the seeded context for the whole thread (overrides route context).
-    // Split the display `label` out of the context object: it's presentation
-    // only and must not travel in the CopilotContext sent to the backend.
+    // Pin the seeded context for the whole thread (overrides route context). Split the display `label` out of the context object: it's presentation only and must not travel in the CopilotContext sent to the backend.
     let pinned: CopilotContext | null = null;
     if (seed.lockContext && seed.context) {
       const { label, ...rest } = seed.context;
@@ -322,12 +301,7 @@ export function CopilotDockPanel() {
       setLockedLabel(undefined);
     }
 
-    // Auto-submit the starter prompt as the first message, passing the pinned
-    // context explicitly so it doesn't race the just-set `lockedContext` state.
-    // Falls back to the current effective context when nothing was pinned.
-    // Context-only seeds (the generic "Ask Copilot" buttons) skip this — the
-    // context is pinned and the input focused so the analyst asks their own
-    // question.
+    // Auto-submit the starter prompt as the first message, passing the pinned context explicitly so it doesn't race the just-set `lockedContext` state. Falls back to the current effective context when nothing was pinned. Context-only seeds (the generic "Ask Copilot" buttons) skip this — the context is pinned and the input focused so the analyst asks their own question.
     if (seed.prompt) {
       submitQuestion(seed.prompt, pinned ?? context);
     } else {
@@ -388,8 +362,7 @@ export function CopilotDockPanel() {
           }));
         }
       } catch (err) {
-        // If the user was cancelling, treat a failed POST as cancelled locally;
-        // otherwise surface the error on the card.
+        // If the user was canceling, treat a failed POST as canceled locally; otherwise surface the error on the card.
         if (approved) {
           const message =
             err instanceof Error ? err.message : "Failed to apply action";
@@ -416,9 +389,7 @@ export function CopilotDockPanel() {
     }),
   );
 
-  // Slash commands are gated by the same conditions as the input: never while
-  // streaming or with a pending confirm. The menu triggers only on a leading
-  // "/" in an otherwise-empty (single-token) input.
+  // Slash commands are gated by the same conditions as the input: never while streaming or with a pending confirm. The menu opens only when the input starts with "/" and is a single line.
   const inputGated = streaming || hasUnresolvedConfirm;
   const isSlashQuery = input.startsWith("/") && !input.includes("\n");
   const slashMatches =
@@ -428,8 +399,7 @@ export function CopilotDockPanel() {
   const slashMenuVisible = slashMatches.length > 0;
 
   const selectCommand = useCallback((command: CopilotCommand) => {
-    // Fill the input with the template so the user can tweak before sending —
-    // never auto-send.
+    // Fill the input with the template so the user can tweak before sending — never auto-send.
     setInput(command.prompt);
     setSlashOpen(false);
     setSlashIndex(0);
@@ -449,8 +419,7 @@ export function CopilotDockPanel() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // While the slash menu is showing, arrows/Enter/Esc drive it instead of the
-    // textarea/submit.
+    // While the slash menu is showing, arrows/Enter/Esc drive it instead of the textarea/submit.
     if (slashMenuVisible) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -553,10 +522,7 @@ export function CopilotDockPanel() {
 
   return (
     <div className={styles.dockGroup} role="complementary" aria-label="IntelFeed copilot">
-      {/* Persistent toggle rail on the panel's left edge — same expand/collapse
-          mechanism as the sidebars: slim strip, chevron flips with state,
-          content shifts because the whole group is in normal flex flow. The ×
-          in the header below is the only thing that fully closes the panel. */}
+      {/* Persistent toggle rail on the panel's left edge — same expand/collapse mechanism as the sidebars: slim strip, chevron flips with state, content shifts because the whole group is in normal flex flow. The × in the header below is the only thing that fully closes the panel. */}
       {!isMobile && (
         <RailToggle
           side="right"
@@ -699,9 +665,7 @@ export function CopilotDockPanel() {
           {context && (
             <ContextPill
               context={context}
-              // The seed label only describes the locked context; when the
-              // effective context is the route-derived ambient one, omit it so
-              // the pill falls back to the id/type.
+              // The seed label only describes the locked context; when the effective context is the route-derived ambient one, omit it so the pill falls back to the id/type.
               labels={
                 lockedLabel && context === lockedContext
                   ? {

@@ -3,14 +3,9 @@ import type { OnboardingStatus } from "@/api/types";
 /**
  * The onboarding flow, as data.
  *
- * Three chapters. The setup chapter is admin-only and each of its steps also
- * knows how to tell whether it is already satisfied, so an admin on a running
- * instance isn't walked through configuring what is already configured.
+ * Four chapters: a welcome, then Set up, Learn the app and Make it yours. The setup chapter is admin-only, and each of its steps can tell whether it is already satisfied, so an admin on a running instance isn't walked through configuring what is already configured.
  *
- * The rule that matters: skipping setup must leave *more* product content, not
- * a shorter wizard. Every persona lands on the whole Learn and Make-it-yours
- * chapters, which is what a second analyst joining the team actually needs —
- * previously they got theme, shortcuts, docs and a CLI install guide.
+ * Skipping setup must leave more product content, not a shorter wizard. Every user gets the full Learn and Make-it-yours chapters, which is what a second analyst joining the team needs (rather than only theme, shortcuts, docs and a CLI install guide).
  */
 
 export type ChapterId = "intro" | "setup" | "learn" | "yours";
@@ -45,17 +40,12 @@ export interface StepDef {
   /** Short name for the chapter rail. */
   label: string;
   adminOnly?: boolean;
-  /**
-   * Given current instance state, is this step already handled? Satisfied setup
-   * steps are dropped, with the reason shown in the rail rather than silently
-   * vanishing.
-   */
+  /** Given current instance state, is this step already handled? Satisfied setup steps are dropped, with the reason shown in the rail rather than silently vanishing. */
   satisfiedBy?: (status: OnboardingStatus) => boolean;
 }
 
 export const STEPS: StepDef[] = [
-  // A prologue, not setup: every persona gets it, including the non-admins
-  // who never see the setup chapter at all.
+  // An introduction, not setup: every user gets it, including non-admins, who never see the setup chapter.
   { id: "welcome", chapter: "intro", label: "Welcome" },
 
   {
@@ -77,11 +67,7 @@ export const STEPS: StepDef[] = [
     chapter: "setup",
     label: "AI provider",
     adminOnly: true,
-    // Two separate things have to be true, and a provider row proves only the
-    // first: claude_code is auto-created at startup for the copilot's default assignment, so
-    // its presence says nobody chose anything — and a chosen provider with no
-    // task routed at it still runs no AI, which is how this step used to "pass"
-    // while the instance did nothing.
+    // Two things must be true: an admin chose a provider, and tasks are routed to it. claude_code is auto-created at startup for the copilot's default assignment, so its presence does not mean anyone chose a provider, and a chosen provider with no task routed to it still runs no AI. Checking only for a provider row would mark this step done while the instance runs no AI.
     satisfiedBy: (s) => s.ai.active !== null && s.ai.active !== "claude_code" && s.ai.tasks_assigned > 0,
   },
   { id: "extras", chapter: "setup", label: "Services & team", adminOnly: true },
@@ -114,9 +100,7 @@ export function skipReason(
   status: OnboardingStatus | undefined,
 ): SkipReason | null {
   if (step.adminOnly && !isAdmin) return "admin only";
-  // Without a status read yet, assume nothing is satisfied: showing a step that
-  // turns out to be unnecessary is a much smaller failure than hiding the
-  // seeding step from an instance that genuinely needs it.
+  // Without a status read yet, assume nothing is satisfied: showing a step that turns out to be unnecessary is a much smaller failure than hiding the seeding step from an instance that needs it.
   if (status && step.satisfiedBy?.(status)) return "already set up";
   return null;
 }

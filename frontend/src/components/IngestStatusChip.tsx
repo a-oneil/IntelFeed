@@ -1,12 +1,7 @@
 import { Chip, Spinner } from "@/components/primitives";
 import type { IngestItem, IngestItemStatus } from "@/hooks/useIngest";
 
-/**
- * One chip per batch-item outcome. `created` splits into "analyzing" (the
- * entry exists; the pipeline and the one-pass AI analysis are still to come)
- * and "done" (the analysis landed), because that gap is minutes to hours on a
- * local model and a chip that just said "done" would be lying.
- */
+/** One chip per batch-item outcome. `created` splits into "analyzing" (the entry exists; the pipeline and the one-pass AI analysis are still to come) and "done" (the analysis finished), because that gap is minutes to hours on a local model and a chip that said "done" at creation would be misleading. */
 export function ingestStatusLabel(status: IngestItemStatus, phase: IngestItem["phase"]): string {
   switch (status) {
     case "created":
@@ -36,7 +31,7 @@ function tintFor(status: IngestItemStatus, phase: IngestItem["phase"]): string |
     case "failed":
       return "var(--danger)";
     default:
-      return undefined; // queued, cancelled: the plain chip
+      return undefined; // queued, canceled: the plain chip
   }
 }
 

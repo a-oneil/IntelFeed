@@ -52,8 +52,7 @@ describe("OnboardingWizard", () => {
   });
 
   it("closing defers instead of completing", async () => {
-    // The old wizard set onboarding_completed on dismiss, so one stray close
-    // permanently burned the flow for that account.
+    // Setting onboarding_completed on dismiss would mean one accidental close permanently ends the tour for that account.
     const user = userEvent.setup();
     render(<OnboardingWizard />);
     await user.click(screen.getByRole("button", { name: /close/i }));
@@ -62,8 +61,7 @@ describe("OnboardingWizard", () => {
     const arg = saveProgress.mock.calls[0][0];
     expect(arg.onboarding_step).toBeTruthy();
     expect(arg.onboarding_completed).toBeUndefined();
-    // ...and the deferral is persisted, or the next hard refresh reopens the
-    // tour over someone who already closed it — `dismissed` dies with the page.
+    // The deferral is also persisted; otherwise the next hard refresh reopens the tour for someone who already closed it, because `dismissed` lives only as long as the page.
     expect(arg.onboarding_deferred_at).toBeTruthy();
   });
 
@@ -77,8 +75,7 @@ describe("OnboardingWizard", () => {
   it("only finishing marks onboarding complete, and clears the saved step", async () => {
     const user = userEvent.setup();
     render(<OnboardingWizard />);
-    // Walk to the end. Read the label before each click — the footer button is
-    // re-rendered every step, so a reference taken earlier goes stale.
+    // Walk to the end. Read the label before each click: the footer button is re-rendered every step, so a reference taken earlier goes stale.
     for (let i = 0; i < 30; i += 1) {
       const btn = screen.getByRole("button", { name: /^(Next|Finish)$/ });
       const wasLast = btn.textContent === "Finish";
@@ -91,7 +88,7 @@ describe("OnboardingWizard", () => {
     expect(finish.onboarding_deferred_at).toBeNull();
   });
 
-  it("is a labelled modal dialog", () => {
+  it("is a labeled modal dialog", () => {
     render(<OnboardingWizard />);
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveAttribute("aria-modal", "true");
@@ -123,10 +120,7 @@ describe("OnboardingWizard", () => {
   });
 
   it("stays on the same step when the flow changes underneath it", async () => {
-    // The setup steps disappear as the user satisfies them — they run the
-    // seeder and re-check, a feed finishes polling. Position is tracked by step
-    // id for exactly this reason: an index would quietly point at a different
-    // step once the list shrank, teleporting the reader mid-sentence.
+    // Setup steps disappear as the user satisfies them (they run the seeder and re-check, or a feed finishes polling). Position is tracked by step id for this reason: an index would point at a different step once the list shrank, moving the reader to another step mid-read.
     status = {
       ...READY,
       reference_data: { ...READY.reference_data, ok: false },

@@ -152,7 +152,7 @@
   text-overflow: ellipsis;
 }
 
-/* Chip carries the colour and geometry; only the leading gap is local. */
+/* Chip carries the color and geometry; only the leading gap is local. */
 .badge {
   margin-left: var(--sp-2);
 }

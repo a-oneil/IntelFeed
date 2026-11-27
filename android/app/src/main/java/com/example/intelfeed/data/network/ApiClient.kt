@@ -34,15 +34,12 @@ class ApiClient(private val authPreferences: AuthPreferences) {
     // Shared with the repository for payloads it decodes itself (e.g. endpoints that can return null).
     val json = ApiJson.json
 
-    // The server rotates refresh tokens and blacklists the old one on use, so concurrent 401s
-    // must share one refresh. Without this, the second refresh spends an already-used token,
-    // fails, and logs the user out.
+    // The server rotates refresh tokens and blacklists the old one on use, so concurrent 401s must share one refresh. Without this, the second refresh spends an already-used token, fails, and logs the user out.
     private val refreshLock = Any()
 
     private val authInterceptor = Interceptor { chain ->
         val originalRequest = chain.request()
-        // Sign-in must never carry a token from a previous session, especially when the user
-        // changes servers. Logout carries its captured token explicitly after local sign-out.
+        // Sign-in must never carry a token from a previous session, especially when the user changes servers. Logout carries its captured token explicitly after local sign-out.
         if (originalRequest.header("Authorization") != null ||
             originalRequest.url.encodedPath.endsWith("/api/auth/login")) {
             return@Interceptor chain.proceed(originalRequest)
@@ -63,19 +60,14 @@ class ApiClient(private val authPreferences: AuthPreferences) {
             return@Interceptor response
         }
 
-        // Only close the 401 once we know we're retrying; otherwise Retrofit still needs to read
-        // its body (closing it early turned every 401 into an IllegalStateException("closed")).
+        // Only close the 401 once we know we're retrying; otherwise Retrofit still needs to read its body (closing it early turns every 401 into an IllegalStateException("closed")).
         val newAccessToken = refreshAccessToken(staleAccessToken = accessToken)
             ?: return@Interceptor response
         response.close()
         chain.proceed(originalRequest.withBearer(newAccessToken))
     }
 
-    /**
-     * Returns a fresh access token, or null if the session couldn't be refreshed. Only an explicit
-     * 401/403 from the refresh endpoint ends the session (matching the web client); network errors,
-     * rate limiting (429) and 5xx keep the stored tokens so a later request can try again.
-     */
+    /** Returns a fresh access token, or null if the session couldn't be refreshed. Only an explicit 401/403 from the refresh endpoint ends the session (matching the web client); network errors, rate limiting (429) and 5xx keep the stored tokens so a later request can try again. */
     private fun refreshAccessToken(staleAccessToken: String): String? = synchronized(refreshLock) {
         val currentAccessToken = authPreferences.getCachedAccessToken() ?: runBlocking { authPreferences.getAccessToken() }
         if (currentAccessToken.isNullOrBlank()) return null // logged out while waiting for the lock
@@ -115,10 +107,7 @@ class ApiClient(private val authPreferences: AuthPreferences) {
         .build()
 
     private val okHttpClient = OkHttpClient.Builder()
-        // OkHttp allows 5 concurrent requests per host by default. The app starts ~13 at once
-        // (feed, folders, eight view counts, Workbench, saved searches) and some take 4–10 s on the
-        // server, so the feed could wait behind the counts. The server speaks HTTP/2, so these all
-        // share one connection anyway.
+        // OkHttp allows 5 concurrent requests per host by default. The app starts ~13 at once (feed, folders, eight view counts, Workbench, saved searches) and some take 4–10 s on the server, so the feed could wait behind the counts. The server speaks HTTP/2, so these all share one connection anyway.
         .dispatcher(Dispatcher().apply { maxRequestsPerHost = 16 })
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -146,15 +135,8 @@ class ApiClient(private val authPreferences: AuthPreferences) {
     private fun HttpUrl.isSameOrigin(server: HttpUrl): Boolean =
         scheme == server.scheme && host.equals(server.host, ignoreCase = true) && port == server.port
 
-    /**
-     * Client for article images (Coil). The server serves feed images through an authenticated
-     * proxy (/api/proxy/image), so requests to that proxy carry the access token. Other paths on
-     * the server and third-party image hosts never receive it: article HTML comes from arbitrary
-     * feeds, and an <img> pointing at another API path would otherwise make an authenticated GET.
-     */
-    // Built from the API client so both share one connection pool: proxied images
-    // come from the IntelFeed server, and reusing the API's open HTTP/2 connection avoids a new
-    // TLS handshake per image. The API client's interceptors (auth refresh, logging) are removed.
+    /** Client for article images (Coil). The server serves feed images through an authenticated proxy (/api/proxy/image), so requests to that proxy carry the access token. Other paths on the server and third-party image hosts never receive it: article HTML comes from arbitrary feeds, and an <img> pointing at another API path would otherwise make an authenticated GET. */
+    // Built from the API client so both share one connection pool: proxied images come from the IntelFeed server, and reusing the API's open HTTP/2 connection avoids a new TLS handshake per image. The API client's interceptors (auth refresh, logging) are removed.
     fun imageHttpClient(): OkHttpClient = okHttpClient.newBuilder()
         .apply { interceptors().clear() }
         // Its own queue (default limits), so a screen full of images can't hold up API calls.

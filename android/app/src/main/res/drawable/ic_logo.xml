@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- IntelFeed mark for in-app use at 24dp, such as the drawer header. It uses the SMALL weights
-     (heavier lines for 32px and below), as in scripts/dev/render_icons.cjs. The colour is a
+     (heavier lines for 32px and below), as in scripts/dev/render_icons.cjs. The color is a
      placeholder: callers tint it. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"

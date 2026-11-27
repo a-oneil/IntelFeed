@@ -7,13 +7,11 @@ import { useExposureBoard } from "@/hooks/useWatchlist";
 import { FollowView } from "./ExposurePage";
 import styles from "./ThreatsPage.module.css";
 
-/** The Threats page: triage gets its own address.
+/** The Threats page: threat triage on its own route.
 
-    Tabs: the ranked briefing board faceted by entity type, plus the
-    Vulnerabilities tab — CVE rows as board citizens (exploitation-ranked
-    briefing rows, posture-derived actions, the board's own state machine).
-    Stack management lives in the Manage-stack slide-over — a setting of the
-    view, not a destination; the exposure board is fetched for it alone. */
+    Tabs: the ranked briefing board filtered by entity type, plus the Vulnerabilities tab, which shows CVEs as rows on the same board (ranked by exploitation, with actions derived from stack posture, using the board's own row states).
+
+    Stack management is in the Manage-stack slide-over, because it is a setting of this view rather than a page of its own; the exposure board is fetched only for that slide-over. */
 
 type Tab = "all" | "actors" | "malware" | "vulns";
 
@@ -39,8 +37,7 @@ export function ThreatsPage() {
   const tab = parseTab(searchParams.get("tab"));
   const [manageStack, setManageStack] = useState(false);
 
-  // The exposure board backs the Vulnerabilities tab and the slide-over; only
-  // fetch it once that tab is in play.
+  // The exposure board backs the Manage-stack slide-over, which only the Vulnerabilities tab offers, so fetch it only while that tab is open.
   const { data: exposure } = useExposureBoard({ enabled: tab === "vulns" });
 
   const setTab = useCallback(

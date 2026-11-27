@@ -61,11 +61,7 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 
-/**
- * The profile's Timeline tab, the phone version of the website profile's activity view: a mentions
- * chart with its trend, "What's new" signals, the stories the entity is part of, and key events
- * (new relationships and correlations) by day.
- */
+/** The profile's Timeline tab, the phone version of the website profile's activity view: a mentions chart with its trend, "What's new" signals, the stories the entity is part of, and key events (new relationships and correlations) by day. */
 internal fun LazyListScope.timelineTab(
     timeline: TimelineUiState,
     type: EntityType,

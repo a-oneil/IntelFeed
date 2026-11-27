@@ -1,6 +1,4 @@
-// Runs inside the page (chrome.scripting.executeScript({func: capturePage})),
-// so it must be self-contained: no imports, no closures over this module.
-// It only reads the document; page-meta.js turns the result into a request.
+// Runs inside the page (chrome.scripting.executeScript({func: capturePage})), so it must be self-contained: no imports, no closures over this module. It only reads the document; page-meta.js turns the result into a request.
 
 export function capturePage(includeHtml) {
   const metas = [];
@@ -28,8 +26,7 @@ export function capturePage(includeHtml) {
       }
     }
   }
-  // The server accepts up to 2,000,000 characters of HTML (PageIngestRequest.html).
-  // A larger page is sent without it, and the server fetches the URL instead.
+  // The server accepts up to 2,000,000 characters of HTML (PageIngestRequest.html). A larger page is sent without it, and the server fetches the URL instead.
   const html = includeHtml ? document.documentElement.outerHTML : null;
   return {
     url: location.href,

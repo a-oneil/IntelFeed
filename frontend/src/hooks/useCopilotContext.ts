@@ -4,16 +4,9 @@ import { useUIStore } from "@/stores/uiStore";
 import { useIntelStore } from "@/stores/intelStore";
 import type { CopilotContext } from "@/hooks/useAI";
 
-/**
- * Route slugs are the canonical entity_type since the 2026-08 vocabulary
- * unification, so no translation table is needed.
- */
+/** Route slugs are the canonical entity_type since the 2026-08 vocabulary unification, so no translation table is needed. */
 
-/**
- * Extracts an entity slug + id from a workbench-style pathname. Handles routes
- * like `/workbench/threat_actor/<id>` and `/intelligence/malware/<id>`. Returns null
- * for the campaign slug (handled separately as campaign_id) and non-entity paths.
- */
+/** Extracts an entity slug + id from a workbench-style pathname. Handles routes like `/workbench/threat_actor/<id>` and `/intelligence/malware/<id>`. Returns null for the campaign slug (handled separately as campaign_id) and non-entity paths. */
 function parseEntityFromPath(pathname: string): { slug: string; id: string } | null {
   const match = pathname.match(
     /\/(actor|threat_actor|malware|cve|ttp|country|sector|tool|mitigation|vendor|product)\/([^/?#]+)/,
@@ -28,17 +21,14 @@ function parseCampaignFromPath(pathname: string): string | null {
 }
 
 /**
- * Assembles the ambient `context` object for a copilot request from the current
- * route + UI/intel store state. Sources, in priority order per field:
+ * Assembles the ambient `context` object for a copilot request from the current route + UI/intel store state. Sources, in priority order per field:
  *   - entry_id: uiStore.selectedEntryId
- *   - entity_type/entity_id: the URL entity slug (preferred, always fresh on
- *     navigation), falling back to intelStore.selectedEntityType/Id
+ *   - entity_type/entity_id: the URL entity slug (preferred, always fresh on navigation), falling back to intelStore.selectedEntityType/Id
  *   - campaign_id: the URL campaign slug
  *   - search_query: uiStore.headerSearchQuery / intelStore.workspaceSearchQuery
  *   - route: the current pathname
  *
- * Returns null when no context is available so the request body sends an
- * explicit null (per the frozen contract).
+ * Returns null when no context is available so the request body sends an explicit null (per the frozen contract).
  */
 export function useCopilotContext(): CopilotContext | null {
   const location = useLocation();
@@ -58,8 +48,7 @@ export function useCopilotContext(): CopilotContext | null {
 
     if (selectedEntryId) context.entry_id = selectedEntryId;
 
-    // Prefer the entity encoded in the URL — it always reflects the page the
-    // user is actually on. Fall back to the intel store's selected entity.
+    // Prefer the entity encoded in the URL, since it always reflects the page the user is actually on. Fall back to the intel store's selected entity.
     const fromPath = parseEntityFromPath(pathname);
     if (fromPath) {
       const entityType = fromPath.slug;

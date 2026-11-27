@@ -1,8 +1,8 @@
 """Shodan InternetDB adapter — free, no API key required.
 
-Port/service/CVE/tag data for IPv4 addresses. Restored from the IOC-v1 era
-(removed in 22ae889) for the observables ledger; non-IP kinds report
-unsupported rather than erroring.
+Port/service/CVE/tag data for IPv4 observables in the ledger (an earlier
+version was removed with IOC v1 in 22ae889); non-IP kinds report unsupported
+rather than raising an error.
 """
 
 import re

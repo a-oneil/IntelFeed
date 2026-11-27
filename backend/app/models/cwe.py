@@ -124,8 +124,8 @@ class CVEWeakness(Base):
     matrix docstring already draws that line for CPE affects-links.
 
     One row per (cve, cwe_ref). The raw string is always kept — including the
-    ``NVD-CWE-noinfo`` / ``NVD-CWE-Other`` sentinels, which are the honest record
-    that NVD declined to classify — and ``cwe_id`` is filled only when the string
+    ``NVD-CWE-noinfo`` / ``NVD-CWE-Other`` sentinels, which record that NVD
+    declined to classify — and ``cwe_id`` is filled only when the string
     resolves to a catalog row, so unresolved refs persist and can resolve
     retroactively after a catalog refresh.
 

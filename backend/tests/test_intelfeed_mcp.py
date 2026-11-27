@@ -710,9 +710,9 @@ def test_stdio_subprocess():
 
 
 def test_supplied_token_is_the_whole_credential(monkeypatch):
-    """The backend's Claude CLI provider runs this server with a short-lived,
-    read-only INTELFEED_TOKEN. It must be used as-is: never refreshed, and never
-    swapped for a password login when the API refuses it."""
+    """The backend's Claude CLI provider runs this server with a short-lived
+    INTELFEED_TOKEN (read-only, or a propose token in a copilot turn). It must be used
+    as-is: never refreshed, and never swapped for a password login when the API refuses it."""
     monkeypatch.setenv("INTELFEED_TOKEN", "agent-token")
     monkeypatch.setenv("INTELFEED_USERNAME", "admin")
     monkeypatch.setenv("INTELFEED_PASSWORD", "hunter2")

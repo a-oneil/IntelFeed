@@ -1,4 +1,4 @@
-"""Tests for the Atlas calendar + map endpoints and the new entries filters."""
+"""Tests for the Atlas calendar + map endpoints and the matching /api/entries filters."""
 
 import uuid
 from datetime import UTC, datetime

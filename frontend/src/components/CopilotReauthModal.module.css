@@ -81,8 +81,7 @@
   padding: 0.5rem 1rem;
   font-size: var(--fs-md);
   font-weight: 600;
-  /* Label sits on the accent fill: #fff measured 2.53:1 against the default
-     accent. --accent-text is derived from that same fill by applyTheme. */
+  /* The label sits on the accent fill. Plain #fff measures only 2.53:1 against the default accent, so the color is --accent-text, which applyTheme derives from that same fill. */
   color: var(--accent-text);
   background: var(--accent);
   border: none;

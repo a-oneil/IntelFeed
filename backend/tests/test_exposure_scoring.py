@@ -159,7 +159,7 @@ async def test_enrich_posture_defended_when_rule_and_telemetry_present(db_sessio
     cve = await _cve(db_session, "CVE-2024-21762", is_kev=True)
     await _link_cve(db_session, entry, cve)
     await _affect(db_session, cve, product=product)
-    # a non-draft rule references the CVE and needs telemetry we collect
+    # a non-draft rule references the CVE and needs telemetry that is collected
     db_session.add(
         DetectionRule(
             rule_type="sigma",
@@ -195,7 +195,7 @@ async def test_enrich_posture_blind_when_telemetry_missing(db_session, test_user
     cve = await _cve(db_session, "CVE-2024-21762", is_kev=True)
     await _link_cve(db_session, entry, cve)
     await _affect(db_session, cve, product=product)
-    # rule exists but requires telemetry we do NOT collect → blind spot
+    # rule exists but requires telemetry that is NOT collected → blind spot
     db_session.add(
         DetectionRule(
             rule_type="sigma",

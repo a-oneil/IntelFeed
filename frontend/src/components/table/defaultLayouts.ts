@@ -1,38 +1,26 @@
 /**
- * The instance's out-of-the-box column arrangement for each DataTable.
+ * The instance's default column arrangement for each DataTable.
  *
- * Captured from the arrangement the instance owner curated in the UI, so a new
- * user opens the workbench on a usable table instead of the raw declaration
- * order with every optional column showing.
+ * Captured from the arrangement the instance owner set up in the UI, so a new user opens the workbench on a usable table instead of the raw declaration order with every optional column showing.
  *
- * Strictly a *fallback layer*: `DataTable` consults this only for a column the
- * user has no stored preference for. Toggle a column, drag a divider, or
- * rearrange the order and your choice wins here and stays won — per column for
- * visibility and width, and wholesale for order (reordering a table replaces the
- * default arrangement rather than merging with it).
+ * This is only a *fallback layer*: `DataTable` consults it only for a column the user has no stored preference for. Once a user toggles a column, drags a divider, or rearranges the order, their choice wins permanently: per column for visibility and width, and as a whole for order (reordering a table replaces the default order rather than merging with it).
  *
- * Filters and sort are deliberately absent: those are "what am I looking at
- * right now" state, not layout, and shipping one person's active filter as
- * everyone's default hides rows for no visible reason.
+ * Filters and sort are deliberately absent: they describe what someone is looking at right now, not layout, and shipping one person's active filter as everyone's default would hide rows for no visible reason.
  *
- * To refresh this snapshot, read `state.tables` out of the `intelfeed-ui`
- * localStorage entry (or `settings.table_layouts` on the user profile) and drop
- * the filter/sort fields.
+ * To refresh this snapshot, read `state.tables` out of the `intelfeed-ui` localStorage entry (or `settings.table_layouts` on the user profile) and drop the filter/sort fields.
  */
 export interface DefaultTableLayout {
   /** Explicit show/hide per column key; overrides the column's `defaultHidden`. */
   visibility?: Record<string, boolean>;
   /** Pixel widths per column key; overrides the column's declared `width`. */
   widths?: Record<string, number>;
-  /** Left-to-right column order; keys absent from it keep their declared position. */
+  /** Left-to-right column order; columns absent from it are appended after these, in their declared order. */
   order?: string[];
 }
 
 /** Keyed by DataTable `tableId` ("entries", "entity:threat_actor", ...). */
 export const DEFAULT_TABLE_LAYOUTS: Record<string, DefaultTableLayout> = {
-  // The Manual Uploads feed in table view: a feed of files reads as a file
-  // table. Same columns as "entries" plus File / Size / Original, with Source
-  // off (every row is the same feed) and Summary off (the filename says more).
+  // The Manual Uploads feed in table view, laid out as a file table. Same columns as "entries" plus File / Size / Original, with Source off (every row is the same feed) and Summary off (the filename says more).
   "entries-uploads": {
     visibility: {
       "status": true,

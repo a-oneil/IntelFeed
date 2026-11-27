@@ -50,7 +50,7 @@ def test_claim_needles_pull_names_out_of_an_edge_claim():
     assert _claim_needles("Earth Lusca exploits CVE-2024-1234") == ["Earth Lusca", "CVE-2024-1234"]
 
 
-def test_snippet_is_bounded_and_centred_on_the_match():
+def test_snippet_is_bounded_and_centered_on_the_match():
     text = "x " * 400 + "Qilin hit a hospital. " + "y " * 400
     snip = _snippet_around([text], ["qilin"])
     assert "Qilin hit a hospital" in snip and len(snip) <= FEED_CONTEXT_MAX

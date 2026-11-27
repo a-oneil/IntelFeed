@@ -48,11 +48,7 @@ import com.example.intelfeed.ui.components.color
 import com.example.intelfeed.ui.entity.severityTone
 import java.util.Locale
 
-/**
- * The web reader's entity popover as a bottom sheet: type (plus KEV and severity for a CVE), the
- * phrase from the article, key facts, description, lookup links, and Profile / Search / Copy.
- * The web's Enrich and "Wrong?" actions change shared server data and aren't offered here.
- */
+/** The web reader's entity popover as a bottom sheet: type (plus KEV and severity for a CVE), the phrase from the article, key facts, description, lookup links, and Profile / Search / Copy. The web's Enrich and "Wrong?" actions change shared server data and aren't offered here. */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun EntityPreviewSheet(
@@ -146,7 +142,7 @@ fun EntityPreviewSheet(
     }
 }
 
-// The web's colours for glossary categories (NIST CSF functions).
+// The web's colors for glossary categories (NIST CSF functions).
 private fun glossaryCategoryColor(category: String): Color = when (category.lowercase()) {
     "govern" -> Color(0xFF6366F1)
     "identify" -> Color(0xFF3B82F6)
@@ -157,10 +153,7 @@ private fun glossaryCategoryColor(category: String): Color = when (category.lowe
     else -> Color(0xFF6B7280)
 }
 
-/**
- * The web's glossary tooltip: term, category and maturity, description, up to five technologies,
- * and "Search articles" (the term and its other spellings, OR-ed).
- */
+/** The web's glossary tooltip: term, category and maturity, description, up to five technologies, and "Search articles" (the term and its other spellings, OR-ed). */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun GlossarySheet(

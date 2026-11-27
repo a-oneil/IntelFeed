@@ -1,12 +1,7 @@
 /**
  * Where "previous"/"next" lands when moving between articles.
  *
- * List order is the primary answer, but it isn't always enough: with auto-read
- * on, a Hide-Read list drops each article the moment you move off it, so the
- * one you just came from is no longer in the list and plain index math has
- * nothing to step back to. The visit trail — the order entries were actually
- * opened in — covers that gap, so j/k and the reader's prev/next keep working
- * after an article has been read out from under them.
+ * List order is tried first, but it isn't always enough: with auto-read on, a Hide-Read list drops each article the moment you move off it, so the one you just came from is no longer in the list and index math has nothing to step back to. The visit trail (the order entries were actually opened in) covers that case, so j/k and the reader's prev/next keep working after an article has been marked read and removed from the list.
  */
 export function adjacentEntryId(
   direction: "prev" | "next",

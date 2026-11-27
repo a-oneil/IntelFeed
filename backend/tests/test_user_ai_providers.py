@@ -1,8 +1,8 @@
 """Personal AI keys: who a key belongs to, which calls it may answer, and what the caps do.
 
 The lookup (``resolve_assignment``) is the whole feature: every branch is
-pinned here, with the policy off by default so an untouched instance
-behaves exactly as before. The API tests are about isolation: another
+pinned here, with the policy off by default so an instance that never turns
+it on behaves as if personal keys did not exist. The API tests are about isolation: another
 person's key is invisible, unroutable and untestable, and share, automation
 and system callers never see a personal key at all.
 """
@@ -175,7 +175,7 @@ async def _spend(db_session, task: AITask, provider: AIProvider, owner: User, co
 # ---------------------------------------------------------------- the lookup
 
 
-async def test_policy_off_is_todays_behaviour(db_session, test_user, site_provider, my_key, monkeypatch):
+async def test_policy_off_is_todays_behavior(db_session, test_user, site_provider, my_key, monkeypatch):
     """A route exists, but with the policy off the site provider answers and nothing is attributed to a key."""
     from app.ai.engine import resolve_assignment, run_task
 
@@ -269,7 +269,7 @@ async def test_no_key_under_optional_is_the_site_without_a_fallback_note(
     task = await _task(db_session, site_provider, "detection_rules")
     resolved = await resolve_assignment(db_session, Caller.user(test_user.id), task.name)
     assert resolved.source == "site"
-    # Most people have no key; that is not a fallback worth a warning stripe.
+    # Most people have no key, so having none is not reported as a fallback.
     assert resolved.fallback_reason is None
 
 
@@ -371,7 +371,7 @@ async def test_disabled_paused_disallowed_type_and_private_endpoint_all_fall_bac
     await db_session.flush()
     assert (await resolve_assignment(db_session, caller, task.name)).fallback_reason == "endpoint_blocked"
 
-    # The admin's switch lets the homelab case through.
+    # With user_ai_allow_private_endpoints on, the private LAN address is allowed.
     monkeypatch.setattr(env_settings, "user_ai_allow_private_endpoints", True)
     assert (await resolve_assignment(db_session, caller, task.name)).source == "user"
 
@@ -769,7 +769,7 @@ async def test_someone_elses_key_is_invisible(
 ):
     url = f"/api/ai/providers/{other_key.id}"
     for headers in (auth_headers, admin_headers):
-        # Using someone else's key (a call to their endpoint) is nobody's to do.
+        # Nobody, the admin included, may test someone else's key: a test calls the key's endpoint.
         assert (await client.post(f"{url}/test", headers=headers)).status_code == 404
     assert (await client.put(url, json={"name": "x"}, headers=auth_headers)).status_code == 404
     assert (await client.post(f"{url}/resume", headers=auth_headers)).status_code == 404
@@ -778,10 +778,10 @@ async def test_someone_elses_key_is_invisible(
     disabled = await client.put(url, json={"is_active": False}, headers=admin_headers)
     assert disabled.status_code == 200 and disabled.json()["is_active"] is False
     assert (await client.post(f"{url}/resume", headers=admin_headers)).status_code == 200
-    # ...but not repoint it: where a key sends its secret is its owner's alone to set.
+    # ...but may not edit it: only the owner sets where a key sends its secret.
     for body in ({"base_url": "https://evil.example/v1"}, {"api_key": "sk-new"}, {"name": "x"}, {"config": {"a": 1}}):
         assert (await client.put(url, json=body, headers=admin_headers)).status_code == 403, body
-    # The site's rows are the admin's to use; a person can read them and nothing more.
+    # Only the admin may test or delete the site's provider rows; other users can only read them.
     assert (await client.post(f"/api/ai/providers/{site_provider.id}/test", headers=auth_headers)).status_code == 403
     assert (await client.delete(f"/api/ai/providers/{site_provider.id}", headers=auth_headers)).status_code == 403
     # The admin may delete a personal key from the User keys tab.
@@ -1110,8 +1110,8 @@ async def test_a_key_without_an_address_is_refused_and_never_routed(
 async def test_the_test_route_rechecks_the_endpoint(
     client: AsyncClient, db_session, auth_headers, my_key, policy_on, monkeypatch
 ):
-    """A hostname that now resolves privately is not contacted by the test route either: the
-    engine, the save path and the test share one endpoint rule."""
+    """A hostname that resolves to a private address is not contacted by the test route either:
+    the engine, the save path and the test route share one endpoint rule."""
     import ipaddress
 
     import app.core.outbound as outbound
@@ -1263,7 +1263,7 @@ async def test_a_task_can_opt_out_of_the_default_key(
 async def test_policy_off_matches_todays_lookup_for_every_caller(
     db_session, test_user, site_provider, my_key, monkeypatch
 ):
-    """Off is the default, and it has to be exactly today's behaviour: a default key, a route,
+    """Off is the default, and it must behave as if personal keys did not exist: a default key, a route,
     fallback turned off and even Required are all inert, every caller kind gets what
     get_task_assignment returns, and an unassigned task is None rather than a refusal."""
     from app.ai.engine import get_task_assignment, resolve_assignment
@@ -1296,7 +1296,7 @@ async def test_policy_off_matches_todays_lookup_for_every_caller(
 async def test_an_unknown_or_unassigned_task_under_each_policy(
     db_session, test_user, site_provider, policy_on, monkeypatch
 ):
-    """Nothing can answer: Optional says so with None (today's "not configured"), Required
+    """Nothing can answer: Optional says so with None (the "not configured" answer), Required
     says "add a key" for a task a key could answer and None for one it never could."""
     from app.ai.engine import UserKeyRequired, resolve_assignment
 
@@ -1320,8 +1320,8 @@ async def test_an_unknown_or_unassigned_task_under_each_policy(
 async def test_a_fallback_to_the_site_spends_the_site_allowance(
     db_session, test_user, site_provider, my_key, policy_on, monkeypatch
 ):
-    """A person whose key can't answer is a person on the instance's providers again, and the
-    daily allowance counts those calls; the status read a direct caller makes first is free."""
+    """A person whose key can't answer falls back to the instance's providers, and the daily
+    allowance counts those calls; the status read a direct caller makes first does not count."""
     from app.ai.engine import SiteAllowanceExceeded, resolve_assignment, run_task
 
     task = await _task(db_session, site_provider, "detection_rules")
@@ -1472,7 +1472,7 @@ async def test_a_copilot_turn_the_client_abandons_still_counts(
     db_session, test_user, site_provider, policy_on, monkeypatch
 ):
     """Closing the tab after the first token is not a free call: the prompt reached the provider,
-    so the turn is ledgered on the way out, as rule chat already does."""
+    so the turn is recorded on the way out, as rule chat already does."""
     import app.ai.engine as engine
     from app.api.copilot import CopilotStreamRequest, copilot_stream
 

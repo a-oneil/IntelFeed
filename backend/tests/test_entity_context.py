@@ -165,7 +165,7 @@ async def test_a_newer_result_drops_the_keys_it_no_longer_carries(db_session):
     row = (await db_session.execute(select(EntityContext).where(EntityContext.entity_id == obs_id))).scalar_one()
     assert row.observed_at == later
 
-    # Not found any more: the source has nothing left to say.
+    # Not found anymore: the source has nothing left to say.
     await _store(db_session, "observable", obs_id, "shodan", {"found": False})
     assert await _context(db_session, "observable", obs_id) == {}
 

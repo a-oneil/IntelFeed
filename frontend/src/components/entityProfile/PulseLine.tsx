@@ -1,9 +1,4 @@
-/**
- * PulseLine — the header's collapsed activity readout: a bare sparkline on the
- * right of the identity block, with the window picker and an Expand control
- * that unfolds the full MentionsTimeline under the header. No numbers: the
- * Overview's Reporting fact says what the curve means.
- */
+/** PulseLine — the header's collapsed activity readout: a bare sparkline on the right of the identity block, with the window picker and an Expand control that unfolds the full MentionsTimeline under the header. No numbers: the Overview's Reporting fact says what the curve means. */
 import { useMemo } from "react";
 import {
   MENTIONS_WINDOWS,

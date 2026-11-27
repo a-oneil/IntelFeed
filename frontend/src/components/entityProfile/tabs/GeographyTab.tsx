@@ -1,10 +1,4 @@
-/**
- * GeographyTab — country-specific intelligence that the generic pivot doesn't
- * capture: role breakdown (origin/target/infrastructure/mentioned), threat
- * actors attributed to vs. targeting this country, related countries, and linked
- * campaigns. Backed by the country-profile endpoint (useCountryProfile). Folds in
- * the retired CountryProfilePage.
- */
+/** GeographyTab — country-specific intelligence that the generic pivot doesn't capture: role breakdown (origin/target/infrastructure/mentioned), threat actors attributed to vs. targeting this country, related countries, and linked campaigns. Backed by the country-profile endpoint (useCountryProfile). It replaces the former CountryProfilePage. */
 import { useNavigate } from "react-router-dom";
 import { useCountryProfile } from "@/hooks/useCountryProfile";
 import { formatDate } from "@/utils/formatDate";

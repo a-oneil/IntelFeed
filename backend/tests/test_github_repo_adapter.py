@@ -391,7 +391,7 @@ async def test_fetch_entries_dedup_same_file():
 
         if _is_list_commits_call(url_str, kwargs):
             resp.status_code = 200
-            # Two commits, oldest first after reversal in adapter
+            # Newest first, as the API lists them; the adapter reverses them to oldest first
             resp.json = lambda: [
                 _make_commit("newer_sha", "Update rule v2", date="2026-03-02T10:00:00Z"),
                 _make_commit("older_sha", "Add rule v1", date="2026-03-01T10:00:00Z"),
@@ -584,7 +584,7 @@ async def test_fetch_entries_file_too_large():
             )
         elif "/contents/" in url_str:
             resp.status_code = 200
-            # Report size larger than 5MB
+            # Report a 10MB file, over the 5MB default limit
             resp.json = lambda: {"content": "", "size": 10 * 1024 * 1024, "encoding": "base64"}
         else:
             resp.status_code = 200
@@ -1337,7 +1337,7 @@ class TestGlobMatchAnchorHandling:
     def test_anchor_was_derived(self):
         from app.adapters.github_content_types import _FNMATCH_ANCHOR
 
-        assert _FNMATCH_ANCHOR in (r"\Z", r"\z"), f"unrecognised anchor {_FNMATCH_ANCHOR!r}"
+        assert _FNMATCH_ANCHOR in (r"\Z", r"\z"), f"unrecognized anchor {_FNMATCH_ANCHOR!r}"
 
     def test_translate_unanchored_drops_the_anchor(self):
         from app.adapters.github_content_types import _translate_unanchored

@@ -1,7 +1,7 @@
 """Same-feed URL dedup at ingest, and the merge that collapses stored copies.
 
 CrowdStrike's RSS gives each post a fresh random ``?p=`` guid on every fetch
-while its <link> stays put, so the guid check never matched and every fetch
+while its <link> stays the same, so the guid check never matched and every fetch
 stored another copy (5,031 rows for ~129 URLs in prod).
 """
 
@@ -25,7 +25,7 @@ from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.services.dedup import item_key, normalize_url
 from app.services.entry_merge import batch_by_keeper, merge_entries, plan_same_url_merges
 
-# ── URL normalisation ────────────────────────────────────
+# ── URL normalization ────────────────────────────────────
 
 
 def test_normalize_url_drops_tracking_and_fragment_only():

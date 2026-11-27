@@ -22,7 +22,7 @@ itself, and you will be pointed somewhere private.
 
 ### What to expect
 
-- An acknowledgement within a few days.
+- An acknowledgment within a few days.
 - An assessment of severity and affected versions, shared with you.
 - A fix and a published advisory once one is available, crediting you unless
   you would rather stay anonymous.

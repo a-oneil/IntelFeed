@@ -262,7 +262,7 @@ async def _recompute_signal_rates() -> dict[str, float]:
     rates = {signal_type: round(count / total_entries, 5) for signal_type, count in rows}
     family_votes = attribute_feedback_votes(feedback_rows, rates)
     # Families below the sample floor keep a neutral 1.0 nudge — a handful of
-    # votes shouldn't swing scoring as hard as a season of feedback would.
+    # votes shouldn't move scoring as much as a large sample would.
     skipped = sorted(f for f, votes in family_votes.items() if len(votes) < min_samples)
     if skipped:
         logger.info("Feedback nudges skipped for %s (< %d verdicts in window)", skipped, min_samples)
@@ -276,7 +276,7 @@ async def _recompute_signal_rates() -> dict[str, float]:
 
     r = await get_redis()
     await r.set(RATES_REDIS_KEY, json.dumps(rates))
-    await r.delete(LEGACY_THRESHOLD_REDIS_KEY)  # raw-sum era auto threshold, read by nothing
+    await r.delete(LEGACY_THRESHOLD_REDIS_KEY)  # auto threshold from the old raw-sum scale; nothing reads it
     if p95 is not None:
         await r.set(THRESHOLD_REDIS_KEY, str(round(float(p95), 4)))
     # Always write (even {}) so families that fall below the sample floor — or
@@ -413,11 +413,11 @@ def rescore_entries_for_threads(thread_ids: list[str], limit: int = 1000):
     """Re-score the articles in story threads whose membership just changed.
 
     Threading runs up to 30 minutes behind ingest, so an article is always
-    scored before the platform knows which story it belongs to — the echo
-    verdict and the outlet count simply are not knowable yet. This is the
-    second look, and it covers the whole thread rather than the new arrival:
-    one more outlet on a story is one more point of corroboration for every
-    article already in it.
+    scored before the platform knows which story it belongs to, and its echo
+    signal and outlet count cannot be computed yet. This task re-scores once
+    the thread changes, and it covers the whole thread rather than only the new
+    article: one more outlet on a story is one more point of corroboration for
+    every article already in it.
     """
     start = time.monotonic()
     try:
@@ -501,7 +501,7 @@ async def _rescore_recent(hours: int, limit: int) -> tuple[int, int]:
     async with _get_worker_session() as db:
         if not await _engine_enabled(db):
             return 0, 0
-        # Unscored entries first so self-healing wins when the limit truncates.
+        # Unscored entries first, so they are kept when the limit truncates the list.
         rows = (
             await db.execute(
                 select(Entry.id, Entry.scored_at)
@@ -638,7 +638,7 @@ def fit_user_signal_weights():
 
     The sibling recompute_signal_rates job pools every user's votes into one
     global nudge baked into Entry.priority_raw. This one keeps the votes
-    separate so each analyst's Radar can diverge from the house ranking at read
+    separate so each analyst's Radar can diverge from the shared ranking at read
     time, without touching a stored score.
     """
     start = time.monotonic()

@@ -118,7 +118,7 @@ async def test_campaign_attack_layer_dedupes_techniques(
     campaign, entries, ttps = campaign_with_entries
 
     # Link ttp1 to the second entry as well, with a different confidence —
-    # previously this produced duplicate techniques in the layer.
+    # before the B6 fix this produced duplicate techniques in the layer.
     db_session.add(EntryTTP(entry_id=entries[0].id, ttp_id=ttps[1].id, confidence="low"))
     db_session.add(EntryTTP(entry_id=entries[1].id, ttp_id=ttps[0].id, confidence="high"))
     await db_session.flush()
@@ -229,7 +229,7 @@ async def test_suggest_offers_the_rest_of_a_story_the_campaign_holds(
 ):
     """The tenth article about a breach may share no entity with the first nine.
 
-    Entity overlap cannot reach it; belonging to the same story can.
+    Entity-overlap suggestions miss it; story thread membership finds it.
     """
     from app.models.story_thread import StoryThread, StoryThreadEntry
 
@@ -270,19 +270,19 @@ async def test_suggest_offers_the_rest_of_a_story_the_campaign_holds(
         assert entry.title in rows, f"{entry.title} should be suggested on story membership alone"
         row = rows[entry.title]
         assert row["reason"] == "same_story"
-        assert row["overlap_count"] == 0  # no entity overlap reached it
+        assert row["overlap_count"] == 0  # suggested with no entity overlap
         assert row["thread_slug"] == "one-story-partly-tracked"
         assert row["thread_in_campaign"] == 1
         assert row["thread_article_count"] == 4
 
-    # Surest first.
+    # Same-story suggestions sort first.
     assert resp.json()[0]["reason"] == "same_story"
 
 
 async def test_suggest_still_offers_entity_matches_that_never_clustered(
     client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_feed, campaign_with_entries
 ):
-    """Coverage that never became a story is still reachable by entity overlap."""
+    """An article in no story thread is still suggested by entity overlap."""
     campaign, entries, ttps = campaign_with_entries
 
     entry = Entry(
@@ -445,12 +445,11 @@ async def test_campaign_timeline_endpoint_returns_its_articles(
     assert {a["title"] for a in articles} == {e.title for e in entries}
 
 
-async def test_campaign_graph_is_labelled_and_connected(client: AsyncClient, auth_headers: dict, campaign_with_entries):
-    """Superseding an earlier assertion that an empty map was correct.
+async def test_campaign_graph_is_labeled_and_connected(client: AsyncClient, auth_headers: dict, campaign_with_entries):
+    """A campaign's graph has a labeled root and at least one edge.
 
-    It was reasoned from the claims-only rule and was wrong in practice: a lone
-    unconnected node is a broken graph however defensible the reasoning. What a
-    campaign claims is its membership.
+    The claims-only rule alone would leave it a single unconnected node, which
+    renders as a broken graph. What a campaign claims is its membership.
     """
     campaign, _, _ = campaign_with_entries
 
@@ -558,7 +557,7 @@ async def test_every_profile_shell_endpoint_accepts_a_campaign(
 
     Each gates on its own entity-type map, so folding campaigns in means every
     one of them has to answer — a single holdout renders as a broken panel or a
-    toast on an otherwise working page. This list is why they are now routed
+    toast on an otherwise working page. This list is why they are routed
     through one `entry_scope_junction` helper instead of a map per module.
     """
     campaign, _, _ = campaign_with_entries
@@ -582,12 +581,12 @@ async def test_campaign_provenance_is_empty_rather_than_an_error(
 async def test_campaign_graph_claims_its_membership(
     client: AsyncClient, auth_headers: dict, db_session: AsyncSession, campaign_with_entries
 ):
-    """The map shows claims, and a campaign's claim is what it holds.
+    """The graph shows claims, and a campaign's claim is its membership.
 
     Nothing writes entity_relationship rows for a campaign — it is not in the
-    relationship matrix — so the claims-only rule left its map a single
-    unconnected node. Membership is an analyst assertion, and the curated
-    CampaignEntity role is the verb.
+    relationship matrix — so the claims-only rule alone would leave its graph a
+    single unconnected node. Membership is an analyst assertion: each edge is
+    labeled with the curated CampaignEntity role, or "related" when there is none.
     """
     from app.models.campaign import CampaignEntity
 
@@ -611,11 +610,11 @@ async def test_campaign_graph_claims_its_membership(
 async def test_campaign_graph_keeps_the_curated_entity_when_the_cap_bites(
     client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_feed, test_user, campaign_with_entries
 ):
-    """Curation outranks volume.
+    """A curated entity survives the neighbor cap even when it co-occurs least.
 
-    A campaign's proximity is co-occurrence only, so a plain score sort spends
-    the neighbour budget on whatever co-occurs most and drops the one entity the
-    analyst called primary.
+    A campaign's proximity is co-occurrence only, so a plain score sort fills
+    the neighbor cap with whatever co-occurs most and drops the one entity the
+    analyst marked primary.
     """
     from app.models.campaign import CampaignEntity, CampaignEntry
     from app.models.threat_actor import EntryThreatActor, ThreatActor
@@ -649,7 +648,7 @@ async def test_campaign_graph_keeps_the_curated_entity_when_the_cap_bites(
     root = f"campaign-{campaign.id}"
     direct = [e for e in data["edges"] if root in (e["source"], e["target"])]
     primary = [e for e in direct if e["label"] == "primary"]
-    assert len(primary) == 1, "the primary entity must survive the neighbour cap"
+    assert len(primary) == 1, "the primary entity must survive the neighbor cap"
     assert primary[0]["confidence"] == "confirmed"
 
 
@@ -657,8 +656,8 @@ async def test_campaign_gets_the_same_detection_workspace_as_an_actor(
     client: AsyncClient, auth_headers: dict, campaign_with_entries
 ):
     """The Detection tab's Build lane is gated on the coverage workspace serving
-    the type; without it a campaign fell back to a bare coverage list that looked
-    nothing like the other profiles."""
+    the type; without it a campaign would fall back to a bare coverage list that
+    looks nothing like the other profiles."""
     campaign, _, _ = campaign_with_entries
 
     resp = await client.get(

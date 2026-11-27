@@ -101,10 +101,10 @@ class MastodonAdapter(ExtendedAdapter):
         author = account.get("display_name") or account.get("username", "")
         acct = account.get("acct", "")
 
-        # Use content (HTML) or fallback to plain text
+        # Mastodon returns the status content as HTML
         content_html = status.get("content", "")
 
-        # Build title from first line of content (stripped of HTML)
+        # Title: the first 120 characters of the content with HTML tags stripped
         import re
 
         plain = re.sub(r"<[^>]+>", "", content_html).strip()

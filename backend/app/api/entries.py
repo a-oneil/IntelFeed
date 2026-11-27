@@ -61,9 +61,9 @@ from app.services.triage import get_triage_entries
 
 # Entries that arrive already older than this (backdated publish date vs. when we
 # first fetched them — e.g. NVD backfilling old CVEs, blogs reposting old content)
-# are treated as already-read for the Hide-Read view so they don't sink to the
-# bottom of the feed as stray unread stragglers. Tunable; promote to a system
-# setting if it needs to be UI-editable.
+# are treated as already-read for the Hide-Read view so they don't sit unread at
+# the bottom of the feed. Tunable; promote to a system setting if it needs to be
+# UI-editable.
 _STALE_ON_ARRIVAL_DAYS = 14
 
 _VALID_COUNTRY_ROLES = {"origin", "target", "infrastructure", "mentioned"}
@@ -90,11 +90,11 @@ logger = structlog.get_logger("app.entries")
 
 
 def _actively_exploited_cve_ids():
-    """CVE ids that count as *actively exploited* — one definition, two readers.
+    """CVE ids that count as *actively exploited*, defined once for two callers.
 
     The day-divider's "N actively exploited" signal and the entry filter behind
-    clicking it both read this, so the badge's number and the list it opens can
-    never drift apart. KEV membership and an explicit active-exploitation
+    clicking it both read this, so the badge's number and the list it opens
+    always agree. KEV membership and an explicit active-exploitation
     reading are separate columns: NVD/CISA sets the first, analysts and the
     extraction pipeline set the second, and either one alone is enough.
     """
@@ -109,7 +109,7 @@ def _exploited_cve_entry_ids():
 #: Entity type → (entry-id column, entity-id column) on its entry junction table.
 #: The reader's day-divider chips filter the list through this: every chip names
 #: an entity, and clicking one asks for that day's entries linked to it. Keyed by
-#: the canonical slugs so the query param speaks the same vocabulary as the rest
+#: the canonical slugs so the query param uses the same type names as the rest
 #: of the app. CWE, ransomware victims and observables are absent because they
 #: have no direct entry junction.
 _ENTRY_ENTITY_LINKS: dict[str, tuple] = {
@@ -159,7 +159,7 @@ def _exclude_stale_on_arrival(query):
     """Drop entries that arrived already older than ``_STALE_ON_ARRIVAL_DAYS``.
 
     Backdated content (an old ``published_at`` fetched only now) otherwise sinks to
-    the bottom of the feed as stray unread stragglers you never scroll to. We treat
+    the bottom of the feed as unread entries nobody scrolls to. We treat
     it as already-read for unread views only — it stays visible when Hide-Read is
     off (sorted by its publish date) and is always reachable via search. Entries
     with no publish date are never considered stale.
@@ -565,11 +565,11 @@ async def _entry_page(
     uses it to keep a story thread's members out of the ranked list once the
     thread row stands for them. A dict passed as ``rank_scores`` is filled with
     the score each entry was actually ordered by, which is the raw priority score
-    only when no read-time lift (exposure, personalisation) is in play.
+    only when no read-time lift (exposure, personalization) is in play.
 
     ``rank_by_lift=False`` keeps a Radar page in stored-score order: the lifts
     still decide membership (a stack-relevant CVE below the threshold still gets
-    in) and still decorate the entries, but they no longer move anything.
+    in) and still decorate the entries, but they do not change the order.
     """
     if country_role is not None and country_role not in _VALID_COUNTRY_ROLES:
         raise AppError(
@@ -733,10 +733,11 @@ async def _entry_page(
             0,
         )
 
-    # My Stack exposure (read-time, per-user, Radar only): float CVEs affecting the
-    # user's declared stack. Adds a joined (entry_id, lift) subquery and re-ranks by
-    # effective_score = priority_raw + lift. Gated by surface + the exposure flag +
-    # a non-empty stack; otherwise the Radar behaves exactly as before.
+    # My Stack exposure (read-time, per-user, Radar only): lift entries whose CVEs
+    # affect the user's declared stack. Adds a joined (entry_id, lift) subquery and
+    # re-ranks by effective_score = priority_raw + lift. Gated by
+    # signal_engine_surface + my_stack_exposure_enabled + a non-empty stack;
+    # otherwise the Radar order is unchanged.
     surface_on = bool(await get_setting("signal_engine_surface", db))
     exposure_active = False
     exposure_vendor_ids: list = []
@@ -761,10 +762,10 @@ async def _entry_page(
 
     # Learned Radar weights (read-time, per-user, Radar only): lift each entry by
     # the gap between the global family multipliers baked into priority_raw and
-    # this analyst's own fitted weights. Personalisation RE-ORDERS the Priority
+    # this analyst's own fitted weights. Personalization RE-ORDERS the Priority
     # Queue and deliberately does not change its membership — the radar threshold
     # below still gates on the global score, so a learned weight can never hide an
-    # entry the badge counted, and turning it off restores the house ranking
+    # entry the badge counted, and turning it off restores the global ranking
     # exactly. See app/services/radar_personalization.py.
     personal_active = False
     personal_coeffs: dict[str, float] = {}
@@ -1183,9 +1184,9 @@ async def count_entries(
         # count(*), not count(DISTINCT entries.id): the only join here is the
         # LEFT JOIN to user_entry_states, which carries UNIQUE (user_id,
         # entry_id), so it can never yield more than one row per entry — every
-        # other filter is a column predicate or an IN/EXISTS subquery. The
-        # DISTINCT was buying nothing and forcing a sort over the whole matching
-        # set (measured on prod: 923ms vs 663ms, same 142,103 answer).
+        # other filter is a column predicate or an IN/EXISTS subquery. DISTINCT
+        # adds nothing here and forces a sort over the whole matching set
+        # (measured on prod: 923ms vs 663ms, same 142,103 answer).
         select(func.count())
         .select_from(Entry)
         .outerjoin(
@@ -1389,14 +1390,16 @@ async def priority_unread_count(
 # the CLI and an agent all get the same queue in the same order.
 
 # How deep into the open-thread list the queue looks. Threads are ranked by their
-# best beat, and one below this many is not going to outrank anything.
+# best beat (highest-scoring non-echo member), and one ranked below this many is
+# not going to outrank anything.
 _QUEUE_THREAD_LIMIT = 40
 
 
 def _thread_queue_score(row: dict) -> float:
-    """The rank a thread row takes (raw units): the score of its best beat.
+    """The rank a thread row takes (raw units): the score of its best beat
+    (highest-scoring non-echo member), read or not.
 
-    Read or not — reading an article doesn't change the story's score, so the
+    Reading an article doesn't change the story's score, so the
     row keeps its place while there is still something unread in it.
 
     Nothing is added for outlet count. The queue is one list sorted by the score
@@ -1481,13 +1484,14 @@ async def build_priority_queue(
         folded = [r for r in rows if (r.get("unread_count") or 0) > 0 and r["id"] not in dismissed]
         for row in folded:
             # Every member of a live thread is withheld, including those on pages
-            # still to come. A thread scores at or above every member, so
+            # still to come. A thread scores at or above every non-echo member, so
             # the row is always reached before the articles it stands for — the
             # story is never missing from the queue, only folded.
             member_ids.update(row.get("entry_ids") or [])
         # A thread whose only unread members are echoes gets no
-        # row, but its members stay withheld above: the beats are read, and an
-        # echo is a reprint of one, so neither belongs back in the queue alone.
+        # row, but its members stay withheld above: the beats (non-echo members)
+        # are read, and an echo is a reprint of one, so neither belongs back in the
+        # queue alone.
         live = [r for r in folded if (r.get("unread_beats") or 0) > 0]
         live.sort(key=_thread_sort_key)
         pending = [r for r in live if thread_after is None or _thread_sort_key(r) > thread_after]
@@ -1519,8 +1523,8 @@ async def build_priority_queue(
     cutoffs = await get_scale_cutoffs(db)
 
     # Two-pointer merge: entries keep their ranked order and a thread slots in
-    # ahead of the first entry it outranks. Both sides are the stored house
-    # score — an entry's own, a thread's best beat — so the merged list
+    # ahead of the first entry it outranks. Both sides are the stored score
+    # (priority_raw) — an entry's own, a thread's best beat — so the merged list
     # runs highest displayed score first. The merge runs in raw units; each row
     # reports its rank on the 0–10 scale.
     items: list[PriorityQueueRow] = []
@@ -2560,7 +2564,7 @@ async def get_entry(
                 is_echo = True
                 echo_payload = sig.payload or {}
                 # Still surfaced: an echo *subtracts* from the score, and hiding
-                # it left the card unable to explain why a story ranked low.
+                # it leaves the card unable to explain why a story ranked low.
             elif len(top_signals) < 2:
                 top_signals.append({"type": sig.signal_type, "explanation": sig.explanation})
             priority_signals.append(
@@ -2829,7 +2833,7 @@ async def get_similar_entries(
 ):
     """Find entries similar to the given entry.
 
-    Prefers the embedding index: cosine nearest neighbours find the article that
+    Prefers the embedding index: cosine nearest neighbors find the article that
     tells the same story in different words, which keyword search structurally
     cannot. Falls back to Meilisearch term overlap for entries that have not
     been embedded yet (or when embeddings are switched off entirely), so the
@@ -2854,10 +2858,10 @@ async def get_similar_entries(
 
     from app.intelligence.story_threads import similar_entries as vector_similar
 
-    neighbours = await vector_similar(db, entry_id, limit=limit, exclude_ids=duplicate_ids)
-    if neighbours:
+    neighbors = await vector_similar(db, entry_id, limit=limit, exclude_ids=duplicate_ids)
+    if neighbors:
         thread_slugs = {}
-        thread_ids = [n["thread_id"] for n in neighbours if n["thread_id"]]
+        thread_ids = [n["thread_id"] for n in neighbors if n["thread_id"]]
         if thread_ids:
             from app.models.story_thread import StoryThread
 
@@ -2886,9 +2890,9 @@ async def get_similar_entries(
                     "thread_slug": thread_slugs.get(n["thread_id"], (None, None))[0],
                     "thread_title": thread_slugs.get(n["thread_id"], (None, None))[1],
                 }
-                for n in neighbours
+                for n in neighbors
             ],
-            "total": len(neighbours),
+            "total": len(neighbors),
             "query_keywords": [],
             "method": "embedding",
         }
@@ -3151,8 +3155,8 @@ async def mark_all_read(
 
     # Sync read state to Meilisearch off the request path: only the entries we
     # actually marked, dispatched to a Celery worker. Doing this inline for the
-    # whole feed previously blocked past the 15s client timeout, which cancelled
-    # the request before commit and silently rolled back the read-state write.
+    # whole feed blocks past the 15s client timeout, which cancels the request
+    # before commit and silently rolls back the read-state write.
     marked_ids = [str(eid) for eid in (updated_ids + missing_ids)]
     try:
         from app.workers.intel_feed_tasks import sync_read_state_to_search

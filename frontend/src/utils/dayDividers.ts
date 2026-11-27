@@ -14,8 +14,7 @@ export type DisplayItemWithDividers = DisplayItem | DayDividerItem;
 /**
  * A story-thread row, as far as day bucketing is concerned.
  *
- * Structural on purpose: `ThreadItem` lives in utils/threads, which already
- * imports this module, and a thread only owes the dividers a date.
+ * Structural on purpose: `ThreadItem` lives in utils/threads, which already imports this module, and the dividers only need a thread's date.
  */
 export interface DatedThreadItem {
   type: "thread";
@@ -56,9 +55,7 @@ function entryDate(entry: Entry): Date | null {
 /**
  * The date a row sits under.
  *
- * A thread is dated by its most recent coverage, not its first: the story is
- * filed on the day it last said something, which is the day a reader scanning
- * dividers expects to find it under.
+ * A thread is dated by its most recent coverage, not its first: the story is filed under the day of its newest article, which is the day a reader scanning dividers expects to find it under.
  */
 function itemDate(item: DividerSource): Date | null {
   if (item.type === "thread") {
@@ -73,9 +70,7 @@ function itemDate(item: DividerSource): Date | null {
 /**
  * How many entries a row is worth in the day's count.
  *
- * A thread counts as one, not as the articles it swallowed: those articles are
- * spread across the whole run of the story, and crediting all of them to the
- * day of its last beat would inflate that day past what is on screen.
+ * A thread counts as one, not as the articles it groups: those articles are spread across the whole run of the story, and crediting all of them to the day of its newest article would inflate that day past what is on screen.
  */
 function entryCountOf(item: DividerSource): number {
   if (item.type === "thread") return 1;

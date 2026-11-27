@@ -82,8 +82,8 @@ async def add_target_sector(
 ) -> bool:
     """Assert that the entity targets the sector. Returns whether anything changed.
 
-    An existing row is upgraded to a stronger source or a higher evidence count;
-    it is never weakened.
+    An existing row is upgraded to a stronger source, never downgraded to a
+    weaker one; a nonzero ``article_count`` replaces the stored count.
     """
     if source not in SOURCE_PRECEDENCE:
         raise ValueError(f"unknown target-sector source: {source}")
@@ -143,7 +143,7 @@ async def set_rollup_sectors(
                 await db.delete(row)
                 changed = True
             elif row.article_count:
-                # Evidence has gone — a curated claim stays, but without a count it can't back.
+                # The evidence is gone: a curated claim stays, with its article count reset to zero.
                 row.article_count = 0
                 changed = True
         elif row.article_count != count:

@@ -30,10 +30,7 @@
 }
 
 .sidebar {
-  /* Nav panels sit a touch darker than the card surface but stay clear of
-     the page ground, so the sidebar still reads as a distinct panel.
-     Derived from two theme-managed tokens, so it moves with the theme
-     instead of clashing the way a fixed --sidebar-bg did. */
+  /* Nav panels sit slightly darker than the card surface but stay lighter than the page background, so the sidebar still reads as a distinct panel. The color is mixed from two theme-managed tokens so it follows the theme; a fixed --sidebar-bg clashed with some themes. */
   background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
   overflow-y: auto;
   overflow-x: hidden;
@@ -45,8 +42,7 @@
   width: 0 !important;
   min-width: 0 !important;
   overflow: hidden;
-  /* Zero-width nav buttons must not remain click/hit-test targets — clicks
-     aimed at them land on overlaying content (toggle rail, page content). */
+  /* Zero-width nav buttons must not remain click/hit-test targets — clicks aimed at them land on overlaying content (toggle rail, page content). */
   visibility: hidden;
   pointer-events: none;
 }

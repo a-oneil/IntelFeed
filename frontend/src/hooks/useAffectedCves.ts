@@ -1,7 +1,4 @@
-/**
- * Hooks for the authoritative CVE↔vendor/product affects-links (cve_affected).
- * Distinct from co-mention pivot data — these are NVD CPE-derived links.
- */
+/** Hooks for the authoritative CVE↔vendor/product affects-links (cve_affected). These are NVD CPE-derived links, distinct from co-mention pivot data. */
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import api from "@/api/client";
 
@@ -13,8 +10,7 @@ export interface AffectedProductRef {
   version_end: string | null;
 }
 
-/** Entity kinds with an authoritative CVE list. vendor/product come from
- * cve_affected (NVD CPE); cwe comes from cve_weaknesses (NVD weakness block). */
+/** Entity kinds with an authoritative CVE list. vendor/product come from cve_affected (NVD CPE); cwe comes from cve_weaknesses (NVD weakness block). */
 export type AffectedKind = "vendor" | "product" | "cwe";
 
 export interface AffectedCVEItem {

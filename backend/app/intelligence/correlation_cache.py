@@ -10,7 +10,7 @@ from app.services.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 
-# Prefix bumps cold-cut old cached payloads at deploy without a manual
+# Bumping a prefix invalidates old cached payloads at deploy without a manual
 # flush; stale prior-version keys age out via TTL.
 # v2: specificity damping, context_role, adjudication fields.
 # v3: graphs carry every claim tier + CWE/mitigation catalog layers; pivots
@@ -51,8 +51,9 @@ def confidence_cache_variant() -> str:
 
     Covers the min-confidence filter plus the specificity/reporting-source
     tuning — changing any of them must miss the cache, not serve payloads
-    built under the old values (the classic inert-settings bug). Empty at
-    the defaults so the pre-warmer and default requests share keys.
+    built under the old values (otherwise a changed setting appears to do
+    nothing until the TTL expires). Empty at the defaults so the pre-warmer
+    and default requests share keys.
     """
     from app.config import settings as env_settings
     from app.intelligence.relationship_matrix import hidden_relationship_confidences

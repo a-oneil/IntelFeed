@@ -116,9 +116,7 @@
   white-space: nowrap;
 }
 
-/* The field's description. Truncates rather than wrapping, and never squeezes
-   the field name it is describing — long tokens like
-   `ransomware_victim.domain:` used to collide with it head-on. */
+/* The field's description. Truncates rather than wrapping, and never squeezes the field name it describes, so long tokens like `ransomware_victim.domain:` don't collide with it. */
 .suggestionCount {
   flex: none;
   max-width: 45%;
@@ -150,9 +148,7 @@
   }
 }
 
-/* The shared OmniSearchInput renders its own wrapper; this surface needs the
-   positioning context (and the click-outside measurement) to be the outer
-   .wrapper, which also holds the results dropdown below. */
+/* The shared OmniSearchInput renders its own wrapper; this surface needs the positioning context (and the click-outside measurement) to be the outer .wrapper, which also holds the suggestions dropdown. */
 .omniWrapper {
   display: contents;
 }

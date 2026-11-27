@@ -7,12 +7,13 @@ Complements the manual Find Duplicates endpoint (substring/alias grouping in
     like "Pegasus" ⊂ "Pegasus Spyware", token overlap)
   - alias overlap (one entity's name is another's alias, shared aliases)
   - shared entity relationships (both related to the same third entity, or
-    directly related to each other — a common symptom of undetected dupes)
+    directly related to each other — common for undetected duplicates)
   - co-mention frequency (entities that co-occur in the same entries AND have
     similar names are strong merge candidates)
 
-Also flags cross-type tool-vs-malware name collisions as "possible cross-type
-duplicate" without offering auto-merge (those need reclassify, not merge).
+Also flags cross-type name collisions between threat actors, malware and tools
+as "possible cross-type duplicate" without offering auto-merge (those need
+reclassify, not merge).
 
 Pairs the analyst dismissed are persisted in
 ``entity_merge_suggestion_dismissals`` and excluded from future responses.
@@ -291,8 +292,9 @@ def _build_suggestion(a: EntityView, b: EntityView, score: float, reasons: list[
 async def suggest_merges(db: AsyncSession, entity_type: str, limit: int = 50) -> dict:
     """Produce ranked duplicate-pair suggestions for one entity type.
 
-    Includes cross-type tool-vs-malware collisions (flagged ``cross_type``)
-    when the requested type is malware or tool. Dismissed pairs are excluded.
+    Includes cross-type collisions (flagged ``cross_type``) against the
+    partner types in ``CROSS_TYPE_PARTNERS`` when the requested type is
+    threat_actor, malware or tool. Dismissed pairs are excluded.
     """
     if entity_type not in SUGGESTION_CONFIG:
         raise ValueError(f"unsupported entity_type: {entity_type}")

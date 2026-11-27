@@ -2,9 +2,9 @@
 
 Classifies IPv4 addresses as benign, malicious, or unknown based on internet
 scanning behavior. The Community endpoint answers without a key; a key, when
-configured, is sent for its higher allowance. Restored from the IOC-v1 era
-(removed in 22ae889) for the observables ledger; non-IP kinds report
-unsupported rather than erroring.
+configured, is sent for its higher allowance. It enriches IP observables in
+the ledger (an earlier version was removed with IOC v1 in 22ae889); non-IP
+kinds report unsupported rather than raising an error.
 """
 
 import re
@@ -31,7 +31,7 @@ class GreyNoiseAdapter(EnrichmentAdapter):
     # GreyNoise publishes no per-minute figure for the Community API; it
     # answers 429 when a caller goes over, and the breaker backs off.
     quota = Quota(10, 3600, daily_budget=100)
-    # Sends the IP to GreyNoise; it runs on its own anyway, as Shodan does.
+    # Sends the IP to GreyNoise; it still runs automatically, as Shodan does.
     egress = Egress.SHARES_IOC
     default_enabled = True
     default_trigger_mode = "auto"
@@ -85,9 +85,9 @@ class GreyNoiseAdapter(EnrichmentAdapter):
             resp = await client.get(f"{self._api_base}{entity_value}", headers=self._headers())
             if resp.status_code == 404:
                 # Not seen scanning the internet (the body still says
-                # noise:false / riot:false) — for a suspected C2 that is itself
-                # signal: targeted infrastructure, not mass noise. GreyNoise
-                # gives no class for it, so none is stored.
+                # noise:false / riot:false). For a suspected C2 that is useful
+                # in itself: it points to targeted infrastructure, not mass
+                # scanning. GreyNoise gives no class for it, so none is stored.
                 data = resp.json()
                 return EnrichmentData(
                     raw_response=data,

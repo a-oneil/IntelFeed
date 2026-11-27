@@ -1,4 +1,5 @@
-"""Engine API — signal-engine stats and settings (grows per engine plan phases 5–6)."""
+"""Engine API — signal-engine stats and settings, pipeline status and plans, jobs, the engine switch,
+personalized Radar weights and the autolink name lists."""
 
 import json
 
@@ -956,7 +957,7 @@ async def pipeline_overview(
     ``success``/``retry`` are 24h run tallies (throughput). ``error`` is the count
     of entries whose *latest* run at the stage is an error — a stage the entry is
     still stuck on — so re-running to green immediately drops it, instead of the
-    old behaviour where a superseded error lingered in the tally for 24h.
+    old behavior where a superseded error lingered in the tally for 24h.
     """
     from datetime import UTC, datetime, timedelta
 
@@ -1087,8 +1088,9 @@ async def pipeline_overview(
     }
 
 
-# Dispatched (non-inline) pipeline stages that write per-entry run rows, in
-# execution order — the column set for the Engine → Processing matrix. Mirrors
+# Per-entry pipeline stages in execution order — the column set for the
+# Engine → Processing matrix. Every stage except analyze writes per-entry run
+# rows; analyze's state is its AI request queue row. Same keys as
 # PIPELINE_STAGE_LABELS (enrich runs per-entity, not per-entry, so it is absent).
 PROCESSING_STAGE_ORDER: list[str] = [
     "translate",
@@ -1850,12 +1852,12 @@ async def radar_feedback(
     return {"ok": True}
 
 
-# --- Personalised Radar (learned per-user signal weights) ------------------
+# --- Personalized Radar (learned per-user signal weights) ------------------
 # The global feedback nudge above pools every analyst's thumbs into one set of
 # family multipliers baked into Entry.priority_raw. These endpoints expose the
 # per-analyst counterpart: weights fitted nightly from this user's own verdicts
 # and applied as a read-time lift on their Radar ordering. Opting out restores
-# the house ranking immediately — nothing is rewritten either way.
+# the system-wide ranking immediately — nothing is rewritten either way.
 
 
 class MyRadarUpdate(BaseModel):

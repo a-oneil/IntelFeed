@@ -1,17 +1,9 @@
 /**
- * VulnerabilitiesTab — authoritative CVE list on vendor, product and weakness
- * profiles, fed by NVD structured data rather than article co-mentions. Vendor
- * and product modes read cve_affected (CPE); weakness mode reads cve_weaknesses.
+ * VulnerabilitiesTab — authoritative CVE list on vendor, product and weakness profiles, fed by NVD structured data rather than article co-mentions. Vendor and product modes read cve_affected (CPE); weakness mode reads cve_weaknesses.
  *
- * Vendor mode shows the full rollup (direct vendor rows plus every product with
- * vendor_id = this vendor) with per-row product labels; product mode scopes to
- * the product's own rows with version ranges; weakness mode spans the whole
- * abstraction subtree by default and labels each row with the descendant that
- * actually matched.
+ * Vendor mode shows the full rollup (direct vendor rows plus every product with vendor_id = this vendor) with per-row product labels; product mode scopes to the product's own rows with version ranges; weakness mode spans the whole abstraction subtree by default and labels each row with the descendant that actually matched.
  *
- * Row design is deliberately calm: severity is the left stripe + the CVSS
- * color, at most one small status chip (KEV, else EXPLOITED), everything
- * else monochrome.
+ * Rows are kept low-contrast on purpose: severity is shown by the left stripe and the CVSS color, there is at most one small status chip (KEV, else EXPLOITED), and everything else is monochrome.
  */
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -59,8 +51,7 @@ function Row({
 }: {
   item: AffectedCVEItem;
   mode: AffectedKind;
-  /** The weakness whose profile this is, so a row matched on the subject itself
-   * doesn't repeat it and a row matched on a descendant can say so. */
+  /** The weakness whose profile this is, so a row matched on the subject itself doesn't repeat it and a row matched on a descendant can say so. */
   subjectCwe?: string;
 }) {
   const viaDescendant = mode === "cwe" && !!item.matched_cwe && item.matched_cwe !== subjectCwe;
@@ -103,8 +94,7 @@ function Row({
                   )}
                 </span>
               ))}
-              {/* Same separator the vendor rows use; without it the chip and the
-                  description run together. */}
+              {/* Same separator the vendor rows use; without it the tags and the description run together. */}
               {": "}
             </>
           )}
@@ -159,9 +149,7 @@ export function VulnerabilitiesTab({
   const [exploited, setExploited] = useState(false);
   const [productId, setProductId] = useState<string | undefined>();
   const [vendorLevel, setVendorLevel] = useState(false);
-  // Weakness mode spans the subtree by default so the list agrees with the
-  // profile's headline count — NVD tags a CVE wherever the assigning analyst
-  // chose, so a Class's direct list is near-empty.
+  // Weakness mode spans the subtree by default so the list agrees with the profile's headline count: NVD tags a CVE at whatever level the assigning analyst chose, so a Class's direct list is nearly empty.
   const [includeDescendants, setIncludeDescendants] = useState(true);
   const [sort, setSort] = useState<AffectedSort>("cvss");
 
@@ -195,8 +183,7 @@ export function VulnerabilitiesTab({
           mode === "cwe" ? (
             <>
               <b>{distinctTotal.toLocaleString()} CVEs</b> carry {entityName.split(" ")[0]}
-              {/* A leaf has nothing below it, so the subtree clause would be a
-                  lie on most weaknesses — say it only when it is true. */}
+              {/* A leaf has nothing below it, so the subtree clause would be false on most weaknesses; it is shown only when the subtree has more than the weakness itself. */}
               {includeDescendants
                 ? (first.subtree_size ?? 1) > 1
                   ? ` or one of the ${((first.subtree_size ?? 1) - 1).toLocaleString()} weaknesses below it`

@@ -16,9 +16,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
-// Entity models. The same shapes come back from the list, detail and per-entry endpoints
-// (e.g. /api/threat-actors, /api/threat-actors/{id}, /api/entries/{id}/threat-actors).
-// Every field has a default so a missing field never fails a whole response.
+// Entity models. The same shapes come back from the list, detail and per-entry endpoints (e.g. /api/threat-actors, /api/threat-actors/{id}, /api/entries/{id}/threat-actors). Every field has a default so a missing field never fails a whole response.
 
 @Serializable
 data class EntityTtpRef(
@@ -143,7 +141,7 @@ data class Cve(
     @SerialName("first_seen_at") val firstSeenAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
     @SerialName("article_count") val articleCount: Int = 0
-    // Not modelled: "timeline" is a list in list responses but an object in per-entry ones.
+    // Not modeled: "timeline" is a list in list responses but an object in per-entry ones.
 )
 
 @Serializable
@@ -381,11 +379,7 @@ data class Cwe(
     val displayTitle: String get() = if (!name.isNullOrBlank()) "$cweId: $name" else cweId
 }
 
-/**
- * GET /api/observables(/{id}). Field names follow the web client (Workbench columns and the
- * observable profile): the server calls the value's type `kind` (ipv4, domain, url, sha256,
- * cmdline, registry, script, …); there is no `type` or `is_ioc` field.
- */
+/** GET /api/observables(/{id}). Field names follow the web client (Workbench columns and the observable profile): the server calls the value's type `kind` (ipv4, domain, url, sha256, cmdline, registry, script, …); there is no `type` or `is_ioc` field. */
 @Serializable
 data class ObservableItem(
     val id: String,
@@ -412,10 +406,7 @@ data class ObservableItem(
     @SerialName("article_count") val articleCount: Int = 0
 )
 
-/**
- * A glossary term found in an article (POST /api/glossary/detect with {"entry_id"}; the web reader
- * calls it for every article it opens). The reader underlines the term and shows its definition.
- */
+/** A glossary term found in an article (POST /api/glossary/detect with {"entry_id"}; the web reader calls it for every article it opens). The reader underlines the term and shows its definition. */
 @Serializable
 data class GlossaryMatch(val term: GlossaryTerm)
 

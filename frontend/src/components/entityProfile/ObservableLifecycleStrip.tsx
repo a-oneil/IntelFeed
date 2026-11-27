@@ -1,10 +1,4 @@
-/**
- * ObservableLifecycleStrip — the indicator's clock on the same lifecycle rail
- * CVEs use: first sighting → latest sighting → projected expiry. A new
- * sighting resets decay, so the expiry node is a projection, not a deadline.
- * Kinds that never decay (hashes, host artifacts, fingerprints) end at the
- * latest sighting with a "no decay" note instead of an expiry node.
- */
+/** ObservableLifecycleStrip — the indicator's timeline on the same lifecycle rail CVEs use: first sighting → latest sighting → projected expiry. A new sighting resets decay, so the expiry node is a projection, not a deadline. Kinds that never decay (hashes, host artifacts, fingerprints) end at the latest sighting with a "no decay" note instead of an expiry node. */
 import type { ObservableResponse } from "@/api/types";
 import styles from "./entityProfile.module.css";
 
@@ -23,8 +17,7 @@ interface Node {
   kind: "start" | "sight" | "due";
 }
 
-/** "Latest report · 3" when articles back the value; a list-feed-only row says
- *  so instead of counting its export variants as reports. */
+/** "Latest report · 3" when articles back the value; a list-feed-only row says so instead of counting its export variants as reports. */
 function lifecycleSightingLabel(d: ObservableResponse): string {
   const reports = d.report_count ?? 0;
   const feeds = d.feed_source_count ?? 0;
@@ -58,15 +51,13 @@ export function ObservableLifecycleStrip({ detail }: { detail: ObservableRespons
     });
   }
 
-  // Proportional positions by date, spread to a minimum gap so labels hold.
+  // Proportional positions by date, spread to a minimum gap so labels don't overlap.
   const ts = nodes.map((n) => (n.date ? new Date(n.date).getTime() : 0));
   const span = Math.max(ts[ts.length - 1] - ts[0], 1);
   let fracs = ts.map((t) => (t - ts[0]) / span);
   const MIN_GAP = 0.22;
   for (let i = 1; i < fracs.length; i++) fracs[i] = Math.max(fracs[i], fracs[i - 1] + MIN_GAP);
-  // Normalize so the last node lands at 1 — it renders pinned to the track's
-  // right edge, and a single-sighting row (first == last) would otherwise show
-  // a 22% progress bar under a dot at 100%.
+  // Normalize so the last node lands at 1 — it renders pinned to the track's right edge, and a single-sighting row (first == last) would otherwise show a 22% progress bar under a dot at 100%.
   const end = fracs[fracs.length - 1];
   if (end > 0) fracs = fracs.map((f) => f / end);
 

@@ -12,17 +12,14 @@
   align-items: center;
 }
 
-/* Removable tag: Chip supplies the box, this keeps the editor's roomier face
-   and its accent wash. Doubled so it beats Chip's own single-class rules
-   whichever order the two stylesheets land in. */
+/* Removable tag: Chip supplies the box, this keeps the editor's roomier face and its accent wash. Doubled so it beats Chip's own single-class rules whichever order the two stylesheets land in. */
 .tag.tag {
   gap: var(--sp-1);
   padding: var(--sp-1) var(--sp-3);
   font-size: var(--fs-base);
   background: var(--accent-bg);
   border-color: transparent;
-  /* A tag longer than the row (an "author:…" tag from an import) truncates
-     inside the box instead of running past it. */
+  /* A tag longer than the row (an "author:…" tag from an import) truncates inside the box instead of running past it. */
   max-width: 100%;
   min-width: 0;
 }

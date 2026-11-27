@@ -1,10 +1,4 @@
-/**
- * VictimsStrip — recent leak-site victims for a ransomware actor, from the
- * ransomware tracker, inside the Overview's Recent victims section (whose row
- * carries the title and count). The key facts count them; this is the
- * victimology: who, in what sector, where, when. Renders nothing when the
- * tracker has no disclosures for this actor (or is disabled).
- */
+/** VictimsStrip: recent leak-site victims for a ransomware actor, from the ransomware tracker, shown inside the Overview's Recent victims section (the section row shows the title and count). The key facts give the counts; this lists each victim: name, sector, country and date. Renders nothing when the tracker has no disclosures for this actor (or is disabled). */
 import { useNavigate } from "react-router-dom";
 import { useActorVictims } from "@/hooks/useEntityProfile";
 import { useIntelStore } from "@/stores/intelStore";

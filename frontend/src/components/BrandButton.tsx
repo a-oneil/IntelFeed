@@ -10,13 +10,9 @@ interface BrandButtonProps {
 }
 
 /**
- * The wordmark, as a button back to all items.
+ * The wordmark, as a button that goes back to all items.
  *
- * One component for both places it appears: the desktop app header, and the
- * mobile sidebar's top row (where the header shows a hamburger instead). It
- * used to be a plain, dead `<span>` in the sidebar — same words, none of the
- * behaviour — so on a phone the wordmark was the one piece of chrome that
- * didn't do what it looks like it does.
+ * One component for both places it appears: the desktop app header, and the mobile sidebar's top row (where the header shows a hamburger instead). Sharing it keeps the sidebar wordmark clickable on a phone instead of being a plain `<span>` that looks like a button but does nothing.
  */
 export function BrandButton({ className }: BrandButtonProps) {
   const navigate = useNavigate();
@@ -29,9 +25,8 @@ export function BrandButton({ className }: BrandButtonProps) {
       className={`${styles.brand} ${className ?? ""}`}
       onClick={() => {
         setSelectedFeed(null);
-        // Desktop: make sure the nav you are heading back to is showing.
-        // Mobile: the sidebar is a full-screen overlay, so getting to all items
-        // means getting out of its way.
+        // Desktop: expand the sidebar so the nav is showing.
+        // Mobile: the sidebar is a full-screen overlay, so collapse it to reveal all items.
         setSidebarCollapsed(isMobile);
         navigate("/");
       }}

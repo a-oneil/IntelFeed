@@ -21,8 +21,7 @@
   flex-shrink: 0;
 }
 
-/* Visible front door for the ⌘K command palette — quiet chrome so it reads
-   as a helper, not a competitor to Copilot. */
+/* Visible button for the ⌘K command palette, styled quietly so it reads as a helper rather than competing with the Copilot button. */
 .paletteBtn {
   display: inline-flex;
   align-items: center;
@@ -167,10 +166,7 @@
   filter: brightness(1.08);
 }
 
-/* Check-engine light, read like the one on a car's dashboard: healthy is the
-   plain unlit outline; errors light it up (the engine filled in the theme
-   colour, with a glow), retries light it amber. Colour is the status, so
-   hover keeps it. Stopped is "off": the outline struck through. */
+/* Engine status icon, styled like a car's check-engine light: healthy is the plain unfilled outline; errors fill it in the accent color with a glow; retries fill it in the warning (amber) color with a glow. Color is the status, so hover keeps it. Stopped draws the outline in the accent color with a diagonal line through it. */
 .engine_warn,
 .engine_warn:hover {
   color: var(--warning);

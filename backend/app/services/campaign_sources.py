@@ -9,8 +9,8 @@ sources here all belong to the campaign instead.
   article carrying that entity belongs, which is exactly the set the autolinker
   already computes; nothing new has to be matched.
 * ``story`` — a thread the campaign already holds part of. A story is a
-  persistent object, so "I accepted this story" can mean "and its later waves
-  too" rather than a suggestion to re-accept on every wave.
+  persistent object, so "I accepted this story" can mean "and its later
+  articles too" rather than a suggestion to re-accept on every new article.
 * ``query`` — a query-language string typed into the campaign. This one *does*
   drift the way a saved search does, but it is the only intake that catches
   something nobody has named yet, and being campaign-owned means a teammate can
@@ -276,10 +276,10 @@ async def preview_source(
     """What following this *would* add, without creating the row.
 
     The count alone is not enough to decide — following a prolific actor can add
-    several hundred articles, and "adds 700" tells you the size of the mistake
-    but not whether it is one. The titles are what make the click informed, so
-    offers have always carried them; a typed query or a hand-picked entity gets
-    the same dry run before the follow exists.
+    several hundred articles, and "adds 700" says nothing about whether they
+    belong. The sample titles show that, so suggested offers carry them, and a
+    typed query or a hand-picked entity gets the same dry run before the follow
+    exists.
     """
     if held is None:
         held = {
@@ -339,7 +339,7 @@ async def preview_source(
         "preview": titles,
         "error": None,
         # Not fatal, but worth saying: an unknown field silently becomes a text
-        # term, and a standing source built on one keeps answering plausibly.
+        # term, and a standing source built on one keeps returning plausible-looking results.
         "unknown_fields": query_unknown_fields(query) if kind == "query" else [],
     }
 

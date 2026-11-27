@@ -1,7 +1,8 @@
 """Server-side read-aloud (Piper TTS) endpoints.
 
-- POST /api/tts/prepare  — enqueue/lookup synthesis for an entry or daily summary.
+- POST /api/tts/prepare  — enqueue/lookup synthesis for an entry, daily summary or entity.
 - GET  /api/tts/file/{cache_key}.mp3 — stream a generated MP3 (JWT via header or ?token=).
+- GET  /api/tts/existing — report audio that already exists, without synthesizing any.
 
 The public, share-token-gated variants live in app/api/shared.py so they can be
 served without a login (a bare <audio> element on the public share page).
@@ -125,7 +126,7 @@ async def prepare_tts(
         result = await tts.get_or_enqueue(db, source="entry", ref_id=body.id, text=text)
     elif body.source == "summary":
         # Resolve the summary text server-side (same derivation as the morning
-        # pre-generation) so the cache key matches and pre-gen'd audio is a hit.
+        # pre-generation) so the cache key matches and pre-generated audio is reused.
         text = await tts.resolve_summary_speech_text(db, body.id, body.filters, user.id)
         if not text:
             raise AppError(code="summary_not_ready", message="Daily summary not available.", status_code=404)
@@ -187,7 +188,8 @@ async def get_tts_file(
     user = await _resolve_user_from_token(request, token, db)
     response = _serve_audio_file(cache_key)
     if not user.is_anonymous:
-        # A visitor's playback must not count as use: the stamp drives eviction.
+        # Only signed-in playback updates last_accessed_at, which cache eviction
+        # reads; a visitor's plays do not count as use.
         await tts.touch(db, cache_key)
     return response
 

@@ -20,9 +20,7 @@ import styles from "./GlossaryPage.module.css";
 import { useOpenSavedSearch } from "@/hooks/useOpenSavedSearch";
 import { useIsVisitor } from "@/stores/authStore";
 
-/** Outlined maturity badges. Deliberately literal, not --danger/--warning/
- *  --success: maturity is not a severity, and aliasing it onto the state ramp
- *  would make an unrelated signal move whenever a theme retunes those. */
+/** Outlined maturity badges. Deliberately literal, not --danger/--warning/--success: maturity is not a severity, and mapping it onto those tokens would change its colors whenever a theme retunes them. */
 const MATURITY_COLORS: Record<string, string> = {
   emerging: "#ef4444",
   trending: "#f59e0b",
@@ -48,8 +46,7 @@ export function GlossaryPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const detailPane = useRailWidth("glossary-detail", { default: 380, min: 280, max: 640 });
-  // Category, type and ordering are the table's own column filters and header
-  // sort now — the page kept a parallel set of selects that did the same job.
+  // Category, type and ordering use the table's own column filters and header sort, so the page has no separate select controls for them.
   const [sort, setSort] = useState<{ key: string; dir: SortDir }>({ key: "name", dir: "asc" });
 
   const openSavedSearch = useOpenSavedSearch();
@@ -59,8 +56,7 @@ export function GlossaryPage() {
   const deleteTerm = useDeleteGlossaryTerm();
   const undoableDelete = useUndoableDelete();
 
-  // The header box searches names AND search_terms, which no single column
-  // filter can express — that's why it survives alongside the table's own.
+  // The header search box matches names AND search_terms, which no single column filter can express, so it stays alongside the table's own filters.
   const filteredTerms = useMemo(() => {
     if (!terms) return [];
     if (!search) return terms;
@@ -214,8 +210,7 @@ export function GlossaryPage() {
           />
         }
       />
-      {/* The pane's width rides a custom property so the narrow-screen rule can
-          still cap it. */}
+      {/* The pane's width is set through a custom property so the narrow-screen rule can still cap it. */}
       <div
         className={styles.layout}
         style={{ "--glossary-detail-w": `${detailPane.width}px` } as React.CSSProperties}
@@ -236,11 +231,9 @@ export function GlossaryPage() {
           />
         </div>
 
-        {/* Definitions used to push the list apart as an inline expansion; they
-            open beside it now, the same way a requirement does. */}
+        {/* Definitions open in a pane beside the list, the same way a requirement does. */}
         {selectedTerm && (
-          /* The pane sits to the right of the handle, so a drag right has to
-             shrink it — the delta is inverted. */
+          /* The pane sits to the right of the handle, so a drag right has to shrink it — the delta is inverted. */
           <ResizeHandle
             label="definition pane"
             onResize={(delta) => detailPane.handleProps.onResize(-delta)}

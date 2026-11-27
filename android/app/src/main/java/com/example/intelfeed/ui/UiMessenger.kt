@@ -11,11 +11,7 @@ data class UiMessage(
     val onAction: (() -> Unit)? = null
 )
 
-/**
- * App-wide snackbar channel. ViewModels post here; the root composable shows the messages. One
- * instance per process (IntelFeedApplication), so a message survives navigating away from the
- * screen that posted it.
- */
+/** App-wide snackbar channel. ViewModels post here; the root composable shows the messages. One instance per process (IntelFeedApplication), so a message survives navigating away from the screen that posted it. */
 class UiMessenger {
     private val _messages = MutableSharedFlow<UiMessage>(extraBufferCapacity = 16)
     val messages: SharedFlow<UiMessage> = _messages.asSharedFlow()

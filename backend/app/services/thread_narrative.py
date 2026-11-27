@@ -1,16 +1,15 @@
-"""The spine of a story thread — what broke, and what each wave added.
+"""The spine of a story thread — the first report, and what each later wave of coverage added.
 
-Two writers, one contract. The sweeper writes a **heuristic** spine the moment a
+There are two writers. The sweeper writes a **heuristic** spine the moment a
 thread exists: one beat per day of coverage, the day's strongest article as its
 headline, the first day marked as the disclosure and the loudest as the peak.
 The nightly AI pass then *replaces* that spine with a written one for threads
 that have changed since it last ran.
 
-The heuristic is not a placeholder to be embarrassed about — it is the default
-rendering path. Dev runs with every AI provider inactive, prod runs on one
-Ollama box, and a thread page that only works when a model answers is a thread
-page that mostly does not work. AI narration upgrades the spine; it is never
-required for one.
+The heuristic spine is the default rendering path, not a placeholder. Dev runs
+with every AI provider inactive and prod runs on one Ollama host, so a thread
+page has to work when no model answers. AI narration improves the spine; it is
+never required for one.
 
 A spine is keyed by the hash of its member set, so a thread that gained nothing
 since the last pass costs nothing to re-narrate.
@@ -36,8 +35,8 @@ TASK_NAME = "story_thread_spine"
 TARGET_TYPE = "story_thread"
 SYSTEM_USER = uuid.UUID(int=0)
 
-# Articles handed to the model. Beyond this the prompt stops being a story and
-# starts being a corpus; the tail of a big thread is almost entirely echoes.
+# Articles handed to the model. More than this is too much to narrate as one
+# story, and the tail of a big thread is almost entirely echoes.
 MAX_PROMPT_ENTRIES = 24
 BODY_CHARS = 400
 
@@ -50,8 +49,8 @@ async def collect_members(db: AsyncSession, thread_id: uuid.UUID) -> list[dict]:
     """Thread members oldest first, with their echo counts and techniques.
 
     Echoes are folded into the article they echo rather than listed: they are by
-    definition the same story told again, and they are what the thread exists to
-    get out of the way.
+    definition the same story told again, and keeping repeats out of the reader's
+    way is what threads are for.
     """
     rows = await db.execute(
         text(
@@ -298,7 +297,7 @@ async def ensure_spine(db: AsyncSession, thread_id: uuid.UUID, allow_ai: bool = 
         title = str(payload.get("title") or "").strip() or None
         summary = str(payload.get("summary") or "").strip() or None
     # ``narrated_at`` means "the spine on this thread right now was written by a
-    # model" — the reader shows a "grouped by day, not yet written" note off it,
+    # model" — the reader shows a "grouped by day, not yet written" note based on it,
     # and an AI call that failed or was never made must not claim otherwise.
     await db.execute(
         text(

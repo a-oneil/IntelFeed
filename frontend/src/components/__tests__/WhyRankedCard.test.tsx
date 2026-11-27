@@ -5,9 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { WhyRankedCard } from "@/components/WhyRankedCard";
 import type { PrioritySignal } from "@/api/types";
 
-/** Raw strength and real contribution deliberately disagree here: `pir_match`
- *  is the strongest raw signal but the weakest contributor, because it fires on
- *  ~43% of entries. The old card plotted raw scores and drew it longest. */
+/** Raw strength and actual contribution deliberately disagree here: `pir_match` is the strongest raw signal but the weakest contributor, because it fires on ~43% of entries. A card that plotted raw scores would draw it longest. */
 const SIGNALS: PrioritySignal[] = [
   { type: "pir_match", family: "interest", score: 0.9, weighted: 0.25, explanation: "Matches intelligence requirement: 'Edge Devices'" },
   { type: "new_pairing", family: "novelty", score: 0.6, weighted: 0.92, explanation: "First-ever observed pairing: Salt Typhoon ↔ Puerto Rico" },
@@ -84,8 +82,7 @@ describe("WhyRankedCard", () => {
     await expand();
     expect(screen.getByText("−0.27")).toBeInTheDocument();
     expect(screen.getByText(/in your ordering\s*only/)).toBeInTheDocument();
-    // Named for its destination: that screen shows learned weights and can pause
-    // or reset them, but nothing there tunes a weight by hand.
+    // The button is named for where it goes: that screen shows learned weights and can pause or reset them, but has no control for setting a weight by hand.
     expect(screen.getByRole("button", { name: "Your Radar" })).toBeInTheDocument();
   });
 

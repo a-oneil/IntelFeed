@@ -53,8 +53,7 @@ export interface EntityInfrastructure {
 
 export const INFRASTRUCTURE_TYPES: readonly EntityType[] = ["threat_actor", "malware", "campaign", "tool"];
 
-/** Claimed + reported-alongside observables for an actor/family/campaign/tool.
- *  Disabled (no request) for every other entity type. */
+/** Claimed + reported-alongside observables for an actor/family/campaign/tool. Disabled (no request) for every other entity type. */
 export function useEntityInfrastructure(entityType: EntityType | undefined, entityId: string | undefined) {
   // Signed-in only; the route answers 401 to a visitor.
   const isVisitor = useIsVisitor();
@@ -89,7 +88,7 @@ export interface ObservableBacklinks {
   reported_with: ObservableBacklink[];
 }
 
-/** The mirror for an observable's profile: who claims it, who it is reported with. */
+/** The reverse view, for an observable's profile: who claims it, who it is reported with. */
 export function useObservableBacklinks(observableId: string | undefined) {
   return useQuery({
     queryKey: ["observable-backlinks", observableId],

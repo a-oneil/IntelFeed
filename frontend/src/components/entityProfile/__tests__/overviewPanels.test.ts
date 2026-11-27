@@ -13,12 +13,7 @@ const ALL_PANELS = Object.values(OVERVIEW_SECTION_PANELS).flat() as OverviewPane
 const hostOf = (panel: OverviewPanelKey): OverviewSectionKey | undefined =>
   (Object.keys(OVERVIEW_SECTION_PANELS) as OverviewSectionKey[]).find((s) => OVERVIEW_SECTION_PANELS[s]?.includes(panel));
 
-/**
- * A type lists its signal panels (overviewPanels) and its rows
- * (overviewSections) separately, and OVERVIEW_SECTION_PANELS says which row
- * hosts which panel. The three must agree, or a panel is configured but never
- * drawn, or a row opens onto nothing.
- */
+/* A type lists its signal panels (overviewPanels) and its rows (overviewSections) separately, and OVERVIEW_SECTION_PANELS says which row hosts which panel. The three must agree; otherwise a panel is configured but never drawn, or a row opens onto nothing. */
 describe("Overview panels against sections", () => {
   it("the section map names each panel once", () => {
     expect(new Set(ALL_PANELS).size).toBe(ALL_PANELS.length);

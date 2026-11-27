@@ -7,8 +7,7 @@
 }
 
 /* ── Toolbar ──────────────────────────────────────────── */
-/* Sits above the toolbar, in the reading path between the input and the counts —
-   the correction has to be seen before the wrong number is believed. */
+/* Sits above the toolbar, between the input and the counts, so the user sees the correction before reading the counts. */
 .didYouMean {
   display: flex;
   align-items: center;
@@ -29,7 +28,7 @@
   padding: 0 4px;
 }
 
-/* Matches .toolbarBtn directly below it — this is the same kind of control. */
+/* Matches .toolbarBtn directly below it, since this is the same kind of control. */
 .didYouMeanApply {
   font-family: inherit;
   font-size: var(--fs-sm);
@@ -46,8 +45,7 @@
   color: var(--accent);
 }
 
-/* Same shelf as .didYouMean: both explain why the counts below are not what the
-   user expected, and both have to be read before those counts are believed. */
+/* Same position as .didYouMean: both explain why the counts below are not what the user expected, so both are shown above those counts. */
 .unknownFields {
   display: flex;
   align-items: center;
@@ -319,8 +317,7 @@
   border-radius: 3px;
   padding: 2px 6px;
   flex: none;
-  /* A floor, not a fixed width — short types still line up in a column, but a
-     long one (mitigation) grows instead of spilling out of its tinted box. */
+  /* A minimum, not a fixed width: short types still line up in a column, but a long one (mitigation) grows instead of overflowing its tinted box. */
   min-width: 62px;
   box-sizing: border-box;
   white-space: nowrap;
@@ -454,9 +451,7 @@
 }
 
 /* ── Landing surface ──────────────────────────────────────
-   Shown until there is a query. Three tiers: what this page is, what you
-   searched before, and the language itself. Full width — the pane is the
-   whole content area, and a 60ch column in the middle of it reads as broken. */
+   Shown until there is a query. Three tiers: what this page is, what you searched before, and the query language itself. Full width: the pane is the whole content area, and a 60ch column in the middle of it looks broken. */
 
 .placeholderHead {
   display: flex;
@@ -475,8 +470,7 @@
 
 .historyGrid {
   display: grid;
-  /* Recent (chips, wraps freely) gets the larger share; saved searches are
-     rows and read better narrow. Collapses to one column under ~840px. */
+  /* Recent searches (chips that wrap) get the larger share; saved searches are rows and read better narrow. Collapses to one column at 840px and below. */
   grid-template-columns: 1.4fr 1fr;
   gap: var(--sp-6);
   align-items: start;
@@ -503,8 +497,7 @@
   color: var(--text-muted);
 }
 
-/* Recents are short strings — chips pack them into the width instead of
-   stacking one per row down a tall, mostly-empty column. */
+/* Recent searches are short strings, so chips fill the width instead of stacking one per row down a tall, mostly empty column. */
 .chipRow {
   display: flex;
   flex-wrap: wrap;
@@ -614,9 +607,7 @@
 }
 
 /* ── Narrow: results sharing the pane with an open reader ──
-   The same squeeze the entry list takes when the reader opens — the column is
-   down to ~300px, so the chrome gives back its horizontal padding and the
-   entity rows stop reserving width for subtext they can no longer show. */
+   The same narrowing the entry list gets when the reader opens: the column is down to ~300px, so the toolbar, notice rows and pagination use smaller horizontal padding and the entity rows stop reserving width for subtext they can no longer show. */
 
 .narrow .toolbar,
 .narrow .didYouMean,
@@ -627,10 +618,7 @@
   gap: var(--sp-2);
 }
 
-/* One scroll strip for the whole bar, the same move the reader's top bar
-   makes at this width: wrapping the controls onto three stacked rows costs
-   ~110px of the list before a single result, so they stay on one line and pan
-   instead. The scrollbar is hidden so it can't eat into the bar's height. */
+/* One horizontal scroll strip for the whole bar, as the reader's top bar does at this width: wrapping the controls onto three stacked rows would take ~110px of height before the first result, so they stay on one line and scroll sideways. The scrollbar is hidden so it doesn't add to the bar's height. */
 .narrow .toolbar {
   flex-wrap: nowrap;
   overflow-x: auto;
@@ -642,8 +630,7 @@
   display: none;
 }
 
-/* Both clusters are cargo on that strip — neither grows to claim the row nor
-   shrinks its controls to fit one. */
+/* Both control groups keep their natural width on that strip: neither grows to fill the row nor shrinks its controls to fit. */
 .narrow .toolbarLeft,
 .narrow .toolbarRight {
   flex: none;
@@ -663,8 +650,7 @@
   min-width: 0;
 }
 
-/* The header's trailing rule keeps a minimum width, which at this size pushes
-   the row wider than the column instead of shrinking. */
+/* The header's trailing rule has a minimum width, which at this size pushes the row wider than the column instead of shrinking. */
 .narrow .sectionHeader .sectionRule {
   min-width: 0;
 }
@@ -675,8 +661,7 @@
   gap: var(--sp-2);
 }
 
-/* Name over subtext rather than beside it: at this width a single line fits
-   the badge and an ellipsis, and nothing else. */
+/* Name above subtext rather than beside it: at this width a single line fits only the badge and an ellipsis. */
 .narrow .rowName {
   max-width: none;
   flex: 1;

@@ -162,8 +162,8 @@ async def _get_profile_threat_surface(db: AsyncSession, user_id: uuid.UUID, prof
     name="get_coverage_workspace",
     description=(
         "Detection coverage workspace for one threat (actor, malware, CVE or ATT&CK technique) over a window: "
-        "its recent articles and the behaviours extracted from them, each with the quote it came from, the "
-        "telemetry channels it needs and whether enabled telemetry can see it. A behaviour flagged "
+        "its recent articles and the behaviors extracted from them, each with the quote it came from, the "
+        "telemetry channels it needs and whether enabled telemetry can see it. A behavior flagged "
         "below_line has no matching telemetry: a sourcing gap, not a detection gap."
     ),
     input_schema={

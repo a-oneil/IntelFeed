@@ -88,7 +88,7 @@ def _strip_comments(text: str) -> str:
         ch = text[i]
         if quote:
             if ch == "\\" and verbatim:
-                out.append("/")  # a literal backslash, not an escape
+                out.append("/")  # a literal backslash in a verbatim string, kept as "/" so it is not read as an escape
                 i += 1
                 continue
             out.append(ch)

@@ -151,7 +151,7 @@ def test_pdf_parser_text_and_scanned():
         parsers.parse_document(parsers.KIND_PDF, b"nope", "a.pdf")
 
 
-def test_pdf_html_drops_the_pdfs_fonts_colours_and_layout():
+def test_pdf_html_drops_the_pdfs_fonts_colors_and_layout():
     doc = parsers.parse_document(parsers.KIND_PDF, _pdf_bytes("Qilin ransomware note"), "a.pdf")
     assert "Qilin ransomware note" in doc.html
     for prop in ("color:", "font-family:", "font-size:", "top:", "line-height:"):
@@ -389,7 +389,7 @@ async def test_github_repo_item_expands_through_the_adapter_without_a_feed(
     entry = (await db_session.execute(select(Entry).where(Entry.id == done.entry_id))).scalar_one()
     assert entry.guid == "manual:github:drb-ra/C2IntelFeeds/feeds/domainC2s.csv"
     assert entry.metadata_["source"] == "github_repo"
-    assert entry.metadata_["content_type"] == "ioc_list"  # the adapter's own classification rides along
+    assert entry.metadata_["content_type"] == "ioc_list"  # the adapter's own classification is kept
     assert entry.metadata_["file_path"] == "feeds/domainC2s.csv"
     # No feed was minted for the repo.
     feeds = (await db_session.execute(select(Feed).where(Feed.feed_type == "github_repo"))).scalars().all()

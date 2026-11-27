@@ -1,28 +1,16 @@
 /**
  * CampaignIntakeComposer — pointing a campaign at something by hand.
  *
- * Before this, standing intake could only be *accepted*: the section listed
- * what the backend had already proposed from what the campaign held, so an
- * entity the campaign had never named could never be followed, and a query had
- * to exist as somebody's personal saved search before it could be linked. A new
- * campaign — the case that most needs intake — was offered nothing at all.
+ * Without it, standing intake could only be accepted from what the backend proposed based on what the campaign already holds: an entity the campaign had never named could not be followed, a query had to exist as someone's personal saved search before it could be linked, and a new campaign, the case that most needs intake, would be offered nothing.
  *
- * Four tabs, because they are four different reaches:
+ * Four tabs, one per kind of source:
  *
- * * **Query** — the one intake that catches something nobody has named yet. It
- *   belongs to the campaign rather than to whoever typed it, so a teammate can
- *   read it, fix it or pause it.
- * * **Entity** — any actor, malware, CVE or other entity, not only the ones the
- *   campaign already names. The type list comes from the server: a type with no
- *   article junction would make a source that is created and never adds
- *   anything, and only the backend knows which those are.
- * * **Story** — a thread by name, including a dormant one. Reached by title,
- *   because a story you want on a campaign is one you can already name.
- * * **Saved search** — the old path, kept for the searches that already exist.
+ * * **Query** — the only intake that catches something nobody has named yet. It belongs to the campaign rather than to whoever typed it, so a teammate can read it, fix it or pause it.
+ * * **Entity** — any actor, malware, CVE or other entity, not only the ones the campaign already names. The type list comes from the server: a type with no article junction would make a source that is created and never adds anything, and only the backend knows which types those are.
+ * * **Story** — a thread by name, including a dormant one. Searched by title, because a story you want on a campaign is one you can already name.
+ * * **Saved search** — links a search that already exists.
  *
- * Nothing commits without a dry run first: every tab previews "adds N" with the
- * article titles, the same information the offers have always carried, because
- * a count tells you the size of a decision but not whether to make it.
+ * The query, entity and story tabs commit nothing without a dry run first: each previews "adds N" with the article titles, the same information the offers carry, because a count tells you the size of a decision but not whether to make it.
  */
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -37,9 +25,7 @@ import {
 import { useEntitySearch } from "@/hooks/useCorrelation";
 import { useThreadSearch } from "@/hooks/useThreads";
 import type { CampaignSourceKind, EntitySearchResult, SavedSearch } from "@/api/types";
-// Two near-identical EntityType unions exist: the theming one (which also
-// covers notes) and the pivot one the row helpers key on. Kept distinct here
-// rather than widened, since the server hands us a plain slug either way.
+// Two near-identical EntityType unions exist: the theming one (which also covers notes) and the pivot one the row helpers key on. Kept distinct here rather than widened, since the server hands us a plain slug either way.
 import type { EntityType as PivotEntityType } from "@/stores/intelStore";
 import { getEntityLabel, type EntityType } from "@/utils/entityTheme";
 import { rowLabel, rowMeta } from "@/utils/relationshipBrowser";
@@ -47,12 +33,7 @@ import styles from "./entityProfile.module.css";
 
 type Tab = "query" | "entity" | "story" | "search";
 
-/**
- * The `{error: {code, message, details}}` envelope every AppError comes back
- * in. Worth surfacing verbatim here: the refusals are specific ("'detection_rule'
- * owns no articles", "Query does not parse: Unexpected token") and a generic
- * "failed" would hide the one sentence that says what to change.
- */
+/** The `{error: {code, message, details}}` envelope every AppError comes back in. Shown verbatim here: the refusals are specific ("'detection_rule' owns no articles", "Query does not parse: Unexpected token") and a generic "failed" would hide the sentence that says what to change. */
 function appErrorMessage(err: unknown): string | undefined {
   return (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message;
 }
@@ -84,7 +65,7 @@ export function CampaignIntakeComposer({
   onOpenArticle,
 }: {
   campaignId: string;
-  /** Saved searches not already linked — the old path, offered when there are any. */
+  /** Saved searches not already linked; the Saved search tab shows only when there are any. */
   availableSearches: SavedSearch[];
   onClose: () => void;
   onOpenArticle?: (entryId: string) => void;
@@ -108,8 +89,7 @@ export function CampaignIntakeComposer({
   const [storyTerm, setStoryTerm] = useState("");
   const settledStoryTerm = useSettled(storyTerm, 250);
 
-  // The server's list is authoritative; a stale default (a type that stopped
-  // being followable) would otherwise silently search nothing.
+  // The server's list wins: a stale default (a type that is no longer followable) would otherwise search nothing without saying so.
   useEffect(() => {
     if (pickable.length > 0 && !pickable.includes(entityType)) setEntityType(pickable[0]);
   }, [pickable, entityType]);
@@ -123,8 +103,7 @@ export function CampaignIntakeComposer({
     tab === "story" ? settledStoryTerm : "",
   );
 
-  // Switching tabs drops the aim rather than previewing a target the visible
-  // tab cannot explain.
+  // Switching tabs clears the picked target, so the preview never shows a target the visible tab did not choose.
   const switchTab = (next: Tab) => {
     setTab(next);
     setPicked(null);
@@ -335,7 +314,7 @@ export function CampaignIntakeComposer({
         </div>
       )}
 
-      {/* --- The dry run. Same shape for all three, because it is one question. --- */}
+      {/* --- The dry run. Same layout for the query, entity and story tabs, because each asks the same question. --- */}
       {tab !== "search" && (
         <div className={styles.intakeDryRun}>
           {picked && (

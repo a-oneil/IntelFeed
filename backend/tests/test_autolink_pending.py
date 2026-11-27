@@ -206,7 +206,7 @@ async def test_reconcile_promotes_confirmed_entity(db_session, entry, royal_malw
 
 @pytest.mark.asyncio
 async def test_reconcile_promotes_cross_slot_mention(db_session, entry, royal_malware):
-    # The AI filed the ransomware brand under threat_actors; our entity is malware.
+    # The AI filed the ransomware brand under threat_actors; the stored entity is malware.
     await store_autolink_matches(db_session, entry.id, [_provisional_match(royal_malware)])
     counts = await reconcile_pending_autolinks(db_session, entry.id, {"threat_actors": [{"name": "Royal"}]})
     assert counts["promoted"] == 1
@@ -321,7 +321,7 @@ async def test_feed_ai_on_holds_provisional_match(db_session, entry, royal_malwa
 @pytest.mark.asyncio
 async def test_instance_ai_off_links_instantly(db_session, entry, royal_malware, drop_counter, monkeypatch):
     """Instance AI off: the pending tier is off as a whole, so dictionary-word
-    names link at once (the legacy behaviour) rather than being dropped."""
+    names link at once (the legacy behavior) rather than being dropped."""
     from app.config import settings as env_settings
     from app.services.ai_eligibility import entry_will_get_ai_analysis
 

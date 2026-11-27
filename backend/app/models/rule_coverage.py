@@ -9,17 +9,17 @@ from app.database import Base
 
 
 class RuleCoverage(Base):
-    """Materialised rule → entity resolution.
+    """Materialized rule → entity resolution.
 
     The tag columns on ``detection_rules`` (``source_cves`` / ``source_ttps`` /
     ``source_actors``) are only ever written by in-app authoring and by the two
     importers whose upstream format happens to carry the field, so they resolve
     3,996 of 11,517 rules and zero actors. This table is the answer to "has an
     open-source engineer already written something for this?" — rebuilt by the
-    resolver rather than hoped for at import time.
+    resolver instead of relying on tags set at import time.
 
     ``via`` records which writer produced the row so the UI can show *why* a rule
-    matched instead of laundering a body-text hit into a green check.
+    matched, and a body-text hit is not shown as if it were a tag match.
     """
 
     __tablename__ = "rule_coverage"

@@ -1,11 +1,4 @@
-/**
- * CveLifecycleStrip — the CVE's story as a node-and-track rail under the pulse
- * line: Disclosed → PoC public → Exploited in wild → KEV added → Remediation
- * due. Reached stages are filled dots on a progress line (the latest reached
- * gets a glow ring); the remediation deadline is a hollow circle at the end.
- * Nodes sit proportionally by date where dates exist, with a minimum gap so
- * labels stay legible. Data the profile already fetches — no new pipeline.
- */
+/** CveLifecycleStrip — the CVE's timeline as a row of dots on a track under the pulse line: Disclosed → PoC public → Exploited in wild → KEV added → Remediation due. Reached stages are filled dots on a progress line (the latest reached gets a glow ring); the remediation deadline is a hollow circle at the end. Nodes are placed proportionally by date where dates exist, with a minimum gap so labels stay legible. Uses only data the profile already fetches. */
 import type { CVE, EntitySearchResult } from "@/api/types";
 import { extractNvd } from "./cveRefs";
 import { isKnownExploited } from "./entityProfileConfig";
@@ -13,8 +6,7 @@ import styles from "./entityProfile.module.css";
 
 type StageKind = "start" | "poc" | "wild" | "kev" | "due";
 
-/** Compact node date: "Aug 6", with the year only when it isn't this year —
- * the rail's labels sit close together and long dates collide. */
+/** Compact node date: "Aug 6", with the year only when it isn't this year — the rail's labels sit close together and long dates collide. */
 function shortDate(iso: string): string {
   const d = new Date(iso.includes("T") ? iso : `${iso}T00:00:00`);
   const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
@@ -29,8 +21,7 @@ interface Stage {
   sub: string | null;
 }
 
-/** Node positions: proportional to dates where known, undated stages
- * interpolated between dated neighbors, then spread to a minimum gap. */
+/** Node positions: proportional to dates where known, undated stages interpolated between dated neighbors, then spread to a minimum gap. */
 function positions(stages: Stage[]): number[] {
   const n = stages.length;
   if (n === 1) return [0];
@@ -123,7 +114,7 @@ export function CveLifecycleStrip({
   if (stages.length < 2) return null;
 
   const fracs = positions(stages);
-  // Progress runs to the latest *reached* stage; the due date is the future.
+  // Progress runs to the latest *reached* stage; the due stage never counts as reached, even when overdue.
   const reached = stages.map((s, i) => (s.kind !== "due" ? i : -1)).filter((i) => i >= 0);
   const lastReached = reached.length ? reached[reached.length - 1] : 0;
   const glowIdx = lastReached; // the newest reached stage carries the ring
@@ -159,8 +150,7 @@ export function CveLifecycleStrip({
       <div className={styles.lcLabels}>
         {stages.map((s, i) => {
           const isLast = i === stages.length - 1;
-          // Labels near the right edge grow leftward so they never run into
-          // the right-aligned final label.
+          // Labels near the right edge grow leftward so they never run into the right-aligned final label.
           const nearEnd = !isLast && fracs[i] > 0.8;
           return (
             <div

@@ -3,10 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { OverviewSection } from "../OverviewSection";
 
-/**
- * One Overview row: closed, it is a single line that still answers the usual
- * question through its digest; open, the section's components render under it.
- */
+/* One Overview row: closed, it is a single line whose digest still answers the usual question; open, the section's components render under it. */
 describe("OverviewSection", () => {
   it("closed: shows name, count and digest, and renders no body", () => {
     render(
@@ -22,7 +19,7 @@ describe("OverviewSection", () => {
     expect(screen.queryByText("the body")).toBeNull();
   });
 
-  it("open: renders the body under the row, labelled by the row's name", () => {
+  it("open: renders the body under the row, labeled by the row's name", () => {
     render(
       <OverviewSection id="activity" title="Activity" open onToggle={() => {}}>
         <p>the body</p>

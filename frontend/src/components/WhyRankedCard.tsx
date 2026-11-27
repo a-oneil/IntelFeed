@@ -38,8 +38,7 @@ function signed(n: number): string {
   return `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(2)}`;
 }
 
-/** One line of the ledger: what fired, which family it belongs to, and what it
- *  actually added to (or took off) the score. */
+/** One line of the ledger: what fired, which family it belongs to, and how much it added to (or took off) the score. */
 interface Row {
   key: string;
   family: string;
@@ -47,27 +46,17 @@ interface Row {
   text: string;
   /** Contribution to the score, already rarity-weighted. */
   value: number;
-  /** Raw strength before weighting — only shown in the receipt. */
+  /** Raw strength before weighting, shown only in the "Show the math" breakdown. */
   raw?: number;
 }
 
-/**
- * "Why it's ranked" — the reader-side explanation of an entry's signal score.
- *
- * Reads as a ledger rather than a chart: every row is one signal, ordered by
- * what it actually contributed, and the rows sum to the header score. The
- * earlier design plotted *raw* signal strength in family bars while the header
- * showed the rarity-weighted total, so the columns never added up and the
- * smallest contributor was routinely drawn as the longest bar. The engine's
- * own weighting now comes down in the payload (`weighted`) and is what's shown.
- *
- * Collapsed by default — the one line most readers see carries the score and
- * the top reason, so expanding is optional.
- */
+/** "Why it's ranked": the reader-side explanation of an entry's signal score.
+
+    A ledger rather than a chart: every row is one signal, ordered by what it contributed, and the rows sum to the header score. Each row shows the engine's rarity-weighted contribution (`weighted` in the payload), not the raw signal strength; raw strength beside a weighted total doesn't add up and can draw the smallest contributor as the longest bar.
+
+    Collapsed by default: the one line most readers see carries the score and the top reason. */
 export function WhyRankedCard({ score, raw, signals, exposure, personal, entryId }: WhyRankedCardProps) {
-  // Local, not persisted: this is an explainer, so every article starts with the
-  // one-line summary and expanding is a per-article choice. A stored preference
-  // meant one click left the full ledger open on every entry forever.
+  // Local, not persisted: every article starts with the one-line summary and expanding is a per-article choice. A stored preference would leave the full ledger open on every entry after one click.
   const [collapsed, setCollapsed] = useState(true);
   const [showMath, setShowMath] = useState(false);
   const navigate = useNavigate();
@@ -78,18 +67,16 @@ export function WhyRankedCard({ score, raw, signals, exposure, personal, entryId
       family: sig.family,
       label: FAMILY_LABEL[sig.family] ?? sig.family,
       text: sig.explanation,
-      // Older payloads carry no `weighted`; raw score is the honest fallback.
+      // Older payloads carry no `weighted`; the raw score is the fallback.
       value: sig.weighted ?? sig.score,
       raw: sig.score,
     }));
-    // Exposure is computed at read time rather than stored as a signal, but it
-    // lifts the score the same way, so it earns the same kind of row.
+    // Exposure is computed at read time rather than stored as a signal, but it lifts the score the same way, so it gets a row too.
     if (exposure) {
       const asset = exposure.asset_name
         ? `${exposure.asset_name} is on your watched stack`
         : "Affects a vendor or product you follow";
-      // The posture belongs in this row, not in a button below it: the old
-      // callout named a CVE that appeared nowhere else on the card.
+      // The posture goes in this row, next to the asset it concerns, rather than in a separate callout that would name a CVE shown nowhere else on the card.
       const cve = exposure.cve_ids[0];
       const posture =
         exposure.posture === "no_rule" && cve
@@ -115,8 +102,7 @@ export function WhyRankedCard({ score, raw, signals, exposure, personal, entryId
   const band = signalBand(score);
   const lead = rows[0];
   const ledgerTotal = rows.reduce((sum, r) => sum + r.value, 0);
-  // Rows are weighted with today's rates; the stored sum was frozen at scoring
-  // time. Beyond display rounding, the two legitimately disagree.
+  // Rows are weighted with today's rates, while the stored sum was fixed at scoring time, so beyond display rounding the two can legitimately differ.
   const drifted = raw != null && Math.abs(ledgerTotal - raw) > 0.1;
 
   return (
@@ -140,8 +126,7 @@ export function WhyRankedCard({ score, raw, signals, exposure, personal, entryId
           <span className={`${styles.score} ${styles[band]}`}>◆ {score.toFixed(1)}</span>
           {collapsed ? (
             <>
-              {/* The line most readers ever see: lead with the reason, not the
-                  card's own name. */}
+              {/* The line most readers see: it leads with the reason, not the card's own name. */}
               <span className={styles.leadText}>{lead.text}</span>
               {rows.length > 1 && (
                 <span className={styles.more}>+{rows.length - 1} more</span>
@@ -196,9 +181,7 @@ export function WhyRankedCard({ score, raw, signals, exposure, personal, entryId
               ))}
               {drifted ? (
                 <>
-                  {/* Rates self-tune nightly and old entries aren't re-scored, so
-                      an entry's stored score can predate the weights above. Say
-                      so rather than printing a sum that doesn't reconcile. */}
+                  {/* Rarity weights are recomputed nightly and old entries aren't re-scored, so an entry's stored score can predate the weights above. Say so rather than print a sum that doesn't reconcile. */}
                   <div className={styles.mathTotal}>
                     <span>At today&rsquo;s weights</span>
                     <span>{ledgerTotal.toFixed(2)}</span>
@@ -247,14 +230,13 @@ export function WhyRankedCard({ score, raw, signals, exposure, personal, entryId
                 </span>
               </span>
             )}
-            {/* Both links ride the same right-aligned group — trailing the
-                prose, the first one wrapped onto its own line. */}
+            {/* Both links sit in one right-aligned group so they stay together when the prose before them wraps. */}
             <span className={styles.footLinks}>
               {personal && personal.families.length > 0 && (
                 <button
                   className={styles.footLink}
                   onClick={() => navigate("/settings?section=reading")}
-                  title="See the weights learned from your votes, pause personalisation, or reset them"
+                  title="See the weights learned from your votes, pause personalization, or reset them"
                 >
                   Your Radar
                 </button>

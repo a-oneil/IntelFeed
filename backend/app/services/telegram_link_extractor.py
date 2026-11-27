@@ -1,6 +1,6 @@
 """Extract Telegram channel/invite/message URLs from entry content.
 
-Patterns we care about:
+Recognized patterns:
   - https://t.me/<channel>
   - https://t.me/<channel>/<msg_id>
   - https://t.me/+<invite_hash>             (private channel invite)
@@ -9,7 +9,7 @@ Patterns we care about:
   - https://t.me/s/<channel>                (web preview, points to same channel)
   - tg://resolve?domain=<channel>           (deep link occasionally seen in code/articles)
 
-Patterns we explicitly reject:
+Rejected patterns:
   - https://t.me/share, https://t.me/iv, https://t.me/proxy etc. — Telegram service paths
   - bare @handles in prose — too noisy and ambiguous (could be mastodon, twitter, etc.)
 """

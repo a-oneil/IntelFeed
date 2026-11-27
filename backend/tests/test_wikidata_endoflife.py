@@ -124,7 +124,7 @@ async def _vendor_count(db) -> int:
 
 def test_preferred_rank_wins_and_deprecated_never_counts():
     claims = ITEMS["entities"]["Q2283"]["claims"]
-    # Four logos at normal rank (1980, 1982, 1987) and the current one preferred.
+    # Four logos: three at normal rank (1980, 1982, 1987) and the current one preferred.
     assert best_values(claims, "P154") == ["Microsoft logo (2012).svg"]
     assert best_values(claims, "P856") == ["https://www.microsoft.com/"]
     # No preferred statement: every normal one, in order.
@@ -203,7 +203,7 @@ async def wiki_entities(db_session):
 
 async def test_sync_fills_blank_columns_and_stores_vendor_context(db_session, wiki_entities):
     microsoft, windows_server, germany, unknown = wiki_entities
-    # Microsoft's P17 is Q30, labelled "United States": a tracked country.
+    # Microsoft's P17 is Q30, labeled "United States": a tracked country.
     united_states = Country(name="United States", iso_code="US", aliases=["United States of America"])
     db_session.add(united_states)
     await db_session.flush()

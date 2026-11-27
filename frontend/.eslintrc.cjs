@@ -19,8 +19,7 @@ module.exports = {
     react: { version: 'detect' },
   },
   rules: {
-    // The browser's own dialogs are unstyled, unthemeable and sit outside the
-    // app's focus and keyboard handling. Use the app's dialogs instead.
+    // The browser's own dialogs are unstyled, can't be themed and sit outside the app's focus and keyboard handling. Use the app's dialogs instead.
     'no-restricted-globals': [
       'error',
       { name: 'confirm', message: 'Use confirmDialog() from @/utils/dialog instead of the browser dialog.' },
@@ -39,16 +38,9 @@ module.exports = {
 
     'react/no-unescaped-entities': 'off',
 
-    // eslint-plugin-react-hooks v7 folded the React Compiler rules into
-    // `recommended`. Eight of them pass on this tree and stay on, so they guard
-    // new code: static-components, use-memo, error-boundaries,
-    // set-state-in-render, config, gating, plus incompatible-library and
-    // unsupported-syntax as warnings.
+    // eslint-plugin-react-hooks v7 includes the React Compiler rules in `recommended`. Eight of them pass on this tree and stay on, so they guard new code: static-components, use-memo, error-boundaries, set-state-in-render, config, gating, plus incompatible-library and unsupported-syntax as warnings.
     //
-    // The six below are off because they fire 118 times on code that predates
-    // them. They are real signal, not noise -- turning each one on is its own
-    // PR with its own refactor, the same way ruff's target-version bump is.
-    // Counts are from v7.1.1 so a future PR can tell progress from drift.
+    // The six below are off because they fire 118 times on code that predates them. They catch real problems; turning each one on is its own PR with its own refactor, the same way ruff's target-version bump is. Counts are from v7.1.1 so a future PR can tell progress from drift.
     'react-hooks/set-state-in-effect': 'off', // 53
     'react-hooks/refs': 'off', // 37
     'react-hooks/immutability': 'off', // 12

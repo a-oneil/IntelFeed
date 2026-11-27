@@ -40,8 +40,8 @@ async def main(dry_run: bool) -> None:
         print()
 
         if dry_run:
-            # Every row is re-fetched unconditionally, so scope is simply the row
-            # count. Querying Wikipedia here would cost minutes to learn nothing.
+            # Every row is re-fetched unconditionally, so the scope is the row
+            # count. Querying Wikipedia here would take minutes and tell us nothing more.
             missing_v = sum(1 for v in vendors if not v.wikipedia_url)
             missing_p = sum(1 for p in products if not p.wikipedia_url)
             print(f"Would query Wikipedia for {len(vendors) + len(products)} entities and rewrite")

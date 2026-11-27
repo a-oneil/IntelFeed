@@ -4,15 +4,8 @@ import { TitleFilterField } from "./TitleFilterField";
 import styles from "../fields.module.css";
 
 /**
- * Where the articles come from and how often.
- *
- * Every type the adapter registry serves, and nothing else. The old dropdown
- * offered `github` — which has no adapter, so `get_adapter()` silently fell
- * back to RSS — and five types (github_repo, github_releases,
- * github_advisories, nvd, mastodon) that the PUT's allowlist rejected with a
- * 400. The server now derives its allowlist from the registry
- * (`known_feed_types()`), so this list and that one can only disagree by
- * someone editing this array.
+ * The feed types offered in the Source pane, which sets where the articles come from and how often.
+ * Lists every type the adapter registry serves, and nothing else. `github` is not offered because it has no adapter, and `get_adapter()` silently falls back to RSS for it. The server derives its PUT allowlist from the registry (`known_feed_types()`), so this list and that one can only disagree if someone edits this array.
  */
 const FEED_TYPES: { value: string; label: string }[] = [
   { value: "rss", label: "RSS" },

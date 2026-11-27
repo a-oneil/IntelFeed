@@ -2,9 +2,9 @@
 
 Mirrors the enrichment adapter registry pattern: stages are code-defined here,
 composition/config is data-defined via PipelinePlan rows (feed > category >
-global) resolved in app/pipeline/plans.py. The Celery chord structure built
-from this registry is asserted structurally identical to the previous
-hand-built dispatch by tests/test_pipeline_registry.py.
+global) resolved in app/pipeline/plans.py. tests/test_pipeline_registry.py
+asserts that the Celery chord built from this registry has the same structure
+as the hand-built dispatch it replaced.
 
 Stage kinds:
 - inline   — runs synchronously inside the fetch loop (documented here for the
@@ -102,7 +102,7 @@ PIPELINE_STAGES: dict[str, StageDef] = {
             "Regex intel extraction (TTP, CVE and mitigation IDs, detection rules). "
             "AI analysis runs from the batch queue"
         ),
-        default_enabled=False,  # historical default: only when feed.auto_extract_on_ingest
+        default_enabled=False,  # synthesize_from_feed enables it per feed (feed_runs_extraction)
         config_schema={
             "mode": {"type": "string", "setting": "feed.intel_extraction_mode"},
             "detection_rules": {"type": "boolean", "setting": "feed.extract_detection_rules"},

@@ -221,17 +221,14 @@ fun EntryReaderScreen(
     val activeState by activeVm.state.collectAsStateWithLifecycle()
     val detail = activeState.detail
 
-    // The pager also composes the neighbouring pages (beyondViewportPageCount) so a swipe shows
-    // text at once. Only the page it has settled on is marked read and loads its side panels;
-    // otherwise opening one article marked the next and previous ones read too.
+    // The pager also composes the neighboring pages (beyondViewportPageCount) so a swipe shows text at once. Only the page it has settled on is marked read and loads its side panels; otherwise opening one article would mark the next and previous ones read too.
     val settledEntryId = effectiveSiblingIds.getOrNull(pagerState.settledPage) ?: entryId
     val settledVm = readerViewModel(pages, settledEntryId, app)
     LaunchedEffect(settledVm) {
         settledVm.activate()
         onSettledEntry(settledEntryId)
     }
-    // Only articles within two pages of the one on screen keep their state (the pager composes
-    // one page either side). Coming back further reloads the article.
+    // Only articles within two pages of the one on screen keep their state (the pager composes one page either side). Coming back further reloads the article.
     LaunchedEffect(pagerState.settledPage, effectiveSiblingIds) {
         val page = pagerState.settledPage
         val keep = (page - 2..page + 2).mapNotNullTo(HashSet()) { effectiveSiblingIds.getOrNull(it) }
@@ -258,16 +255,13 @@ fun EntryReaderScreen(
             keyboardController?.show()
         }
     }
-    // Find in article. Applied once typing pauses: each change re-styles every paragraph of the
-    // article on the main thread.
+    // Find in article. Applied once typing pauses: each change re-styles every paragraph of the article on the main thread.
     val appliedFind by produceState("", findQuery) {
         val query = findQuery.trim()
         if (query.isNotEmpty()) delay(250)
         value = query
     }
-    // The paragraphs the find bar searches, as the reader shows them, so the count matches the
-    // highlights (it used to count in contentText, which many articles don't have). Parsed off the
-    // main thread once per article, only while the find bar is open.
+    // The paragraphs the find bar searches, as the reader shows them, so the count matches the highlights (contentText is not used because many articles don't have it). Parsed off the main thread once per article, only while the find bar is open.
     val findTexts by produceState<List<String>?>(null, showFindInArticle, detail?.id, activeState.translation, activeState.showOriginal) {
         val article = detail
         val translation = activeState.translation
@@ -515,8 +509,7 @@ fun EntryReaderScreen(
         },
         bottomBar = {
             if (effectiveSiblingIds.size > 1) {
-                // A plain 56 dp bar: BottomAppBar is always 80 dp, which in landscape left about half
-                // the screen for the article.
+                // A plain 56 dp bar: BottomAppBar is always 80 dp, which in landscape leaves about half the screen for the article.
                 Surface(color = SlateDark800) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -709,11 +702,9 @@ private fun ReaderBody(
         }
     }
 
-    // Entity names (and requirement keywords) marked in the text, computed off the main thread once
-    // the linked intelligence has loaded; until then the plain text shows.
+    // Entity names (and requirement keywords) marked in the text, computed off the main thread once the linked intelligence has loaded; until then the plain text shows.
     val terms = remember(state.glossary, state.intel, state.highlightEntities, state.pirMatches) {
-        // The web marks glossary terms first, then entity names outside them (the "Highlight
-        // entities" setting only turns entities off); requirement keywords go last.
+        // The web marks glossary terms first, then entity names outside them (the "Highlight entities" setting only turns entities off); requirement keywords go last.
         glossaryTerms(state.glossary) +
             (if (state.highlightEntities) state.intel?.let(::entityTerms).orEmpty() else emptyList()) +
             keywordTerms(state.pirMatches)
@@ -740,15 +731,13 @@ private fun ReaderBody(
         ScrollState(initial = initialScrollPosition)
     }
 
-    // Current values for the collector below; reading `parsed` directly captured the first
-    // composition's value, so once the article was parsed, scrolling back to the top was never saved.
+    // Current values for the collector below. Reading `parsed` directly would capture the first composition's value, so after the article was parsed, scrolling back to the top would never be saved.
     val articleShown by rememberUpdatedState(parsed != null)
     val reportScroll by rememberUpdatedState(onScrollPositionChanged)
     LaunchedEffect(scrollState) {
         snapshotFlow { scrollState.value }
             .collect { pos ->
-                // While the article is still loading the page is short and the position is clamped
-                // to 0; don't overwrite the saved position with that.
+                // While the article is still loading the page is short and the position is clamped to 0; don't overwrite the saved position with that.
                 if (pos > 0 || articleShown) reportScroll(pos)
             }
     }
@@ -855,8 +844,7 @@ private fun ReaderBody(
         // Tags
         Spacer(Modifier.height(10.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            // Read state, visible and one tap to reverse. Says so when opening the article marked
-            // it read (Settings › Auto-mark as read on open).
+            // Read state, visible and one tap to reverse. Says so when opening the article marked it read (Settings › Auto-mark as read on open).
             when {
                 !detail.isRead -> Pill("Unread · mark read", CyberBlue, leadingIcon = Icons.Default.MarkEmailUnread, onClick = onToggleRead)
                 state.autoMarkedRead -> Pill("Marked read on open · undo", TextSecondary, leadingIcon = Icons.Default.MarkEmailRead, onClick = onToggleRead)

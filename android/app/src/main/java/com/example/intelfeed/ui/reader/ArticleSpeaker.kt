@@ -19,11 +19,10 @@ import java.util.Locale
 /**
  * Reads an article aloud with the system text-to-speech engine.
  *
- * - Automatically searches for and selects high-quality neural/natural voice models over legacy
- *   robotic screen-reader defaults.
- * - Cleans technical text (URLs, hashes, markdown, CVEs) with SpeechText for a natural cadence.
- * - Supports language targeting so foreign or translated articles use authentic native voices.
- * - Supports configurable speech rates.
+ * - Picks the best installed voice for the language: highest quality first, then voices named network/neural/WaveNet/studio, then ones that work offline.
+ * - Cleans technical text (URLs, hashes, markdown, CVEs) with SpeechText so it reads naturally.
+ * - Uses a voice for the language passed in, so a translated or non-English article is read in that language.
+ * - The speech rate is configurable (0.5x to 2x).
  * - The engine is only started the first time the user taps Read aloud.
  * - Long text is queued in chunks: TextToSpeech rejects input over ~4000 characters.
  * - [isSpeaking] is Compose state, updated on the main thread.
@@ -145,7 +144,7 @@ class ArticleSpeaker(context: Context) {
                         targetLocale.country.isEmpty() || it.locale.country.equals(targetLocale.country, ignoreCase = true)
                     }.ifEmpty { matching }
 
-                    // Prefer higher quality (VERY_HIGH > HIGH > NORMAL) and neural/network/studio voices
+                    // Prefer higher quality (VERY_HIGH > HIGH > NORMAL), then network/neural/studio voices, then voices that work offline.
                     val best = countryMatches.maxWithOrNull(
                         compareBy<Voice> { it.quality }
                             .thenBy { voice ->
@@ -167,7 +166,7 @@ class ArticleSpeaker(context: Context) {
                 }
             }
         } catch (_: Throwable) {
-            // Some TTS engines don't support getVoices(); fallback to language
+            // Some TTS engines don't support getVoices(); fall back to setting the language.
         }
 
         try {

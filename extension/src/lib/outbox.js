@@ -1,8 +1,6 @@
-// Sends that couldn't reach the server, kept in chrome.storage.local until it
-// answers again. Pure functions over the queue array, so the tests run them
-// under plain node; background.js does the storage and the sending.
+// Sends that couldn't reach the server, kept in chrome.storage.local until it answers again. Pure functions over the queue array, so the tests run them under plain node; background.js does the storage and the sending.
 
-// chrome.storage.local holds 10 MB in all. The queue keeps under 8.
+// chrome.storage.local holds 10 MB in all. The queue stays under 8 MB.
 export const MAX_ITEMS = 25;
 const MAX_BYTES = 8 * 1000 * 1000;
 // What "couldn't send" keeps, so a refused page isn't silently lost.
@@ -23,12 +21,7 @@ function withoutHtml(body) {
   return rest;
 }
 
-/**
- * Add a send to the queue. Returns {queue, downgraded} or throws when it is full.
- * A page whose HTML would take the queue over MAX_BYTES is kept as a link (no
- * HTML): the server fetches it later, which loses paywalled or signed-in
- * content but keeps the send.
- */
+/** Add a send to the queue. Returns {queue, downgraded} or throws when it is full. A page whose HTML would take the queue over MAX_BYTES is kept as a link (no HTML): the server fetches it later, which loses paywalled or signed-in content but keeps the send. */
 export function enqueue(queue, { kind, body, title }, now = Date.now()) {
   if (queue.length >= MAX_ITEMS) {
     throw new Error(`${MAX_ITEMS} pages are already waiting to send. Send or discard them from the toolbar popup first.`);

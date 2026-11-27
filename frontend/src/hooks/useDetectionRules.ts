@@ -137,12 +137,9 @@ export function useExtractRuleMetadata() {
 /**
  * Which of the rule library's Telemetry values the enabled inventory answers.
  *
- * Server-side because the match is tiered and fuzzy — a ticked product name, a
- * canonical behaviour id, or a category with a ticked source — so comparing the
- * two lists in the client would under-count badly.
+ * Computed server-side because the match is tiered and fuzzy (a checked product name, a canonical behavior id, or a category with a checked source), so comparing the two lists in the client would badly under-count.
  *
- * Changes only when someone edits Telemetry Sources, so it is cached for the
- * session rather than refetched per keystroke in the library.
+ * Changes only when someone edits Telemetry Sources, so it is cached for 5 minutes rather than refetched on every keystroke in the library.
  */
 export function useRuleTelemetryVocabulary() {
   return useQuery({
@@ -407,8 +404,7 @@ export function useTechniqueCoverage(techniqueIds: string[]) {
   return useQuery({
     queryKey: ["technique-coverage", ids],
     queryFn: async () => {
-      // The workbench TTP table feeds this the whole infinite-scrolled page set,
-      // which runs past the server's 500-ID cap — split and recombine.
+      // The workbench TTP table passes every loaded page of its infinite scroll, which can exceed the server's 500-ID cap, so split into batches and merge the results.
       const chunks: string[][] = [];
       for (let i = 0; i < ids.length; i += COVERAGE_BATCH) {
         chunks.push(ids.slice(i, i + COVERAGE_BATCH));
@@ -535,8 +531,7 @@ export function useConvertRule() {
       const { data } = await api.post<ConvertResult>(
         `/detection-rules/${ruleId}/convert`,
         { target_type, dialect: dialect ?? null, notes: notes?.trim() || null },
-        // AI conversion routinely takes 30-90s; the client default of 15s
-        // aborted every call before the model could answer.
+        // AI conversion routinely takes 30-90s; the client default of 15s would abort the call before the model answers.
         { timeout: 180000 }
       );
       return data;

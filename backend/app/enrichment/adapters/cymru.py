@@ -136,7 +136,7 @@ class CymruAdapter(EnrichmentAdapter):
     applies_to = {"observable": ("ipv4", "ipv6")}
     scope = {"status": ("active",)}
     # Two queries per IP, or one per bulk connection. Team Cymru publishes no
-    # figure for DNS, only the ask to use DNS (or bulk) at volume; 60 a minute
+    # figure for DNS, only the request to use DNS (or bulk) at volume; 60 a minute
     # is ~30 IPs.
     quota = Quota(60, 60, daily_budget=4000)
     egress = Egress.LOW

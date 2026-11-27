@@ -156,7 +156,7 @@ async def create_share_link(
     # Pre-generate read-aloud audio so it's ready the moment the share is opened,
     # instead of waiting for the first viewer to click Listen. ttl_days=1 keeps this
     # share-scoped: the audio lapses after ~24h of no plays, then regenerates on
-    # demand. Best-effort — a synthesis-enqueue hiccup must not fail the share.
+    # demand. Best-effort: a failure to enqueue synthesis must not fail the share.
     if settings.tts_enabled:
         try:
             from app.services import tts
@@ -448,7 +448,7 @@ async def get_shared_entry(
         for m, link in mit_result.all()
     ]
 
-    # Offensive tools
+    # Tools
     tool_result = await db.execute(
         select(Tool, EntryTool)
         .join(EntryTool, EntryTool.tool_id == Tool.id)
@@ -916,7 +916,7 @@ async def run_shared_ai_task(
     }
 
     # The sharer is recorded as the attributed user, but the caller is the
-    # anonymous link: share traffic is pipeline spend, never a person's.
+    # anonymous link, so share traffic counts as pipeline spend, never a person's.
     parsed = await run_task(
         db=db,
         user_id=share.created_by,
@@ -1027,8 +1027,8 @@ async def shared_ask_agent(
     if not body.question.strip():
         raise AppError(code="bad_request", message="Question is required", status_code=400)
 
-    # Share traffic is never a person: the lookup answers with the
-    # instance's provider whatever the sharer has set up.
+    # Share traffic is never treated as a person: the lookup returns the
+    # instance's provider, whatever provider the sharer has set up.
     caller = Caller.share(share.created_by)
     resolved = await resolve_assignment(db, caller, "entry_qa")
     if resolved is None:

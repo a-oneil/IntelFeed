@@ -10,15 +10,12 @@ import styles from "./SelectionContextMenu.module.css";
 
 interface SelectionContextMenuProps {
   containerRef: React.RefObject<HTMLElement | null> | React.RefObject<HTMLElement | null>[];
-  /** Entry the selection lives in, when there is one. Omitted for entry-less
-   *  contexts like the daily summary — the chat pivot and Link-to-entity action
-   *  (both of which need an entry) are hidden in that case. */
+  /** Entry the selection lives in, when there is one. Omitted for entry-less contexts like the daily summary; the chat pivot and Link-to-entity action (both of which need an entry) are hidden in that case. */
   entryId?: string;
   onCreateEntity: (text: string) => void;
   onCreateNote: (selectedText: string) => void;
   onAddAlias: (text: string) => void;
-  /** Links the selection to an entity *on this entry*. Omit in entry-less
-   *  contexts — the menu item is then hidden. */
+  /** Links the selection to an entity *on this entry*. Omit in entry-less contexts; the menu item is then hidden. */
   onLinkEntity?: (text: string) => void;
 }
 
@@ -66,8 +63,7 @@ export function SelectionContextMenu({
   }, []);
 
   const handleMouseUp = useCallback((e: MouseEvent) => {
-    // Clicking inside the menu (e.g. submenu toggles) collapses the selection —
-    // ignore those events so the menu doesn't immediately dismiss itself.
+    // Clicking inside the menu (e.g. submenu toggles) collapses the selection; ignore those events so the menu doesn't immediately dismiss itself.
     if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
 
     setTimeout(() => {
@@ -225,12 +221,7 @@ export function SelectionContextMenu({
 
   const toggleSubmenu = (s: Submenu) => setSubmenu((v) => (v === s ? null : s));
 
-  // Portal to <body>: the menu is `position: fixed` positioned from viewport
-  // coordinates, but in the AI summary it renders inside the virtualized entry
-  // list whose rows carry `transform: translateY(...)`. A transformed ancestor
-  // makes `fixed` resolve against that ancestor, so the menu ends up clipped /
-  // hidden. Escaping to <body> restores true viewport positioning (and is a
-  // no-op in the non-transformed reader).
+  // Portal to <body>: the menu is `position: fixed` positioned from viewport coordinates, but in the AI summary it renders inside the virtualized entry list whose rows carry `transform: translateY(...)`. A transformed ancestor makes `fixed` resolve against that ancestor, so the menu ends up clipped or hidden. Rendering into <body> restores viewport positioning (and changes nothing in the reader, which has no transformed ancestor).
   return createPortal(
     <div
       ref={menuRef}

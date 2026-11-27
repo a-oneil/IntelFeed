@@ -15,10 +15,7 @@ export function useDebouncedValue<T>(value: T, ms: number): T {
 
 // ── "/" ownership ───────────────────────────────────────
 //
-// Two global "/" listeners already exist in this app and only avoid colliding
-// because AppHeader suppresses HeaderSearch on workbench routes. That invariant
-// is invisible and easy to break, so `/` is never claimed automatically — a
-// surface has to ask for it — and a second claimant is loud in development.
+// `/` is never claimed automatically: a surface has to opt in with `ownsSlashKey` (HeaderSearch is the one that does). Two mounted claimants would both preventDefault and fight over focus, so in development a second claimant logs a warning.
 const slashOwners = new Set<string>();
 
 function claimSlashKey(label: string) {
@@ -37,13 +34,13 @@ function claimSlashKey(label: string) {
 export interface UseOmniSearchInputOptions<S extends OmniSuggestion> {
   /** Controlled query text. The surface owns where it lives. */
   value: string;
-  /** Called with the next query text — on typing and on accepting a suggestion. */
+  /** Called with the next query text, on typing and on accepting a suggestion. */
   onChange: (next: string) => void;
   /** The input element. Supply one if the surface needs to focus/blur it itself. */
   inputRef: React.RefObject<HTMLInputElement | null>;
   /** Element that click-outside is measured against. */
   containerRef: React.RefObject<HTMLElement | null>;
-  /** See `SuggestionSource` — a hook, stable identity required. */
+  /** See `SuggestionSource`: a hook, and its identity must be stable. */
   suggestionSource?: SuggestionSource<S>;
   /** ArrowDown past the end returns to 0 (and ArrowUp past the top to the end). */
   wrap?: boolean;
@@ -51,19 +48,15 @@ export interface UseOmniSearchInputOptions<S extends OmniSuggestion> {
   allowDeselect?: boolean;
   /** Debounce for `debouncedValue`. 0 disables it. Default 300. */
   debounceMs?: number;
-  /** Claim the global "/" focus shortcut. Never automatic — see the note above. */
+  /** Claim the global "/" focus shortcut. Never automatic; see the note above. */
   ownsSlashKey?: boolean;
   /** Name used in the double-claim warning. */
   slashKeyOwnerLabel?: string;
-  /** Escape ladder rung 2 — fired only when the suggestion dropdown was not open. */
+  /** Second step of Escape handling: fired when the dropdown is closed or has no suggestions. */
   onEscape?: () => void;
   /** Fires after a suggestion has been spliced into the query. */
   onSuggestionApplied?: (suggestion: S) => void;
-  /**
-   * Keys layered on top of the base map. Runs after the Escape ladder and after
-   * the suggestion keys, and only if neither handled the event. Return true to
-   * mark the event handled.
-   */
+  /** Keys layered on top of the base map. Runs after Escape handling and the suggestion keys, and only if neither handled the event. The return value is currently ignored. */
   extraKeys?: (e: React.KeyboardEvent) => boolean | void;
   /** Notified whenever the dropdown opens or closes. */
   onOpenChange?: (open: boolean) => void;
@@ -79,7 +72,7 @@ export interface OmniSearchInputState<S extends OmniSuggestion> {
   /** -1 means "nothing selected" and is a real state when `allowDeselect`. */
   activeIndex: number;
   setActiveIndex: React.Dispatch<React.SetStateAction<number>>;
-  /** Move the selection by `delta`, honouring `wrap` / `allowDeselect`. */
+  /** Move the selection by `delta`, honoring `wrap` / `allowDeselect`. */
   moveActive: (delta: number) => void;
   /** Splice a suggestion over the caret token and restore the caret after it. */
   applySuggestion: (suggestion: S) => void;
@@ -98,13 +91,9 @@ export interface OmniSearchInputState<S extends OmniSuggestion> {
 }
 
 /**
- * The shared search *input* layer: caret tokenisation, suggestion splice, one
- * selection state machine, debounce, click-outside, the Escape ladder and the
- * optional "/" shortcut.
+ * The shared search *input* layer: caret tokenization, suggestion splice, one selection state machine, debounce, click-outside, Escape handling and the optional "/" shortcut.
  *
- * It deliberately owns nothing about *results*: fetching and rendering stay with
- * each surface, which is why the dropdown a surface draws can be a flat completion
- * list, a grouped entity panel, or a modal command list without this hook caring.
+ * It owns nothing about *results*: fetching and rendering stay with each surface, so the dropdown a surface draws can be a flat completion list, a grouped entity panel, or a modal command list without this hook needing to know.
  */
 export function useOmniSearchInput<S extends OmniSuggestion>(
   options: UseOmniSearchInputOptions<S>,
@@ -132,8 +121,7 @@ export function useOmniSearchInput<S extends OmniSuggestion>(
 
   const setOpen = setOpenState;
 
-  // Notify the surface out-of-band rather than from inside the state updater, so a
-  // StrictMode double-invoke can't fire the callback twice.
+  // Notify the surface from an effect rather than from inside the state updater, so a StrictMode double-invoke can't fire the callback twice.
   const onOpenChangeRef = useRef(onOpenChange);
   onOpenChangeRef.current = onOpenChange;
   const prevOpenRef = useRef(open);
@@ -143,9 +131,7 @@ export function useOmniSearchInput<S extends OmniSuggestion>(
     onOpenChangeRef.current?.(open);
   }, [open]);
 
-  // The token under the caret is what gets completed and replaced. `getTokenAtCursor`
-  // walks outward from the caret rather than regexing the text before it, so a caret
-  // parked in the middle of a token still completes that whole token.
+  // The token under the caret is what gets completed and replaced. `getTokenAtCursor` walks outward from the caret rather than matching a regex against the text before it, so a caret in the middle of a token still completes the whole token.
   const token = useMemo<OmniToken | null>(() => {
     const input = inputRef.current;
     if (!input || !open) return null;
@@ -163,10 +149,9 @@ export function useOmniSearchInput<S extends OmniSuggestion>(
     };
   }, [value, open, inputRef]);
 
-  // Called unconditionally — `suggestionSource` is a hook by contract.
+  // Called unconditionally, because `suggestionSource` is a hook by contract.
   const sourced = suggestionSource?.(token, open && !!token);
-  // Falls back to a module-level constant, not a fresh `[]`: the reset effect below
-  // keys off this identity, and a new array each render would loop.
+  // Falls back to a module-level constant, not a fresh `[]`: the reset effect below depends on this identity, and a new array each render would cause an infinite render loop.
   const suggestions = (sourced ?? NO_SUGGESTIONS) as readonly S[];
 
   // Reset selection when suggestions change
@@ -204,10 +189,7 @@ export function useOmniSearchInput<S extends OmniSuggestion>(
       if (!token) return;
       const before = value.slice(0, token.startPos);
       const after = value.slice(token.endPos);
-      // A completed value ends the token; a field name still needs its value typed,
-      // so don't append the space that would push the caret past the colon.
-      // Note: the surrounding text is spliced verbatim — interior whitespace the
-      // user typed is preserved, deliberately.
+      // A completed value ends the token; a field name still needs its value typed, so don't append the space that would push the caret past the colon. The surrounding text is spliced in unchanged, so whitespace the user typed is preserved on purpose.
       const trailing = suggestion.type === "value" ? " " : "";
       onChange(`${before}${suggestion.insert}${trailing}${after}`);
       setActiveIndex(-1);
@@ -222,7 +204,7 @@ export function useOmniSearchInput<S extends OmniSuggestion>(
     [token, value, onChange, inputRef, setOpen, onSuggestionApplied],
   );
 
-  // Global "/" shortcut to focus search. Opt-in only — see `claimSlashKey`.
+  // Global "/" shortcut to focus search. Opt-in only; see `claimSlashKey`.
   useEffect(() => {
     if (!ownsSlashKey) return;
     const release = claimSlashKey(slashKeyOwnerLabel);
@@ -255,8 +237,7 @@ export function useOmniSearchInput<S extends OmniSuggestion>(
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      // Escape ladder, rung 1: an open dropdown swallows Escape and stops it there,
-      // so a layout-level global Escape handler doesn't also fire.
+      // Escape, first step: an open dropdown with suggestions closes and stops the event, so a layout-level global Escape handler doesn't also fire.
       if (e.key === "Escape") {
         if (open && suggestions.length > 0) {
           setOpen(false);

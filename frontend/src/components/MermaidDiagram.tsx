@@ -3,11 +3,7 @@ import styles from "./MermaidDiagram.module.css";
 
 let mermaidPromise: Promise<typeof import("mermaid").default> | null = null;
 
-/**
- * Mermaid is ~500KB, so it is imported on first diagram render rather than at
- * module load — the documentation route is the only place that pulls it in, and a
- * page with no diagrams never pays for it.
- */
+/** Mermaid is ~500KB, so it is imported on the first diagram render rather than at module load: the documentation route is the only place that uses it, and a page with no diagrams never downloads it. */
 function loadMermaid() {
   if (!mermaidPromise) {
     mermaidPromise = import("mermaid").then((mod) => mod.default);
@@ -56,10 +52,7 @@ interface Props {
 export function MermaidDiagram({ chart }: Props) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // scale and pan live in ONE state object: zooming has to move the pan in the
-  // same commit, and splitting them meant the zoom updater mutated the other
-  // piece of state — an impure updater React is free to run more than once,
-  // which multiplied the pan and flung the diagram off-screen.
+  // Scale and pan live in one state object because zooming has to move the pan in the same update. With separate state, the zoom updater had to set the pan from inside its updater, which made it impure; React may run an updater more than once, so the pan was applied repeatedly and pushed the diagram off-screen.
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
   const idRef = useRef(`mermaid-${(seq += 1)}`);
@@ -69,7 +62,7 @@ export function MermaidDiagram({ chart }: Props) {
   const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
     const renderId = idRef.current;
     setError(null);
     loadMermaid()
@@ -83,26 +76,20 @@ export function MermaidDiagram({ chart }: Props) {
         return mermaid.render(renderId, chart);
       })
       .then(({ svg: rendered }) => {
-        if (!cancelled) setSvg(rendered);
+        if (!canceled) setSvg(rendered);
       })
       .catch((err: unknown) => {
         // A malformed diagram should show its source, not blank the page.
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!canceled) setError(err instanceof Error ? err.message : String(err));
       });
     return () => {
-      cancelled = true;
+      canceled = true;
       // mermaid.render appends a detached measuring node keyed by id; drop it.
       document.getElementById(`d${renderId}`)?.remove();
     };
   }, [chart]);
 
-  /**
-   * Give the SVG a real pixel size. mermaid emits width="100%" and keeps the true
-   * dimensions only in the viewBox; inside a max-content container that is
-   * circular, so the browser fell back to the 300x150 default for replaced
-   * elements and every diagram rendered as a ~300px thumbnail. Returns the
-   * natural size so fit() does not have to re-measure the layout.
-   */
+  /** Give the SVG a real pixel size. mermaid emits width="100%" and keeps the true dimensions only in the viewBox; inside a max-content container that is circular, so without this the browser falls back to the 300x150 default for replaced elements and every diagram renders as a ~300px thumbnail. Returns the natural size so fit() does not have to re-measure the layout. */
   const normalize = useCallback(() => {
     const svgEl = viewportRef.current?.querySelector("svg");
     if (!svgEl) return null;
@@ -115,14 +102,9 @@ export function MermaidDiagram({ chart }: Props) {
   }, []);
 
   /**
-   * Fit the diagram's *width*, never magnifying past 1:1.
+   * Fit the diagram's width, never magnifying past 1:1.
    *
-   * `legible: true` (how a diagram opens) additionally refuses to go below
-   * MIN_LEGIBLE_SCALE. Sizes here span three orders of magnitude — the ER diagram
-   * is ~14000px wide, which a true fit renders as an unreadable 45px-tall smear —
-   * so opening favours readable text over completeness, and panning covers the
-   * rest. The toolbar button calls this with `legible: false` for a genuine
-   * whole-diagram fit.
+   * With `legible: true` (used when a diagram opens) the scale also never goes below MIN_LEGIBLE_SCALE. Diagram widths span three orders of magnitude: the ER diagram is ~14000px wide, and fitting it fully makes it an unreadable strip about 45px tall. So a diagram opens with readable text, and the reader pans to see the rest. The toolbar's zoom-percentage button calls this with `legible: false` to fit the whole diagram.
    */
   const fit = useCallback(
     (legible = false) => {
@@ -139,7 +121,7 @@ export function MermaidDiagram({ chart }: Props) {
       const height = dims.height * scale;
       setView({
         scale,
-        // Centre whichever axis fits; anchor the other at the start.
+        // Center whichever axis fits; anchor the other at the start.
         x: width < vw ? PADDING + (vw - width) / 2 : PADDING,
         y: height < vh ? PADDING + (vh - height) / 2 : PADDING,
       });
@@ -182,14 +164,12 @@ export function MermaidDiagram({ chart }: Props) {
     });
   }, []);
 
-  // Non-passive listener: React's onWheel is passive, so it cannot preventDefault
-  // and the page would scroll away underneath the zoom.
+  // Non-passive listener: React's onWheel is passive, so it cannot call preventDefault and the page would scroll while zooming.
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport || !svg) return;
     const onWheel = (e: WheelEvent) => {
-      // Plain scroll keeps scrolling the page; ctrl/⌘ + wheel zooms, matching
-      // the pinch gesture browsers already map to ctrl+wheel.
+      // Plain scroll keeps scrolling the page; ctrl/⌘ + wheel zooms, which also covers trackpad pinch, since browsers report it as ctrl+wheel.
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
       zoomAt(e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP, e.clientX, e.clientY);

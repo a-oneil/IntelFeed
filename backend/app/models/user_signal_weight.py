@@ -6,8 +6,8 @@ pools every analyst's votes into one set of multipliers baked into the stored
 ``Entry.priority_raw``. This table is the per-analyst counterpart: one row
 per (user, family), fitted nightly from that user's own verdicts and applied
 at *read* time as a lift on the Radar ordering — exactly the way My Stack
-exposure works. The stored score stays global, so personalisation is always
-one toggle away from off.
+exposure works. The stored score stays global, so turning personalization off
+is a single toggle.
 """
 
 import uuid

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.feed import Feed
 from app.models.user import User
+from app.schemas.feed import FeedDiscoverResult
 
 
 @pytest.mark.asyncio
@@ -42,8 +43,8 @@ async def test_create_feed(client: AsyncClient, auth_headers: dict):
 
     assert response.status_code == 201
     data = response.json()
-    # The response is a flat FeedResponse; it used to be a subscription
-    # wrapper with the feed nested under a "feed" key.
+    # The response is a flat FeedResponse, not a subscription wrapper with the
+    # feed nested under a "feed" key.
     assert data["title"] == "Test Blog"
     assert data["url"] == "https://example.com/feed.xml"
     assert data["feed_type"] == "rss"
@@ -245,9 +246,10 @@ async def test_update_feed_type_accepts_every_registered_adapter(
 ):
     """Every type the adapter registry serves is a legal target for a type change.
 
-    The allowlist used to be a hand-written copy that had drifted: it rejected
-    github_repo / github_releases / github_advisories / nvd / mastodon, all of
-    which the edit modal offers, and accepted `github`, which has no adapter.
+    The allowlist comes from the registry because a hand-written copy drifted:
+    it rejected github_repo / github_releases / github_advisories / nvd /
+    mastodon, all of which the edit modal offers, and accepted `github`, which
+    has no adapter.
     """
     from app.adapters import known_feed_types
 
@@ -417,7 +419,7 @@ async def test_non_admin_cannot_clear_retention_with_an_explicit_null(
 async def test_ai_analysis_can_be_disabled_without_disabling_autolinking(
     client: AsyncClient, admin_headers: dict, db_session: AsyncSession
 ):
-    """The gap this field closes: quieting the AI used to mean mode="none"."""
+    """AI analysis can be turned off on its own; otherwise the only way to quiet it is mode="none"."""
     feed = Feed(
         title="Noisy",
         url="https://noisy.example.com/rss",
@@ -436,7 +438,7 @@ async def test_ai_analysis_can_be_disabled_without_disabling_autolinking(
     assert response.status_code == 200
     data = response.json()
     assert data["ai_analysis_enabled"] is False
-    # Autolinking is untouched — that is the whole point.
+    # Autolinking is untouched; keeping it on is what this field is for.
     assert data["intel_extraction_mode"] == "selective"
 
 
@@ -533,9 +535,9 @@ async def _worker_session_on(db: AsyncSession):
     """Hand the task the test's own session so it sees uncommitted fixtures.
 
     `_extract_entry_intel` opens its own worker session, which cannot see the
-    test transaction — without this the task simply logs "Entry not found" and
-    returns zeroes, which would make a "nothing was extracted" assertion pass
-    for entirely the wrong reason.
+    test transaction. Without this the task logs "Entry not found" and returns
+    zeroes, which would make a "nothing was extracted" assertion pass for the
+    wrong reason.
     """
     yield db
 
@@ -567,12 +569,12 @@ async def _run_extract(
 
 @pytest.mark.asyncio
 async def test_regex_pass_is_skipped_when_only_rule_extraction_is_on(db_session: AsyncSession, monkeypatch):
-    """The NVD/CVE pass has to honour its own flag.
+    """The NVD/CVE pass has to honor its own flag.
 
     Both halves of `extract_entry_intel_task` share one dispatch gate
-    (`auto_extract_on_ingest or extract_detection_rules`), and the regex half
-    used not to re-check its own flag — so turning "look up CVEs in NVD" off did
-    nothing at all as long as rule extraction was on.
+    (`auto_extract_on_ingest or extract_detection_rules`), so the regex half
+    must re-check its own flag. Without that check, turning "look up CVEs in
+    NVD" off did nothing as long as rule extraction was on.
     """
     feed = Feed(
         title="Rules only",
@@ -647,11 +649,11 @@ async def _extracted_records(db_session: AsyncSession, cve_id: str) -> tuple[int
 async def test_mode_none_feed_extracts_nothing_even_with_both_switches_on(
     db_session: AsyncSession, monkeypatch, test_user
 ):
-    """ "Analyse this feed" off has to stop the CVE/NVD pass and rule saving too.
+    """ "Analyze this feed" off has to stop the CVE/NVD pass and rule saving too.
 
-    The extract task used to read only the two per-feed switches, so a feed set
-    to mode none kept minting CVE records and saving rules while the feed
-    modal showed both rows greyed out.
+    When the extract task read only the two per-feed switches, a feed set to
+    mode none kept creating CVE records and saving rules while the feed modal
+    showed both rows grayed out.
     """
     stats = await _run_extract(
         db_session, monkeypatch, _extract_feed("none"), "Patch CVE-2026-10301 now.\n" + _YARA_RULE
@@ -740,11 +742,11 @@ async def test_extended_feed_types_track_the_adapter_registry():
 async def test_bulk_category_update_stamps_the_review_date(
     client: AsyncClient, admin_headers: dict, db_session: AsyncSession
 ):
-    """Rating a whole category used to leave every feed reading "never assessed".
+    """Rating a whole category stamps `last_reviewed_at` on every feed in it.
 
-    The single-feed PUT stamped `last_reviewed_at` on any assessment change and
-    the bulk path did not, so the Overview pane contradicted what you had just
-    done.
+    The single-feed PUT stamps it on any assessment change. Without the same in
+    the bulk path, every feed in the category still read "never assessed" in the
+    Overview pane right after it was rated.
     """
     from app.models.category import Category
 
@@ -783,7 +785,7 @@ async def test_bulk_category_update_stamps_the_review_date(
 async def test_bulk_category_update_leaves_unsent_fields_alone(
     client: AsyncClient, admin_headers: dict, db_session: AsyncSession
 ):
-    """ "Leave as they are" is the default on every control — it must mean it."""
+    """ "Leave as they are" is the default on every control, so unsent fields must not change."""
     from app.models.category import Category
 
     category = Category(name="Bulk untouched")
@@ -822,9 +824,8 @@ async def test_bulk_category_update_leaves_unsent_fields_alone(
 async def test_bulk_category_update_cannot_overwrite_analyst_notes(
     client: AsyncClient, admin_headers: dict, db_session: AsyncSession
 ):
-    """One textarea replacing the notes on every feed in a category, with no
-    undo, is not a thing this endpoint should be able to do. Per-feed notes are
-    edited per feed."""
+    """The bulk endpoint must not replace the notes on every feed in a category,
+    since there is no undo. Notes are edited one feed at a time."""
     from app.models.category import Category
 
     category = Category(name="Notes guarded")
@@ -1007,3 +1008,61 @@ async def test_remove_feed_for_everyone_unsubscribes_all_and_keeps_entries(
     left = await db_session.execute(select(UserFeedSubscription).where(UserFeedSubscription.feed_id == dead.id))
     assert left.scalars().all() == []
     assert await db_session.get(Entry, entry.id) is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("skip_shorts", [True, False])
+async def test_create_youtube_feed_honors_skip_shorts(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, skip_shorts: bool
+):
+    """The Add Feed dialog's Skip Shorts box wins over the user's default."""
+    found = FeedDiscoverResult(
+        url="https://www.youtube.com/feeds/videos.xml?channel_id=UC1234567890abcdef",
+        title="Black Hat",
+        feed_type="youtube",
+        description=None,
+    )
+    with (
+        patch("app.api.feeds.discover_feed", return_value=found),
+        patch("app.workers.feed_tasks.fetch_feed.delay"),
+    ):
+        response = await client.post(
+            "/api/feeds",
+            json={"url": "https://www.youtube.com/@BlackHatOfficialYT", "exclude_shorts": skip_shorts},
+            headers=auth_headers,
+        )
+    assert response.status_code == 201
+    feed = await db_session.get(Feed, uuid.UUID(response.json()["id"]))
+    assert bool((feed.adapter_config or {}).get("exclude_shorts")) is skip_shorts
+
+
+@pytest.mark.asyncio
+async def test_preview_link_suggests_category_and_interval(client: AsyncClient, auth_headers: dict):
+    from app.services.link_preview import LinkPreview
+
+    async def fake_identify(url: str) -> LinkPreview:
+        return LinkPreview(kind="github", title="owner/project", feed_type="github_repo", url=url, github={})
+
+    with patch("app.services.link_preview._identify", fake_identify):
+        response = await client.post(
+            "/api/feeds/preview", json={"url": "github.com/owner/project"}, headers=auth_headers
+        )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["kind"] == "github"
+    assert data["url"] == "https://github.com/owner/project"
+    assert data["fetch_interval_minutes"] == 1440
+    assert data["suggested_category_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_preview_link_rejects_a_non_link(client: AsyncClient, auth_headers: dict):
+    response = await client.post("/api/feeds/preview", json={"url": "ransomware"}, headers=auth_headers)
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_category_suggestion_is_routed_before_feed_id(client: AsyncClient, auth_headers: dict):
+    response = await client.get("/api/feeds/category-suggestion", params={"feed_type": "nvd"}, headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json() == {"category_id": None}

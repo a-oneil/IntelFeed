@@ -1,6 +1,4 @@
-/* In-flow flex group on the app shell's right edge: [toggle rail | panel].
-   Same open/close mechanism as the sidebars — the rail is always present
-   (desktop), the panel collapses to nothing, content shifts naturally. */
+/* In-flow flex group on the app shell's right edge: [toggle rail | panel]. Same open/close mechanism as the sidebars — the rail is always present (desktop), the panel is not rendered while collapsed, and the content beside it reflows. */
 .dockGroup {
   display: flex;
   flex-shrink: 0;

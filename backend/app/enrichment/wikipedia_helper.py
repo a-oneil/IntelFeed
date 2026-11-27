@@ -26,8 +26,8 @@ SKIP_SECTIONS: set[str] = {
 
 MAX_CONTENT_CHARS = 12_000
 
-# Map entity names to their best Wikipedia search query.
-# Handles disambiguation and names that don't resolve cleanly.
+# Entity name → the Wikipedia article title to try first, for names that hit a
+# disambiguation page or otherwise don't resolve to the right article.
 WIKI_OVERRIDES: dict[str, str] = {
     # Vendors
     "CrowdStrike": "CrowdStrike",
@@ -149,9 +149,10 @@ WIKI_OVERRIDES: dict[str, str] = {
 
 
 def get_search_queries(entity_name: str, entity_type: str) -> list[str]:
-    """Build an ordered list of Wikipedia search queries for a given entity.
+    """Build an ordered list of Wikipedia page titles to try for a given entity.
 
-    Checks WIKI_OVERRIDES first, then applies entity-type-specific suffixes.
+    An entry in WIKI_OVERRIDES wins (then the raw name); otherwise the raw name,
+    then entity-type-specific suffixes.
     """
     # If there's a known override, use it first, then fall back to the raw name
     override = WIKI_OVERRIDES.get(entity_name)

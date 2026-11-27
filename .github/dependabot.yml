@@ -2,7 +2,7 @@
 # Dependabot on a repo this size otherwise opens ~10-20 PRs a week, each
 # triggering a full CI run, and the result is that nobody reads any of them.
 #
-# Note this only opens *version* PRs. The vulnerability side needs "Dependabot
+# This only opens *version* PRs. The vulnerability side needs "Dependabot
 # alerts" switched on in the repo's Settings > Code security — on a private
 # repo it is off by default. The weekly pip-audit / pnpm audit in
 # the `security` job in .github/workflows/ci.yml is the backstop either way.

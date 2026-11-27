@@ -382,7 +382,7 @@ async def test_non_alias_update_does_not_queue_retro_scan(
     actor_id = create.json()["id"]
     queued_backlinks.clear()
 
-    # Description-only edit, and a re-cased alias — neither widens the match surface.
+    # Description-only edit, and a re-cased alias — neither adds a new name to match.
     resp = await client.put(
         f"{BASE}/threat-actors/{actor_id}",
         json={"description": "updated", "aliases": ["GAMMA"]},
@@ -435,5 +435,5 @@ async def test_merge_queues_retro_scan_for_keeper(client: AsyncClient, admin_hea
         headers=admin_headers,
     )
     assert resp.status_code == 200
-    # The keeper absorbed "Duplicate Actor" + "DupeAlias" — both are new match surface.
+    # The keeper absorbed "Duplicate Actor" + "DupeAlias" — both are new names to match.
     assert queued_backlinks == [{"entity_type": "threat_actor", "entity_id": keeper_id}]

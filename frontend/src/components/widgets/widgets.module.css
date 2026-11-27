@@ -261,8 +261,7 @@
   font-family: monospace;
 }
 
-/* Chip overrides. Both are doubled so they beat Chip's own single-class
-   `.chip` / `.md` rules whichever order the two stylesheets land in. */
+/* Chip overrides. Both selectors are doubled so they beat Chip's own single-class `.chip` / `.md` rules whichever order the two stylesheets load in. */
 
 /* Filled score / error badges: Chip's box, one step up in size and weight. */
 .countChip.countChip {
@@ -270,8 +269,7 @@
   font-weight: 700;
 }
 
-/* Unfilled count badges (mention counts, co-occurrence counts): same size bump
-   but borderless on the primary text colour, as they have always read. */
+/* Unfilled count badges (mention counts, co-occurrence counts): same size bump, but borderless and in the primary text color. */
 .numBadge.numBadge {
   font-size: var(--fs-sm);
   font-weight: 700;
@@ -383,8 +381,7 @@
   color: var(--text-primary);
 }
 
-/* Chip already supplies the tertiary fill and secondary text; these small type
-   tags have never carried a border. Doubled for the ordering reason above. */
+/* Chip already supplies the tertiary fill and secondary text; these small type tags have no border. Doubled for the ordering reason above. */
 .tagSmall.tagSmall {
   border-color: transparent;
 }
@@ -782,8 +779,7 @@
   gap: 6px;
 }
 
-/* Tag pills are Chip `solid` at the tag's own colour; these are the deltas
-   (roomier, lighter, brightness hover). Doubled for the ordering reason above. */
+/* Tag pills are Chip `solid` at the tag's own color; these rules are the differences (more padding, lighter weight, brightness on hover). Doubled for the ordering reason above. */
 .tagPill.tagPill {
   gap: 6px;
   padding: 3px 8px;
@@ -798,11 +794,7 @@
   border-color: var(--chip-tint);
 }
 
-/* The scrim darkens the pill so the count reads as a sub-element. It only
-   works while the label is light: once Chip derives a BLACK foreground for a
-   light tag colour, a dark scrim pulls the ground toward the text (measured
-   3.14:1 on #8B5CF6). --tag-scrim is set per-pill alongside the derived
-   foreground so it always moves away from the text, not toward it. */
+/* The scrim darkens the pill behind the count so it reads as a sub-element. That only works while the label is light: once Chip derives a black foreground for a light tag color, a dark scrim moves the background toward the text color (measured 3.14:1 on #8B5CF6). --tag-scrim is set per pill alongside the derived foreground so it always moves the background away from the text color. */
 .tagPillCount {
   font-size: var(--fs-sm);
   font-weight: 700;
@@ -1206,8 +1198,7 @@
   flex-shrink: 0;
 }
 
-/* Board chips are Chip in its default tone (hot ones use `toned` at --accent);
-   the only delta is the display face. */
+/* Board chips are Chip in its default tone (hot ones use `toned` at --accent); the only difference is the display font. */
 .boardChip {
   font-family: var(--font-display);
 }
@@ -1233,8 +1224,7 @@
 }
 
 /* ── Ransomware pulse (stacked columns) ── */
-/* Chart widgets fill the widget body: the chart box takes what the legend
-   leaves, and the SVG draws in that box's pixels (useChartSize). */
+/* Chart widgets fill the widget body: the chart box takes the space the legend leaves, and the SVG draws in that box's pixels (useChartSize). */
 .chartFill {
   display: flex;
   flex-direction: column;

@@ -32,8 +32,7 @@ import { ResizeHandle } from "@/components/ResizeHandle";
 import { useRailWidth } from "@/hooks/useRailWidth";
 import { confirmDialog } from "@/utils/dialog";
 
-/* Chip tints for automation-log statuses — status categories, not entity
-   types, so they stay literals (see the --entity-* aliasing rule). */
+/* Chip tints for automation-log statuses. These are status categories, not entity types, so they stay literals (see the --entity-* aliasing rule). */
 const AL_STATUS_TINT: Record<string, string | undefined> = {
   success: "#22c55e",
   error: "#ef4444",
@@ -56,12 +55,7 @@ type SettingsSection =
 
 type NavItem = { key: SettingsSection; label: string; icon: string; iconViewBox?: string; adminOnly?: boolean; keywords?: string[] };
 
-// Grouped rather than flat: seven of the twelve sections are admin-only, so a
-// flat list showed non-admins five items with unexplained gaps in the order.
-// Fencing admin work into its own group means the list still reads as three
-// intentional groups when those items are filtered out. Items are alphabetical
-// within each group — there is no meaningful priority order between them, so
-// the only orders left are "alphabetical" and "whatever was added last".
+// Grouped rather than flat: seven of the thirteen sections are admin-only, so a flat list would show non-admins six items with unexplained gaps in the order. With admin work in its own group, the list still reads as deliberate groups when those items are filtered out. Items are alphabetical within each group because there is no meaningful priority order between them.
 const NAV_GROUPS: { group: string; items: NavItem[] }[] = [
   {
     group: "You",
@@ -99,8 +93,7 @@ const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState<SettingsSection>("account");
-  // Each section is its own URL, so Back from a page a section links to
-  // returns to that section, and Back steps through the sections visited.
+  // Each section is its own URL, so Back from a page a section links to returns to that section, and Back steps through the sections visited.
   const openSection = (key: SettingsSection) => {
     setActiveSection(key);
     if (searchParams.get("section") !== key) setSearchParams({ section: key });
@@ -114,8 +107,7 @@ export function SettingsPage() {
   useAppSidebarAutoCollapse();
   const isMobile = useIsMobile();
 
-  // location.key changes on every navigation, even to the same URL, so the
-  // header gear re-runs this while already on /settings.
+  // location.key changes on every navigation, even to the same URL, so clicking the header gear while already on /settings re-runs this effect.
   const locationKey = useLocation().key;
   useEffect(() => {
     let section = searchParams.get("section");
@@ -124,9 +116,7 @@ export function SettingsPage() {
       setActiveSection("account");
       return;
     }
-    // Legacy deep links: these sections were absorbed into Engine — the
-    // EngineSection maps the old section id onto the matching console state,
-    // so the query string is left untouched here.
+    // Legacy deep links: these sections are part of Engine. EngineSection maps the old section id onto the matching console state, so the query string is left untouched here.
     if (
       section === "schedules" ||
       section === "enrichment" ||
@@ -135,8 +125,7 @@ export function SettingsPage() {
     ) {
       section = "engine";
     }
-    // Validate against the items this user can actually see, so a deep link to
-    // an admin-only section falls back to the default instead of a blank pane.
+    // Validate against the items this user can see, so a deep link to an admin-only section falls back to the default instead of a blank pane.
     const item = section ? NAV_ITEMS.find((n) => n.key === section) : undefined;
     if (item && (!item.adminOnly || isAdmin)) {
       setActiveSection(item.key);
@@ -148,9 +137,7 @@ export function SettingsPage() {
     .map((g) => ({ ...g, items: g.items.filter((i) => !i.adminOnly || isAdmin) }))
     .filter((g) => g.items.length > 0);
 
-  // "Where do I change X?" has eleven possible answers — a filter box (same
-  // pattern as the docs sidebar) narrows the nav by section name or by the
-  // setting vocabulary each section covers.
+  // A setting can live in any of up to thirteen sections, so a filter box (same pattern as the docs sidebar) narrows the nav by section name or by the setting keywords each section covers.
   const [navFilter, setNavFilter] = useState("");
   const q = navFilter.trim().toLowerCase();
   const matchedKeyword = (item: NavItem): string | null => {
@@ -164,15 +151,11 @@ export function SettingsPage() {
     .map((g) => ({ ...g, items: g.items.filter(itemMatches) }))
     .filter((g) => g.items.length > 0);
 
-  // The nav is identical on both breakpoints; only its container differs — a
-  // resizable column on desktop, a slide-over sheet behind a one-row trigger on
-  // mobile, where laying it out inline cost the entire viewport.
+  // The nav is identical on both breakpoints; only its container differs: a resizable column on desktop, and on mobile a slide-over sheet behind a one-row trigger, because laid out inline it took up the whole viewport.
   const activeLabel =
     visibleGroups.flatMap((g) => g.items).find((i) => i.key === activeSection)?.label ?? "Settings";
 
-  // Just the one door out to the docs: the API references (Swagger, ReDoc)
-  // moved onto the documentation landing page, which is also reachable from
-  // the header on every route.
+  // The nav footer has a single link, to the documentation. The API references (Swagger, ReDoc) are on the documentation landing page, which the header also links to on every route.
   const navSearch = (
     <input
       className={styles.navSearch}
@@ -228,8 +211,7 @@ export function SettingsPage() {
           <Link to="/documentation">documentation</Link> may cover it.
         </p>
       )}
-      {/* The sheet is the only way to these on a phone — without them,
-          Documentation and the API references were unreachable there. */}
+      {/* On a phone the sheet is the only place the nav footer appears, so without it the documentation link would be unreachable there. */}
       {navFooter}
     </>
   );
@@ -405,9 +387,7 @@ function AccountSection() {
         <div className={styles.cardActions}>
           {canResumeTour && (
             <button
-              // Clearing the deferral reopens the wizard on the saved step; the
-              // step itself is left alone. The run id remounts it, in case this
-              // page's wizard is still mounted-but-dismissed.
+              // Clearing the deferral reopens the wizard on the saved step; the step itself is left alone. A new run id remounts the wizard in case it is still mounted but dismissed on this page.
               onClick={() =>
                 replayOnboarding.mutate({
                   onboarding_deferred_at: null,
@@ -495,8 +475,6 @@ function AppearanceSection() {
   );
 }
 
-/* ─── Feeds & Export ──────────────────────────────────── */
-
 /* ─── Reading Preferences ─────────────────────────────── */
 
 function ReadingSection() {
@@ -504,9 +482,7 @@ function ReadingSection() {
   const updateProfile = useUpdateProfile();
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
-  // Account preferences over the shipped defaults (hooks/useReadingPrefs).
-  // The four list toggles are pushed into this browser's UI store by
-  // useReadingPrefsSync once the profile saves.
+  // Account preferences layered over the shipped defaults (hooks/useReadingPrefs). useReadingPrefsSync pushes the four list toggles into this browser's UI store once the profile saves.
   const prefs = readingPrefs(user?.settings as Record<string, unknown> | undefined);
 
   const updateSetting = async (key: keyof ReadingPrefs, value: unknown) => {
@@ -525,7 +501,7 @@ function ReadingSection() {
     <div className={styles.sectionContent}>
       <h2 className={styles.sectionTitle}>Reading</h2>
       <p className={styles.sectionDesc}>
-        Reader typography, view mode, mark-as-read behaviour, summaries, translation and read-aloud voice.
+        Reader typography, view mode, mark-as-read behavior, summaries, translation and read-aloud voice.
         {saveMsg && <span className={styles.autoSaveIndicator}>{saveMsg}</span>}
       </p>
 
@@ -1082,8 +1058,7 @@ interface ParsedLogLine {
   level: LogLevel;
   event: string;
   details: string;
-  // Epoch ms for chronological merging of DB-backed lines (job runs) into
-  // file lines; continuation lines inherit the previous line's epoch.
+  // Epoch ms, used to merge DB-backed lines (job runs) into file lines in time order; a continuation line gets the previous line's epoch plus one.
   epoch?: number;
 }
 
@@ -1101,11 +1076,7 @@ const LEVEL_LABELS: Record<LogLevel, string> = {
   error: "ERR", warning: "WRN", info: "INF", debug: "DBG",
 };
 
-/* Chip tints for log levels. These are log SEVERITY CATEGORIES of a
-   third-party logger, not the app's entity vocabulary and not the
-   --severity-* ramp (which is theme-managed and reserved for CVE/rule
-   severity), so they stay literals rather than aliasing either. They are the
-   exact colours the old .logLvl_* classes carried. */
+/* Chip tints for log levels. These are log severity categories of a third-party logger, not the app's entity vocabulary and not the --severity-* ramp (which is theme-managed and reserved for CVE/rule severity), so they stay literals rather than aliasing either. The values match the colors of the earlier .logLvl_* classes. */
 const LEVEL_TINT: Record<LogLevel, string> = {
   error: "#ef4444", warning: "#f59e0b", info: "#3b82f6", debug: "#6b7280",
 };
@@ -1132,9 +1103,7 @@ function parseLogLine(raw: string): ParsedLogLine | null {
     // Filter /api/logs polling noise
     if (typeof obj.path === "string" && obj.path.startsWith("/api/logs")) return null;
 
-    // Celery lifecycle boilerplate: success/received/dispatch chatter is fully
-    // covered by the structured views (job_runs rows in this tab, per-entry
-    // stage runs in the reader popover). Failures and job log output stay.
+    // Drop Celery lifecycle messages (task succeeded, task received, beat sending a due task): the structured views already cover them (job_runs rows in this tab, per-entry stage runs in the reader popover). Failures and job log output are kept.
     const ev = typeof obj.event === "string" ? obj.event : "";
     if (
       (obj.logger === "celery.app.trace" && ev.includes("succeeded in")) ||
@@ -1187,8 +1156,7 @@ function parseLogContent(raw: string): ParsedLogLine[] {
   const lines = raw.split("\n")
     .map(parseLogLine)
     .filter((line): line is ParsedLogLine => line !== null);
-  // Continuation lines (tracebacks, non-JSON) inherit the previous line's
-  // epoch so chronological merging keeps them adjacent.
+  // Continuation lines (tracebacks, non-JSON) get the previous line's epoch plus one, so the time-ordered merge keeps them right after that line.
   let lastEpoch = 0;
   for (const line of lines) {
     if (line.epoch != null) {
@@ -1233,8 +1201,7 @@ function summarizeRunDetail(detail: JobRunRow["detail"]): string {
   return parts.join(" · ");
 }
 
-/** A scheduled-job run (job_runs table) rendered as a log line — same shape as
- *  the parsed jobs.log lines so it flows through the level/search filters. */
+/** A scheduled-job run (job_runs table) rendered as a log line, in the same shape as the parsed jobs.log lines so it goes through the level and search filters. */
 function jobRunToLogLine(run: JobRunRow): ParsedLogLine {
   const dur = run.duration_ms != null ? ` (${run.duration_ms}ms)` : "";
   const details: string[] = [];
@@ -1504,8 +1471,7 @@ function LogsSection() {
     } finally {
       setLoading(false);
     }
-    // The Jobs view interleaves the structured job_runs rows (status,
-    // duration, what-it-did) with the raw worker log lines.
+    // The Jobs view interleaves the structured job_runs rows (status, duration, what the run did) with the raw worker log lines.
     if (filename === "jobs.log") {
       try {
         const res = await api.get<{ runs: JobRunRow[] }>("/engine/job-runs");
@@ -1537,8 +1503,7 @@ function LogsSection() {
   const parsedLines = useMemo(() => {
     const lines = parseLogContent(content);
     if (activeFile !== "jobs.log" || !jobRunLines.length) return lines;
-    // Interleave job-run rows chronologically; cap to the window covered by
-    // the loaded file lines so old DB rows don't pad the top of the view.
+    // Interleave job-run rows by time, keeping only those inside the window the loaded file lines cover so old DB rows don't fill the top of the view.
     const firstEpoch = lines.find((l) => l.epoch != null)?.epoch ?? 0;
     return [...lines, ...jobRunLines.filter((j) => (j.epoch ?? 0) >= firstEpoch)].sort(
       (a, b) => (a.epoch ?? 0) - (b.epoch ?? 0),
@@ -1999,7 +1964,7 @@ function UsersSection() {
   );
 }
 
-/* ─── Claude Code Skill ──────────────────────────────── */
+/* ─── Telegram + Claude Code Skill ───────────────────── */
 
 function TelegramSection() {
   return (

@@ -77,7 +77,7 @@ rule {rule_name} {{
 def _string_rule(value: str, context: str, prefix: str, author: str) -> dict:
     """Generate a YARA rule that matches files containing a string."""
     rule_name = _safe_rule_name(prefix, f"string_{value[:20]}")
-    # Escape quotes in the value
+    # Escape backslashes and quotes in the value
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
 
     content = f"""rule {rule_name} {{

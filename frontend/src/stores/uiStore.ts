@@ -4,11 +4,7 @@ import type { SavedSearch } from "@/api/types";
 import type { TableLayoutMap } from "@/types/tableLayout";
 import { adjacentEntryId } from "@/utils/entryNavigation";
 
-/**
- * One turn of the documentation-page copilot thread. Kept in the store rather
- * than in the component so leaving `/documentation` and coming back resumes the
- * conversation instead of restarting it.
- */
+/** One turn of the documentation-page copilot thread. Kept in the store rather than in the component so leaving `/documentation` and coming back resumes the conversation instead of restarting it. */
 export interface DocsChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -24,17 +20,9 @@ export interface DocsChatMessage {
 export interface DocsChatState {
   conversationId: string | null;
   messages: DocsChatMessage[];
-  /**
-   * Slug of the last documentation page read this session. The chat lives on
-   * the landing page, so by the time you come back to ask about a page you have
-   * already navigated off it — this is what keeps "how do I do that?" answerable.
-   */
+  /** Slug of the last documentation page read this session. The chat lives on the landing page, so by the time you come back to ask about a page you have already navigated off it — this is what keeps "how do I do that?" answerable. */
   lastDocSlug?: string | null;
-  /**
-   * A turn is mid-flight. Deliberately NOT persisted: on reload the stream is
-   * gone, and a `true` restored from localStorage would lock the composer
-   * forever. Rehydration drops it, which reads as false.
-   */
+  /** A turn is mid-flight. Deliberately NOT persisted: on reload the stream is gone, and a `true` restored from localStorage would lock the composer forever. Rehydration drops it, which reads as false. */
   streaming?: boolean;
 }
 
@@ -59,8 +47,7 @@ export interface CopilotSeed {
   lockContext?: boolean;
 }
 
-// Mobile viewport keeps the sidebar as an overlay drawer — auto-restoring it
-// after a reader closes (desktop behavior) clobbers manual/swipe dismissals.
+// Mobile viewport keeps the sidebar as an overlay drawer — auto-restoring it after a reader closes (desktop behavior) clobbers manual/swipe dismissals.
 const isMobileViewport = () =>
   typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
 
@@ -78,15 +65,13 @@ export interface ReportWizardState {
   templateType?: string;
 }
 
-/** Context carried by the send-to-report gesture: evidence to attach to a
- *  draft, plus an optional wizard seed for the "start new" path. */
+/** Context carried by the send-to-report gesture: evidence to attach to a draft, plus an optional wizard seed for the "start new" path. */
 export interface SendToReportPayload {
   entryIds?: string[];
   entityIds?: Record<string, string[]>;
   wizardState?: Omit<ReportWizardState, "isOpen">;
   label?: string;
-  /** Sender's commentary, seeding the detections section body — a coverage
-      set's skipped rules read as known gaps. Never overwrites analyst prose. */
+  /** Sender's commentary, seeding the detections section body — a coverage set's skipped rules read as known gaps. Never overwrites analyst prose. */
   note?: string;
 }
 
@@ -95,27 +80,19 @@ export interface SendToReportState {
   payload: SendToReportPayload;
 }
 
-/**
- * Per-table layout + filter state for the shared DataTable. Keyed by a stable
- * table id ("entries", "entity:threat_actor", …) so every table remembers its
- * own columns, widths, order, filters and sort independently.
- */
+/** Per-table layout + filter state for the shared DataTable. Keyed by a stable table id ("entries", "entity:threat_actor", …) so every table remembers its own columns, widths, order, filters and sort independently. */
 export interface TableLayout {
-  /** Explicit visibility overrides; columns the user never touched follow the
-   *  column definition's default, so newly shipped columns get sane defaults. */
+  /** Explicit visibility overrides; columns the user never touched follow the column definition's default, so newly shipped columns get sane defaults. */
   columnVisibility: Record<string, boolean>;
   columnWidths: Record<string, number>;
-  /** User-arranged order (select column excluded — it stays pinned first).
-   *  Empty = default order; unlisted columns keep their default position. */
+  /** User-arranged order (select column excluded — it stays pinned first). Empty = default order; unlisted columns keep their default position. */
   columnOrder: string[];
   textFilters: Record<string, string>;
   hasFilters: Record<string, boolean>;
   /** Per-column dropdown filters (entry State, malware type, CVE severity, …). */
   choiceFilters: Record<string, string>;
   clientSort: { key: string; dir: "asc" | "desc" } | null;
-  /** Epoch ms of the last column visibility/width/order edit. Only the layout
-   *  fields sync to the user profile, and this is the tiebreaker deciding which
-   *  device's arrangement wins — see useTableLayoutSync. */
+  /** Epoch ms of the last column visibility/width/order edit. Only the layout fields sync to the user profile, and this is the tiebreaker deciding which device's arrangement wins — see useTableLayoutSync. */
   layoutUpdatedAt: number;
 }
 
@@ -147,16 +124,12 @@ type ActivePanel = "entries" | "notes";
 /**
  * How wide the search page is looking.
  *
- * This is the `in:` chip in the header field, lifted into the store because two
- * components read it: the chip itself, and the /search page that decides which
- * halves of the result set to render. The entity half is named after the
- * surface that owns entities — the workbench — so the chip matches the nav.
+ * This is the `in:` chip in the header field, lifted into the store because two components read it: the chip itself, and the /search page that decides which halves of the result set to render. The entity half is named after the surface that owns entities — the workbench — so the chip matches the nav.
  */
 export type SearchScope = "feeds" | "workbench" | "everything";
 type ReaderPanel = "intel" | "ai" | "notes" | "tag" | "create_entity" | "add_alias" | "link_entity" | null;
 
-/** "piper" = server-generated natural voice (consistent across devices);
- *  "browser" = the OS Web Speech voice (instant, offline, word-highlighting). */
+/** "piper" = server-generated natural voice (consistent across devices); "browser" = the OS Web Speech voice (instant, offline, word-highlighting). */
 export type ReadAloudEngine = "piper" | "browser";
 
 export type ReaderFontSize = 13 | 14 | 15 | 16 | 18 | 20;
@@ -166,10 +139,7 @@ export type ReaderMaxWidth = 600 | 720 | 860 | 1000 | 0; // 0 = unlimited
 /**
  * Which half of the app the sidebar is showing.
  *
- * IntelFeed is a reader *and* an intelligence workbench, but the sidebar only
- * ever described the reader — the workbench hid behind a 14px icon in the tool
- * strip, and users reported the app as "just an RSS reader". The sidebar now
- * declares both halves up top and swaps its body between them.
+ * IntelFeed is a reader *and* an intelligence workbench, so the sidebar shows both modes at the top and swaps its body between them. A sidebar that only listed the reader left the workbench behind a small icon, and users took the app for an RSS reader.
  */
 export type SidebarMode = "reading" | "workbench";
 export type ProfileOverviewMode = "brief" | "everything";
@@ -181,25 +151,19 @@ interface UIState {
   setSidebarMode: (mode: SidebarMode) => void;
   viewMode: ViewMode;
   sortOrder: SortOrder;
-  // DataTable layout + filter state, namespaced per table id. Persisted so the
-  // columns, widths, order, filters and sort a user set up survive route
-  // navigation and reloads: click around and you return to the view you left.
+  // DataTable layout + filter state, namespaced per table id. Persisted so the columns, widths, order, filters and sort a user set up survive route navigation and reloads: click around and you return to the view you left.
   tables: Record<string, TableLayout>;
   setTableColumnVisible: (tableId: string, key: string, visible: boolean) => void;
   setTableColumnWidth: (tableId: string, key: string, width: number) => void;
   setTableColumnOrder: (tableId: string, order: string[]) => void;
   resetTableLayout: (tableId: string) => void;
-  /** Adopt server-side layouts for tables whose stored arrangement is newer
-   *  (or that this device has never touched). Filters/sort are left alone. */
+  /** Adopt server-side layouts for tables whose stored arrangement is newer (or that this device has never touched). Filters/sort are left alone. */
   applyRemoteTableLayouts: (remote: TableLayoutMap) => void;
-  /** Whose layouts the `tables` map currently holds. Null on a browser that
-   *  hasn't synced yet; a mismatch means someone else logged in here. */
+  /** Whose layouts the `tables` map currently holds. Null on a browser that hasn't synced yet; a mismatch means someone else logged in here. */
   tablesOwnerId: string | null;
-  /** Stamp of the account Reading preferences last pushed into this
-   *  browser's toggles (see hooks/useReadingPrefs). Null: never seeded. */
+  /** Stamp of the account Reading preferences last pushed into this browser's toggles (see hooks/useReadingPrefs). Null: never seeded. */
   readingPrefsApplied: string | null;
-  /** Hand the tables over to a different user: their server layouts replace
-   *  what the previous account left behind, filters and all. */
+  /** Hand the tables over to a different user: their server layouts replace what the previous account left behind, filters and all. */
   takeOverTableLayouts: (userId: string, remote: TableLayoutMap) => void;
   setTableTextFilter: (tableId: string, key: string, value: string) => void;
   setTableHasFilter: (tableId: string, key: string, value: boolean) => void;
@@ -210,39 +174,23 @@ interface UIState {
   selectedEntryId: string | null;
   /** Slug of the story thread open in the reader pane, if any. */
   selectedThreadSlug: string | null;
-  /**
-   * Threads cleared this session, by id. Session-only (never persisted) so a
-   * dismissed thread stays gone across refetches but comes back tomorrow if
-   * the story is still running. Shared state because a thread can be cleared
-   * from its row in the queue or from the reader's top bar.
-   */
+  /** Threads cleared this session, by id. Session-only (never persisted) so a dismissed thread stays gone across refetches but comes back tomorrow if the story is still running. Shared state because a thread can be cleared from its row in the queue or from the reader's top bar. */
   dismissedThreadIds: string[];
   selectedFeedId: string | null;
   selectedCategoryId: string | null;
   virtualFolder: VirtualFolder;
   showUnreadOnly: boolean;
-  // Priority Queue's own Hide Read preference, kept separate from the main feed's
-  // showUnreadOnly so the queue can default to hiding read entries without
-  // clobbering (or being clobbered by) the reader's setting. Defaults on.
+  // Priority Queue's own Hide Read preference, kept separate from the main feed's showUnreadOnly so the queue can default to hiding read entries without clobbering (or being clobbered by) the reader's setting. Defaults on.
   priorityShowUnreadOnly: boolean;
-  // Ephemeral: set true when a feed/category has no unread entries so the UI
-  // shows all entries without clobbering the user's persisted preference.
+  // Ephemeral: set true when a feed/category has no unread entries so the UI shows all entries without clobbering the user's persisted preference.
   unreadFallbackActive: boolean;
   markReadOnScroll: boolean;
-  // Day dividers the user has collapsed in the entry list (persisted as an
-  // array — Sets don't survive JSON serialization). collapseAllMode keeps any
-  // day that loads in later collapsed too, until expand-all / a manual toggle.
+  // Day dividers the user has collapsed in the entry list (persisted as an array — Sets don't survive JSON serialization). collapseAllMode keeps any day that loads in later collapsed too, until expand-all / a manual toggle.
   collapsedDays: string[];
   collapseAllMode: boolean;
-  /**
-   * Entity profile Overview: which sections are left open, per entity type
-   * ("cve", "threat_actor", …). Every row starts closed, so
-   * a type with no entry shows them all closed. Persisted: if you always open Mitigations on techniques, it
-   * stays open on techniques.
-   */
+  /** Entity profile Overview: which sections are left open, per entity type ("cve", "threat_actor", …). Every row starts closed, so a type with no entry shows them all closed. Persisted: if you always open Mitigations on techniques, it stays open on techniques. */
   profileOpenSections: Record<string, string[]>;
-  /** `currentlyOpen` is what the tab shows right now (the stored set, or
-   *  everything), so a toggle from "Everything" lands on a real set. */
+  /** `currentlyOpen` is what the tab shows right now (the stored set, or everything), so a toggle from "Everything" lands on a real set. */
   setProfileSectionOpen: (entityType: string, key: string, open: boolean, currentlyOpen: string[]) => void;
   /** "brief" shows the per-type open set; "everything" opens every section. */
   profileOverviewMode: ProfileOverviewMode;
@@ -256,14 +204,9 @@ interface UIState {
   sidePanelWidth: number;
   settingsNavCollapsed: boolean;
   docsNavCollapsed: boolean;
-  // Automations page: disabled rules are folded away by default so the list
-  // shows only what's actually running.
+  // Automations page: disabled rules are folded away by default so the list shows only what's actually running.
   automationShowDisabled: boolean;
-  // Dashboard grid: when locked, widgets can't be dragged or resized. Starts
-  // locked everywhere — rearranging a board is a deliberate act, while an
-  // accidental drag is costly, and on a phone it is destructive: the grid
-  // collapses to one column, and saving that clamped layout flattens every
-  // widget to a 1/12-width sliver on desktop. Persisted per device.
+  // Dashboard grid: when locked, widgets can't be dragged or resized. Starts locked everywhere — rearranging a board is a deliberate act, while an accidental drag is costly, and on a phone it is destructive: the grid collapses to one column, and saving that clamped layout flattens every widget to a 1/12-width sliver on desktop. Persisted per device.
   dashboardLocked: boolean;
   pendingSavedSearch: SavedSearch | null;
   /** Filter text handed to the note browser when search sends a note there. */
@@ -278,11 +221,7 @@ interface UIState {
   setRuleFacetsCollapsed: (collapsed: boolean) => void;
   ransomwareFacetsCollapsed: boolean;
   setRansomwareFacetsCollapsed: (collapsed: boolean) => void;
-  // Widths of the secondary/tertiary rails (workbench nav, settings nav, the
-  // search / rule / ransomware facet rails, the docs and prompt lists). Keyed
-  // by rail id rather than a field per rail: every one of them wants the same
-  // drag-to-resize behaviour the app sidebar has, and a map keeps adding the
-  // next rail to a single `useRailWidth` call. Absent key = the rail's default.
+  // Widths of the secondary/tertiary rails (workbench nav, settings nav, the search / rule / ransomware facet rails, the docs and prompt lists). Keyed by rail id rather than a field per rail: every one of them wants the same drag-to-resize behavior the app sidebar has, and a map keeps adding the next rail to a single `useRailWidth` call. Absent key = the rail's default.
   railWidths: Record<string, number>;
   setRailWidth: (railId: string, width: number, min: number, max: number) => void;
   resetRailWidth: (railId: string) => void;
@@ -294,9 +233,7 @@ interface UIState {
   keywordsSectionCollapsed: boolean;
   savedSearchesSectionCollapsed: boolean;
   allItemsCollapsed: boolean;
-  // Articles "since last visit" tracker: unread total + timestamp stamped
-  // whenever the user opens the Articles hero, so we can show a "+N since Ht"
-  // delta of articles that arrived since. Frontend-only (no last-read endpoint).
+  // Articles "since last visit" tracker: unread total + timestamp stamped whenever the user opens the Articles hero, so the sidebar can show a "+N since <time>" count of articles that arrived after that. Frontend-only (no last-read endpoint).
   articlesSeenCount: number | null;
   articlesSeenAt: number | null;
   markArticlesSeen: (count: number) => void;
@@ -370,9 +307,7 @@ interface UIState {
   openSendToReport: (payload: SendToReportPayload) => void;
   closeSendToReport: () => void;
   closeReportWizard: () => void;
-  /** App-level modals. Both used to be layout-local state, but the command
-   *  palette has to open them from anywhere, and the add-feed dialog rendered
-   *  inside the sidebar was invisible whenever the sidebar was collapsed. */
+  /** App-level modals. They live in the store rather than in a layout because the command palette opens them from anywhere, and an add-feed dialog rendered inside the sidebar would be invisible whenever the sidebar is collapsed. */
   addFeedOpen: boolean;
   openAddFeed: () => void;
   closeAddFeed: () => void;
@@ -414,12 +349,7 @@ interface UIState {
 /** How far back j/k can walk after auto-read empties the list behind you. */
 const NAV_TRAIL_LIMIT = 200;
 
-/**
- * Record an opened entry on the visit trail. Stepping onto the neighbour the
- * trail already holds just moves the cursor (so walking back and forth doesn't
- * grow a trail of duplicates); anything else truncates the forward half and
- * appends, like browser history.
- */
+/** Record an opened entry on the visit trail. Stepping onto the neighbor the trail already holds just moves the cursor (so walking back and forth doesn't grow a trail of duplicates); anything else truncates the forward half and appends, like browser history. */
 function recordNavTrail(s: UIState, id: string): Pick<UIState, "entryNavTrail" | "entryNavTrailIndex"> {
   const trail = s.entryNavTrail;
   const idx = s.entryNavTrailIndex;
@@ -514,20 +444,16 @@ export const useUIStore = create<UIState>()(
       allItemsCollapsed: false,
       articlesSeenCount: null,
       articlesSeenAt: null,
-      // Manual toggles take ownership: auto-collapse restores (reader panel,
-      // workbench detail routes) must not override an explicit user choice.
+      // Manual toggles take ownership: auto-collapse restores (reader panel, workbench detail routes) must not override an explicit user choice.
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed, sidebarAutoCollapsed: false })),
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed, sidebarAutoCollapsed: false }),
       setSidebarWidth: (width) => set({ sidebarWidth: Math.max(275, Math.min(480, width)) }),
-      // Switching mode always shows the sidebar: the switch is inside it, so a
-      // collapsed sidebar means the click came from the rail toggle's flyout or
-      // a keyboard shortcut, and leaving it collapsed would look like a no-op.
+      // Switching mode always shows the sidebar: the switch is inside it, so a collapsed sidebar means the click came from the rail toggle's flyout or a keyboard shortcut, and leaving it collapsed would look like a no-op.
       setSidebarMode: (mode) => set({ sidebarMode: mode, sidebarCollapsed: false, sidebarAutoCollapsed: false }),
       setViewMode: (mode) => set({ viewMode: mode }),
       setSortOrder: (order) => set({ sortOrder: order }),
       tables: {},
-      // Every layout mutation stamps layoutUpdatedAt so the profile sync can
-      // tell which device arranged the table most recently.
+      // Every layout mutation stamps layoutUpdatedAt so the profile sync can tell which device arranged the table most recently.
       setTableColumnOrder: (tableId, order) =>
         set((s) => patchTable(s.tables, tableId, { columnOrder: order, layoutUpdatedAt: Date.now() })),
       setTableColumnVisible: (tableId, key, visible) =>
@@ -549,8 +475,7 @@ export const useUIStore = create<UIState>()(
             layoutUpdatedAt: Date.now(),
           });
         }),
-      // Layout reset only — the user's active filters and sort are a separate
-      // concern with their own "Clear filters" action.
+      // Layout reset only — the user's active filters and sort are a separate concern with their own "Clear filters" action.
       resetTableLayout: (tableId) =>
         set((s) =>
           patchTable(s.tables, tableId, {
@@ -584,9 +509,7 @@ export const useUIStore = create<UIState>()(
           let changed = false;
           for (const [tableId, r] of Object.entries(remote)) {
             const local = s.tables[tableId];
-            // A table this device has never touched adopts the server layout
-            // outright; otherwise only a strictly newer edit wins, so the
-            // arrangement you just made locally is never yanked out from under you.
+            // A table this device has never touched adopts the server layout outright; otherwise only a strictly newer edit wins, so the arrangement you just made locally is never yanked out from under you.
             if (local && r.updatedAt <= local.layoutUpdatedAt) continue;
             next[tableId] = {
               ...(local ?? EMPTY_TABLE_LAYOUT),
@@ -616,12 +539,10 @@ export const useUIStore = create<UIState>()(
         }),
       setTableClientSort: (tableId, sort) =>
         set((s) => patchTable(s.tables, tableId, { clientSort: sort })),
-      // Matches the header "Clear filters" action: resets the column filters and
-      // dropdowns but leaves the active sort intact.
+      // Matches the header "Clear filters" action: resets the column filters and dropdowns but leaves the active sort intact.
       clearTableFilters: (tableId) =>
         set((s) => patchTable(s.tables, tableId, { textFilters: {}, hasFilters: {}, choiceFilters: {} })),
-      // A thread and an article are both "what the reader pane is showing", so
-      // selecting either clears the other.
+      // A thread and an article are both "what the reader pane is showing", so selecting either clears the other.
       setSelectedThread: (slug) => set(() => {
         if (slug) {
           return {
@@ -706,8 +627,7 @@ export const useUIStore = create<UIState>()(
       setUnreadFallbackActive: (value: boolean) => set({ unreadFallbackActive: value }),
       toggleMarkReadOnScroll: () => set((s) => ({ markReadOnScroll: !s.markReadOnScroll })),
       setMarkReadOnScroll: (value: boolean) => set({ markReadOnScroll: value }),
-      // Manual per-day toggle also drops out of collapse-all mode so it stops
-      // fighting the user's individual choices.
+      // Manual per-day toggle also drops out of collapse-all mode so it stops fighting the user's individual choices.
       toggleDayCollapsed: (dayKey: string) =>
         set((s) => ({
           collapsedDays: s.collapsedDays.includes(dayKey)
@@ -718,8 +638,7 @@ export const useUIStore = create<UIState>()(
       collapseAllDays: (dayKeys: string[]) =>
         set({ collapsedDays: [...dayKeys], collapseAllMode: true }),
       expandAllDays: () => set({ collapsedDays: [], collapseAllMode: false }),
-      // Fold newly-loaded days into the set while collapse-all is active; no-op
-      // (returns unchanged state) when there's nothing new, to avoid re-renders.
+      // Fold newly-loaded days into the set while collapse-all is active; no-op (returns unchanged state) when there's nothing new, to avoid re-renders.
       mergeCollapsedDays: (dayKeys: string[]) =>
         set((s) => {
           const have = new Set(s.collapsedDays);
@@ -734,8 +653,7 @@ export const useUIStore = create<UIState>()(
         }),
       setActivePanel: (panel) => set({ activePanel: panel }),
       setEntryListWidth: (width) => set({ entryListWidth: Math.max(200, Math.min(800, width)) }),
-      // Manual toggle takes ownership: the auto-collapse restore in
-      // setActiveReaderPanel must not override an explicit user choice.
+      // Manual toggle takes ownership: the auto-collapse restore in setActiveReaderPanel must not override an explicit user choice.
       setEntryListCollapsed: (collapsed) => set({ entryListCollapsed: collapsed, entryListAutoCollapsed: false }),
       setSidePanelWidth: (width) => set({ sidePanelWidth: Math.max(280, Math.min(2400, width)) }),
       toggleSettingsNav: () => set((s) => ({ settingsNavCollapsed: !s.settingsNavCollapsed })),
@@ -746,9 +664,7 @@ export const useUIStore = create<UIState>()(
       toggleDashboardLocked: () => set((s) => ({ dashboardLocked: !s.dashboardLocked })),
       setActiveReaderPanel: (panel) => set((s) => {
         if (panel) {
-          // Collapse both left columns to make room for the panel, but only
-          // claim ownership (auto flag) of ones the user hadn't collapsed
-          // themselves — closing the panel restores exactly what it took.
+          // Collapse both left columns to make room for the panel, but only claim ownership (auto flag) of ones the user hadn't collapsed themselves — closing the panel restores exactly what it took.
           return {
             activeReaderPanel: panel,
             entryListCollapsed: true,
@@ -757,8 +673,7 @@ export const useUIStore = create<UIState>()(
             sidebarAutoCollapsed: s.sidebarCollapsed ? s.sidebarAutoCollapsed : true,
           };
         }
-        // Reader is still open, so leave the sidebar in reading mode
-        // (collapsed) and only give back the entry list if we auto-took it.
+        // The reader is still open, so the sidebar stays collapsed; the entry list is restored only if opening the panel collapsed it.
         return {
           activeReaderPanel: null,
           entryListCollapsed: s.entryListAutoCollapsed ? false : s.entryListCollapsed,
@@ -878,8 +793,7 @@ export const useUIStore = create<UIState>()(
       setDocsChat: (update) => set((state) => ({ docsChat: update(state.docsChat) })),
       resetDocsChat: () =>
         set((state) => ({
-          // Keep lastDocSlug: a new question asked right after reading a page is
-          // still about that page.
+          // Keep lastDocSlug: a new question asked right after reading a page is still about that page.
           docsChat: { conversationId: null, messages: [], streaming: false, lastDocSlug: state.docsChat.lastDocSlug },
         })),
     }),
@@ -890,8 +804,7 @@ export const useUIStore = create<UIState>()(
         if (!persisted || typeof persisted !== "object") return persisted;
         let s = persisted as Record<string, unknown>;
 
-        // v0 → v1: the entry table's flat column/filter fields became the
-        // per-table `tables` map, so existing users keep the layout they built.
+        // v0 → v1: the entry table's flat column/filter fields became the per-table `tables` map, so existing users keep the layout they built.
         if (version < 1) {
           const {
             tableColumnVisibility, tableColumnWidths, tableColumnOrder,
@@ -915,10 +828,7 @@ export const useUIStore = create<UIState>()(
           };
         }
 
-        // v1 → v2: layouts gained `layoutUpdatedAt` for profile sync. Stamp the
-        // arrangements already on this device so they upload on next load
-        // instead of sitting at timestamp 0 and losing every tiebreak. Tables
-        // sitting at defaults stay unstamped so they aren't pushed at all.
+        // v1 → v2: layouts gained `layoutUpdatedAt` for profile sync. Stamp the arrangements already on this device so they upload on next load instead of sitting at timestamp 0 and losing every tiebreak. Tables sitting at defaults stay unstamped so they aren't pushed at all.
         if (version < 2) {
           const tables = (s.tables as Record<string, TableLayout>) ?? {};
           const now = Date.now();
@@ -937,35 +847,25 @@ export const useUIStore = create<UIState>()(
           };
         }
 
-        // v2 → v3: the entity search scope was called "intelligence" while the
-        // surface it searches is called the workbench everywhere else in the
-        // app. One name, and the chip now matches the nav.
+        // v2 → v3: the entity search scope was called "intelligence" while the surface it searches is called the workbench everywhere else in the app. One name, and the chip now matches the nav.
         if (version < 3 && s.searchScope === "intelligence") {
           s = { ...s, searchScope: "workbench" };
         }
 
-        // v3 → v4: Feeds no longer starts collapsed. Everyone who has opened
-        // the app is carrying a persisted `true` written by the old default,
-        // which would keep the section shut forever — drop the stored value so
-        // the new default applies. A deliberate collapse is indistinguishable
-        // from the default here, so this does re-open it for those users once.
+        // v3 → v4: Feeds no longer starts collapsed. Everyone who has opened the app is carrying a persisted `true` written by the old default, which would keep the section shut forever — drop the stored value so the new default applies. A deliberate collapse is indistinguishable from the default here, so this does re-open it for those users once.
         if (version < 4) {
           s = { ...s };
           delete s.feedsSectionCollapsed;
         }
 
-        // v4 → v5: "Why it's ranked" collapses per entry now and no longer
-        // stores a preference, so drop the stranded key; and Radar left the sort
-        // dropdown (the Priority Queue is its surface), so land anyone parked on
-        // the removed option back on Newest.
+        // v4 → v5: "Why it's ranked" collapses per entry now and no longer stores a preference, so drop the stranded key; and Radar left the sort dropdown (the Priority Queue is its surface), so land anyone parked on the removed option back on Newest.
         if (version < 5) {
           s = { ...s };
           delete s.whyRankedCollapsed;
           if (s.sortOrder === "radar") s.sortOrder = "newest";
         }
 
-        // v5 → v6: profile Overview rows all start closed. Stored choices had
-        // the old per-type default-open rows baked in, so they start over.
+        // v5 → v6: profile Overview rows all start closed. Stored choices had the old per-type default-open rows baked in, so they start over.
         if (version < 6) {
           s = { ...s, profileOpenSections: {} };
         }
@@ -1013,8 +913,7 @@ export const useUIStore = create<UIState>()(
         docsNavCollapsed: state.docsNavCollapsed,
         automationShowDisabled: state.automationShowDisabled,
         dashboardLocked: state.dashboardLocked,
-        // Capped: AI turns are long, and this store also carries table
-        // layouts and dashboards that must not be squeezed out.
+        // Capped: AI turns are long, and this store also carries the table layouts, which must not be squeezed out of localStorage.
         docsChat: {
           conversationId: state.docsChat.conversationId,
           messages: state.docsChat.messages.slice(-DOCS_CHAT_PERSIST_LIMIT),

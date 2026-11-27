@@ -3,11 +3,7 @@ import api from "@/api/client";
 import type { StoryThread, StoryThreadDetail, ThreadListResponse } from "@/api/types";
 import { isVisitorNow } from "@/stores/authStore";
 
-/**
- * Open story threads — one unfolding story instead of the twenty-three articles
- * that reported it. Used by the entry list to fold the pile into a single row
- * and by the threads page to browse what is running.
- */
+/** Open story threads: one developing story in place of the many articles that reported it. Used by the entry list to fold those articles into a single row and by the threads page to browse open stories. */
 export function useOpenThreads(enabled = true, limit = 40) {
   return useQuery({
     queryKey: ["threads", "open", limit],
@@ -21,12 +17,7 @@ export function useOpenThreads(enabled = true, limit = 40) {
   });
 }
 
-/**
- * Threads whose title matches — for a picker that needs one *named* story
- * rather than the recent ones. Status "any" on purpose: a dormant story is
- * exactly the kind you reach for by name, and following one onto a campaign
- * still picks up its later waves if it wakes.
- */
+/** Threads whose title matches, for a picker that needs one specific story by name rather than the recent ones. Status is "any" on purpose: a dormant story is the kind people look up by name, and a dormant thread followed onto a campaign still picks up its later coverage if it becomes active again. */
 export function useThreadSearch(q: string, limit = 20) {
   const term = q.trim();
   return useQuery({

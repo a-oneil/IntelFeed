@@ -2,8 +2,8 @@
 
 The tool registry (app/tools/) restates platform vocabulary — entity types,
 rule formats, TLP markings, automation triggers, adapter types, relationship
-verbs — inside tool input schemas. Historically those copies rotted as the
-platform moved (a 2026-08 audit found 13 broken tools). These tests pin every
+verbs — inside tool input schemas. Historically those copies drifted as the
+platform changed (a 2026-08 audit found 13 broken tools). These tests pin every
 schema enum to its canonical source and catch executor/schema mismatches, so
 the registry breaks loudly in CI-time checks instead of silently at runtime.
 """

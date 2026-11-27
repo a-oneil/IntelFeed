@@ -9,8 +9,7 @@ export interface QueueItem {
   audioUrl: string;
   thumbnailUrl: string | null;
   durationSeconds: number | null;
-  /** "podcast" = external episode with backend playback tracking; "tts" =
-   *  server-generated read-aloud whose mediaId is synthetic (no playback row). */
+  /** "podcast" = external episode with backend playback tracking; "tts" = server-generated read-aloud whose mediaId is synthetic (no playback row). */
   kind?: "podcast" | "tts";
 }
 
@@ -183,8 +182,7 @@ export const usePlayerStore = create<PlayerState>()(
     {
       name: "intelfeed-player",
       storage: createJSONStorage(() => {
-        // Fall back to a no-op store when localStorage is missing or broken
-        // (jsdom in tests, private mode, sandboxed iframes, etc.).
+        // Fall back to an in-memory store when localStorage is missing or broken (jsdom in tests, private mode, sandboxed iframes, etc.).
         if (
           typeof window === "undefined" ||
           !window.localStorage ||

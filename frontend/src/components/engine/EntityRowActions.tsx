@@ -1,15 +1,6 @@
-/**
- * EntityRowActions — the per-row "⋯" entity-management menu of the Review
- * queue, so an analyst can fix the entity a proposal is about without
- * pivoting to its profile: merge it into another, rename it, add an alias,
- * convert its type, or delete it and put its names on the do-not-recreate
- * list. The same actions as the Entities view, for any catalogue type the
- * queue surfaces.
- *
- * Rendered as a fixed-position popover so it escapes the table's scroll
- * clipping. Every change invalidates the review, extraction and engine
- * caches, and the proposals about a deleted entity are cleared server-side.
- */
+/** EntityRowActions: the per-row "⋯" entity-management menu of the Review queue, so an analyst can fix the entity a proposal is about without opening its profile: merge it into another, rename it, add an alias, convert its type, or delete it and put its names on the do-not-recreate list (countries are deleted without the denylist). The same actions as the Entities view, for any catalog type the queue shows.
+
+Rendered as a fixed-position popover so the table's scroll container does not clip it. Every change invalidates the review (hygiene), extraction, engine, entity-link and relationship caches, and the proposals about a deleted entity are cleared server-side. */
 
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -93,7 +84,7 @@ export function EntityRowActions({
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
-    // Any scroll shifts the anchor — close rather than track.
+    // Any scroll moves the button the menu is anchored to, so close the menu rather than reposition it.
     window.addEventListener("scroll", close, true);
     window.addEventListener("resize", close);
     return () => {

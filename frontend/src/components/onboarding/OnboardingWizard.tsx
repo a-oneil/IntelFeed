@@ -29,13 +29,8 @@ function OnboardingSession() {
 
   const steps = useMemo(() => visibleSteps(!!isAdmin, status), [isAdmin, status]);
 
-  // Resume where they left off. Closing the modal saves the step; only
-  // finishing sets onboarding_completed, so a stray Escape can no longer burn
-  // the entire flow for an account — which it used to.
-  // Track position by step id, never by index. The visible set legitimately
-  // changes under the user — they run the seeder and re-check, a feed finishes
-  // polling — and an index would silently point at a different step when it
-  // does, teleporting them mid-sentence.
+  // Resume where the user left off. Closing the modal saves the step; only finishing sets onboarding_completed, so pressing Escape by accident does not end the tour for the account.
+  // Track position by step id, never by index. The set of visible steps can change while the wizard is open (the user runs the seeder and re-checks, a feed finishes polling), and an index would then point at a different step and jump the user to it.
   const savedStep = user?.settings?.onboarding_step as StepId | undefined;
   const [currentId, setCurrentId] = useState<StepId | null>(null);
   const resumed = useRef(false);
@@ -45,8 +40,7 @@ function OnboardingSession() {
     setCurrentId(savedStep && steps.some((s) => s.id === savedStep) ? savedStep : steps[0].id);
   }, [savedStep, steps, statusLoading]);
 
-  // If the step they were on disappears (they just satisfied it), fall to the
-  // next one still standing rather than back to the beginning.
+  // If the current step disappears (the user just completed it), move to the next remaining step instead of back to the beginning.
   const found = steps.findIndex((s) => s.id === currentId);
   const position = STEPS.findIndex((s) => s.id === currentId);
   const nextRemaining = steps.findIndex((s) => STEPS.indexOf(s) > position);
@@ -58,9 +52,7 @@ function OnboardingSession() {
     if (currentId !== null && found < 0 && step) setCurrentId(step.id);
   }, [currentId, found, step]);
 
-  // Closing saves the step *and* records the deferral. `dismissed` dies with the
-  // page, so without the second half every hard refresh reopened the tour and
-  // closing meant nothing until you walked all the way to Finish.
+  // Closing saves the step *and* records the deferral. `dismissed` is page state and is lost on reload, so without the deferral every hard refresh would reopen the tour until the user reached Finish.
   const close = useCallback(() => {
     setDismissed(true);
     saveProgress.mutate({
@@ -92,8 +84,7 @@ function OnboardingSession() {
   );
   const prev = useCallback(() => index > 0 && goTo(steps[index - 1].id), [goTo, index, steps]);
 
-  // Focus management: move focus into the dialog on open, keep Tab inside it,
-  // and hand focus back to whatever had it when we close.
+  // Focus management: move focus into the dialog on open, keep Tab inside it, and return focus to the previously focused element on close.
   useEffect(() => {
     if (dismissed) return;
     restoreFocusTo.current = document.activeElement;
@@ -240,9 +231,7 @@ function OnboardingSession() {
 function useThemesSafely() {
   const { data } = useThemes();
   const setThemePref = useSetThemePreference();
-  // The preference is a column on the user, not a key in the settings blob —
-  // nothing ever writes `settings.theme_id`, so reading it meant no theme
-  // showed as selected, not even the one just clicked.
+  // The theme preference is a column on the user (`theme_id`), not a key in the settings blob; nothing writes `settings.theme_id`, so reading that would show no theme as selected, not even the one just clicked.
   const current = useAuthStore((s) => s.user?.theme_id ?? undefined);
   return { list: data ?? [], current, apply: (id: string) => setThemePref.mutate({ theme_id: id }) };
 }

@@ -64,8 +64,8 @@ _SHODAN_TAG_TO_INFRA = {"vpn": "vpn", "proxy": "proxy", "tor": "tor", "scanner":
 
 
 def _aliases(value, entity) -> list[str]:
-    # These lists feed the autolinker vocabulary, and an unfiltered
-    # dictionary-word alias is how the false-positive link epidemic started.
+    # These lists feed the autolinker vocabulary, and unfiltered
+    # dictionary-word aliases caused a wave of false-positive links.
     from app.intelligence.autolinker import filter_aliases
 
     return filter_aliases([a for a in value or [] if isinstance(a, str)], getattr(entity, "name", "") or "")
@@ -291,7 +291,7 @@ def _same(text: str, value) -> bool:
     return text.casefold() == render_value(value).casefold()
 
 
-#: Who holds a ranked column's value. ``None``: nobody we may replace (an
+#: Who holds a ranked column's value. ``None``: no source may replace it (an
 #: analyst asserted it, or nothing did). Otherwise (rank, sources): the best
 #: rank among the enrichment sources that claim it and those sources; an
 #: AI or reference-feed value holds at no rank, so any source replaces it.

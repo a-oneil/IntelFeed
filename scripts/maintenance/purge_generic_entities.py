@@ -4,7 +4,7 @@ The creation gate (``generic_name_reason`` in
 ``app/intelligence/entity_resolution.py``) stops the extractor minting
 "the threat actor", "North America", "Iranian hackers" or "remote access
 trojan" as entities. Rows created before a rule existed are still in the
-catalogue, and every article that mentions the phrase links to them — which
+catalog, and every article that mentions the phrase links to them — which
 is what fills the review queues with remove-link and reclassify proposals
 about the same junk names. This script applies today's gate to what is
 already on file and deletes what fails it.
@@ -17,7 +17,7 @@ Three checks, the same ones the live gate runs, in this order:
                   non-entity rules: protocols, cipher names, install
                   commands, code tokens, OS APIs, categories, technique
                   names, attribution descriptors, number-only actors)
-    country       the name is a catalogue country, alias or demonym
+    country       the name is a catalog country, alias or demonym
 
 Deletion goes through the review queues' own path
 (``delete_named_entity`` in ``app/api/extraction.py``): entry links and

@@ -170,14 +170,14 @@ function apiErrorMessage(err: unknown): string {
   return axiosErr.response?.data?.error?.message ?? axiosErr.message ?? "Unknown error";
 }
 
-/** Chip props for the accent-outlined variants — was `.badgeAccent` / `.customTag`. */
+/** Chip props for the accent-outlined variants. */
 const ACCENT_OUTLINE = {
   tone: "outline",
   tint: "color-mix(in srgb, var(--accent) 45%, transparent)",
   fg: "var(--accent)",
 } as const;
 
-/** Chip props for a plain outlined micro tag — was `.deprecatedTag` / `.histTag`. */
+/** Chip props for a small plain outlined tag. */
 const MUTED_OUTLINE = {
   tone: "outline",
   tint: "var(--border)",
@@ -345,8 +345,7 @@ const EMPTY_SEED: CreateSeed = {
 export default function PromptWorkspace() {
   const { data: tasks, isLoading } = useAITasks();
   const { data: allProviders } = useAIProviders();
-  // Site assignments only ever point at the instance's providers; the
-  // caller's personal keys in the same response are not candidates here.
+  // Site assignments only ever point at the instance's providers; the caller's personal keys in the same response are not candidates here.
   const providers = useMemo(() => allProviders?.filter((p) => !p.user_id), [allProviders]);
   const { data: assignments } = useAllTaskAssignments();
   const { data: rulesPage } = useAutomationRules();
@@ -454,9 +453,7 @@ export default function PromptWorkspace() {
         </select>
       </div>
 
-      {/* The rail's width rides a custom property: the shell is a grid, and
-          below 1160px it drops to a single column that has to be able to take
-          the width back. */}
+      {/* The rail's width is set through a custom property rather than inline grid columns: the shell is a grid, and below 1160px it drops to a single column, which the stylesheet can only do if the width is not fixed inline. */}
       <div
         className={styles.shell}
         style={{ "--prompt-rail-w": `${rail.width}px` } as React.CSSProperties}
@@ -726,9 +723,7 @@ function TaskDetail({
   const loadedVersionRef = useRef<string | null>(null);
   const userEditorRef = useRef<PromptEditorHandle>(null);
 
-  // Output schema: system tasks keep their shipped default and edit a
-  // separate override (the seeder re-syncs the default on deploy); custom
-  // tasks own their schema outright and edit it in place.
+  // Output schema: system tasks keep their shipped default and edit a separate override (the seeder re-syncs the default on deploy); custom tasks own their schema outright and edit it in place.
   const isCustomTask = !task.is_system;
   const effectiveSchemaText = useMemo(() => {
     const schema = task.output_schema_override ?? task.output_schema;
@@ -737,8 +732,7 @@ function TaskDetail({
   const [schemaText, setSchemaText] = useState(effectiveSchemaText);
   const [schemaMessage, setSchemaMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const schemaDirty = schemaText !== effectiveSchemaText;
-  // Top-level required fields in the shipped default mark tasks whose output
-  // is parsed by pipeline code (one-pass extraction, link validation, …).
+  // Top-level required fields in the shipped default mark tasks whose output is parsed by pipeline code (one-pass extraction, link validation, …).
   const pipelineFields = useMemo(
     () => (Array.isArray(task.output_schema?.required) ? (task.output_schema.required as string[]) : []),
     [task.output_schema]
@@ -1400,18 +1394,12 @@ function TestBench({
 
 /* ─── Agent tools ───────────────────────────────────────────────── */
 
-/** Provider types whose tool loop runs in IntelFeed and reads this list. The
- *  Claude CLI gets its tools from the MCP server instead. */
+/** Provider types whose tool loop runs in IntelFeed and reads this list. The Claude CLI gets its tools from the MCP server instead. */
 const IN_PROCESS_TOOL_TYPES = new Set(["ollama", "claude", "openai_compatible"]);
 
 /**
- * Per-task tool allowlist for agentic tasks on a provider with an in-process
- * tool loop (Ollama, Anthropic API, OpenAI-compatible). Stored as the
- * assignment config's `agent_tools` key.
- * When unset, the copilot is shown a curated set and reaches every other tool
- * the user may run through find_tools/call_tool; a custom list limits it to
- * exactly those tools. Other agentic tasks get every read-only tool. The
- * copilot's write tools always wait for the user's Confirm.
+ * Per-task tool allowlist for agentic tasks on a provider with an in-process tool loop (Ollama, Anthropic API, OpenAI-compatible). Stored as the assignment config's `agent_tools` key.
+ * When unset, the copilot is shown a curated set and reaches every other tool the user may run through find_tools/call_tool; a custom list limits it to exactly those tools. Other agentic tasks get every read-only tool. The copilot's write tools always wait for the user's Confirm.
  */
 function AgentToolsRow({
   task,
@@ -1431,8 +1419,7 @@ function AgentToolsRow({
   const { data: toolDefs } = useAgentTools({ enabled: relevant });
   const { data: copilotCfg } = useCopilotConfig();
 
-  // The copilot may propose writes (each confirmed by the user); other agentic
-  // tasks run unattended, so they are offered reads only.
+  // The copilot may propose writes (each confirmed by the user); other agentic tasks run unattended, so they are offered reads only.
   const offerable = useMemo(
     () =>
       (toolDefs ?? [])
@@ -1554,12 +1541,7 @@ function AgentToolsRow({
   );
 }
 
-/**
- * Copilot writes that run without the person clicking Confirm — the
- * `copilot_auto_approve_tools` system setting. Empty by default. Only writes
- * the backend says may skip the click are listed: never admin-only tools or
- * deletes. Applies whichever provider answers, the Claude CLI included.
- */
+/** Copilot writes that run without the user clicking Confirm (the `copilot_auto_approve_tools` system setting, empty by default). Only writes the backend allows to skip the click are listed, never admin-only tools or deletes. Applies whichever provider answers, the Claude CLI included. */
 function CopilotAutoApproveRow() {
   const { data: copilotCfg } = useCopilotConfig();
   const { data: settings } = useSystemSettings();

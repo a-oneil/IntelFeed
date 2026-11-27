@@ -155,8 +155,7 @@ export function AutolinkingSection({
   hours,
   unreviewed = false,
 }: {
-  /** Render inside the Engine console card: no KPI tiles, no view toggle
-   *  (the parent's tabs control links vs relationships). */
+  /** Render inside the Engine console card: no KPI tiles, no view toggle (the parent's tabs control links vs relationships). */
   embedded?: boolean;
   /** Only rows from the last N hours (the console's time picker); every row when unset. */
   hours?: number;
@@ -170,7 +169,7 @@ export function AutolinkingSection({
   useEffect(() => {
     if (viewProp) setView(viewProp);
   }, [viewProp]);
-  // A type only relationships have (country, observable) is no links filter.
+  // A type only relationships have (country, observable) is not a valid links filter, so clear it when switching to links.
   useEffect(() => {
     if (view === "links") setEntityType((t) => (LINK_TYPES.includes(t) ? t : ""));
   }, [view]);
@@ -313,8 +312,7 @@ export function AutolinkingSection({
 
   return (
     <div className={styles.wrap}>
-      {/* KPI row + view toggle — standalone only; the Engine console renders
-          its own healthline/tabs when embedding this table. */}
+      {/* KPI row and view toggle, standalone only; the Engine console renders its own health line and tabs when embedding this table. */}
       {!embedded && (
         <>
           <div className={styles.kpis}>

@@ -303,9 +303,9 @@ class TestExtractFilters:
 
 
 class TestCaseInsensitiveKeywords:
-    """Lowercase `not` used to tokenize as the search word "not" while leaving
-    the filter it was meant to negate in place *positively* — the query did the
-    opposite of what it said."""
+    """Boolean keywords match in any case. Read as the search word "not", a
+    lowercase `not` would leave the filter it negates applied *positively*, so
+    the query would do the opposite of what it says."""
 
     def test_lowercase_not_negates(self):
         ast = parse_query("not tag:noise")

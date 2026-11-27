@@ -1,4 +1,4 @@
-"""Tests for R2: component-based relationship strength + pivot payload."""
+"""Tests for component-based relationship strength and the pivot payload."""
 
 import importlib.util
 import uuid
@@ -96,12 +96,12 @@ async def test_pivot_strength_and_typed_join(db_session, test_feed, test_threat_
     assert s["articles"] == 2
     assert s["sources"] == 1
     assert 0 < s["score"] <= 1
-    assert item["proximity_score"] == s["score"]  # badge reads an honest 0–1 now
+    assert item["proximity_score"] == s["score"]  # proximity_score is the same 0–1 strength score
     assert s["tier"] in ("weak", "moderate", "strong")
     assert s["last_seen"] is not None
     assert sum(s["trend"]) == 2
 
-    # typed layer joined onto the co-occurring row instead of being dropped
+    # the typed relationship is joined onto the co-occurrence row, not dropped
     assert item["relationship_type"] == "uses"
     assert item["relationship_direction"] == "outbound"
     assert item["relationship_confidence"] in ("possible", "probable")
@@ -408,7 +408,7 @@ async def test_direction_migration_round_trip(db_session, test_threat_actor):
 
 @pytest.mark.asyncio
 async def test_graph_edges_carry_typed_verbs(db_session, test_feed, test_threat_actor):
-    """R4: graph edges use the typed verb, oriented semantically, with provenance."""
+    """Graph edges use the typed verb, oriented semantically, with provenance."""
     from app.intelligence.correlation import build_entity_graph
     from app.intelligence.correlation_cache import invalidate_entity_cache
 
@@ -444,8 +444,8 @@ async def test_graph_edges_carry_typed_verbs(db_session, test_feed, test_threat_
             None,
         )
 
-    # A single co-mention reaches the "possible" signal tier — the map shows
-    # every claim tier now, so the edge is drawn immediately, marked possible.
+    # A single co-mention reaches the "possible" signal tier. The map shows
+    # every claim tier, so the edge is drawn immediately, marked possible.
     rel = (await db_session.execute(select(EntityRelationship))).scalar_one()
     assert rel.confidence == "possible"
     signal_edge = _actor_malware_edge(await build_entity_graph(db_session, "malware", malware.id))
@@ -532,7 +532,7 @@ async def test_relationship_signals_endpoint(client, auth_headers, db_session, t
     )
     await db_session.flush()
 
-    # POST, not GET: the table sends every loaded row's id, which overflowed
+    # POST, not GET: the table sends every loaded row's id, which overflows
     # gunicorn's request-line limit as a query string.
     resp = await client.post(
         "/api/entity-relationships/signals/threat_actor",

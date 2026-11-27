@@ -36,10 +36,7 @@ object HtmlText {
             .replace("&nbsp;", " ")
             .trim()
 
-    /**
-     * Strips backend LLM artifacts like </new_description>, <parameter name="reason">...</parameter>,
-     * or reasoning/scratchpad tags that occasionally leak into entity descriptions from server prompts.
-     */
+    /** Strips AI output artifacts such as </new_description>, <parameter name="reason">...</parameter>, or thought/reasoning/scratchpad tags that occasionally leak into entity descriptions from server prompts. */
     fun cleanAiArtifacts(text: String?): String? {
         if (text.isNullOrBlank()) return null
         val stripped = text
@@ -83,11 +80,7 @@ object HtmlText {
         return result
     }
 
-    /**
-     * Single-paragraph version for list cards with a couple of lines. A long value (some feeds put
-     * the whole article in the summary) is cut before parsing: it used to be parsed in full, on the
-     * main thread, every time its card came back into view, since long values aren't cached.
-     */
+    /** Single-paragraph version for list cards with a couple of lines. A long value (some feeds put the whole article in the summary) is cut before parsing: long values aren't cached, so parsing one in full would run on the main thread every time its card came back into view. */
     fun toSnippet(html: String): String {
         if (html.isEmpty()) return ""
         val source = if (html.length > MAX_CACHEABLE_LENGTH) cutForSnippet(html) else html

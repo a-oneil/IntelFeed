@@ -11,20 +11,12 @@ const SAVE_INTERVAL = 30_000; // Save progress every 30s
 const VOICE_STORAGE_KEY = "intelfeed:readAloud:voice";
 const SPEECH_PROGRESS_KEY = "intelfeed:readAloud:progress";
 const SPEECH_PROGRESS_MAX_ENTRIES = 50;
-// Chrome / Edge cut off utterances after ~15 seconds. Pinging pause/resume
-// every 10s while speaking keeps the queue alive on long paragraphs.
+// Chrome / Edge cut off utterances after ~15 seconds. Calling pause/resume every 10s while speaking keeps the queue alive on long paragraphs.
 const KEEP_ALIVE_INTERVAL = 10_000;
-// Watchdog: if speechSynthesis hasn't been speaking for this long while we
-// still think we're reading, assume it stalled and recover.
+// Watchdog: if speechSynthesis hasn't been speaking for this long while we still think we're reading, assume it stalled and recover.
 const STALL_RECOVERY_MS = 3_000;
 
-/**
- * Detect any mobile device. The pause()/resume() keep-alive trick is a
- * desktop Chromium workaround for the 15s utterance cutoff — on mobile it
- * tends to make things worse: iOS Safari permanently stalls on pause(), and
- * Android Chrome has its own quirks where pause/resume can cause silent
- * dropouts. The stall watchdog handles cutoffs on mobile instead.
- */
+/** Detect any mobile device. The pause()/resume() keep-alive is a desktop Chromium workaround for the 15s utterance cutoff, and on mobile it makes things worse: iOS Safari permanently stalls on pause(), and on Android Chrome pause/resume can cause silent dropouts. The stall watchdog handles cutoffs on mobile instead. */
 function isMobileDevice(): boolean {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent;
@@ -369,10 +361,7 @@ function SpeechMode() {
   const paragraphsRef = useRef<string[]>([]);
   const playbackRateRef = useRef(playbackRate);
   const skipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Generation token: bumped on every speakParagraph() / cancel so stale
-  // onend/onerror callbacks from canceled utterances are ignored. Without this,
-  // cancel() can fire onend for the previous utterance after we've already
-  // queued the next one, causing the same paragraph to be re-read.
+  // Generation token: bumped on every speakParagraph() / cancel so stale onend/onerror callbacks from canceled utterances are ignored. Without this, cancel() can fire onend for the previous utterance after the next one is already queued, and the same paragraph is read twice.
   const generationRef = useRef(0);
   const isSupported = typeof window !== "undefined" && "speechSynthesis" in window;
 
@@ -435,8 +424,7 @@ function SpeechMode() {
         return;
       }
 
-      // Bump the generation token before cancel() so any onend/onerror that
-      // fires for the previous (now-canceled) utterance is ignored.
+      // Bump the generation token before cancel() so any onend/onerror that fires for the previous (just canceled) utterance is ignored.
       const myGen = ++generationRef.current;
       window.speechSynthesis.cancel();
 
@@ -456,12 +444,9 @@ function SpeechMode() {
       const voice = getVoice();
       if (voice) utterance.voice = voice;
 
-      // Word-position table for the timer-based highlight fallback. Mobile
-      // browsers (Android Chrome especially) don't fire onboundary events for
-      // most voices, so without this the highlight stays frozen on mobile.
+      // Word-position table for the timer-based highlight fallback. Mobile browsers (Android Chrome especially) don't fire onboundary events for most voices, so without this the highlight stays frozen on mobile.
       const wordPositions: Array<{ start: number; len: number; t: number }> = [];
-      // Approximate speech rate: ~15 chars/sec at rate 1.0 (~150 wpm with avg
-      // 6-char words). Scaled by the utterance rate.
+      // Approximate speech rate: ~15 chars/sec at rate 1.0 (~150 wpm with avg 6-char words). Scaled by the utterance rate.
       const charsPerSec = 15 * Math.max(0.1, utteranceRate);
       const wordRe = /\S+/g;
       let wm: RegExpExecArray | null;
@@ -531,8 +516,7 @@ function SpeechMode() {
         setSpeechWord(-1, 0);
         currentIndexRef.current = index;
         if (speechTrack) writeSpeechProgress(speechTrack.entryId, index);
-        // Wait briefly to see if the browser will deliver real onboundary
-        // events. If not (mobile), kick in the timer-based estimator.
+        // Wait 350ms to see if the browser delivers real onboundary events. If not (mobile), start the timer-based estimator.
         fallbackStartTimer = setTimeout(() => {
           fallbackStartTimer = null;
           if (!boundaryFired) startFallbackHighlight();
@@ -581,27 +565,23 @@ function SpeechMode() {
     [isSupported, getVoice, setSpeechIndex, setSpeechWord, stopSpeech, speechTrack],
   );
 
-  // Start speaking when speechTrack changes. Wait for the voices list to be
-  // populated before kicking off — otherwise getVoice() returns null and the
-  // first paragraph is read with the system default (robot) voice instead of
-  // the user's selection.
+  // Start speaking when speechTrack changes. Wait for the voices list to be populated first, otherwise getVoice() returns null and the first paragraph is read with the system default voice instead of the user's selection.
   useEffect(() => {
     if (!speechTrack || !isSupported) return;
     paragraphsRef.current = speechTrack.paragraphs;
-    // Resume from where the user left off last time on this entry. If the
-    // saved index is past the end (entry was finished), start from the top.
+    // Resume from where the user left off last time on this entry. If the saved index is past the end (entry was finished), start from the top.
     const saved = readSpeechProgress(speechTrack.entryId);
     const startIndex = saved > 0 && saved < speechTrack.paragraphs.length ? saved : 0;
     currentIndexRef.current = startIndex;
     if (startIndex !== 0) setSpeechIndex(startIndex);
     isReadingRef.current = true;
 
-    let cancelled = false;
+    let canceled = false;
     let startTimer: ReturnType<typeof setTimeout> | null = null;
     let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
     const begin = () => {
-      if (cancelled) return;
+      if (canceled) return;
       window.speechSynthesis.removeEventListener("voiceschanged", onVoicesReady);
       if (fallbackTimer) {
         clearTimeout(fallbackTimer);
@@ -609,7 +589,7 @@ function SpeechMode() {
       }
       // Small delay so any previous cancel() can settle first.
       startTimer = setTimeout(() => {
-        if (!cancelled) speakParagraph(startIndex);
+        if (!canceled) speakParagraph(startIndex);
       }, 50);
     };
 
@@ -626,7 +606,7 @@ function SpeechMode() {
     }
 
     return () => {
-      cancelled = true;
+      canceled = true;
       window.speechSynthesis.removeEventListener("voiceschanged", onVoicesReady);
       if (startTimer) clearTimeout(startTimer);
       if (fallbackTimer) clearTimeout(fallbackTimer);
@@ -700,18 +680,13 @@ function SpeechMode() {
     stopSpeech();
   };
 
-  // Refs for the latest handler closures so the Media Session effect can call
-  // them without being re-registered on every render.
+  // Refs for the latest handler closures so the Media Session and watchdog effects can call them without being re-registered on every render.
   const skipToRef = useRef(skipTo);
   const handleStopRef = useRef(handleStop);
   skipToRef.current = skipTo;
   handleStopRef.current = handleStop;
 
-  // Chrome / Edge cut off speechSynthesis utterances at ~15s. Ping pause()/
-  // resume() every 10s while speaking to keep the queue alive on long
-  // paragraphs. Skip on mobile — pause/resume is unreliable there (iOS
-  // permanently stalls; Android Chrome silently drops speech). On mobile we
-  // rely on the stall watchdog below to recover from any cutoffs.
+  // Chrome / Edge cut off speechSynthesis utterances at ~15s. Call pause()/resume() every 10s while speaking to keep the queue alive on long paragraphs. Skipped on mobile, where pause/resume is unreliable (iOS permanently stalls; Android Chrome silently drops speech); there the stall watchdog below recovers from cutoffs.
   useEffect(() => {
     if (!isSupported || !speechTrack || !isPlaying || speechPaused) return;
     if (isMobileDevice()) return;
@@ -724,11 +699,7 @@ function SpeechMode() {
     return () => clearInterval(interval);
   }, [isSupported, speechTrack, isPlaying, speechPaused]);
 
-  // Stall watchdog. Mobile browsers stop speaking without firing onend or
-  // onerror in several scenarios (Android Chrome cutoff, app backgrounding,
-  // audio focus loss). If speechSynthesis.speaking has been false for several
-  // seconds while we're still supposed to be reading, advance to the next
-  // paragraph as a recovery.
+  // Stall watchdog. Mobile browsers stop speaking without firing onend or onerror in several cases (Android Chrome cutoff, app backgrounding, audio focus loss). If speechSynthesis.speaking has been false for STALL_RECOVERY_MS (3s) while we're still supposed to be reading, advance to the next paragraph, or stop if this was the last one.
   useEffect(() => {
     if (!isSupported || !speechTrack || !isPlaying || speechPaused) return;
     let lastSpeakingAt = Date.now();
@@ -740,9 +711,7 @@ function SpeechMode() {
         hasEverSpoken = true;
         return;
       }
-      // Don't recover while user-paused, before we've actually started, or
-      // while waiting for the first utterance to begin (voice loading, slow
-      // synth startup, etc.).
+      // Don't recover while user-paused, before reading has started, or while waiting for the first utterance to begin (voice loading, slow synth startup, etc.).
       if (synth.paused || !isReadingRef.current || !hasEverSpoken) return;
       if (Date.now() - lastSpeakingAt < STALL_RECOVERY_MS) return;
 
@@ -754,20 +723,15 @@ function SpeechMode() {
         }
         skipToRef.current(next);
       } else {
-        // At end already — just stop cleanly.
+        // Already at the last paragraph, so stop.
         handleStopRef.current();
       }
     }, 1000);
     return () => clearInterval(watchdog);
   }, [isSupported, speechTrack, isPlaying, speechPaused]);
 
-  // Media Session API — show the player on iOS lock screen / Android
-  // notification shade with native play/pause/skip controls.
-  // NOTE: skipped on mobile. Speech Synthesis doesn't route through the
-  // browser's media pipeline, so Android's audio focus manager tears down
-  // the session a few seconds after we declare playbackState = "playing"
-  // (no actual audio output backing it), which kills speech mid-paragraph.
-  // Re-enable once we play a silent audio loop alongside speech.
+  // Media Session API: shows the player with native play/pause/skip controls in the OS media controls.
+  // Skipped on mobile. Speech Synthesis doesn't route through the browser's media pipeline, so Android's audio focus manager tears down the session a few seconds after we declare playbackState = "playing" (no actual audio output backing it), which kills speech mid-paragraph. Re-enable once a silent audio loop plays alongside speech.
   useEffect(() => {
     if (!speechTrack) return;
     if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;

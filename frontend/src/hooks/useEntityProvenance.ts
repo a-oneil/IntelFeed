@@ -42,13 +42,8 @@ export interface EntityProvenance {
   tracked_fields: string[];
 }
 
-/**
- * Field-level provenance for one entity — one request per profile, shared by
- * every field marker on it.
- */
-// Types with tracked field claims (mirrors the backend's ENTITY_MODEL_MAP).
-// Catalog types (mitigation, cwe) have no claimed fields — asking 400s and
-// surfaces an error toast on every profile visit.
+/** Field-level provenance for one entity: one request per profile, shared by every field marker on it. */
+// Types with tracked field claims (mirrors the backend's ENTITY_MODEL_MAP). Catalog types (mitigation, cwe) have no claimed fields; requesting them returns 400 and shows an error toast on every profile visit.
 const PROVENANCE_TYPES = new Set([
   "threat_actor",
   "malware",

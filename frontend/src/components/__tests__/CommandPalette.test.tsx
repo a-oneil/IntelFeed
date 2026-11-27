@@ -1,14 +1,9 @@
 /**
- * Tests for `CommandPalette` (⌘K) — a *command* launcher only.
+ * Tests for `CommandPalette` (⌘K), which only launches commands.
  *
- * The palette used to also search entities and entries against
- * /search/unified. That half is gone: looking things up belongs to the /search
- * route, and the palette only fuzzy-matches the static vocabulary in
- * `components/search/commands.ts`.
+ * The palette does not search entities or entries against /search/unified: looking things up belongs to the /search route, and the palette only fuzzy-matches the static vocabulary in `components/search/commands.ts`.
  *
- * Keyboard model pinned here: arrows CLAMP at 0 / len-1 (no wrap, no -1
- * deselect), the selection defaults to 0 so Enter always does something, Tab is
- * unhandled, and Escape is a single rung straight to onClose.
+ * Keyboard behavior tested here: the arrow keys stop at 0 and len-1 (no wrap, no -1 deselect), the selection defaults to 0 so Enter always does something, Tab is unhandled, and Escape calls onClose directly.
  */
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -26,8 +21,7 @@ vi.mock("react-router-dom", async () => {
   return { ...actual, useNavigate: () => navigateMock };
 });
 
-// Kept mocked purely as a tripwire: nothing in the palette may reach for the
-// server search again.
+// Mocked only so the tests can check that nothing in the palette calls the server search.
 const unifiedSearchMock = vi.fn();
 vi.mock("@/hooks/useUnifiedSearch", () => ({
   useUnifiedSearch: (...args: unknown[]) => unifiedSearchMock(...args),
@@ -122,8 +116,7 @@ describe("CommandPalette lifecycle", () => {
 
   it("tracks the visited page in localStorage even though the palette is a modal", () => {
     renderPalette(false);
-    // Known wart: the recently-visited tracker lives inside a component that is
-    // usually closed, and writes on every route change regardless of `open`.
+    // Known quirk: the recently-visited tracker lives inside a component that is usually closed, and writes on every route change regardless of `open`.
     const stored = JSON.parse(localStorage.getItem(RECENT_PAGES_KEY) || "[]");
     expect(stored[0]).toMatchObject({ path: "/feeds", label: "All Feeds" });
   });
@@ -189,7 +182,7 @@ describe("CommandPalette empty-query composition", () => {
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });
 
-  it("filters UUID-labelled recent pivots out of the recent-entities section", () => {
+  it("filters UUID-labeled recent pivots out of the recent-entities section", () => {
     useIntelStore.setState({
       recentPivots: [
         { type: "malware", id: "m1", label: "123e4567-e89b-12d3-a456-426614174000", timestamp: 1 },
@@ -277,8 +270,7 @@ describe("CommandPalette admin gating", () => {
 // ---------------------------------------------------------------------------
 
 describe("CommandPalette keyboard model", () => {
-  /** "yara" matches exactly two commands, tied on score and so ordered by
-   *  category: the create command, then the browse one. */
+  /** "yara" matches exactly two commands, tied on score and so ordered by category: the create command, then the browse one. */
   function twoResults() {
     return typeQuery("yara");
   }

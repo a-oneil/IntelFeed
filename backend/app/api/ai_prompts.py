@@ -107,8 +107,8 @@ async def update_prompt(
     if not task:
         raise AppError(code="not_found", message="Task not found", status_code=404)
 
-    # Create new version. `system_text=None` clears the system block; an
-    # explicit empty string also clears it. Anything else is stored as-is.
+    # Create new version. `system_text=None` keeps the task's default system
+    # template; an explicit empty string clears it. Anything else is stored as-is.
     if body.system_text is None:
         system_text = task.default_system_template
     elif body.system_text == "":
@@ -253,7 +253,7 @@ async def preview_prompt(
     variables so the analyst sees the resolved prompt (and Jinja lint errors)
     without invoking the LLM. Templates are taken from the request body so
     unsaved edits preview too."""
-    # Confirm the task exists (keeps behaviour consistent with the other routes).
+    # Confirm the task exists (keeps behavior consistent with the other routes).
     task_result = await db.execute(select(AITask).where(AITask.id == task_id))
     if task_result.scalar_one_or_none() is None:
         raise AppError(code="not_found", message="Task not found", status_code=404)

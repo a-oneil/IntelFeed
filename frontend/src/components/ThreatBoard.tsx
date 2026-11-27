@@ -22,15 +22,9 @@ import styles from "./ThreatBoard.module.css";
 
 /** The Threats board: one briefing row per resolved threat.
 
-    A collapsed row is four things — identity, story, one quiet caption line,
-    actions. No chip band: the evidence detail lives in the drawer the row
-    expands into. The story is the nightly AI brief when one is cached (built
-    only from the window's entries) and the window's lead headline otherwise —
-    never a template sentence over three integers.
+    A collapsed row shows four things: identity, story, one caption line, and actions. There is no chip band; the evidence detail lives in the drawer the row expands into. The story is the nightly AI brief when one is cached (built only from the window's entries) and the window's lead headline otherwise, never a template sentence built from counts.
 
-    There is deliberately no coverage percentage: source_ttps tag equality
-    returns 88-90% for every actor in the database. `prior_rules` is an
-    inventory to open, not a verdict. */
+    There is deliberately no coverage percentage: source_ttps tag equality returns 88-90% for every actor in the database. `prior_rules` is an inventory to open, not a verdict. */
 
 const WINDOWS = [
   { value: "7d", label: "7d" },
@@ -53,9 +47,7 @@ const EMPTY_TEXT: Record<StateFilter, string> = {
   muted: "Nothing dismissed. Dismissed rows stay here until you reopen them.",
 };
 
-/** The ⋯ menu for one row: every state the row can move to from where it is.
-    `tracked` and `open` are both "on the board"; handled and muted differ in
-    what brings a row back: new techniques for handled, only you for muted. */
+/** The ⋯ menu for one row: every state the row can move to from its current state. `tracked` and `open` both keep the row on the board; handled and muted differ in what brings a row back: newly reported techniques for handled, only a manual reopen for muted. */
 function menuItems(item: ThreatBoardItem): { label: string; hint: string; state: ThreatState }[] {
   switch (item.state) {
     case "handled":
@@ -95,8 +87,7 @@ const ENTITY_COLOR: Record<string, string> = {
   malware: "var(--entity-malware)",
   cve: "var(--entity-cve)",
   ttp: "var(--entity-ttp)",
-  // A story row is not an entity, and the board says so with the intel accent
-  // rather than borrowing an entity colour it would then be lying about.
+  // A story row is not an entity, so it uses the intel accent instead of an entity color.
   story: "var(--accent-intel)",
 };
 
@@ -107,8 +98,7 @@ const FACET_LABEL: Record<string, string> = {
   story: "story",
 };
 
-/** The button names the job, derived from the counts server-side — in words a
-    first-time visitor can read aloud, not board shorthand. */
+/** The button names the next job (the server derives `action` from the counts), in plain words rather than shorthand. */
 function actionLabel(item: ThreatBoardItem): string {
   switch (item.action) {
     case "write":
@@ -154,29 +144,22 @@ function actionTitle(item: ThreatBoardItem): string {
   }
 }
 
-/** True once threading has an opinion about this row: its articles are fewer
-    stories than they are outlets, which is the whole claim the feature makes. */
+/** True when threading has grouped this row's coverage: its articles form fewer stories than there are outlets. */
 function foldsCoverage(item: ThreatBoardItem): boolean {
   return item.stories > 0 && item.stories !== item.attention;
 }
 
-/** Threat rows this one absorbed (one thread holds both). Defensive because a
-    freshly-deployed bundle can be served before the API container finishes
-    restarting, and a row without the field must render, not throw. */
+/** Threat rows this one absorbed (one thread holds both), excluding CVEs. Defaults to an empty list because a freshly deployed bundle can be served before the API container finishes restarting, and a row without the field must render, not throw. */
 function absorbed(item: ThreatBoardItem): ThreatBoardItem["merged_from"] {
   return (item.merged_from ?? []).filter((m) => m.entity_type !== "cve");
 }
 
-/** CVEs this row's articles claim on the All view — the fold made visible, so
-    a vulnerability never vanishes just because an actor is telling its story. */
+/** CVEs folded into this row on the All view, listed so a vulnerability stays visible when an actor's row carries its story. */
 function carried(item: ThreatBoardItem): ThreatBoardItem["merged_from"] {
   return (item.merged_from ?? []).filter((m) => m.entity_type === "cve");
 }
 
-/** One quiet line under the story, only for a story row: whether it is still
-    developing and that no entity has been named yet. Entity rows carry no
-    caption — the numbers live on the identity line and the rule inventory
-    lives in the drawer. */
+/** One caption line under the story, only for a story row: its update count when it is still developing, otherwise that no actor, malware or CVE has been identified yet. Entity rows have no caption; their numbers are on the identity line and the rule inventory is in the drawer. */
 function captionText(item: ThreatBoardItem): string {
   if (item.is_story) {
     return item.beats > 1 ? `${item.beats} updates, still developing` : "no actor, malware or CVE identified yet";
@@ -184,8 +167,7 @@ function captionText(item: ThreatBoardItem): string {
   return "";
 }
 
-/** Story line: brief > headline > nothing. Never a computed template sentence —
-    that is the exact thing this row exists to replace. */
+/** Story line: the AI brief, else the lead headline, else nothing (generic-word rows get an exclusion notice instead). Never a computed template sentence, which is what this row replaces. */
 function Story({ item }: { item: ThreatBoardItem }) {
   if (item.is_generic) {
     return (
@@ -219,8 +201,7 @@ function Story({ item }: { item: ThreatBoardItem }) {
   return null;
 }
 
-/** "Have we seen this shape before" — the nearest prior story by centroid.
-    One line, and only when there is a real neighbour above the floor. */
+/** "Have we seen this before": the nearest prior story by centroid similarity. One line, shown only when there is a neighbor above the similarity floor. */
 function PrecedentLine({ item, onOpenStory }: { item: ThreatBoardItem; onOpenStory: (slug: string) => void }) {
   const { data } = usePrecedent(item.thread_slug, !!item.thread_slug);
   const top = data?.[0];
@@ -245,8 +226,7 @@ function PrecedentLine({ item, onOpenStory }: { item: ThreatBoardItem; onOpenSto
   );
 }
 
-/** A story row's drawer. There is no coverage workspace to fetch — the row has
-    no entity — so this shows what the thread itself knows. */
+/** A story row's drawer. The row has no entity, so there is no coverage workspace to fetch; this shows what the thread itself knows. */
 function StoryDrawer({
   item,
   onOpenArticle,
@@ -324,11 +304,7 @@ function StoryDrawer({
   );
 }
 
-/** The row's hunts: the shared hunt cards (components/hunt/HuntPackPanel)
-    for this window, a Download hunt package button for the whole zip, and a
-    link to the profile's all-reporting hunts when they exist. A starting point
-    for a hunt that is run in the SIEM and recorded in the ATHF workspace —
-    IntelFeed tracks nothing past the draft. */
+/** The row's hunts: the shared hunt cards (components/hunt/HuntPackPanel) for this window, a Download hunt package button for the whole zip, and a link to the profile's all-reporting hunts when they exist. These are a starting point for a hunt that is run in the SIEM and recorded in the ATHF workspace; IntelFeed tracks nothing past the draft. */
 function HuntSection({ item, window }: { item: ThreatBoardItem; window: string }) {
   const navigate = useNavigate();
   const { data: profile } = useHuntPack(item.entity_type, item.entity_key, PROFILE_SCOPE);
@@ -377,8 +353,7 @@ function HuntSection({ item, window }: { item: ThreatBoardItem; window: string }
   );
 }
 
-/** Expansion drawer: a three-column preview of the workspace, served by the
-    workspace endpoint that already exists. Fetched lazily on first expand. */
+/** Expansion drawer: a three-column preview of the coverage workspace, from the existing workspace endpoint. Fetched on first expand. */
 function ThreatDrawer({
   item,
   window,
@@ -393,11 +368,9 @@ function ThreatDrawer({
   onOpenStory: (slug: string) => void;
 }) {
   const { data, isLoading } = useCoverageWorkspace(item.entity_type, item.entity_key, window, true);
-  // The full inventory behind the caption's "N rules match" — every library
-  // rule that resolves to this row, strongest claim first.
+  // The full inventory behind the row's `prior_rules` count: every library rule that resolves to this row, strongest claim first.
   const { data: rules } = useBoardRules(item.entity_type, item.entity_key, item.prior_rules > 0);
-  // Both lists open to six and expand in place: a "+ N more" that points
-  // somewhere else is a dead end.
+  // The article and new-technique lists show six items and expand in place, so "+ N more" never sends the reader to another page.
   const [allArticles, setAllArticles] = useState(false);
   const [allNew, setAllNew] = useState(false);
 
@@ -407,7 +380,7 @@ function ThreatDrawer({
   const LIST_CAP = 6;
   const articles = allArticles ? data.articles : data.articles.slice(0, LIST_CAP);
   const newAll = data.behaviours.filter((b) => b.is_new);
-  const newBehaviours = allNew ? newAll : newAll.slice(0, LIST_CAP);
+  const newBehaviors = allNew ? newAll : newAll.slice(0, LIST_CAP);
 
   return (
     <div className={styles.drawer}>
@@ -457,8 +430,8 @@ function ThreatDrawer({
 
       <div className={styles.dcol}>
         <div className={styles.dhead}>New techniques this window · {item.new_techniques}</div>
-        {newBehaviours.length === 0 && <div className={styles.dmore}>None this window.</div>}
-        {newBehaviours.map((b) => (
+        {newBehaviors.length === 0 && <div className={styles.dmore}>None this window.</div>}
+        {newBehaviors.map((b) => (
           <div key={b.technique_id} className={styles.drow}>
             <b className={styles.dttp}>{b.technique_id}</b> {b.technique_name}
             <i>{b.tier ? " · telemetry collected" : b.below_line ? " · no telemetry source" : ""}</i>
@@ -559,25 +532,20 @@ type VulnFilter = "all" | "stack" | "kev" | "epss" | "norule";
 export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
   const [window, setWindow] = useState("14d");
   const [stateFilter, setStateFilter] = useState<StateFilter>("open");
-  // The open row menu, portalled to the body because .row clips its overflow
-  // for the rounded corners: the row key plus where the trigger sits.
+  // The open row menu, portaled to the body because .row clips its overflow for the rounded corners: the row key plus the trigger's position.
   const [menuFor, setMenuFor] = useState<{ key: string; top: number; right: number } | null>(null);
   const [vulnFilter, setVulnFilter] = useState<VulnFilter>("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const navigate = useNavigate();
   const setState = useSetThreatState();
 
-  // The server owns the two rankings; actor/malware are client-side cuts of
-  // the threats facet. "all" interleaves both by score server-side, with CVEs
-  // claimed by a visible cluster folded onto that cluster's row.
+  // The server owns the two rankings; actor/malware are client-side filters of the threats facet. "all" interleaves both by score server-side, with CVEs claimed by a visible cluster folded onto that cluster's row.
   const serverFacet: BoardFacet = facet === "vulns" ? "vulns" : facet === "all" ? "all" : "threats";
-  // Handled and muted rows are only returned when asked for; open and tracked
-  // are the board's normal read.
+  // Handled and muted rows are only returned when asked for; open and tracked rows are the board's default view.
   const includeDecided = stateFilter === "handled" || stateFilter === "muted";
   const { data, isLoading } = useThreatBoard(window, includeDecided, serverFacet);
 
-  // The ⋯ menu closes on any click outside it, on Escape, and when the page
-  // scrolls (its fixed position would drift from the trigger).
+  // The ⋯ menu closes on any click outside it, on Escape, and when the page scrolls or resizes (its fixed position would drift from the trigger).
   useEffect(() => {
     if (!menuFor) return;
     const onDown = (e: MouseEvent) => {
@@ -616,14 +584,11 @@ export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
     });
   }, [data, facet, stateFilter, vulnFilter]);
 
-  // The board is a workbench surface: a story opens in the dock beside it,
-  // the same place its articles open.
+  // The board is a workbench page, so a story opens in the dock beside it, the same place its articles open.
   const openStory = useOpenThread();
 
   const openThreat = (item: ThreatBoardItem) => {
-    // A story row's key is a thread slug, and the thread is its page — the
-    // queue opens it directly, which is what the story has instead of a
-    // profile.
+    // A story row's key is a thread slug, and a story has no entity profile, so the row opens the thread itself.
     if (item.is_story) {
       openStory(item.entity_key);
       return;
@@ -632,8 +597,7 @@ export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
       toast.info(`"${item.label}" is flagged as a generic word, not a threat. Resolve it in Engine review.`);
       return;
     }
-    // CVE rows land on the CVE face of the Detection tab — the same view the
-    // workspace's cluster strip opens, so board and profile can never disagree.
+    // CVE rows open the CVE profile's Detection tab, the same view the workspace's cluster strip opens, so the board and the profile show the same thing.
     if (item.entity_type === "cve") {
       navigate(`/workbench/cve/${item.profile_id ?? item.entity_key}?tab=detection`);
       return;
@@ -890,8 +854,7 @@ export default function ThreatBoard({ facet = "all" }: { facet?: string }) {
                       window={window}
                       onOpenRule={(ruleId) => navigate(`/workbench/rule/${ruleId}`)}
                       onOpenArticle={(entryId) => {
-                        // The workbench's docked reader — the board stays put
-                        // as the list; the original is one ↗ away.
+                        // Opens the workbench's docked reader, so the board stays in place as the list; the original article is one ↗ click away.
                         useIntelStore.getState().openWorkbenchReader(entryId);
                       }}
                       onOpenStory={openStory}

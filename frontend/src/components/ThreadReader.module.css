@@ -1,5 +1,4 @@
-/* Mirrors EntryReader's shell: a fixed action bar over a scrolling pane, so
-   closing a thread is in the same place as closing an article. */
+/* Mirrors EntryReader's shell: a fixed action bar over a scrolling pane, so the control that closes a thread is in the same place as the one that closes an article. */
 .readerContainer {
   display: flex;
   flex-direction: column;

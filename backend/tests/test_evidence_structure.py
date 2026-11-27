@@ -134,8 +134,8 @@ class TestAttach:
 
     async def test_far_apart_cluster_is_not_asserting(self, db_session, feed, monkeypatch):
         """A story that only names the pair paragraphs apart (low proximity)
-        is shared coverage, not an assertion — with 3+ entries that's the
-        roundup-noise shape."""
+        is shared coverage, not an assertion — with 3+ entries that is the
+        pattern news roundups produce."""
         monkeypatch.setattr(settings, "relationship_evidence_structure", True)
         entries = [await make_entry(db_session, feed, vec=cluster_vec(1)) for _ in range(3)]
         item = {"proximity_entries": [prox(e, score=0.1) for e in entries]}

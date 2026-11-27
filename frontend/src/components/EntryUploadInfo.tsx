@@ -4,13 +4,7 @@ import { useUIStore } from "@/stores/uiStore";
 import { fileTypeLabel, formatBytes, ingestFileUrl, isFileUpload, originalState, uploadMeta } from "@/utils/ingest";
 import styles from "./EntryUploadInfo.module.css";
 
-/**
- * The upload facts an entry carries, shown in the reader's byline: the
- * original file (filename, type, size, Download) and the batch it arrived in.
- * Three states for the file: downloadable, removed by the retention sweep, or
- * ingested before originals were kept — each says so rather than offering a
- * dead link. Nothing renders for an ordinary polled entry.
- */
+/** The upload facts an entry carries, shown in the reader's byline: the original file (filename, type, size, Download) and the batch it arrived in. The file has three states: downloadable, removed by the retention sweep, or ingested before originals were kept; each says so rather than offering a dead link. Nothing renders for an ordinary polled entry. */
 export function UploadByline({
   metadata,
   feedId,

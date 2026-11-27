@@ -1,9 +1,9 @@
-"""Coverage Workspace — the authoring lane behind the profile's Detection tab.
+"""Coverage Workspace — the API behind the Detection tab on entity profiles.
 
-Its own router rather than another block in api/intelligence.py (4,632 lines).
-Everything here is a read over stored rows: no AI call sits on any of these
-paths, because `GET /detection-rules/{id}` already measures ~5s on this box and
-the summary generator 503s under load.
+It is its own router to keep api/intelligence.py from growing further.
+Every endpoint here reads stored rows and none calls an AI provider, because
+`GET /detection-rules/{id}` already takes about 5s on the production host and
+the detection summary generator returns 503 under load.
 """
 
 import uuid
@@ -26,7 +26,7 @@ from app.schemas.coverage_workspace import (
     SetExportResponse,
     SetSaveRequest,
     WorkspaceArticle,
-    WorkspaceBehaviour,
+    WorkspaceBehavior,
     WorkspaceChannel,
     WorkspaceQuote,
 )
@@ -44,7 +44,7 @@ from app.services.coverage_workspace import (
 
 router = APIRouter()
 
-# Export formats the UI offers today. The endpoint hands back the assembled set
+# Export formats the UI offers. The endpoint hands back the assembled set
 # with its provenance intact; writing the bytes is the export layer's job, and
 # no new format is introduced here.
 EXPORT_FORMATS = ("bundle", "markdown", "intel_report")
@@ -71,10 +71,10 @@ async def get_coverage_workspace(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Articles and behaviours for one threat over the window.
+    """Articles and behaviors for one threat over the window.
 
-    Behaviours carry the quote they were extracted from and the ATT&CK channels
-    they need, classified against the enabled telemetry. A behaviour whose
+    Behaviors carry the quote they were extracted from and the ATT&CK channels
+    they need, classified against the enabled telemetry. A behavior whose
     channels match nothing is flagged `below_line` — a rule for it could not
     fire, so it is a sourcing item and never counted as a detection gap.
     """
@@ -92,7 +92,7 @@ async def get_coverage_workspace(
         article_total=workspace.article_total,
         article_contributed_total=workspace.article_contributed_total,
         behaviours=[
-            WorkspaceBehaviour(
+            WorkspaceBehavior(
                 technique_id=b.technique_id,
                 technique_name=b.technique_name,
                 tactic=b.tactic,
@@ -119,7 +119,7 @@ async def get_coverage_workspace(
 
 
 @router.get("/{entity_type}/{entity_key}/behaviours/{technique_id}/rules", response_model=PriorRulesResponse)
-async def get_behaviour_prior_rules(
+async def get_behavior_prior_rules(
     entity_type: str = Path(..., description="threat_actor, malware, cve or ttp"),
     entity_key: str = Path(..., description="Entity UUID, CVE id or ATT&CK technique id"),
     technique_id: str = Path(..., description="ATT&CK technique id, e.g. T1078.004"),
@@ -127,7 +127,7 @@ async def get_behaviour_prior_rules(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Library rules that already resolve to this behaviour or to the threat.
+    """Library rules that already resolve to this behavior or to the threat.
 
     Ordered by telemetry tier, so the rules that can fire against the current
     inventory come first. Each row carries `via`, `confidence` and `matched_on`:
@@ -165,9 +165,9 @@ def _saved(summary, upstream_moved: list[str] | None = None) -> SavedSet:
 async def _upstream_moved(db: AsyncSession, summaries) -> dict[uuid.UUID, list[str]]:
     """Per set: adopted/extended rules whose upstream commit postdates the save.
 
-    Detectable since repo sync started writing upstream_updated_at; surfaced
-    nowhere until now. A moved upstream is a re-read, not an alarm — the badge
-    says "the community changed a rule you adopted".
+    Uses the upstream_updated_at column that repo sync writes. A changed upstream
+    rule is something to re-read, not an error — the badge says "the community
+    changed a rule you adopted".
     """
     from sqlalchemy import text as sa_text
 
@@ -232,7 +232,7 @@ async def save_coverage_set(
 ):
     """Persist the assembled set into `detection_summaries`.
 
-    Repo, licence and format are read from the library at save time rather than
+    Repo, license and format are read from the library at save time rather than
     trusted from the client, so an adopted rule carries its attribution wherever
     the set is exported. Passing `summary_id` rewrites an existing set instead of
     accumulating a row per keystroke.
@@ -279,7 +279,7 @@ async def export_coverage_set(
     """Export the assembled set.
 
     `markdown` renders the research report — intelligence with ¶-cited quotes,
-    behaviours, the ruleset table with attribution, and skips as known gaps.
+    behaviors, the ruleset table with attribution, and skips as known gaps.
     `bundle` returns the file list the .zip download is built from (fetch
     `/sets/{id}/export.zip` for the archive itself). `intel_report` returns the
     raw payload for the report builder to attach.

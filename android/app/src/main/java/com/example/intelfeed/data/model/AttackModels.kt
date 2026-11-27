@@ -3,11 +3,7 @@ package com.example.intelfeed.data.model
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/**
- * GET /api/attack/matrix?domain=enterprise|mobile|ics&days=N (no days = all time), the web's
- * Workbench "ATT&CK Matrix": every tactic with its techniques, how often each was seen in the
- * feeds in the window, and whether the rule library covers it.
- */
+/** GET /api/attack/matrix?domain=enterprise|mobile|ics&days=N (no days = all time), the web's Workbench "ATT&CK Matrix": every tactic with its techniques, how often each was seen in the feeds in the window, and whether the rule library covers it. */
 @Serializable
 data class AttackMatrix(
     val domain: String = "enterprise",

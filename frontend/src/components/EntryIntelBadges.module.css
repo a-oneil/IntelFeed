@@ -111,10 +111,7 @@
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 
-/* The PIR chip is a <span role="button">, so the global mobile
-   `button, [role="button"] { min-height: 36px }` touch-target rule in index.css
-   (equal specificity to .chip) would stretch it taller than the sibling badges.
-   This compound selector outranks it so the PIR chip stays badge-height. */
+/* The PIR chip is a <span role="button">, so the global mobile `button, [role="button"] { min-height: 36px }` touch-target rule in index.css (equal specificity to .chip) would stretch it taller than the sibling badges. This compound selector has higher specificity, so the PIR chip stays badge-height. */
 .chip.pirChip {
   min-height: 20px;
 }

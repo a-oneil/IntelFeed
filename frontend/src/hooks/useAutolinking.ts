@@ -79,9 +79,7 @@ export function useEntityLinkStats() {
 
 const refKey = (r: LinkRef | EntityLink) => `${r.entity_type}|${r.entity_id}|${r.entry_id}`;
 
-/** Drop the given links from every cached list page immediately, so the table
- *  updates on click instead of waiting on the (slow) 380k-row list refetch.
- *  Returns the prior cache snapshot for rollback on error. */
+/** Drop the given links from every cached list page immediately, so the table updates on click instead of waiting on the (slow) 380k-row list refetch. Returns the prior cache snapshot for rollback on error. */
 function optimisticallyRemoveLinks(qc: ReturnType<typeof useQueryClient>, refs: LinkRef[]) {
   const kill = new Set(refs.map(refKey));
   const prev = qc.getQueriesData<PaginatedResponse<EntityLink>>({ queryKey: ["entity-links"] });
@@ -106,8 +104,7 @@ export function useUnlink() {
       return { prev: optimisticallyRemoveLinks(qc, [ref]) };
     },
     onError: (_e, _v, ctx) => ctx?.prev?.forEach(([key, data]) => qc.setQueryData(key, data)),
-    // Reconcile in the background — do NOT return the promise, or mutateAsync
-    // would stay pending through the heavy list refetch and block the caller.
+    // Reconcile in the background. Do NOT return the promise, or mutateAsync would stay pending through the heavy list refetch and block the caller.
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ["entity-links"] });
     },
@@ -146,9 +143,7 @@ export interface RelationshipFilters {
   offset: number;
 }
 
-/** Global paginated relationships list for the Autolinking tab.
- * Keyed under the shared "relationships" prefix so the existing
- * confirm/reject/delete mutations invalidate it. */
+/** Global paginated relationships list for the Autolinking tab. Keyed under the shared "relationships" prefix so the existing confirm/reject/delete mutations invalidate it. */
 export function useAllRelationships(filters: RelationshipFilters, enabled = true) {
   return useQuery({
     queryKey: ["relationships", "all", filters],
@@ -156,8 +151,7 @@ export function useAllRelationships(filters: RelationshipFilters, enabled = true
       const params: Record<string, string | number | boolean> = {
         limit: filters.limit,
         offset: filters.offset,
-        // Management view: show every stored edge regardless of the
-        // relationship_min_confidence display setting.
+        // Management view: show every stored edge regardless of the relationship_min_confidence display setting.
         all_confidence: true,
       };
       if (filters.entity_type) params.entity_type = filters.entity_type;

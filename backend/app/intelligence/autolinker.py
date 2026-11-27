@@ -64,7 +64,7 @@ def _get_blocked_forms() -> frozenset[str]:
     return frozenset(n.strip().lower() for n in raw.split(",") if n.strip())
 
 
-# Module-level aliases kept for backwards compatibility with tests / external callers.
+# Module-level aliases kept for backward compatibility with tests / external callers.
 @property  # type: ignore[misc]
 def _FALSE_POSITIVE_NAMES_prop() -> frozenset[str]:  # noqa: N802
     return _get_fp_names()
@@ -184,8 +184,8 @@ def is_common_english_word(form: str) -> bool:
 
 # Country names that are also ordinary words. The common-words list is built
 # from subtitle frequencies, so it carries proper nouns too ("canada",
-# "germany", "australia") — holding those held most country links for no
-# reason. A country match is provisional only when its surface form is here.
+# "germany", "australia"), and holding matches on those would hold most country
+# links for no reason. A country match is provisional only when its surface form is here.
 AMBIGUOUS_COUNTRY_WORDS = frozenset(
     {"chad", "china", "georgia", "guinea", "jersey", "jordan", "niger", "panama", "turkey", "chile", "cuba"}
 )
@@ -340,7 +340,7 @@ class VocabEntry:
     lowercase_only: bool = False
 
 
-# Types that name organisations and their products. A threat actor or malware
+# Types that name organizations and their products. A threat actor or malware
 # form that one of them also uses ("Quasar" the framework) is held for the AI.
 _ORG_TYPES = frozenset({"vendor", "product"})
 _THREAT_TYPES = frozenset({"threat_actor", "malware"})
@@ -575,7 +575,7 @@ _NAME_DESCRIPTORS = frozenset(
     }
 )  # fmt: skip
 
-# Capitalised only because they start a sentence or a phrase.
+# Capitalized only because they start a sentence or a phrase.
 _LEAD_WORDS = frozenset(
     {
         "a", "an", "and", "as", "at", "both", "by", "called", "dubbed", "for", "from",
@@ -643,7 +643,7 @@ def _related_spans(text: str) -> list[tuple[int, int]]:
 
     At the start of a line the rest of the line is the headline. Inline (Dark
     Reading runs them into the body with no line break) the headline is the
-    run of title-case words after the label; the capitalised word just before
+    run of title-case words after the label; the capitalized word just before
     the first lowercase one already starts the next sentence."""
     spans: list[tuple[int, int]] = []
     for m in _RELATED_LABEL_RE.finditer(text):
@@ -675,7 +675,7 @@ def _in_spans(pos: int, spans: list[tuple[int, int]] | None) -> bool:
 
 
 def is_headline_text(text: str) -> bool:
-    """A short paragraph in Title Case (a headline): every word is capitalised,
+    """A short paragraph in Title Case (a headline): every word is capitalized,
     so a capital next to a name says nothing about it."""
     if len(text.split()) > 30:
         return False
@@ -743,7 +743,7 @@ def _ends_with_country_form(text: str, pos: int) -> bool:
 def _glued_compound(text: str, start: int, end: int, form: str) -> bool:
     """True when the match is one piece of a longer hyphenated, file or path token.
 
-    "X-Agent" in "X-Agent-Secret", "Proton" in "Proton-J": a capitalised or
+    "X-Agent" in "X-Agent-Secret", "Proton" in "Proton-J": a capitalized or
     numeric piece after the hyphen makes a different name ("-linked", "-based"
     only describe it). A name with capitals written all in lower case and glued
     to a hyphen, slash or dot is a file or path ("push security-audit.yml",
@@ -776,7 +776,7 @@ _PHRASE_LEAD_WORDS = frozenset({"a", "an", "the", "of", "and", "for", "in", "on"
 def _phrase_case_fits(form: str, seen: str) -> bool:
     """Case test for a multi-word name that has capitals. Its first real word
     must be written as in the name ("push security" is not Push Security), and a
-    capitalised word must not turn up as a different acronym ("the COM object"
+    capitalized word must not turn up as a different acronym ("the COM object"
     is not The Com). A phrase in all capitals (a shouted headline) fits."""
     if form == form.lower() or seen.isupper():
         return True
@@ -846,11 +846,11 @@ def _after_place_prefix(text: str, start: int) -> bool:
 
 
 def _in_name_run(text: str, start: int, end: int, entry: VocabEntry, headline: bool) -> bool:
-    """True when a one-word name sits inside a longer capitalised name:
+    """True when a one-word name sits inside a longer capitalized name:
     "NVIDIA Inception", "Quasar Framework", "WWHF Deadwood", "SOC Teams",
     "Adi Moldovan". Words that say what the name is ("Quasar RAT") and
     demonyms before it ("Iranian MuddyWater") don't count. In a headline every
-    word is capitalised, so only an acronym neighbour counts there."""
+    word is capitalized, so only an acronym neighbor counts there."""
     form = entry.surface_form
     if not _ALPHA_FORM_RE.match(form):
         return False
@@ -876,7 +876,7 @@ def _in_name_run(text: str, start: int, end: int, entry: VocabEntry, headline: b
             if counts:
                 return True
     if entry.entity_type not in PENDING_TIER_TYPES - {"country"}:
-        # A demonym before a capitalised noun is ordinary ("Russian GRU"), and
+        # A demonym before a capitalized noun is ordinary ("Russian GRU"), and
         # so is a company name before its product ("Microsoft Defender").
         return False
     after = _token_after(text, end)
@@ -908,7 +908,7 @@ def _occurrence_verdict(
     if entry.is_ambiguous:
         if entry.lowercase_only and entry.entity_type in ("tool", "product", "vendor"):
             # A package name written in lower case ("axios") is that package;
-            # capitalised mid-sentence it is something else (Axios the outlet).
+            # capitalized mid-sentence it is something else (Axios the outlet).
             if seen != form and not (headline or _sentence_initial(text, start)):
                 if entry.entity_type != "tool":
                     return _DROP
@@ -995,7 +995,8 @@ def scan_text(text_or_paragraphs: str | list[tuple[int, str]]) -> list[dict]:
         related = _related_spans(para_text)
         headline = is_headline_text(para_text)
 
-        # Phase 1: Aho-Corasick scan for threat actors, malware, countries.
+        # Phase 1: Aho-Corasick scan of the name vocabulary (threat actors, malware,
+        # countries, vendors, products, tools).
         # Collect the paragraph's accepted matches first, then drop any that
         # sit inside a longer one ("Korea" in "North Korea").
         candidates: list[tuple[int, int, VocabEntry, bool]] = []
@@ -1045,7 +1046,7 @@ def scan_text(text_or_paragraphs: str | list[tuple[int, str]]) -> list[dict]:
                 if vocab_entry.surface_form not in seen[key]["surface_forms"]:
                     seen[key]["surface_forms"].append(vocab_entry.surface_form)
                 # A single clean occurrence (multi-word form, coined name, a
-                # sentence that leaves no doubt) rescues the whole match from
+                # sentence that leaves no doubt) takes the whole match out of
                 # the pending tier.
                 if not held:
                     seen[key]["provisional"] = False
@@ -1189,8 +1190,8 @@ async def _bump_entity_stats(db: AsyncSession, model, entity_id: uuid.UUID) -> N
     Emitted as a single UPDATE rather than a load-mutate-flush so the row lock is
     taken here — in the caller's deterministic order — instead of at commit time
     in whatever order SQLAlchemy happens to flush its dirty set. Also makes the
-    increment atomic: the old read-modify-write could drop counts when two
-    entries linked the same entity concurrently.
+    increment atomic: a read-modify-write can drop counts when two entries link
+    the same entity concurrently.
     """
     await db.execute(
         update(model)
@@ -1443,7 +1444,7 @@ async def store_autolink_matches(
                 is_new_stub = False
                 if cve_uuid is None:
                     # The one entity autolink creates rather than only links: a
-                    # CVE id is specific enough to stand on its own. It honours
+                    # CVE id is specific enough to stand on its own. It honors
                     # the same do-not-recreate list as the extract path, and
                     # created_via marks the stub so curation can find it.
                     from app.intelligence.cve import is_plausible_cve_id
@@ -1562,7 +1563,7 @@ async def autolink_entry(
 
     # Off the event loop: the scan is pure CPU with nothing to await, and this
     # path is reachable from POST /entries/{id}/autolink, where running it
-    # inline froze every other request on the same gunicorn worker. In a Celery
+    # inline would block every other request on the same gunicorn worker. In a Celery
     # worker the thread hop costs nothing.
     matches = await asyncio.to_thread(scan_text, paragraphs)
     if not matches:
@@ -1626,8 +1627,8 @@ async def autolink_batch(
         (EntryCountry, EntryCountry.source),
         (EntryVendor, EntryVendor.source),
         (EntryProduct, EntryProduct.source),
-        # Tool/Mitigation are now auto-linked too; deleting only source="auto_link"
-        # rows preserves any AI-extracted links.
+        # Tool and Mitigation links also come from AI extraction; deleting only
+        # source="auto_link" rows preserves those.
         (EntryTool, EntryTool.source),
         (EntryMitigation, EntryMitigation.source),
     ]
@@ -1738,8 +1739,7 @@ async def schedule_vocabulary_refresh(db: AsyncSession) -> str:
 
     Request handlers call this instead of ``refresh_vocabulary`` because a build
     loads seven tables and compiles a 34k-form automaton: inline, that is ten
-    seconds in which the request hangs, and before the build moved off the
-    event loop it also froze every other request on the same gunicorn worker.
+    seconds in which the request hangs.
     The rebuild runs on the Celery worker, which publishes the new version to
     Redis; each API process then rebuilds its own copy (in a thread) the next
     time it scans.
@@ -1831,8 +1831,8 @@ async def _rebuild_vocabulary(db: AsyncSession) -> tuple[int, list]:
 
     vocab = EntityVocabulary()
     # Pure CPU (Aho-Corasick over every name and alias) with nothing to await:
-    # inline, it froze the event loop — and every other request on this worker
-    # — for the whole build. The rows are fully loaded, so the thread only reads
+    # inline, it would block the event loop — and every other request on this
+    # worker — for the whole build. The rows are fully loaded, so the thread only reads
     # plain attributes and never touches the session.
     count = await asyncio.to_thread(
         vocab.build_from_entities, actors, malware_families, countries, vendors, products, tools
@@ -1997,7 +1997,7 @@ async def link_entity_to_existing_entries(
     - cve: CVE ID pattern search
     - cwe: weakness ID pattern search
     - ttp: technique ID pattern search
-    - tool: name + aliases text search
+    - tool, vendor, product: name + aliases text search
     - mitigation: M-ID search, catalog rows only (names are ordinary English)
     """
     stats = {"scanned": 0, "linked": 0, "entity_type": entity_type}
@@ -2088,8 +2088,8 @@ async def _link_entity_to_existing_entries_inner(
         if not entity:
             return {**stats, "error": "entity_not_found"}
         # Id only. The catalog's alternate terms ("UAF", "Dangling pointer") are
-        # exactly the dictionary-word aliases that produced the 2026-07 false
-        # positive epidemic, so they stay out of the search terms.
+        # exactly the dictionary-word aliases that caused the 2026-07 wave of
+        # false-positive links, so they stay out of the search terms.
         search_terms = [entity.cwe_id]
     elif entity_type == "ttp":
         entity = (await db.execute(select(TTP).where(TTP.id == entity_id))).scalar_one_or_none()

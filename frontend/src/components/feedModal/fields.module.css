@@ -324,8 +324,7 @@
   background: var(--bg-tertiary);
 }
 
-/* A plan-held stage reads differently from an engine-wide one: it is somebody's
-   deliberate override, and it is editable — just not from here. */
+/* A stage set by a pipeline plan is styled differently from an engine-wide one: it is a deliberate override, and it can be edited, just not from this modal. */
 .scopeChipPlan {
   color: var(--accent-intel);
   background: var(--accent-intel-bg);
@@ -430,7 +429,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  /* Two up, not one: six stacked tiles turn Overview into a scroll. */
+  /* Two columns, not one: six stacked tiles would make Overview a long scroll. */
   .statGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

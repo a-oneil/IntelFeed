@@ -37,12 +37,7 @@ interface RuleContextRailProps {
   onDiff: (ruleId: string) => void;
 }
 
-/**
- * Right column: why the rule exists, what has landed since, whether the fields
- * are actually collected, and what already covers the same ground. The
- * telemetry card is also where data sources are edited — the one place the
- * page shows them.
- */
+/** Right column: why the rule exists, what new intel has arrived since, whether the fields are actually collected, and which rules already cover the same ground. The telemetry card is also where data sources are edited, the only place the page shows them. */
 export function RuleContextRail({
   rule,
   freshIntel,
@@ -57,10 +52,7 @@ export function RuleContextRail({
   const [editingSources, setEditingSources] = useState(false);
   const [openSource, setOpenSource] = useState<string | null>(null);
 
-  // The quote is the entry_ttps match text for a technique this rule claims —
-  // the sentence that caused the rule, not the article's first paragraph.
-  // Autolinked rows store a marker (`auto_link:T1059.001`) rather than prose,
-  // so anything without a space in it is a token, not a quote.
+  // The quote is the entry_ttps match text for a technique this rule claims (the sentence that led to the rule, not the article's first paragraph), falling back to any technique's match text. Autolinked rows store a marker (`auto_link:T1059.001`) rather than prose, so only text longer than 24 characters that contains whitespace counts as a quote.
   const quote = useMemo(() => {
     if (!entryTtps?.length) return null;
     const isProse = (t: string | null | undefined) => !!t && t.trim().length > 24 && /\s/.test(t.trim());

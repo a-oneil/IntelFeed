@@ -1,4 +1,4 @@
-"""Shared machinery for returning analyst notes as search results.
+"""Shared code for returning analyst notes as search results.
 
 Notes live in two tables — `notes` (attached to an entry, or standalone) and
 `entity_notes` (attached to an actor, CVE, campaign, ...) — but search returns
@@ -75,7 +75,7 @@ def note_prose(text: str) -> str:
 
 
 def note_snippet(text: str | None, query_lower: str, width: int = 190) -> str | None:
-    """A window of a note's body centred on the match.
+    """A window of a note's body centered on the match.
 
     Every other entity leads with a description whose first line says what it
     is, so a head-of-string truncation reads fine. A note is somebody's prose:

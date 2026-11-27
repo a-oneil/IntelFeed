@@ -1,16 +1,7 @@
 /**
- * SourcesCard — the Overview's single home for outbound links: the config's
- * external pivot links (moved out of the header meta row), per-type reference
- * links (Malpedia, GitHub, Wikipedia), and for CVEs the NVD reference set
- * grouped into Advisories / Patches / Analysis / Other, capped with an
- * "all N references" expansion. When no Wikipedia article is attached, the
- * find-article flow starts from here. Machine-fetched context (and the
- * enrichment controls) live in the ContextPanel, which shares the Context
- * section with this card.
+ * SourcesCard: the one place on the Overview for outbound links. It shows the config's external pivot links, per-type reference links (Malpedia, GitHub, Wikipedia), and for CVEs the NVD reference set grouped into Advisories / Patches / Analysis / Other, capped per group with an "all N references" expansion. When no Wikipedia article is attached, the find-article flow starts from here. Machine-fetched context (and the enrichment controls) live in the ContextPanel, which shares the Context section with this card.
  *
- * Website is deliberately NOT a chip here — it stays an editable identity
- * field in the header (vendor/product), and two homes for one URL was the
- * duplicate the redesign set out to kill.
+ * Website is deliberately not a chip here: it is an editable identity field in the header (vendor/product), and showing the same URL in two places is the duplication this layout avoids.
  */
 import { useState } from "react";
 import type { EntitySearchResult } from "@/api/types";

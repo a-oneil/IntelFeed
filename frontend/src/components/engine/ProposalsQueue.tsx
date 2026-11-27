@@ -1,20 +1,9 @@
 /**
  * ProposalsQueue — the Review tab's Queue and History lenses.
  *
- * Queue: everything the adjudicator, the duplicate review and the scans want
- * changed, one row per entity (the backend files a proposal per article, so
- * "Linux" collects 600 remove-link proposals and "Qilin" a reclassify per
- * mention). The row says what is proposed, who proposed it (Source) and how
- * sure they were (Confidence); its buttons settle every article's copy at
- * once, and it expands to the evidence and the articles behind it. Rows
- * about something that is not a catalogue entity (an edge, an article's
- * assessment) stand alone. One filter row: Domain (what applying changes),
- * Action, Sort, search; Run scan files more rows; Apply all and Dismiss all
- * act on what the table shows.
+ * Queue: everything the adjudicator, the duplicate review and the scans want changed, one row per entity (the backend files a proposal per article, so "Linux" collects 600 remove-link proposals and "Qilin" a reclassify per mention). The row says what is proposed, who proposed it (Source) and how sure they were (Confidence); its buttons settle every article's copy at once, and it expands to the evidence and the articles behind it. Rows about something that is not a catalog entity (an edge, an article's assessment) stand alone. One filter row: Domain (what applying changes), Action, Sort, search; Run scan adds more rows; Apply all and Dismiss all act on what the table shows.
  *
- * History: everything that was applied, by a person or by the stage in
- * Applied mode, with Restore. Filters: Change, Applied by, a time window,
- * search. Restore puts one thing back; nothing bulk.
+ * History: everything that was applied, by a person or by the stage in Applied mode, with Restore. Filters: Change, Applied by, a time window, search. Restore puts one thing back; nothing bulk.
  */
 
 import { Fragment, useEffect, useMemo, useState } from "react";
@@ -125,8 +114,7 @@ const SOURCE_LABEL: Record<string, string> = {
   mixed: "Several",
 };
 
-// Action filter: one dropdown over both logs. Values may be comma-lists —
-// the backend feed matches any of the listed action codes.
+// Action filter: one dropdown over both logs. Values may be comma-lists — the backend feed matches any of the listed action codes.
 const QUEUE_FILTERS = [
   { value: "", label: "Any change" },
   { value: "adjudication_unlink,shadow_remove", label: "Remove link" },
@@ -144,8 +132,7 @@ const QUEUE_FILTERS = [
   { value: "ttp_malformed_id,cve_malformed_id,cve_withdrawn", label: "Fix ID" },
   { value: "orphan_prune", label: "Prune orphan" },
 ];
-// What ran. The adjudicator's codes stay the same from proposal to apply
-// (only `applied` flips), so they sit beside the older engines' own codes.
+// What ran. The adjudicator's codes stay the same from proposal to apply (only `applied` flips), so they sit beside the older engines' own codes.
 const HISTORY_FILTERS = [
   { value: "", label: "Any change" },
   { value: "removed,adjudication_unlink", label: "Link removed" },
@@ -511,7 +498,7 @@ export function ProposalsQueue({
 
   const runRowAction = useHygieneRowAction();
   const dismissReview = useDismissReview();
-  // its own instance, so a row's Dismiss doesn't show Dismiss all as busy
+  // A separate mutation instance, so a row's Dismiss doesn't show Dismiss all as busy
   const dismissAll = useDismissReview();
   const applyReview = useApplyReview();
   const applyReclassify = useApplyReclassifyGroups();
@@ -550,8 +537,7 @@ export function ProposalsQueue({
   const scanVendors = useScanVendorAutolink();
   const scanDupes = useScanDuplicates();
 
-  // Scans that mint fresh entity proposals into the queue (link verdicts
-  // come from the adjudicate stage at ingest, so there is nothing to scan for).
+  // Scans that add new entity proposals to the queue (link verdicts come from the adjudicate stage at ingest, so there is nothing to scan for).
   const scans = [
     {
       label: "Review duplicates (AI)",
@@ -635,8 +621,7 @@ export function ProposalsQueue({
 
   const groupRef = (g: ReviewGroup) => ({ entity_type: g.entity_type, entity_id: g.entity_id, row_ids: g.row_ids });
 
-  /** Apply what this row shows under the filters, except its type changes
-   *  (those go through Convert). One server loop, one toast. */
+  /** Apply what this row shows under the filters, except its type changes (those go through Convert). One server loop, one toast. */
   const applyGroup = async (g: ReviewGroup) => {
     setBusyRow(g.key);
     try {
@@ -698,9 +683,7 @@ export function ProposalsQueue({
     }
   };
 
-  // Every proposal the table shows, through the same code a row's Apply uses,
-  // as a background job. Type changes go to their proposed type; assessments
-  // are notes and never apply.
+  // Every proposal the table shows, through the same code a row's Apply uses, as a background job. Type changes go to their proposed type; assessments are notes and never apply.
   const applyAll = async () => {
     if (
       !(await confirmDialog({
@@ -878,8 +861,7 @@ export function ProposalsQueue({
                 const busy = busyRow === k;
                 const isOpen = open.has(k);
                 const label = primaryLabel(g);
-                // Every row opens to its newest proposal's evidence; one
-                // with several proposals also lists them.
+                // Every row opens to its newest proposal's evidence; one with several proposals also lists them.
                 const manyRows = g.entity_id !== null && g.proposals > 1;
                 const expandable = manyRows || g.latest_row_id !== null;
                 const convertTargets = g.entity_id ? g.reclassify_to : [];

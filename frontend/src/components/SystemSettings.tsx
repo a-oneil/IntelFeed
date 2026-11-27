@@ -8,9 +8,7 @@ import type { SettingValue } from "@/hooks/useSystemSettings";
 import styles from "./SystemSettings.module.css";
 import { AsyncStateLoading } from "@/components/AsyncState";
 
-/** A setting to scroll to and flash, set by a host that navigated here on the
- *  user's behalf (the Engine console's "Find a setting" search). `nonce` makes
- *  picking the same setting twice flash it twice. */
+/** A setting to scroll to and flash, set by a host that navigated here on the user's behalf (the Engine console's "Find a setting" search). `nonce` makes picking the same setting twice flash it twice. */
 export const SettingsHighlightContext = createContext<{ key: string; nonce: number } | null>(null);
 
 export default function SystemSettings({
@@ -23,16 +21,13 @@ export default function SystemSettings({
   flat,
 }: {
   filterGroups?: string[];
-  /** Render exactly these keys, in this order, as one ungrouped block —
-   *  for hosts that own a feature rather than a settings group (a job row
-   *  showing the knobs that tune it). Takes precedence over filterGroups. */
+  /** Render exactly these keys, in this order, as one ungrouped block — for hosts that own a feature rather than a settings group (a job row showing the knobs that tune it). Takes precedence over filterGroups. */
   filterKeys?: string[];
   excludeKeys?: string[];
   renderAfterKey?: Record<string, (pendingValue: unknown, meta: SettingValue) => React.ReactNode>;
   hideGroupTitle?: boolean;
   topSlot?: React.ReactNode;
-  /** No group card chrome — for hosts (like Engine stage panels) that provide
-   *  their own container. */
+  /** No group card chrome — for hosts (like Engine stage panels) that provide their own container. */
   flat?: boolean;
 } = {}) {
   const { data, isLoading } = useSystemSettings();
@@ -85,8 +80,7 @@ export default function SystemSettings({
 
   const { settings, groups } = data;
 
-  // Key-filtered mode: one synthetic group holding the requested keys in the
-  // order the caller listed them.
+  // Key-filtered mode: one synthetic group holding the requested keys in the order the caller listed them.
   const KEY_GROUP = "__keys__";
   const grouped: Record<string, [string, SettingValue][]> = {};
   if (filterKeys) {
@@ -127,8 +121,7 @@ export default function SystemSettings({
     "backup",
     "public_rss",
   ];
-  // A group the backend names but this list doesn't would otherwise render
-  // nowhere at all — append the leftovers instead of silently dropping them.
+  // A group the backend names but this list doesn't would otherwise render nowhere at all — append the leftovers instead of silently dropping them.
   const knownGroups = new Set(allGroupOrder);
   const groupOrderAll = [
     ...allGroupOrder,

@@ -1,21 +1,11 @@
-// Runs on web pages once the user allows the extension on all sites (see the
-// settings page). It tells the background worker which page this is and which
-// feeds it advertises (for the toolbar dot), and — when highlighting is on for
-// this site — sends the page's visible text to the user's IntelFeed server to
-// find known entities, marks them, and shows a card on hover.
+// Runs on web pages once the user allows the extension on all sites (see the settings page). It tells the background worker which page this is and which feeds it advertises (for the toolbar dot), and — when highlighting is on for this site — sends the page's visible text to the user's IntelFeed server to find known entities, marks them, and shows a card on hover.
 //
-// Everything the server returns is written with textContent: into <mark>
-// elements in the page for the highlights, and into a closed shadow root for
-// the card and the panel. Nothing from the server or the page is parsed as HTML.
+// Everything the server returns is written with textContent: into <mark> elements in the page for the highlights, and into a closed shadow root for the card and the panel. Nothing from the server or the page is parsed as HTML.
 
 (function () {
   if (window.top !== window || window.__intelfeedPage) return;
   window.__intelfeedPage = true;
-  // Never on IntelFeed itself — it links its own entities. The background
-  // worker already excludes the signed-in server's host, but that misses any
-  // other instance (dev at localhost:3001 while signed in to prod, a second
-  // server, an IP instead of the hostname), so the app also marks its own page.
-  // apple-mobile-web-app-title covers servers built before the marker.
+  // Never on IntelFeed itself — it links its own entities. The background worker already excludes the signed-in server's host, but that misses any other instance (dev at localhost:3001 while signed in to prod, a second server, an IP instead of the hostname), so the app also marks its own page. apple-mobile-web-app-title covers servers built before the marker.
   if (document.querySelector('meta[name="application-name"][content="IntelFeed"], meta[name="apple-mobile-web-app-title"][content="IntelFeed"]')) return;
 
   const MAX_TEXT = 120000;
@@ -98,10 +88,7 @@
         mark.setAttribute(MARK_ATTR, String(byForm.get(f.form)));
         mark.textContent = f.form;
         const color = m.color || "#888888";
-        // The app's highlight (InlineEntityHighlighter.module.css): a dotted
-        // underline in the entity's colour, no background; solid with a faint
-        // tint on hover (see the mouseover handler). 3px where the app has 2px:
-        // at a site's own text size the app's weight reads lighter.
+        // The app's highlight (InlineEntityHighlighter.module.css): a dotted underline in the entity's color, no background; solid with a faint tint on hover (see the mouseover handler). 3px where the app has 2px: at a site's own text size the app's weight reads lighter.
         mark.style.cssText = [
           "background:transparent",
           "color:inherit",
@@ -109,8 +96,7 @@
           "padding:0 0 1px",
           "transition:background-color .15s",
         ].join(";");
-        // No cursor of its own: the page's (text, or a link's pointer) stays,
-        // since hovering is what opens the card.
+        // No cursor of its own: the page's (text, or a link's pointer) stays, since hovering is what opens the card.
         frag.append(mark);
         at = f.end;
         count += 1;
@@ -127,8 +113,7 @@
   let hideTimer;
   let shownMark = null;
 
-  // Same as TYPE_LABELS in lib/notes.js and contrastText in lib/theme.js below:
-  // a content script can't import modules, so keep the copies in step.
+  // Copies of TYPE_LABELS in lib/notes.js and (below) contrastText in lib/theme.js: a content script can't import modules, so keep the copies in sync.
   const TYPE_LABELS = {
     threat_actor: "Threat actor",
     malware: "Malware",
@@ -268,7 +253,7 @@
     head.append(badge);
     for (const b of view.badges) {
       const extra = el("span", b.text, "badge");
-      // Solid like the type badge, or toned: the colour on a faint tint of itself
+      // Solid like the type badge, or toned: the color on a faint tint of itself
       extra.style.background = b.solid ? b.color : `${b.color}26`;
       extra.style.color = b.solid ? contrastText(b.color) : b.color;
       head.append(extra);
@@ -285,8 +270,7 @@
     who.append(el("span", m.name, "name"));
     card.append(head, who);
 
-    // The grid, in the app's order: the type's facts, then Articles and First
-    // seen (the other way round for CVEs and techniques), aliases, description.
+    // The grid, in the app's order: the type's facts, then Articles and First seen (the other way round for CVEs and techniques), aliases, description.
     const grid = el("div", null, "grid");
     const item = (label, value, cls = "value", full = false) => {
       const row = el("div", null, full ? "item full" : "item");
@@ -348,7 +332,7 @@
     host.style.top = `${top + window.scrollY}px`;
   }
 
-  /** The description cut at 220 characters, with Show more / Show less for the rest. */
+  /** The description cut at `max` characters (220 unless the card view sets descMax), with Show more / Show less for the rest. */
   function description(full, max = 220) {
     const span = el("span", null, "desc");
     const long = full.length > max;

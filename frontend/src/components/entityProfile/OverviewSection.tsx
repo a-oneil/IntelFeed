@@ -1,11 +1,7 @@
 /**
- * OverviewSection — one row of the Overview's single column. Closed, it is a
- * 46px line: caret, name, count, and a digest that answers the usual question
- * (how many, which top ones, how fresh) without opening anything. Open, the
- * section's own components render beneath it, unchanged.
+ * OverviewSection — one row of the Overview's single column. Closed, it is a 46px line: caret, name, count, and a digest that answers the usual question (how many, which top ones, how fresh) without opening anything. Open, the section's own components render beneath it, unchanged.
  *
- * Which rows are open is the analyst's choice, remembered per entity type in
- * uiStore; the Brief / Everything switch in the tab bar opens them all at once.
+ * Which rows are open is the analyst's choice, remembered per entity type in uiStore; the Brief / Everything switch in the tab bar opens them all at once.
  */
 import type { ReactNode } from "react";
 import { Segmented } from "@/components/primitives";

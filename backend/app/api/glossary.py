@@ -267,7 +267,7 @@ async def get_glossary_counts(
     def _all_names(t: GlossaryTerm) -> list[str]:
         return [t.name] + (t.search_terms or [])
 
-    # Run searches in thread pool to avoid blocking, batched to limit concurrency
+    # Run searches in a thread pool to avoid blocking, capped at 10 workers to limit concurrency
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {str(t.id): loop.run_in_executor(executor, _search_count, _all_names(t)) for t in terms}
         results = await asyncio.gather(*futures.values())

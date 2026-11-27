@@ -630,7 +630,7 @@ async def run_rule_now(
             await db.flush()
             logs.append(log)
     else:
-        # No batch actions — run per-entry as before
+        # Per-entry mode: run the rule once for each matched entry
         for entry in matched_entries:
             try:
                 log = await execute_automation(db, entry, rule)

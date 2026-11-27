@@ -13,14 +13,11 @@
 }
 
 .sidebar {
-  /* Nav panels sit a touch darker than the card surface but stay clear of
-     the page ground, so the sidebar still reads as a distinct panel.
-     Derived from two theme-managed tokens, so it moves with the theme
-     instead of clashing the way a fixed --sidebar-bg did. */
+  /* Nav panels use a mix of the card surface and the page background, so the sidebar reads as a distinct panel. The color is derived from two theme-managed tokens so it follows the theme instead of clashing, as a fixed --sidebar-bg did. */
   background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
   overflow-y: auto;
   overflow-x: hidden;
-  /* visibility flips at the end of the collapse / start of the expand */
+  /* visibility switches at the end of the collapse and the start of the expand */
   transition: width 0.2s, min-width 0.2s, visibility 0.2s;
 }
 
@@ -28,8 +25,7 @@
   width: 0 !important;
   min-width: 0 !important;
   overflow: hidden;
-  /* Zero-width nav buttons must not remain click/hit-test targets — clicks
-     aimed at them land on overlaying content (toggle rail, page content). */
+  /* Zero-width nav buttons must not stay clickable, so clicks at that spot reach the content on top of them (toggle rail, page content). */
   visibility: hidden;
   pointer-events: none;
 }

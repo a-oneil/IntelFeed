@@ -149,9 +149,7 @@
   color: var(--warning);
 }
 
-/* Micro tag face (Custom / Deprecated / Active / System). Chip carries the box
-   and the colour arrives as `tint` + `fg`; only the tracking is bespoke, and
-   neither property is one Chip declares, so no specificity bump is needed. */
+/* Small uppercase tag (Custom / Deprecated / Active / System). Chip provides the box and the color comes from its `tint` + `fg` props; only letter spacing and uppercase are set here, and Chip declares neither property, so no extra specificity is needed. */
 .microTag {
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -251,7 +249,7 @@
   color: var(--text-primary);
 }
 
-/* Header badge face. Same story as .microTag: Chip owns the box. */
+/* Header badge. As with .microTag, Chip provides the box; only letter spacing and uppercase are set here. */
 .badge {
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -538,9 +536,7 @@
   gap: 0.28rem;
 }
 
-/* Variable-insert chips: Chip's box in the mono face. The hover pair is
-   doubled so it beats Chip's own .clickable:hover whichever order the two
-   stylesheets land in. */
+/* Variable-insert chips: Chip's box with the monospace font. The hover selector is doubled (.varChip.varChip) so it beats Chip's own .clickable:hover regardless of which stylesheet loads first. */
 .varChip {
   font-family: var(--font-mono, monospace);
 }

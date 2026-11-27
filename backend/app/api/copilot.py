@@ -44,8 +44,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Cap the history we replay into the prompt so long threads don't blow the
-# context window / latency budget. Matches the P0 "last ~20 messages" guidance.
+# Cap the history we replay into the prompt so long threads don't overflow the
+# context window or slow the answer down. Only the last 20 messages are sent.
 _MAX_HISTORY_MESSAGES = 20
 
 from app.tools import DEFAULT_COPILOT_TOOLS, DEFAULT_COPILOT_WRITE_TOOLS  # noqa: E402
@@ -113,7 +113,7 @@ _GUIDE_DIR = "guide"
 # Article content injected into the ambient context when entries are pinned.
 # A pinned article means "this text is in the conversation" — the model answers
 # grounded in it without needing a get_entry round-trip (tools remain available
-# for going beyond it). Caps keep local-model context windows honest.
+# for going beyond it). The caps keep the prompt within local-model context windows.
 _PINNED_ENTRY_MAX_CHARS = 15_000
 _PINNED_MULTI_MAX_ENTRIES = 8
 _PINNED_MULTI_MAX_CHARS = 4_000
@@ -236,7 +236,7 @@ reference page for the mechanism. Do not open with implementation detail for
 someone who asked a how-do-I question.
 
 If the docs genuinely don't cover something, say so plainly instead of inventing
-behaviour. You may still fall back to the read-only data tools when the question
+behavior. You may still fall back to the read-only data tools when the question
 turns out to be about what is actually in their feed.
 """
 
@@ -245,9 +245,10 @@ def _docs_mode_context(doc_slug: str | None) -> str:
     """Docs-mode preamble plus the page index, split guide vs reference.
 
     The index goes in verbatim — it is small, a few dozen titles — so the model
-    can name the right page in one shot instead of burning a tool round-trip on
-    `list_documentation_pages` for every question. Splitting it by half is what
-    makes the routing rule above actionable rather than advisory.
+    can name the right page in one shot instead of spending a tool round-trip on
+    `list_documentation_pages` for every question. The index is split into the
+    guide and reference halves so the model can follow the preamble's rule about
+    which half to answer from.
     """
     from app.services import documentation as docs_service
 
@@ -663,9 +664,10 @@ async def copilot_stream(
                     # mints a propose token for this conversation, so a write
                     # the model asks for is staged for the user's click.
                     if settings.copilot_worker_dispatch:
-                        # Prod topology: run the CLI on the dedicated claude_code
-                        # worker (owns the OAuth credentials volume) and relay its
-                        # events back over Redis. The api never needs the CLI/creds.
+                        # Prod topology: run the CLI on the ai-queue worker
+                        # (celery-worker-ai, which owns the OAuth credentials volume)
+                        # and relay its events back over Redis. The api never needs
+                        # the CLI or its credentials.
                         from app.workers.celery_app import celery_app
 
                         run_id = str(uuid.uuid4())
@@ -861,7 +863,7 @@ async def copilot_stream(
             }
         finally:
             # The client went away mid-turn. sse-starlette cancels this task,
-            # so the write has to be shielded or it is cancelled at its first
+            # so the write has to be shielded or it is canceled at its first
             # await. The prompt reached the provider either way, so even a turn
             # abandoned before its first token is spend: a disconnect-and-retry
             # loop must not be free.
@@ -967,7 +969,7 @@ async def copilot_confirm(
     Only the user it was staged for can confirm it. It runs as that user, with
     their role checked again now (``run_confirmed``). ``edited_params``
     replaces the arguments, except on a destructive call, which is confirmed
-    as shown or cancelled. On success a line is added to the conversation, so
+    as shown or canceled. On success a line is added to the conversation, so
     the model sees the result on the next turn. On an error the staged call is
     kept for a retry.
     """

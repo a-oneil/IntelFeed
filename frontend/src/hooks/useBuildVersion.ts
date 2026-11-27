@@ -10,10 +10,7 @@ export interface BuildStamp {
 /**
  * The build the API is running, from `GET /api/version`.
  *
- * That endpoint touches no database, Redis or Meilisearch, which is what makes
- * polling it reasonable. Refetches on window focus — coming back to a tab you
- * left open across a deploy is the moment this matters — against the app-wide
- * default of `false`.
+ * That endpoint touches no database, Redis or Meilisearch, so polling it is cheap. It refetches on window focus (overriding the app-wide default of `false`), because returning to a tab left open across a deploy is when a stale bundle is most likely.
  */
 export function useBuildVersion(enabled = true) {
   return useQuery({
@@ -23,19 +20,15 @@ export function useBuildVersion(enabled = true) {
     staleTime: 60_000,
     refetchInterval: 10 * 60_000,
     refetchOnWindowFocus: true,
-    // A missing version endpoint must never surface as an error toast; the
-    // footer simply has nothing to compare against.
+    // A missing version endpoint must never surface as an error toast; the footer just has nothing to compare against.
     retry: false,
   });
 }
 
 /**
- * True when the browser is holding a bundle older than the one the server is
- * serving — i.e. a reload would change what you are looking at.
+ * True when the browser holds a bundle built from a different commit than the server is running, i.e. a reload would change what you are looking at.
  *
- * Only ever true for a stamped image build. Under the dev server the stamp is
- * frozen at start-up while HMR keeps the code current, so every commit would
- * otherwise light this up while the bundle is in fact fine.
+ * Only ever true for a stamped image build. Under the dev server the stamp is frozen at start-up while HMR keeps the code current, so every commit would otherwise flag the bundle as stale when it is not.
  */
 export function useStaleBundle(): { stale: boolean; serverVersion?: string } {
   const meaningful = __STAMP_SOURCE__ === "env" && Boolean(__GIT_SHA__);

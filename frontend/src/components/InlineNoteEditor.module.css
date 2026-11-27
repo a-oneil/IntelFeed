@@ -1,5 +1,4 @@
-/* InlineNoteEditor — the shared markdown note editor, sized to live inside a
-   card. Markdown source on the left, live rendered preview on the right. */
+/* InlineNoteEditor: the shared markdown note editor, sized to fit inside a card. Markdown source on the left, live rendered preview on the right. */
 .editor {
   display: flex;
   flex-direction: column;

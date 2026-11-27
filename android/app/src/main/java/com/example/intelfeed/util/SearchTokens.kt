@@ -1,10 +1,6 @@
 package com.example.intelfeed.util
 
-/**
- * Reads and rewrites `field:value` tokens in a search query (docs/query-language.md), for the
- * search filter sheet. Only positive tokens are handled: a negated one (`-tag:x`, `NOT feed:x`)
- * is left exactly as typed, so editing filters can never flip its meaning.
- */
+/** Reads and rewrites `field:value` tokens in a search query (docs/query-language.md), for the search filter sheet. Only positive tokens are handled: a negated one (`-tag:x`, `NOT feed:x`) is left exactly as typed, so editing filters can never flip its meaning. */
 object SearchTokens {
 
     private fun pattern(field: String) =
@@ -24,10 +20,6 @@ object SearchTokens {
         return if (clean.any { it.isWhitespace() }) "$field:\"$clean\"" else "$field:$clean"
     }
 
-    /**
-     * [query] with an unclosed quote closed. The filter sheet appends its tokens to the typed text,
-     * and after an unclosed quote the server read them as part of the phrase ("ransomware
-     * date:>=… is:starred"), so applying a filter found nothing.
-     */
+    /** [query] with an unclosed quote closed. The filter sheet appends its tokens to the typed text, and after an unclosed quote the server would read them as part of the phrase ("ransomware date:>=… is:starred"), so applying a filter would find nothing. */
     fun closeOpenQuote(query: String): String = if (query.count { it == '"' } % 2 == 1) "$query\"" else query
 }

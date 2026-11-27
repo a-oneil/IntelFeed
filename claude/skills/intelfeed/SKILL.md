@@ -46,7 +46,7 @@ python3 ~/.claude/skills/intelfeed/scripts/intelfeed_cli.py get_dashboard_stats
 
 `search_entries` and `search_unified` run the **full** query language: every filter below is executed, not only the text terms. The language has 18 article fields and 122 intelligence fields.
 
-`search_entities` is the exception: it is plain text over entity names, aliases, catalogued IDs and prose. A `field:value` string sent to it is matched literally and finds nothing. Send filters through `search_unified` (or `search_entries` when you only want the articles).
+`search_entities` is the exception: it is plain text over entity names, aliases, cataloged IDs and prose. A `field:value` string sent to it is matched literally and finds nothing. Send filters through `search_unified` (or `search_entries` when you only want the articles).
 
 Prefer a precise filter over free text. `cve.kev:true` is a fact; "known exploited" is a guess about what an article happened to say.
 
@@ -94,7 +94,7 @@ Prefer a precise filter over free text. `cve.kev:true` is a fact; "known exploit
 - `ransomware_victim:` — Victim organization, plus `ransomware_victim.sector:`, `ransomware_victim.domain:`, `ransomware_victim.group:lockbit`
 - `pir:` — Priority Intelligence Requirement title, plus `pir.priority:`, `pir.category:`
 
-**Catalogue suffixes** work across entity types and help with curation and triage:
+**Catalog suffixes** work across entity types and help with curation and triage:
 
 - `<entity>.articles:>100` — how much has been written about it (`ttp`, `threat_actor`, `malware`, `country`, `sector`, `tool`, `vendor`, `product`, `mitigation`, `cwe`, `observable`/`ioc`)
 - `<entity>.seen:>2026-01-01` / `<entity>.first_seen:>2026-06` — recency, for the same types (**not** `cve.*`: CVEs carry only `.review` and `.via`)
@@ -125,7 +125,7 @@ title:"zero day" AND tag:critical
 threat_actor:APT29 AND ttp.tactic:initial-access
 is:starred NOT type:youtube
 
-# Vulnerabilities that are catalogued as exploited AND likely to be attacked
+# Vulnerabilities that are cataloged as exploited AND likely to be attacked
 cve.kev:true cve.epss:>0.5
 
 # The signal engine's own under-covered queue, in its own ranking
@@ -162,7 +162,7 @@ threat_actor.via:ai_extraction threat_actor.articles:>10
 
 `search_entities` and `search_unified` tag every entity with **`match_kind`**:
 
-- **`direct`** — the query hit the entity's own identity: its name, an alias, or its catalogued ID (`T1059`, `CVE-2025-5777`, `G0016`). Results from an explicit field filter are always direct.
+- **`direct`** — the query hit the entity's own identity: its name, an alias, or its cataloged ID (`T1059`, `CVE-2025-5777`, `G0016`). Results from an explicit field filter are always direct.
 - **`mention`** — the query hit something the entity merely *says*: a description, tag, tactic, or rule body.
 
 Searching "lockbit" returns the LockBit group as `direct` alongside dozens of actors and YARA rules whose prose cites LockBit as `mention`. **Lead with the direct matches.** Treat mentions as context, and never report a mention as if it were the entity the user asked about.
@@ -174,7 +174,7 @@ Searching "lockbit" returns the LockBit group as `direct` alongside dozens of ac
 - **`note`** — a note on an article (`entry_id` + `entry_title` set) or a standalone one (both null). Also carries `is_pinned`.
 - **`entity_note`** — a note on an actor, malware, CVE, TTP, campaign, vendor or product. Carries `entity_type`, `entity_id`, `entity_name` (the resolved subject) and `note_type`. Its title is optional and falls back to `"Note on {subject}"`.
 
-`description` is a ~190-character window **centred on the match**, not the note's opening. Quote from it directly; do not treat it as a summary.
+`description` is a ~190-character window **centered on the match**, not the note's opening. Quote from it directly; do not treat it as a summary.
 
 Notes have their own filters, which reach both tables at once (they are entity filters, so run them through `search_unified` / `search_entries`, not `search_entities`):
 
@@ -253,7 +253,7 @@ Then synthesize everything into a coherent briefing. Say which parts are claims 
 
 1. `get_observable '{"observable": "185.174.100.5"}'` — kind, role, confidence with decay, sighting count, how it got into the observables list
 2. `search_entries '{"query": "observable:185.174.100.5 sort:newest"}'` — the articles it was seen in
-3. `search_observables '{"kind": "domain", "role": "c2", "status": "active"}'` — neighbouring infrastructure of the same role
+3. `search_observables '{"kind": "domain", "role": "c2", "status": "active"}'` — neighboring infrastructure of the same role
 
 Regex never adds a value to the observables list. Every value comes from AI analysis, the adjudicator, a curated IOC list feed, a publisher's IOC table, a TTP observable, or an analyst promoting it. Absence means "not judged", not "not mentioned".
 
@@ -314,12 +314,12 @@ Everything that creates, changes or deletes data is refused when `INTELFEED_READ
 - **get_story_thread** — One thread: its timeline (one update per wave of coverage), members with roles (`origin`/`beat`/`echo`), entities and outlets (slug, include_members)
 - **get_daily_summary** — The cached AI daily briefing for a day, or null (date). Read-only; it never generates one
 - **get_entry_story** — Follow-ups and precursors to an entry, chained through shared strong entities in a ±30 day window (entry_id)
-- **get_similar_entries** — Nearest neighbours from the embedding index, falling back to shared-entity overlap when the entry is not embedded (entry_id, limit)
+- **get_similar_entries** — Nearest neighbors from the embedding index, falling back to shared-entity overlap when the entry is not embedded (entry_id, limit)
 
 ### Workbench Boards (7 tools)
 
 - **get_threat_board** — The Threats board: actors/malware and exploited CVEs ranked by distinct stories over a window, each with lead headline, cached brief, sources, handled state and, for CVEs, exposure lift and detection state (`blind`, `no_rule`, `defended`) (window: 7d/14d/30d, facet: threats/vulns/all, limit, min_attention, include_handled)
-- **get_coverage_workspace** — One threat's recent articles and extracted behaviours, each with its quote, the telemetry it needs and whether enabled telemetry sees it; `below_line` marks a sourcing gap (entity_type: threat_actor/malware/cve/ttp, entity_key, window)
+- **get_coverage_workspace** — One threat's recent articles and extracted behaviors, each with its quote, the telemetry it needs and whether enabled telemetry sees it; `below_line` marks a sourcing gap (entity_type: threat_actor/malware/cve/ttp, entity_key, window)
 - **get_entity_whats_new** — An entity's latest developments: novelty and severity signals on its recent articles (entity_type, entity_id, days, scoped)
 - **list_intel_profiles** — The instance's intel profiles: named scopes (a customer, a portfolio) of regions, sectors and technology (limit, offset)
 - **get_intel_profile** — One intel profile with resolved country names and sector labels (profile_id)

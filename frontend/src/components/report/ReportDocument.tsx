@@ -1,11 +1,7 @@
 /**
  * ReportDocument — a report's sections drawn as one readable document.
  *
- * Shared by the report builder's Document view and the public shared-report
- * page, so both show the same thing: a heading per section, the narrative as
- * markdown, and data sections (observables, threat surface, TTPs, references,
- * timeline, CVEs, entities) as tables shape-detected the same way the markdown
- * exporter does.
+ * Shared by the report builder's Document view and the public shared-report page, so both show the same thing: a heading per section, the narrative as markdown, and data sections (observables, threat surface, TTPs, references, timeline, CVEs, entities) as tables shape-detected the same way the markdown exporter does.
  */
 
 import { EntityLinkedMarkdown } from "@/components/EntityLinkedMarkdown";
@@ -22,40 +18,27 @@ export interface ReportDocSection {
 
 interface Props {
   sections: ReportDocSection[];
-  /**
-   * Markdown written outside any section, drawn first with no heading. It is
-   * the whole document for a template with no sections.
-   */
+  /** Markdown written outside any section, drawn first with no heading. It is the whole document for a template with no sections. */
   freeText?: string;
   /** Link entity mentions to their profiles (needs a signed-in session). */
   linkEntities?: boolean;
-  /**
-   * Entity matches computed server-side (the public page): the mentions are
-   * highlighted from these, with no scan and no profile navigation.
-   */
+  /** Entity matches computed server-side (the public page): the mentions are highlighted from these, with no scan and no profile navigation. */
   entityMatches?: EntityScanMatch[];
-  /**
-   * Draw the sections straight on the page, like an article, instead of on
-   * the builder's bordered sheet.
-   */
+  /** Draw the sections straight on the page, like an article, instead of on the builder's bordered sheet. */
   frameless?: boolean;
-  /**
-   * Text for a section with nothing in it. When omitted, empty sections are
-   * left out — the public page shows what was written, not what wasn't.
-   */
+  /** Text for a section with nothing in it. When omitted, empty sections are left out, so the public page shows only what was written. */
   emptyText?: (section: ReportDocSection) => string;
 }
 
 const cell = (v: unknown) => (Array.isArray(v) ? v.join(", ") : v == null ? "" : String(v));
 
-/** Reference URLs are analyst/AI-written text; on the public page only web links get an anchor. */
+/** Reference URLs are analyst/AI-written text, so only http(s) links get an anchor. */
 function webHref(v: unknown): string | null {
   const s = typeof v === "string" ? v.trim() : "";
   return /^https?:\/\//i.test(s) ? s : null;
 }
 
-/** Data-section rows rendered as a real table, shape-detected the same way
- *  the markdown exporter does (observables, threat surface, TTPs, refs...). */
+/** Data-section rows rendered as a table, shape-detected the same way the markdown exporter does (observables, threat surface, TTPs, refs...). */
 export function SectionItemsTable({ items }: { items: Record<string, unknown>[] }) {
   const first = items[0] || {};
 

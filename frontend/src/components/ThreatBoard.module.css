@@ -1,14 +1,12 @@
-/* Threats board — quiet briefing rows.
+/* Threats board: one row per threat, styled as a briefing list.
    A collapsed row is identity · story · one muted caption · actions.
-   No chip band: detail lives in the expansion drawer. */
+   No row of chips: detail lives in the expansion drawer. */
 
 .board {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  /* Same blend the workbench sidebar uses (SidebarLayout.module.css): a
-     touch darker than the card surface, so rows sit level with the nav
-     panels instead of reading brighter than them. */
+  /* Same blend the workbench sidebar uses (SidebarLayout.module.css): slightly darker than the card surface, so rows match the nav panels instead of looking brighter than them. */
   --board-surface: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
   gap: 12px;
 }
@@ -46,7 +44,7 @@
   font-size: 13px;
 }
 
-/* Separated cards, not one fused list — the rows need air between them. */
+/* Separate cards, not one joined list, with space between the rows. */
 .rows {
   display: flex;
   flex-direction: column;
@@ -106,7 +104,7 @@
   text-decoration: underline;
 }
 
-/* unboxed coloured mono word — the entity vocabulary without the borders */
+/* colored mono label (entity type, "same story" and similar), without a border */
 .tag {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -161,7 +159,7 @@
   color: var(--text-muted);
 }
 
-/* caption line — plain muted mono, not furniture */
+/* caption line: plain muted mono text, no boxes or borders */
 .cap {
   display: flex;
   align-items: baseline;
@@ -326,14 +324,13 @@
   text-decoration: underline;
 }
 
-/* The other names one story's row carries — quieter than the name it leads
-   with, because one of them has to be the row's identity. */
+/* The other names a story's row carries, styled quieter than the leading name because only one of them is the row's identity. */
 .coName {
   font-size: 13px;
   color: var(--text-secondary);
 }
 
-/* A sub-heading inside a drawer column (Precedent under the behaviours). */
+/* A sub-heading inside a drawer column (Precedent under the behaviors). */
 .dsubhead {
   margin-top: 8px;
   font-family: var(--font-mono);
@@ -383,8 +380,7 @@
   }
 }
 
-/* A CVE this row's articles claim (All view): named on the row, never a
-   second line and never dropped. */
+/* A CVE this row's articles mention (All view): shown on the row itself, never on a second line and never dropped. */
 .tagCve {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -403,8 +399,7 @@
 }
 
 .menu {
-  /* Portalled to the body: .row clips overflow, so top/right come from the
-     trigger's rect as inline style. */
+  /* Portaled to the body because .row clips overflow, so top/right come from the trigger's rect as inline style. */
   position: fixed;
   z-index: 9999;
   min-width: 240px;
@@ -445,8 +440,7 @@
   color: var(--text-secondary);
 }
 
-/* Full-width rule inventory at the drawer's foot — the list behind the
-   caption's "N rules name it". */
+/* Full-width rule list at the bottom of the drawer: the rules counted by the caption's "rules N". */
 .dRules {
   grid-column: 1 / -1;
   border-top: 1px solid var(--border-subtle);
@@ -535,9 +529,7 @@
   color: var(--accent);
 }
 
-/* The hunt pack at the drawer's foot (cards: components/hunt/HuntPackPanel):
-   hypotheses and queries the analyst takes to their SIEM. Nothing here is a
-   tracker. */
+/* The hunt pack at the bottom of the drawer (cards: components/hunt/HuntPackPanel): hypotheses and queries the analyst takes to their SIEM. Nothing here tracks hunt status. */
 .dHunt {
   grid-column: 1 / -1;
   border-top: 1px solid var(--border-subtle);

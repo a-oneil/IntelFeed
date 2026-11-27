@@ -33,8 +33,7 @@ export default function OverviewRowWidget({ config }: Props) {
   if (!data) return <div className={styles.noData}>No overview data</div>;
 
   const entrySeries = data.series.entries.map((p) => p.count);
-  // A visitor (public read-only mode) gets no detection or unread figures —
-  // the server leaves them out — so those tiles drop rather than break.
+  // A visitor (public read-only mode) gets no detection or unread figures (the server leaves them out), so those tiles are hidden rather than shown broken.
   const detectionSeries = (data.series.detections ?? []).map((p) => p.count);
   const sortedEntities = [...data.entities].sort((a, b) =>
     entityLabel(a.type).localeCompare(entityLabel(b.type)),

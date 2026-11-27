@@ -5,10 +5,7 @@ interface IntelFeedLogoProps {
   className?: string;
 }
 
-/**
- * The IntelFeed mark (utils/brandMark.ts). Uses currentColor so it takes the
- * theme's accent; at 32px and below it uses the heavier SMALL weights.
- */
+/** The IntelFeed mark (utils/brandMark.ts). Uses currentColor so it takes the theme's accent; at 32px and below it uses the heavier SMALL weights. */
 export function IntelFeedLogo({ size = 22, className }: IntelFeedLogoProps) {
   const w = size <= 32 ? MARK_WEIGHTS.SMALL : MARK_WEIGHTS.FULL;
   return (

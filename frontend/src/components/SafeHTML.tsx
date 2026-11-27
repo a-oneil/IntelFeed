@@ -15,9 +15,7 @@ interface SafeHTMLProps {
 
 export function SafeHTML({ html, className, style, glossaryTerms }: SafeHTMLProps) {
   const ref = useRef<HTMLDivElement>(null);
-  // Settings → Reading → "Open links in new tab": outside links in article
-  // content get target="_blank" (on) or lose it (off). Same-site links are
-  // left alone either way.
+  // Settings → Reading → "Open links in new tab": outside links in article content get target="_blank" (on) or lose it (off). Same-site links are left alone either way.
   const openLinksNewTab = useReadingPrefs().open_links_new_tab;
 
   const clean = useMemo(() => {
@@ -41,11 +39,7 @@ export function SafeHTML({ html, className, style, glossaryTerms }: SafeHTMLProp
       if (node.tagName === "A" && node.getAttribute("target") === "_blank") {
         node.setAttribute("rel", "noopener noreferrer");
       }
-      // A <form action> / formaction sends the browser off-site without an
-      // <a>, so it would slip past the external-link confirmation. Drop only
-      // destinations that LEAVE the site; forms, controls and same-site
-      // destinations are left alone. (Image-map <area> links are handled by
-      // the click guard itself, so their content stays intact.)
+      // A <form action> / formaction sends the browser off-site without an <a>, so it would bypass the external-link confirmation. Drop only destinations that leave the site; forms, controls and same-site destinations are left alone. (Image-map <area> links are handled by the click guard itself, so their content stays intact.)
       for (const attr of ["action", "formaction"]) {
         const value = node.getAttribute?.(attr);
         if (value && isExternalWebUrl(value)) node.removeAttribute(attr);
@@ -117,8 +111,7 @@ export function SafeHTML({ html, className, style, glossaryTerms }: SafeHTMLProp
     );
 
     el.querySelectorAll<HTMLImageElement>("img").forEach((img) => {
-      // Telegram media is login-only; a visitor (public read-only mode) would
-      // only get a broken image, so the post shows as text.
+      // Telegram media is login-only; a visitor (public read-only mode) would only get a broken image, so the post shows as text.
       if (isVisitorNow() && (img.getAttribute("src") || "").startsWith("/api/telegram-media/")) {
         img.remove();
         return;
@@ -149,8 +142,7 @@ export function SafeHTML({ html, className, style, glossaryTerms }: SafeHTMLProp
       ref={ref}
       className={className}
       style={style}
-      // Feed-supplied markup: ExternalLinkGuard treats links in here as untrusted
-      // even when it is set to "article content only".
+      // Feed-supplied markup: ExternalLinkGuard treats links in here as untrusted even when it is set to "article content only".
       {...{ [UNTRUSTED_CONTENT_ATTR]: "" }}
       dangerouslySetInnerHTML={{ __html: clean }}
     />

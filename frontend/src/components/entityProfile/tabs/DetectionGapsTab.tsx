@@ -1,10 +1,4 @@
-/**
- * DetectionGapsTab — prioritized punch-list of this entity's techniques with
- * NO covering detection rule. DetectionTab already shows the full
- * covered/library-only/gap breakdown; this tab is deliberately narrower — just
- * the actionable gaps, ready to generate a rule for, for a detection engineer
- * triaging "what should I build next".
- */
+/** DetectionGapsTab — a prioritized list of this entity's techniques that have no covering detection rule. DetectionTab already shows the full covered/library-only/gap breakdown; this tab shows only the gaps, each with a button to generate a rule, for a detection engineer deciding what to build next. */
 import { useState } from "react";
 import { currentReadingPrefs } from "@/hooks/useReadingPrefs";
 import { defaultRuleTypes } from "@/utils/queryLanguage";

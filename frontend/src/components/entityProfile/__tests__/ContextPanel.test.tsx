@@ -35,7 +35,7 @@ vi.mock("@/utils/formatDate", () => ({ formatDateTime: (input: string) => `at ${
 const HOUR = 3_600_000;
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
 
-/** Spec §B sample, one source per display type. */
+/** Sample context (spec §B) with one source per display type. */
 function sample(over: Partial<EntityContext> = {}): EntityContext {
   return {
     sources: [
@@ -283,7 +283,7 @@ describe("ContextPanel", () => {
     expect(screen.getByText("No context yet")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Enrich now" }));
     expect(mutate).toHaveBeenCalledWith(
-      // Named, so auto-mode sources run too, not just manual-mode ones.
+      // The sources are named explicitly, so auto-mode sources run too, not just manual-mode ones.
       { entityType: "observable", entityId: "o1", sourceTypes: ["shodan", "greynoise"], refresh: false },
       expect.anything(),
     );
@@ -320,7 +320,7 @@ describe("ContextPanel", () => {
     );
   });
 
-  // Rows still open and close for everyone; only the enrichment buttons go.
+  // Rows still open and close for everyone; only the enrichment buttons are hidden.
   const enrichButtons = () => screen.queryAllByRole("button", { name: /^(Refresh|Enrich now)/ });
 
   it("is read-only for visitors", () => {

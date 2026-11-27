@@ -56,8 +56,7 @@ export function WatchlistPanel() {
     if (isKnownEntityType(w.entity_type)) navigate(entityProfilePath(w.entity_type, w.entity_id));
   };
 
-  // Mutations are captured per render, so the column set has to be rebuilt when
-  // their pending state flips — otherwise Remove stays enabled mid-delete.
+  // Mutations are captured per render, so the column set is rebuilt when the delete's pending state flips; otherwise Remove stays enabled mid-delete.
   const columns: DataTableColumn<EntityWatch>[] = useMemo(() => [
     {
       key: "entity", label: "Entity", width: 280, minWidth: 140, flex: true,
@@ -80,8 +79,7 @@ export function WatchlistPanel() {
       ),
     },
     {
-      // Replaces the two hand-rolled "Watching" / "Muted" sections: one list,
-      // one filter — the same shape as every other workbench table.
+      // Watched and muted entities share one list with a Mode filter, the same shape as every other workbench table.
       key: "mode", label: "Mode", width: 110, minWidth: 90,
       textValue: (w) => w.mode,
       sortValue: (w) => w.mode,
@@ -117,7 +115,7 @@ export function WatchlistPanel() {
             }}
           />
         ) : (
-          /* Boost is meaningless on a mute — muting suppresses the entity outright. */
+          /* Boost does not apply to a muted entity: muting suppresses it outright. */
           <span className={styles.zero}>·</span>
         ),
     },

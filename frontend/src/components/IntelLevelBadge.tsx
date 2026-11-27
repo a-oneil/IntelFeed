@@ -1,19 +1,11 @@
 import styles from "./IntelLevelBadge.module.css";
 
 /**
- * How much of the extraction pipeline a feed actually runs, as a fill level.
+ * How much of the extraction pipeline a feed runs, as a fill level.
  *
- * This used to be a five-way enum — full / selective / known_only / manual /
- * none — derived from `intel_extraction_mode` + `auto_extract_on_ingest`. Two
- * of those names described a pipeline that stopped existing: "known entities
- * only" claimed nothing new would be created and "manual" claimed nothing ran
- * automatically, while the one-pass AI read both and minted entities from
- * them. The Pipeline pane in the edit modal was rebuilt around the real
- * switches; this is the same model, compressed to a rail.
+ * It counts the stages that run rather than naming an extraction mode, because a five-way label (full / selective / known_only / manual / none, derived from `intel_extraction_mode` + `auto_extract_on_ingest`) was misleading: "known entities only" claimed nothing new would be created and "manual" claimed nothing ran automatically, while the one-pass AI read both and created entities from them. It follows the same switches as the Pipeline pane in the feed edit modal, compressed to a rail.
  *
- * Three per-feed stages can be on, so the rail has four states: empty (the
- * feed is processed but every extraction stage is off), a third, two thirds,
- * and full. A feed with `intel_extraction_mode = "none"` renders nothing.
+ * Three per-feed stages can be on, so the rail has four states: empty (the feed is processed but every extraction stage is off), a third, two thirds, and full. A feed with `intel_extraction_mode = "none"` renders nothing.
  */
 export interface IntelLevelInput {
   mode: string;

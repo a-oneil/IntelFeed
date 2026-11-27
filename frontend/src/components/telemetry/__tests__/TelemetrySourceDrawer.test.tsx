@@ -74,9 +74,9 @@ describe("TelemetrySourceDrawer", () => {
     const link = await screen.findByRole("link", { name: /Finding types/ });
     expect(link).toHaveAttribute("href", "https://docs.aws.amazon.com/guardduty/x");
     expect(screen.getByText("Needs the agent")).toBeInTheDocument();
-    // Markdown, like every other note.
+    // Rendered as markdown, like every other note.
     expect(screen.getByText("EC2").tagName).toBe("STRONG");
-    // One Edit and one Delete: mine. Not on lee's note.
+    // One Edit and one Delete, on the current user's note only; lee's note has neither.
     expect(screen.getAllByRole("button", { name: /Edit/ })).toHaveLength(1);
     expect(screen.getAllByTitle("Delete note")).toHaveLength(1);
   });

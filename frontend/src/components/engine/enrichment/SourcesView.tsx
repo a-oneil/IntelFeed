@@ -1,8 +1,4 @@
-/**
- * Sources: the list answers three things per source (is it on, does it work,
- * what does it fill); the side panel holds the rest. Sources that are on come
- * first, problems at the top; the rest sit under "Available".
- */
+/** Sources: the list answers three things per source (is it on, does it work, what does it fill); the side panel holds the rest. Sources that are on come first, problems at the top; the rest sit under "Available". */
 import { useState } from "react";
 import { toast } from "sonner";
 

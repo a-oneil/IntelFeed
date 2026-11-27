@@ -1,8 +1,9 @@
 """Applying an adjudicator alias trim on a type outside the merge registry.
 
-The adjudicator files alias trims for every linkable type; the apply used to
-look the entity up in the merge registry (actor/malware/vendor/product/tool)
-and refused a country with "unsupported entity_type: country".
+The adjudicator files alias trims for every linkable type. These tests guard
+against the apply looking the entity up in the merge registry
+(actor/malware/vendor/product/tool), which refused a country with
+"unsupported entity_type: country".
 """
 
 import uuid

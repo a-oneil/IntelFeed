@@ -87,8 +87,8 @@ async def _compute_counts_inline(
 
         plan = build_execution_plan(ast, viewer_id=user_id)
 
-        # Every Postgres-backed filter, not just `feed:` — resolving one and not
-        # the other leaves the rest of them unapplied.
+        # Resolve every Postgres-backed filter, not just `feed:`; any filter
+        # left unresolved would not be applied to the count.
         from app.search.query_planner import resolve_deferred_filters
 
         await resolve_deferred_filters(db, plan)

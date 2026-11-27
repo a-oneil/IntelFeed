@@ -1,13 +1,7 @@
 /**
- * TagPicker — a multi-select of tags with autocomplete over existing tags plus
- * inline create-new, for anywhere tags are configured by name (e.g. automation
- * add/remove-tags actions).
+ * TagPicker: a multi-select of tags with autocomplete over existing tags plus inline create-new, for anywhere tags are configured by name (e.g. automation add/remove-tags actions).
  *
- * With `presentation`, a tag that doesn't exist yet also gets a colour, a
- * "show as chip" switch, a "visible to everyone" switch and a tooltip, so a
- * rule author sets the tag's look and scope the moment they invent it. Existing
- * tags are never restyled or re-scoped from here — the tag's own record is the
- * source of truth.
+ * With `presentation`, a tag that doesn't exist yet also gets a color, a "show as chip" switch, a "visible to everyone" switch and a tooltip, so a rule author sets the tag's look and scope when they create it. Existing tags are never restyled or re-scoped from here; the tag's own record is the source of truth.
  */
 import { useMemo, useRef, useState } from "react";
 import { useTags } from "@/hooks/useTags";
@@ -21,14 +15,14 @@ import {
 } from "@/utils/tagSpecs";
 import styles from "./TagPicker.module.css";
 
-/** Quick picks for a new chip; the colour input covers everything else. */
+/** Quick picks for a new chip; the color input covers everything else. */
 const SWATCHES = ["#DC2626", "#EA580C", "#CA8A04", "#16A34A", "#0891B2", "#2563EB", "#7C3AED", "#DB2777"];
 
 interface TagPickerProps {
   value: TagSpec[];
   onChange: (specs: TagSpec[]) => void;
   placeholder?: string;
-  /** Offer colour / chip / scope / tooltip for tags that will be created. */
+  /** Offer color / chip / scope / tooltip for tags that will be created. */
   presentation?: boolean;
 }
 
@@ -65,7 +59,7 @@ function NewTagEditor({ spec, onChange }: { spec: NewTagSpec; onChange: (spec: N
           Visible to everyone
         </label>
       </div>
-      <div className={styles.swatches} role="radiogroup" aria-label={`Colour for ${spec.name}`}>
+      <div className={styles.swatches} role="radiogroup" aria-label={`Color for ${spec.name}`}>
         {SWATCHES.map((c) => (
           <button
             key={c}
@@ -83,7 +77,7 @@ function NewTagEditor({ spec, onChange }: { spec: NewTagSpec; onChange: (spec: N
           className={styles.colorInput}
           value={color}
           onChange={(e) => onChange({ ...spec, color: e.target.value })}
-          aria-label={`Custom colour for ${spec.name}`}
+          aria-label={`Custom color for ${spec.name}`}
         />
       </div>
       <input

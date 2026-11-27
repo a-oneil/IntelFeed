@@ -90,7 +90,7 @@ export function useEnrichEntity() {
         entity_id: entityId,
         source_types: sourceTypes,
         refresh,
-        // A person asked: the manual lane, ahead of new/refresh/backfill work.
+        // A person started this lookup, so it goes in the manual lane, ahead of new/refresh/backfill work.
         lane: "manual",
       });
       return data;
@@ -137,12 +137,10 @@ export function useEnrichValue() {
 
 // --- Console (Settings → Engine → Enrichment) ---
 
-/** key_rejected: the source turned the key down (401/403) — fix the key,
- *  waiting won't help. */
+/** key_rejected: the source rejected the key (401/403). The key has to be fixed; waiting won't help. */
 type EnrichmentSourceStatus = "ok" | "failing" | "off" | "needs_key" | "key_rejected";
 
-/** What a lookup sends out: nothing (the source is downloaded), public ids,
- *  or the analyst's indicators. */
+/** What a lookup sends out: nothing (the source is downloaded), public ids, or the analyst's indicators. */
 export type EnrichmentEgress = "none" | "low" | "shares_ioc";
 
 export type EnrichmentKeyStatus = "set" | "missing" | "optional" | "rejected";
@@ -229,8 +227,7 @@ export interface EnrichmentConsole {
   sources: EnrichmentConsoleSource[];
 }
 
-/** source_type → label, from the last console read: toasts name sources the
- *  way the console does. */
+/** source_type → label, from the last console read, so toasts name sources the same way the console does. */
 const LABELS = new Map<string, string>();
 export function sourceLabel(sourceType: string): string {
   return LABELS.get(sourceType) ?? sourceType;
@@ -278,7 +275,7 @@ export interface EnrichmentSourceDetail {
     waiting: number;
     by_lane: Partial<Record<EnrichmentLane, number>>;
     retrying: number;
-    /** Queued lookups by why they wait again (rate_limited = after a 429). */
+    /** Queued lookups by the reason they are waiting again (rate_limited = after a 429). */
     by_reason?: Partial<Record<EnrichmentQueueReason, number>>;
     failed: number;
   };
@@ -409,7 +406,7 @@ export interface EnrichmentKey {
   status: EnrichmentKeyStatus;
   /** Why the source rejected it, when it did. */
   message: string | null;
-  /** The caller has an own key, used for the lookups they start. */
+  /** The caller has their own key, used for the lookups they start. */
   mine: boolean;
   personal_allowed: boolean;
   signup_url: string | null;

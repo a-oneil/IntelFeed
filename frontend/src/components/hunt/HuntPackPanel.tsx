@@ -1,16 +1,7 @@
 /**
- * Hunts, one line per hunt: number, title, tactic and any telemetry it needs
- * that isn't collected, with Copy and ATHF file on the line. A line opens in
- * place to the hypothesis, its techniques (links to their profiles), the
- * query, and the why / adapt / false-positive notes behind one link.
- *
- * Two homes, one list: the profile's Hunts row (all reporting; the row line
- * carries Draft more / Draft again through `HuntRowActions`) and the Threats
- * board drawer (`HuntPackPanel`, the board's window). Same service
- * (hooks/useHuntPacks).
- *
- * A pack is a starting point for a hunt run in the SIEM and recorded in the
- * ATHF workspace; IntelFeed tracks nothing past the draft.
+ * Hunts, one line per hunt: number, title, tactic and any telemetry it needs that isn't collected, with Copy and ATHF file buttons on the line. A line expands in place to show the hypothesis, its techniques (linked to their profiles), the query, and the why / adapt / false-positive notes behind one link.
+ * The same list appears in two places, both backed by hooks/useHuntPacks: the entity profile's Hunts row (`HuntRowBody`, drafted from everything reported on the entity; the row line carries Draft more / Draft again through `HuntDraftLinks`) and the Threats board drawer (`HuntPackPanel`, drafted from the board's time window).
+ * A pack is a starting point for a hunt that is run in the SIEM and recorded in the ATHF workspace; IntelFeed tracks nothing past the draft.
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -63,8 +54,7 @@ export function missingFor(h: HuntHypothesis): string[] {
 export function runnableSummary(pack: HuntPack): string {
   const runs = pack.hypotheses.filter((h) => h.runnable).length;
   const blockedHunts = pack.hypotheses.filter((h) => !h.runnable);
-  // A missing log is a sentence ("vCenter VCSA SSO logs forwarded via
-  // syslog to…"): too long to list here, and each hunt's own line names it.
+  // A missing log source is a whole sentence ("vCenter VCSA SSO logs forwarded via syslog to…"), too long to list here, and each hunt's own line names it; so when any hunt lacks its log source, fall back to "logs you don't collect".
   const missing = blockedHunts.some((h) => h.log_source && h.source_have === false)
     ? []
     : [...new Set(blockedHunts.flatMap(missingFor))];
@@ -123,8 +113,7 @@ function HuntLine({
 }) {
   const [copied, setCopied] = useState(false);
   const [details, setDetails] = useState(false);
-  // The log nobody collects comes first: it is why the hunt can't run, even
-  // when its log types read as collected from some other source.
+  // missingFor lists the uncollected log source first: it is why the hunt can't run, even when its log types show as collected from some other source.
   const missing = missingFor(h);
   const copy = async () => {
     try {
@@ -253,7 +242,7 @@ export function HuntList({
   );
 }
 
-/** Drafting / failed / before-the-first-draft lines shared by both homes. */
+/** Drafting / failed / before-the-first-draft lines shared by the profile row and the board drawer. */
 function HuntStatus({
   draftState,
   emptyText,

@@ -48,8 +48,7 @@ const EXPORT_FORMATS = [
 
 type SectionData = { title?: string; body?: string; items?: Record<string, unknown>[] };
 
-/** Placeholder line the skeleton puts under each heading; stripped back out
- *  when the body is parsed into sections on create. */
+/** Placeholder line the skeleton puts under each heading; stripped back out when the body is parsed into sections on create. */
 function sectionPlaceholder(sec: ReportTemplateSection): string {
   if (sec.type === "data") {
     return "_(data section: fills automatically from linked articles and entities)_";
@@ -57,16 +56,12 @@ function sectionPlaceholder(sec: ReportTemplateSection): string {
   return sec.description ? `_${sec.description}_` : "_Write this section..._";
 }
 
-/** Markdown scaffold for a template: one ## heading per section. Selecting a
- *  template in create mode fills the editor with this. */
+/** Markdown scaffold for a template: one ## heading per section. Selecting a template in create mode fills the editor with this. */
 function buildTemplateSkeleton(secs: ReportTemplateSection[]): string {
   return secs.map((sec) => `## ${sec.title}\n\n${sectionPlaceholder(sec)}\n`).join("\n");
 }
 
-/** Split an edited skeleton back into per-section bodies by matching the
- *  template's ## headings, so text typed in create mode lands in the right
- *  section tabs after the report exists. Returns null for freeform bodies
- *  that don't use the template's headings. */
+/** Split an edited skeleton back into per-section bodies by matching the template's ## headings, so text typed in create mode lands in the right section tabs after the report exists. Returns null for freeform bodies that don't use the template's headings. */
 function parseBodyIntoSections(
   body: string,
   secs: ReportTemplateSection[]
@@ -127,7 +122,7 @@ const SNIPPET_INSERTS: Array<{ label: string; snippet: string }> = [
   },
 ];
 
-/** Narrative sections still unwritten, or null when none are left (or there are none). */
+/** How many narrative sections are written out of the total, or null when all are written (or there are none). */
 function narrativeProgress(report: { content?: unknown } | null | undefined): { done: number; total: number } | null {
   if (!report) return null;
   const content = report.content as Record<string, unknown>;
@@ -171,8 +166,7 @@ export function ReportBuilderPage() {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [sections, setSections] = useState<Record<string, string>>({});
-  // Data sections whose rows the analyst has rewritten as text in this
-  // editing session: on save the body replaces the rows (items become []).
+  // Data sections whose rows the analyst has rewritten as text in this editing session: on save the body replaces the rows (items become []).
   const [itemsReplaced, setItemsReplaced] = useState<Set<string>>(new Set());
   const [summary, setSummary] = useState("");
   const [tlpMarking, setTlpMarking] = useState("TLP:GREEN");
@@ -187,8 +181,7 @@ export function ReportBuilderPage() {
   const [generatingSection, setGeneratingSection] = useState<string | null>(null);
   const [activeSectionTab, setActiveSectionTab] = useState<string | null>(null);
   const [docView, setDocView] = useState<"rendered" | "markdown">("rendered");
-  // Create mode: template grid collapses once a template is picked, so the
-  // editor gets the room. Reopens from the header row.
+  // Create mode: the template grid collapses once a template is picked, so the editor gets the room. It reopens from the header row.
   const [templatePickerOpen, setTemplatePickerOpen] = useState(true);
   const [addEntrySearch, setAddEntrySearch] = useState("");
   const [showAddEntry, setShowAddEntry] = useState(false);
@@ -228,9 +221,7 @@ export function ReportBuilderPage() {
       const savedBody = typeof content?.body === "string" ? content.body : "";
       setBody(savedBody);
       const rawSections = (content?.sections || {}) as Record<string, unknown>;
-      // Opening a report picks the view once: a free-text report with nothing
-      // in it opens ready to write, everything else opens as the document.
-      // Later refetches (after a save) leave the analyst's choice alone.
+      // Opening a report picks the view once: a free-text report with nothing in it opens ready to write, everything else opens as the document. Later refetches (after a save) leave the analyst's choice alone.
       if (openedReportRef.current !== report.id) {
         openedReportRef.current = report.id;
         const blank = Object.keys(rawSections).length === 0 && !savedBody.trim();
@@ -263,17 +254,14 @@ export function ReportBuilderPage() {
     }
   }, [isCreateMode, templates, templateType]);
 
-  // Selecting a template fills the editor below with its section skeleton.
-  // Never clobbers typed content: only an empty editor or a previous
-  // untouched skeleton gets replaced.
+  // Selecting a template fills the editor below with its section skeleton. It never overwrites typed content: only an empty editor or a previous untouched skeleton gets replaced.
   const lastSkeletonRef = useRef<string>("");
   useEffect(() => {
     if (!isCreateMode || !templateType) return;
     const secs = (templates?.find((t) => t.type === templateType)?.sections || []).filter(
       (sec): sec is ReportTemplateSection => typeof sec === "object" && sec !== null
     );
-    // A template with no sections (Manual) has an empty skeleton, so switching
-    // to it clears another template's untouched headings.
+    // A template with no sections (Manual) has an empty skeleton, so switching to it clears another template's untouched headings.
     const skeleton = secs.length > 0 ? buildTemplateSkeleton(secs) : "";
     if ((body.trim() === "" || body === lastSkeletonRef.current) && body !== skeleton) {
       setBody(skeleton);
@@ -369,9 +357,7 @@ export function ReportBuilderPage() {
   const handleCreate = () => {
     if (!title.trim() || !templateType) return;
 
-    // Untouched skeleton → empty content so the backend scaffolds sections;
-    // an edited skeleton is parsed so each heading's text lands in its
-    // section tab; freeform text stays in body.
+    // Untouched skeleton → empty content so the backend scaffolds sections; an edited skeleton is parsed so each heading's text lands in its section tab; freeform text stays in body.
     const parsed = body === lastSkeletonRef.current ? { preamble: "", sections: {} } : parseBodyIntoSections(body, currentTemplateSections);
     const createContent = parsed ? { body: parsed.preamble, sections: parsed.sections } : { body, sections: {} };
 
@@ -409,8 +395,7 @@ export function ReportBuilderPage() {
   };
 
   const shareUrl = shareLink ? `${window.location.origin}${shareLink.url}` : null;
-  // Only CLEAR and GREEN may go out by public link (the backend enforces the
-  // same rule when the link is made and on every read).
+  // Only CLEAR and GREEN may go out by public link (the backend enforces the same rule when the link is made and on every read).
   const tlpBlocksSharing = tlpMarking !== "TLP:CLEAR" && tlpMarking !== "TLP:GREEN";
   const copyShareUrl = async (url: string) => {
     try {
@@ -475,8 +460,7 @@ export function ReportBuilderPage() {
     return c?.sections || {};
   }, [report]);
 
-  /** The rows a data section still carries — none once the analyst has
-   *  rewritten them as text this session. */
+  /** The rows a data section still carries — none once the analyst has rewritten them as text this session. */
   const sectionItems = useCallback(
     (sectionName: string): Record<string, unknown>[] => {
       if (itemsReplaced.has(sectionName)) return [];
@@ -492,8 +476,7 @@ export function ReportBuilderPage() {
     [sections, sectionItems],
   );
 
-  /** Typing in a data section's editor turns its rows into text: the body is
-   *  now the whole section and the rows go on save. */
+  /** Typing in a data section's editor turns its rows into text: the body becomes the whole section and the rows are dropped on save. */
   const handleDataSectionChange = useCallback((sectionName: string, value: string) => {
     setItemsReplaced((prev) => (prev.has(sectionName) ? prev : new Set(prev).add(sectionName)));
     setSections((prev) => ({ ...prev, [sectionName]: value }));
@@ -541,10 +524,7 @@ export function ReportBuilderPage() {
     setIsGenerating(true);
     regenerateAll.mutate(id, {
       onSuccess: async () => {
-        // The server cleared the narrative sections before answering, so this
-        // refetch is authoritative. With nothing left unfinished (no narrative
-        // sections, or all already written) there is nothing to wait for — don't
-        // poll until a completion event that may never arrive.
+        // The server clears the narrative sections before answering, so this refetch is authoritative. With nothing left unfinished (no narrative sections, or all already written) there is nothing to wait for, so don't poll for a completion event that may never arrive.
         const { data } = await refetch();
         awaitingRegenRef.current = false;
         if (!narrativeProgress(data)) setIsGenerating(false);
@@ -713,9 +693,7 @@ export function ReportBuilderPage() {
           </div>
         </div>
 
-        {/* Template picker — an expander: collapsed it's one row showing the
-            chosen template; picking a card collapses it to hand the editor
-            the vertical room. */}
+        {/* Template picker, as an expander: collapsed, it is one row showing the chosen template; picking a card collapses it to give the editor the vertical room. */}
         <div className={styles.templateSelector}>
           <button
             type="button"
@@ -960,8 +938,7 @@ export function ReportBuilderPage() {
             </div>
           )}
 
-          {/* Full document view — rendered document by default, raw markdown
-              behind a toggle. Data sections draw their items as tables. */}
+          {/* Full document view — rendered document by default, raw markdown behind a toggle. Data sections draw their items as tables. */}
           {(activeSectionTab === null || viewingVersionId) && (
             <>
               {!viewingVersionId && (
@@ -993,9 +970,7 @@ export function ReportBuilderPage() {
                 <ReportDocument
                   sections={currentTemplateSections.map((sec) => {
                     const data = (contentSections[sec.name] || {}) as SectionData;
-                    // Generated bodies often open with their own "## Title"
-                    // heading — the doc view already draws one, so drop it
-                    // (same rule as the markdown exporter).
+                    // Generated bodies often open with their own "## Title" heading; the doc view already draws one, so drop it (same rule as the markdown exporter).
                     const body = (sections[sec.name] || data.body || "").replace(/^\s*##\s+[^\n]*\n+/, "");
                     return {
                       name: sec.name,

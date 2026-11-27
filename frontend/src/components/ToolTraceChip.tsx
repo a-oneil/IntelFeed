@@ -33,10 +33,7 @@ const TOOL_ICONS: Record<string, TablerIcon> = {
   list_documentation_pages: IconBooks,
 };
 
-/**
- * Renders the most salient argument inline (e.g. a query string) so the chip
- * reads like "search_entries 'APT29'" after its icon. Falls back to an arg count.
- */
+/** Renders the most salient argument inline (e.g. a query string) so the chip reads like "search_entries 'APT29'" after its icon. Falls back to an arg count. */
 function argHint(args: Record<string, unknown>): string {
   const primary =
     args.query ?? args.q ?? args.name ?? args.cve_id ?? args.technique_id ?? args.slug ?? args.id;

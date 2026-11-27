@@ -90,7 +90,7 @@ async def _check_actor_overlap(
     entry_ttps: list[dict],
     entry_id: uuid.UUID,
 ) -> list[dict]:
-    """Check if TTPs in this entry match known threat actor activity."""
+    """Placeholder for matching this entry's TTPs against known threat actors; returns no insights."""
     insights = []
 
     return insights[:3]

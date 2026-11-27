@@ -17,8 +17,8 @@ class ThreatBoardState(Base):
 
     ``new_count_at_decision`` is what makes a snooze date unnecessary: a handled
     threat comes back on its own once its live count of first-seen techniques
-    exceeds the count at the time you dismissed it. New tradecraft reopens the
-    row; a quiet fortnight does not.
+    exceeds the count at the time you dismissed it. New techniques reopen the
+    row; time passing alone does not.
     """
 
     __tablename__ = "threat_board_state"

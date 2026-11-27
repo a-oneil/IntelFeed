@@ -6,7 +6,7 @@ generated under a narrow contract so accuracy is the default:
 - Inputs are the row's own window entries and nothing else — no model memory of
   the actor, no world knowledge. If it isn't in the window's articles, it isn't
   in the brief.
-- Two to three sentences; victims/sector, access vector, tooling or artefact
+- Two to three sentences; victims/sector, access vector, tooling or artifact
   when the window documents one; uncertainty markers ("claims", "reportedly")
   preserved from the sources; counts forbidden (the row renders those itself).
 - Vulnerability rows are written by their own prompt (``cve_brief``) against the
@@ -37,11 +37,12 @@ logger = logging.getLogger(__name__)
 
 # The brief's inputs, per entity: the window's entries with their extracted
 # techniques and any real observable quotes. Capped and truncated — the brief is
-# two sentences, not a survey; twelve articles of context is plenty.
-# Articles the prompt sees, and the candidate pool folded down to reach it.
-# The cap used to be applied in SQL, before anything knew which articles were
-# one story — so a wave of eight re-reports took eight of the twelve slots and
-# the model saw four other stories at most.
+# two sentences, not a survey; twelve articles of context is enough.
+# BRIEF_ENTRY_CAP is how many articles the prompt sees; BRIEF_CANDIDATE_CAP is
+# the pool fetched and then folded by story down to that number. The cap is not
+# applied in SQL, because SQL does not know which articles are one story: a wave
+# of eight re-reports would take eight of the twelve slots and leave room for
+# four other stories at most.
 BRIEF_ENTRY_CAP = 12
 BRIEF_CANDIDATE_CAP = 24
 
@@ -165,14 +166,13 @@ async def collect_cve_facts(db: AsyncSession, cve_id: str) -> dict:
 async def _fold_to_one_per_story(db: AsyncSession, rows: list[dict]) -> list[dict]:
     """One article per story, with what it folded recorded on it.
 
-    Twelve articles where eight are the same advisory spend most of the model's
-    attention saying that advisory eight times, and the brief comes back
-    reading like the pile it was built from. Threads already know which ones
-    are one story, so the batch is folded before the prompt is built — the same
-    treatment the daily briefing gives its input.
+    Twelve articles where eight are the same advisory leave the model reading
+    that advisory eight times, and the brief over-weights it. Story threads
+    already record which articles are one story, so the batch is folded before
+    the prompt is built — the same treatment the daily briefing gives its input.
 
     An article no thread holds passes through as itself, and carries no
-    coverage fields: nothing knows what it is part of. A story is represented
+    coverage fields, since it belongs to no story. A story is represented
     by its first member in the caller's order, skipping any the thread folded
     as an echo — an echo is a re-report of the article it would be standing in
     for.

@@ -1,5 +1,4 @@
-/* Analyst-authored chips leading the badge row. Sized to sit flush with the
-   row's 20px intel chips. */
+/* Analyst-authored chips leading the badge row. Sized to sit flush with the row's 20px intel chips. */
 .group {
   display: inline-flex;
   align-items: center;
@@ -16,8 +15,7 @@
   min-width: 0;
 }
 
-/* In a narrow column the chips shrink and ellipsise rather than overlap.
-   Doubled class to outrank the primitive's `flex: none`. */
+/* In a narrow column the chips shrink and ellipsize rather than overlap. Doubled class to outrank the primitive's `flex: none`. */
 .item .chip {
   flex: 0 1 auto;
   min-width: 3ch;

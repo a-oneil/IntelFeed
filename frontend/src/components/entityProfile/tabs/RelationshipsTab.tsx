@@ -1,14 +1,7 @@
 /**
- * RelationshipsTab — the entity's relationships as a compact list beside an
- * evidence panel.
+ * RelationshipsTab — the entity's relationships as a compact list beside an evidence panel.
  *
- * The list reads as sentences grouped by verb and type ("Qilin uses ·
- * techniques"), each row naming its source (MITRE ATT&CK, a feed, AI-reviewed
- * articles, an analyst) and how many articles it was seen in. Selecting a row
- * opens the panel: why it's listed, the articles that state it, the reviews,
- * and — kept apart — the articles that merely mention both. CVE and CWE
- * profiles add the links that come from reference data. Co-mentions (no
- * relationship stated) and names no entity matches sit below, on request.
+ * The list reads as sentences grouped by verb and type ("Qilin uses · techniques"), each row naming its source (MITRE ATT&CK, a feed, AI-reviewed articles, an analyst) and how many articles it was seen in. Selecting a row opens the panel: why it's listed, the articles that state it, the reviews, and, listed separately, the articles that only mention both. CVE and CWE profiles add the links that come from reference data. Co-mentions (no relationship stated) and names that match no entity are listed below, opened on request.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
@@ -137,14 +130,13 @@ export function RelationshipsTab({
   onOpenEntry: (entryId: string) => void;
 }) {
   const navigate = useNavigate();
-  // A visitor browses: no Shift+drag links, no moderation, no review evidence.
+  // A visitor can only browse: no Shift+drag links, no moderation, no review evidence.
   const isVisitor = useIsVisitor();
   const openThread = useOpenThread();
-  // The list and its evidence are the tab; the graph opens on request.
+  // The tab shows the list and its evidence; the graph opens on request.
   const [graphCollapsed, setGraphCollapsed] = useState(true);
   const [storyFilter, setStoryFilter] = useState<{ title: string; keys: Set<string> } | null>(null);
-  // On-demand neighbor sets fetched per node from the graph's +/− badge —
-  // keyed by graph node id.
+  // On-demand neighbor sets fetched per node from the graph's +/− badge, keyed by graph node id.
   const [graphExpansions, setGraphExpansions] = useState<
     Map<string, { nodes: EntityNode[]; edges: EntityEdge[]; clusters: GraphStoryCluster[] }>
   >(new Map());
@@ -156,8 +148,7 @@ export function RelationshipsTab({
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [heldOpen, setHeldOpen] = useState(false);
-  // null until the toggle is clicked: then the open state follows whether
-  // there are relationships (none → the co-mentions are the content).
+  // null until the toggle is clicked; while null, the co-mentions section is open only when there are no relationships (then the co-mentions are the content).
   const [coOpenChoice, setCoOpenChoice] = useState<boolean | null>(null);
   const [pendingEdge, setPendingEdge] = useState<{
     sourceId: string;
@@ -169,7 +160,7 @@ export function RelationshipsTab({
   } | null>(null);
   const pendingVerbs = pendingEdge ? allowedVerbsForPair(pendingEdge.sourceType, pendingEdge.targetType) : [];
   const panelRef = useRef<HTMLDivElement>(null);
-  // Phone: the evidence opens under the tapped row instead of beside the list.
+  // On a phone the evidence opens under the tapped row instead of beside the list.
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -182,8 +173,7 @@ export function RelationshipsTab({
     setCoOpenChoice(null);
   }, [entityId]);
 
-  // Which enrichment sources claim each connection, and the names they gave
-  // that resolved to nothing (held). Signed-in only.
+  // Which enrichment sources claim each connection, and the names they gave that resolved to no entity (held). Signed-in users only.
   const { data: claims } = useRelationClaims(entityType, entityId, !isVisitor);
   const viaOf = useCallback(
     (row: RelRow) => {
@@ -199,8 +189,7 @@ export function RelationshipsTab({
   const updateRel = useUpdateRelationship();
   const createRelationship = useCreateRelationship();
 
-  // Window / load-all re-query the pivot with parameters; the default view
-  // reuses the page-level pivot passed in as props.
+  // The time window and load-all re-query the pivot with parameters; the default view reuses the page-level pivot passed in as props.
   const needsParamFetch = windowDays > 0 || serverExpanded;
   const paramPivot = usePivot(entityType, needsParamFetch ? entityId : undefined, {
     window_days: windowDays > 0 ? windowDays : undefined,
@@ -209,7 +198,7 @@ export function RelationshipsTab({
   const effRelated = (needsParamFetch ? paramPivot.data?.related : undefined) ?? related;
   const effCounts = (needsParamFetch ? paramPivot.data?.related_counts : undefined) ?? relatedCounts;
 
-  // Time-scoped graph mirrors the same evidence window as the rows.
+  // The time-scoped graph uses the same evidence window as the rows.
   const windowGraph = useEntityGraph(
     entityType,
     windowDays > 0 && !graphCollapsed ? entityId : undefined,
@@ -220,8 +209,7 @@ export function RelationshipsTab({
 
   const allRows = useMemo(() => flattenRelated(effRelated, entityType), [effRelated, entityType]);
 
-  // Country profiles' targeting / origin / infrastructure rows come from
-  // article tagging, not typed relationships — listed with the relationships.
+  // Country profiles' targeting / origin / infrastructure rows come from article tagging, not typed relationships, but are listed with the relationships.
   const countryRole = (r: RelRow) => (entityType === "country" ? r.item.country_relationship : undefined);
   const { asserted: typed, context: untyped } = useMemo(() => splitAssertedContext(allRows), [allRows]);
   const asserted = useMemo(
@@ -235,9 +223,7 @@ export function RelationshipsTab({
   const hasRelationships = asserted.length > 0;
   const coOpen = coOpenChoice ?? !hasRelationships;
 
-  // The panel stays in view while the list scrolls: pinned just below any bar
-  // pinned to the top of the area the page scrolls in (the profile's tab bar),
-  // and no taller than what's visible there, so its own scroll reaches the end.
+  // The panel stays in view while the list scrolls: it sticks just below any sticky bar at the top of the page's scroll container (the profile's tab bar), and is no taller than the visible area, so its own scroll can reach the end.
   useLayoutEffect(() => {
     const slot = panelRef.current;
     if (!slot) return;
@@ -253,8 +239,7 @@ export function RelationshipsTab({
         }
       }
       slot.style.top = `${pinned + 12}px`;
-      // Until it pins, the panel starts lower down the page: fit it to the
-      // space between where it starts now and the bottom of the visible area.
+      // Until it sticks, the panel starts lower down the page: fit it to the space between its current top and the bottom of the visible area.
       const visibleBottom = scroller ? scroller.getBoundingClientRect().top + scroller.clientHeight : window.innerHeight;
       slot.style.maxHeight = `${Math.max(240, visibleBottom - slot.getBoundingClientRect().top - 12)}px`;
     };
@@ -352,8 +337,7 @@ export function RelationshipsTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listed, entityType, entityLabel]);
 
-  // Beside the list, keep a row selected so the panel always explains
-  // something. On a phone nothing opens until a row is tapped.
+  // Beside the list, a row is always selected so the panel always shows something. On a phone nothing opens until a row is tapped.
   const visibleKeys = useMemo(() => new Set(groups.flatMap((g) => g.rows.map(rowKey))), [groups]);
   const selected = useMemo(() => {
     const fallback = !isMobile && groups[0] ? rowKey(groups[0].rows[0]) : null;
@@ -361,19 +345,14 @@ export function RelationshipsTab({
     return key ? asserted.find((r) => rowKey(r) === key) ?? null : null;
   }, [selectedKey, visibleKeys, groups, asserted, isMobile]);
 
-  // A second tap on the open row closes it (phone only: beside the list,
-  // something is always open).
+  // A second tap on the open row closes it (phone only: beside the list, a row is always open).
   const selectRow = (row: RelRow) =>
     setSelectedKey((prev) => (isMobile && prev === rowKey(row) ? null : rowKey(row)));
 
-  // The graph's story clusters and inspector facts come from the earned
-  // (story-backed) typed relationships, unfiltered.
+  // The graph's story clusters and inspector facts come from the earned (story-backed) typed relationships, unfiltered.
   const { earned: earnedAll } = useMemo(() => partitionEarned(typed), [typed]);
   const mapClusters = useMemo(() => buildStoryMap(earnedAll), [earnedAll]);
-  // Detection coverage: prefer the pivot's library-wide rule_coverage (how
-  // many rules in the WHOLE library reference each technique/CVE — counts
-  // feed the inspector). Fall back to source refs on the pivot's own rules
-  // for older cached payloads; never claim a gap blindly without either.
+  // Detection coverage: prefer the pivot's library-wide rule_coverage (how many rules in the whole library reference each technique/CVE; the counts are shown in the inspector). Fall back to source refs on the pivot's own rules for older cached payloads; with neither, coverage is unknown and no gap is reported.
   const coverage = useMemo(() => {
     const effCoverage = (needsParamFetch ? paramPivot.data?.rule_coverage : undefined) ?? ruleCoverage;
     if (effCoverage) {
@@ -394,8 +373,7 @@ export function RelationshipsTab({
     return { ttps, cves, present: hasSourceData };
   }, [effRelated, ruleCoverage, needsParamFetch, paramPivot.data]);
 
-  // Inspector facts per graph node — trust, evidence shape, counts, the
-  // profile description, KEV, and detection coverage.
+  // Inspector facts per graph node: trust, evidence shape, counts, the profile description, KEV, and detection coverage.
   const graphNodeInfo = useMemo(() => {
     const m = new Map<string, GraphNodeInfo>();
     for (const r of typed) {
@@ -447,15 +425,13 @@ export function RelationshipsTab({
     0,
   );
 
-  // The node's +/− badge (or the inspector): fetch the node's own PIVOT —
-  // its earned claims become satellite nodes, and its evidence stories
-  // become mini hulls orbiting it. Collapse just drops the set.
+  // The node's +/− badge (or the inspector): expanding fetches the node's own pivot, whose top 24 earned relationships become new nodes around it and whose evidence stories become small clusters around it. Collapsing removes that set.
   const toggleGraphExpand = (nodeId: string, nodeType: string, expand: boolean) => {
     if (!expand) {
       setGraphExpansions((prev) => {
         const next = new Map(prev);
         next.delete(nodeId);
-        // Cascade: expansions hanging off the collapsed one fold back with it.
+        // Expansions attached to the collapsed node are removed with it.
         return pruneExpansions(next, new Set((effGraph?.nodes ?? []).map((n) => n.id)));
       });
       return;
@@ -538,8 +514,7 @@ export function RelationshipsTab({
       .catch(() => undefined);
   };
 
-  // The rules behind a coverage tick — fetched when the inspector asks,
-  // filtered library-wide by the node's technique/CVE id.
+  // The rules behind a coverage indicator, fetched when the inspector asks for them and filtered library-wide by the node's technique/CVE id.
   const fetchCoveringRules = useCallback(async (node: EntityNode): Promise<CoveringRule[]> => {
     const d = node.data as { technique_id?: string; cve_id?: string } | undefined;
     const params =
@@ -555,7 +530,7 @@ export function RelationshipsTab({
     return data.items ?? [];
   }, []);
 
-  // Trim graph to the largest nodes around the center for very dense entities.
+  // For very dense entities, trim the graph to the center node plus the largest nodes (MAX_GRAPH_NODES).
   let nodes = effGraph?.nodes ?? [];
   let edges = effGraph?.edges ?? [];
   if (nodes.length > MAX_GRAPH_NODES) {

@@ -2,8 +2,8 @@
 
 The arrays on actors and malware were written by six paths over two years and
 hold ~435 distinct strings for a 21-slug vocabulary: canonical labels, near
-duplicates the normalizer misses ("Government agencies"), geography smuggled in
-as industry ("Middle East", "Ukraine"), asset classes that are not sectors at
+duplicates the normalizer misses ("Government agencies"), geography stored as
+industry ("Middle East", "Ukraine"), asset classes that are not sectors at
 all ("Email servers", "Android users"), and single-character fragments from a
 string that was iterated character by character.
 

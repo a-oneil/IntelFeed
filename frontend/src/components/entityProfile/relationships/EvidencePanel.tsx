@@ -1,8 +1,4 @@
-/**
- * EvidencePanel — why one relationship is listed: who says so, how sure we
- * are, the articles that state it (with their sentence), what the reviewers
- * said, and — kept apart — the articles that merely mention both.
- */
+/** EvidencePanel — why one relationship is listed: who says so, its confidence status, the articles that state it (with their sentence), what the reviewers said, and, in a separate list, the articles that only mention both. */
 import { useEffect, useState } from "react";
 import type { EntityType } from "@/stores/intelStore";
 import { useRelationshipEvidence, type RelationshipReview } from "@/hooks/useHygiene";
@@ -63,8 +59,7 @@ export function EvidencePanel({
 }) {
   const { item, label, type } = row;
   const relId = item.relationship_id ?? null;
-  // Catalog rows (ATT&CK technique ↔ mitigation) carry a synthetic id, not a
-  // stored relationship: there is no evidence to fetch and nothing to edit.
+  // Catalog rows (ATT&CK technique ↔ mitigation) carry a synthetic id, not a stored relationship: there is no evidence to fetch and nothing to edit.
   const stored = !!relId && UUID.test(relId);
   const evidence = useRelationshipEvidence(stored && !isVisitor ? relId : null);
   const [showAllCited, setShowAllCited] = useState(false);

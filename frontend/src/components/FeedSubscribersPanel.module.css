@@ -127,3 +127,12 @@
   width: 100%;
   text-align: left;
 }
+
+/* Phones: a 12px × is too small to tap. */
+@media (max-width: 767px) {
+  .removeBtn {
+    min-width: 44px;
+    min-height: 44px;
+    margin-right: calc(-1 * var(--sp-3));
+  }
+}

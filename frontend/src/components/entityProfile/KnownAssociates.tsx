@@ -1,16 +1,7 @@
 /**
- * KnownAssociates — the entity's best-evidenced CLAIMS as rows of the
- * Overview's key facts table: one row per verb (targets, uses, attributed
- * to…), keyed by the verb, naming the other entities. Who stands behind each
- * name (MITRE ATT&CK, an analyst, AI review, several separate stories) is in
- * its tooltip, in plain words; the row carries no source tag, because one row
- * mixes sources.
+ * KnownAssociates — the entity's best-evidenced CLAIMS as rows of the Overview's key facts table: one row per verb (targets, uses, attributed to…), keyed by the verb, naming the other entities. Who stands behind each name (MITRE ATT&CK, an analyst, AI review, several separate stories) is in its tooltip, in plain words; the row carries no source tag, because one row mixes sources.
  *
- * Deliberately NOT co-mention strength: the old "STRONG" tiers ranked by raw
- * co-occurrence, which put reporting vendors and countries alongside real
- * tradecraft with no way to explain why. Rows here must be asserted claims
- * that earned their place under the evidence-structure rules (see
- * relationshipBrowser), so every chip is explainable from its tooltip.
+ * Deliberately not ranked by co-mention strength: ranking by raw co-occurrence (the "STRONG" tiers) put reporting vendors and countries next to real techniques and tools with no way to explain why. Rows here must be asserted claims that earned their place under the evidence-structure rules (see relationshipBrowser), so every chip is explainable from its tooltip.
  */
 import { useMemo } from "react";
 import type { EntityType } from "@/stores/intelStore";
@@ -34,16 +25,11 @@ import { Row as FactRow } from "./SnapshotCard";
 import styles from "./entityProfile.module.css";
 
 const LIMIT = 12;
-/** At most four names per entity type — without this the rows fill with
- * ATT&CK techniques on every actor (MITRE corroborates them all), which the
- * ATT&CK tab already covers and which says nothing about who the entity runs
- * with. The cap makes the rows read across the diamond: capability, tooling,
- * victim. */
+/** At most four names per entity type — without this the rows fill with ATT&CK techniques on every actor (MITRE corroborates them all), which the ATT&CK tab already covers and which says nothing about the entity's other associations. The cap mixes types so the rows cover capability, tooling and victims. */
 const TYPE_CAP = 4;
 const TRUST_RANK: Record<string, number> = { corroborated: 2, reported: 1, signal: 0 };
 
-/** A claim's mark — present only when it carries information. Corroboration
- * provenance first, then a recurring evidence shape. */
+/** A claim's mark — present only when it carries information. Corroboration provenance first, then a recurring evidence shape. */
 function markOf(row: RelRow): { text: string; kind: "corroborated" | "recurring" } | null {
   const trust = trustOf(row.item);
   if (trust?.tier === "corroborated") {
@@ -77,9 +63,7 @@ export function KnownAssociates({
 }) {
   const { top, claimCount, relatedCount } = useMemo(() => {
     const { asserted } = splitAssertedContext(flattenRelated(related, entityType));
-    // Same gates the tab folds on, so the Overview never promotes what the tab
-    // hides: junk ids, ubiquitous software, regions mis-filed as countries,
-    // and claims whose evidence carries no story.
+    // Same gates the tab folds on, so the Overview never promotes what the tab hides: junk ids, ubiquitous software, regions mis-filed as countries, and claims whose evidence carries no story.
     const eligible = asserted.filter(
       (r) =>
         isEarnedRow(r) &&
@@ -112,11 +96,7 @@ export function KnownAssociates({
     return { top: picked, claimCount: eligible.length, relatedCount: flattenRelated(related, entityType).length };
   }, [related, entityType]);
 
-  // No claims worth standing behind → no claim rows; co-mentions stay in the
-  // tab, where they are labeled as context. But keep the escape hatch: on
-  // profiles whose related set is all co-mention (typical vendor / product /
-  // country / CVE), a slim link is the Overview's only way into Relationships
-  // besides the tab itself.
+  // No eligible claims → no claim rows; co-mentions stay in the tab, where they are labeled as context. Profiles whose related set is all co-mentions (typical for vendor / product / country / CVE) still get a short link, because it is the Overview's only way into Relationships besides the tab itself.
   if (top.length === 0) {
     if (relatedCount === 0) return null;
     return (
@@ -134,8 +114,7 @@ export function KnownAssociates({
     );
   }
 
-  // Rows in first-seen order, which is rank order: the best-evidenced verb
-  // leads. The verb is the row's key; the names read as a sentence.
+  // Rows in first-seen order, which is rank order: the best-evidenced verb leads. The verb is the row's key; the names read as a sentence.
   const groups = new Map<string, RelRow[]>();
   for (const row of top) {
     const verb = verbChipLabel(row.item);

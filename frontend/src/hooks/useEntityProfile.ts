@@ -7,13 +7,7 @@ import { useDeleteObservable } from "@/hooks/useIntelligence";
 import { useIntelStore } from "@/stores/intelStore";
 import type { CampaignDetectionGaps } from "@/api/types";
 
-/**
- * Generate an AI assessment for an entity from its linked articles + metadata
- * and persist it to the entity's description. Backed by the dedicated
- * /entities/{type}/{id}/ai-summary endpoint (which saves to description), not
- * the generic AI-run endpoint — that one only stores an AIResult and, run on an
- * entity, blows up on the entry-oriented article_summary prompt.
- */
+/** Generate an AI assessment for an entity from its linked articles + metadata and save it to the entity's description. Uses the dedicated /entities/{type}/{id}/ai-summary endpoint (which saves to description), not the generic AI-run endpoint: that one only stores an AIResult and, run on an entity, fails on the entry-oriented article_summary prompt. */
 export function useGenerateEntitySummary() {
   const qc = useQueryClient();
   return useMutation({
@@ -141,9 +135,7 @@ export function useUpdateOffensiveTool() {
 
 // --- Unlink all entries ---
 
-/** Matches the per-type entry→entity queries (["entry-vendors", id], …) that the
- *  reader's inline highlighter reads. Anything that removes or retypes an entity
- *  has to invalidate them or the old highlight survives in an open article. */
+/** Matches the per-type entry→entity queries (["entry-vendors", id], …) that the reader's inline highlighter reads. Anything that removes or retypes an entity has to invalidate them, or the old highlight stays in an open article. */
 function isEntryEntityQuery(q: { queryKey: readonly unknown[] }): boolean {
   return typeof q.queryKey[0] === "string" && (q.queryKey[0] as string).startsWith("entry-");
 }
@@ -160,8 +152,7 @@ export function useUnlinkAllEntries() {
       qc.invalidateQueries({ queryKey: ["entity-graph", vars.entityType, vars.entityId] });
       qc.invalidateQueries({ queryKey: ["entity-timeline", vars.entityType, vars.entityId] });
       qc.invalidateQueries({ queryKey: ["workbench"] });
-      // Entry→entity lists feed the reader's inline highlighter; without this the
-      // just-unlinked entity stays underlined in any open article.
+      // Entry→entity lists feed the reader's inline highlighter; without this the just-unlinked entity stays underlined in any open article.
       qc.invalidateQueries({ predicate: isEntryEntityQuery });
     },
   });
@@ -307,12 +298,7 @@ export const EDITABLE_ENTITY_TYPES = [
 
 export type EditableEntityType = (typeof EDITABLE_ENTITY_TYPES)[number];
 
-/**
- * One field-update entry point for every entity type — the per-type PUT hooks
- * behind a single dispatch, so callers (profile header, table edit modal) don't
- * each re-implement the switch. Returns the underlying mutateAsync promise, so
- * a rejected save (e.g. 409 duplicate name) still surfaces to the caller.
- */
+/** One field-update entry point for every entity type: the per-type PUT hooks behind a single dispatch, so callers (profile header, table edit modal) don't each re-implement the switch. Returns the underlying mutateAsync promise, so a rejected save (e.g. 409 duplicate name) still reaches the caller. */
 export function useUpdateEntity() {
   const qc = useQueryClient();
   const updateActor = useUpdateThreatActor();
@@ -338,13 +324,10 @@ export function useUpdateEntity() {
         case "tool": return updateTool.mutateAsync(payload as Parameters<typeof updateTool.mutateAsync>[0]);
         case "vendor": return updateVendor.mutateAsync(payload as Parameters<typeof updateVendor.mutateAsync>[0]);
         case "product": return updateProduct.mutateAsync(payload as Parameters<typeof updateProduct.mutateAsync>[0]);
-        // Campaigns have their own resource; the shell edits name/status/TLP
-        // through it exactly as it edits an actor's fields through /threat-actors.
+        // Campaigns have their own resource; the profile edits name/status/TLP through it the same way it edits an actor's fields through /threat-actors.
         case "campaign":
           return api.patch(`/campaigns/${entityId}`, values).then((r) => {
-            // The sibling hooks invalidate through their own mutations; the
-            // campaign path is a bare request, so it clears the profile's
-            // queries itself or the header keeps showing the old name.
+            // The other hooks invalidate through their own mutations; the campaign path is a plain request, so it invalidates the profile's queries itself or the header keeps showing the old name.
             qc.invalidateQueries({ queryKey: ["pivot", "campaign", entityId] });
             qc.invalidateQueries({ queryKey: ["campaign", entityId] });
             qc.invalidateQueries({ queryKey: ["campaigns"] });
@@ -388,13 +371,10 @@ export function useDeleteProduct() {
 }
 
 
-/** Entity types whose creation paths consult the analyst do-not-recreate list.
- *  Denying anything else would write a row nothing reads. Mirrors
- *  DENIABLE_TYPES in app/intelligence/entity_resolution.py. */
+/** Entity types whose creation paths check the analyst do-not-recreate list. Denying any other type would write a row nothing reads. Mirrors DENIABLE_TYPES in app/intelligence/entity_resolution.py. */
 export const DENIABLE_ENTITY_TYPES = new Set(["threat_actor", "malware", "tool", "cve", "ttp"]);
 
-/** Ban an entity's name + aliases from being re-created by the one-pass
- *  extractor / autolinker. Call before deleting — it reads the live entity. */
+/** Block an entity's name + aliases from being re-created by the one-pass extractor / autolinker. Call it before deleting, because it reads the live entity. */
 export function useDenyEntityName() {
   return useMutation({
     mutationFn: async ({ entityType, entityId }: { entityType: string; entityId: string }) => {
@@ -407,11 +387,7 @@ export function useDenyEntityName() {
   });
 }
 
-/**
- * One delete entry point for every entity type — the per-type DELETE hooks
- * behind a single dispatch, so row menus and bulk table actions don't each
- * re-implement the switch.
- */
+/** One delete entry point for every entity type: the per-type DELETE hooks behind a single dispatch, so row menus and bulk table actions don't each re-implement the switch. */
 export function useDeleteEntity() {
   const deleteActor = useDeleteThreatActor();
   const deleteMalware = useDeleteMalwareFamily();
@@ -437,15 +413,11 @@ export function useDeleteEntity() {
         case "mitigation": return deleteMitigationEntity.mutateAsync(entityId);
         case "vendor": return deleteVendor.mutateAsync(entityId);
         case "product": return deleteProduct.mutateAsync(entityId);
-        // Sightings and relationships go with the row. Callers that want the
-        // value kept out for good deny it instead (useDenyObservable) — that
-        // leaves the tombstone every capture door reads.
+        // Sightings and relationships are deleted with the row. Callers that want the value kept out permanently deny it instead (useDenyObservable), which leaves the tombstone every capture path checks.
         case "observable": return deleteObservable.mutateAsync(entityId);
-        // Campaigns cascade their own membership rows server-side; nothing the
-        // campaign held is deleted with it, only the fact that it held them.
+        // Campaigns cascade their own membership rows server-side; the entries and entities in the campaign are not deleted, only their membership.
         case "campaign": return deleteCampaign.mutateAsync(entityId);
-        // No handler = loud failure — a resolved promise here once produced
-        // "Deleted N observables" toasts over rows that were never touched.
+        // A type with no handler rejects, because a resolved promise here once produced "Deleted N observables" toasts for rows that were never deleted.
         default: return Promise.reject(new Error(`No delete handler for entity type "${entityType}"`));
       }
     },
@@ -568,8 +540,7 @@ export function useDismissMergeSuggestion() {
   });
 }
 
-// Entity types that the merge endpoint (MERGE_CONFIG) supports. Mirrors
-// backend/app/api/entity_profiles.py. CVE/TTP/mitigation are not mergeable.
+// Entity types that the merge endpoint (MERGE_CONFIG) supports. Mirrors backend/app/api/entity_profiles.py. CVE/TTP/mitigation are not mergeable.
 export const MERGEABLE_ENTITY_TYPES = ["threat_actor", "malware", "country", "tool", "vendor", "product"] as const;
 
 // Frontend EntityType → list endpoint used to search for a merge target.
@@ -631,16 +602,14 @@ export function useConvertEntity() {
       return data;
     },
     onSuccess: () => {
-      // Convert can touch any of the 8 entity types — invalidate the full set
-      // plus the shared workbench/pivot/dup caches.
+      // Convert can touch any of the 8 entity types, so invalidate the full set plus the shared workbench/pivot/duplicate caches.
       for (const key of ["threat-actors", "malware", "tools", "vendors", "products", "countries", "cves", "ttps"]) {
         qc.invalidateQueries({ queryKey: [key] });
       }
       qc.invalidateQueries({ queryKey: ["workbench"] });
       qc.invalidateQueries({ queryKey: ["pivot"] });
       qc.invalidateQueries({ queryKey: ["entity-duplicates"] });
-      // The source entity no longer exists under its old type — drop the entry
-      // links the reader highlighted it from.
+      // The source entity no longer exists under its old type, so drop the entry links the reader highlights it from.
       qc.invalidateQueries({ predicate: isEntryEntityQuery });
       clearSelectedEntity();
     },
@@ -781,8 +750,7 @@ export interface ActorVictimRow {
   disclosure_count: number;
 }
 
-/** Leak-site victims for a ransomware actor — the Overview's victims strip.
- * 404s (tracker disabled / not a group) resolve to an empty list. */
+/** Leak-site victims for a ransomware actor, for the Overview's victims strip. Any error, including a 404 (tracker disabled / not a group), resolves to an empty list. */
 export function useActorVictims(entityId: string | undefined, enabled: boolean) {
   // Signed-in only; the route answers 401 to a visitor.
   const isVisitor = useIsVisitor();
@@ -811,8 +779,7 @@ export interface ActorVictimStats {
   prev_30d: number;
 }
 
-/** Windowed victim counts for the Snapshot's "Leak-site victims · 30d" row.
- * Same 404 tolerance as useActorVictims — null means "no tracker data". */
+/** Windowed victim counts for the Snapshot's "Leak-site victims · 30d" row. Errors are handled the same way as in useActorVictims; null means "no tracker data". */
 export function useActorVictimStats(entityId: string | undefined, enabled: boolean) {
   // Signed-in only; the route answers 401 to a visitor.
   const isVisitor = useIsVisitor();
@@ -845,8 +812,7 @@ export interface EntityStoryThread {
   latest_beat: { headline: string; occurred_at: string | null } | null;
 }
 
-/** Story threads this entity's articles belong to. status "open" feeds the
- * Active Story card; "any" feeds the expanded timeline's story markers. */
+/** Story threads this entity's articles belong to. status "open" feeds the Active Story card; "any" feeds the expanded timeline's story markers. */
 export function useEntityStoryThreads(
   entityType: string | undefined,
   entityId: string | undefined,
@@ -904,8 +870,7 @@ export function useEntityMentionsTimeseries(
     },
     enabled: !!entityType && !!entityId,
     staleTime: 5 * 60 * 1000,
-    // Keep the previous window's series on screen while the next one loads —
-    // switching ranges shouldn't flash the empty state.
+    // Keep the previous window's series on screen while the next one loads, so switching ranges doesn't flash the empty state.
     placeholderData: (prev) => prev,
   });
 }

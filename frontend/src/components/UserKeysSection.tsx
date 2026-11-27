@@ -30,12 +30,7 @@ function capText(value: number, money: boolean): string {
   return money ? formatCapInput(value) : String(value);
 }
 
-/**
- * Where a prompt's result shows up, from the flags the row already carries.
- * The two surfaces with no flag of their own (the copilot dock, Report
- * Studio) are named by prompt; everything else follows its category and its
- * reader-panel visibility, so a new prompt lands in the right bucket.
- */
+/** Where a prompt's result shows up, from the fields the row already carries. Chat prompts (the copilot dock and the share page) and Report Studio sections are identified by category and name; everything else follows its category, its `user_provider_locked` flag and its reader-panel visibility, so a new prompt lands in the right bucket. */
 function whereItRuns(prompt: AITask): string {
   if (prompt.category === "chat") return prompt.name === "copilot" ? "Copilot dock" : "Share page";
   if (prompt.name.startsWith("report_section")) return "Report Studio";
@@ -108,19 +103,14 @@ function NumberSetting({
   );
 }
 
-/**
- * AI Configuration → User keys: the admin's side of personal AI keys. The
- * policy, the allowed types, the caps, which prompts may use a personal key,
- * and every key people have added (to disable or delete, never to use).
- */
+/** AI Configuration → User keys: the admin's side of personal AI keys. The policy, the allowed types, the caps, which prompts may use a personal key, and every key people have added (to disable or delete, never to use). */
 export function UserKeysSection() {
   const { data: settings, isLoading, isError, error, refetch } = useSystemSettings();
   const updateSettings = useUpdateSystemSettings();
   const { data: prompts } = useAITasks();
   const { data: assignments } = useAllTaskAssignments();
   const { data: allProviders } = useAIProviders();
-  // Site assignments name the instance's providers; the admin's own personal
-  // keys in the same response are never a prompt's site provider.
+  // Site assignments name the instance's providers; the admin's own personal keys in the same response are never a prompt's site provider.
   const providers = allProviders?.filter((p) => !p.user_id);
   const { data: userKeys } = useUserKeys();
   const updatePrompt = useUpdateAITask();

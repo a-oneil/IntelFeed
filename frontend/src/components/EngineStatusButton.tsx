@@ -7,11 +7,9 @@ import { useUIStore } from "@/stores/uiStore";
 import { Hint } from "./primitives";
 import styles from "./AppHeader.module.css";
 
-/** Check-engine light: an engine block with intake, exhaust and mount, in a
- *  24-unit box. Shared with the settings nav so the two always match. */
+/** Check-engine icon: an engine block with intake, exhaust and mount, drawn in a 24-unit box. Shared with the settings nav so the two always match. */
 export const ENGINE_ICON_PATH = "M7 6h6M10 6v3M5 9h10l2 2h2v-2h2v8h-2v-2h-2v3h-9l-3-3H3v-3h2z";
-/** The block only fills the middle of its box; crop to it so it reads at the
- *  size of the icons around it. */
+/** The block only fills the middle of its box; crop the viewBox to it so it renders at the same size as the icons around it. */
 export const ENGINE_ICON_VIEWBOX = "2 2 20 20";
 
 const entries = (n: number) => `${n.toLocaleString()} ${n === 1 ? "entry is" : "entries are"} erroring.`;
@@ -33,8 +31,7 @@ function describe(h: EngineHealth): { title: string; body: string } {
   }
 }
 
-/** Check-engine light in the header: admins only, opens the Engine console
- *  with the settings nav collapsed. */
+/** Engine status button in the header: shown to admins only, opens the Engine console with the settings nav collapsed. */
 export function EngineStatusButton() {
   const isAdmin = useIsAdmin();
   const health = useEngineHealth(isAdmin);
@@ -48,8 +45,7 @@ export function EngineStatusButton() {
       <button
         className={`${styles.iconBtn} ${styles[`engine_${health.level}`]}`}
         onClick={() => {
-          // The Engine console wants the width: fold the settings nav away.
-          // The rail's own toggle brings it back.
+          // The Engine console needs the width, so collapse the settings nav. The nav's own toggle expands it again.
           setSettingsNavCollapsed(true);
           navigate("/settings?section=engine");
         }}

@@ -224,8 +224,8 @@ async def _pregenerate_tts(db: AsyncSession, day_key: str, filters_dict: dict) -
 # The briefing is generated once and read from two very different places. In the
 # app (Triage day divider, reader) the markdown links point at `/?entry=<id>` so
 # a click opens IntelFeed's own reader. Pushed outside the app (Discord, Slack, a
-# custom webhook) that link is useless — the reader is behind auth and the reader
-# may not even have an account — so the same markdown gets rewritten to each
+# custom webhook) that link is useless — the reader is behind auth and the person
+# reading may not even have an account — so the same markdown gets rewritten to each
 # article's original source URL before it goes out.
 
 _ENTRY_LINK_RE = re.compile(
@@ -236,10 +236,10 @@ _ENTRY_LINK_RE = re.compile(
 async def externalize_entry_links(db: AsyncSession, markdown: str | None) -> str:
     """Rewrite in-app reader deep links to the entries' original article URLs.
 
-    Every ``/?entry=<uuid>`` (relative, or already absolutised with
+    Every ``/?entry=<uuid>`` (relative, or already made absolute with
     PUBLIC_BASE_URL) becomes the source article's own URL. An entry with no
     source URL — or one that has since been deleted — keeps its in-app link,
-    absolutised when PUBLIC_BASE_URL is set so it is at least clickable from
+    made absolute when PUBLIC_BASE_URL is set so it is at least clickable from
     Discord/Slack.
 
     Best-effort: any failure returns the markdown unchanged rather than losing

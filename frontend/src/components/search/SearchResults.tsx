@@ -22,9 +22,7 @@ import { promptDialog } from "@/utils/dialog";
 /** Rows a mention group shows before its "Show all N". */
 const GROUP_CAP = 10;
 
-// Direct-match fields whose matched value is the name/identifier already
-// printed on the row. Tagging these restates the obvious; the section header
-// ("name, alias or identifier") covers them.
+// Direct-match fields whose matched value is the name or identifier already printed on the row. A tag on these would repeat what the row shows; the section header ("name, alias or identifier") covers them.
 const SELF_EVIDENT_MATCH_FIELDS = new Set(["name", "title", "cve_id", "mitre_id", "technique"]);
 
 const MATCH_FIELD_LABELS: Record<string, string> = {
@@ -145,17 +143,11 @@ export function SearchResults({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [showHelp, setShowHelp] = useState(false);
   const [showBuilder, setShowBuilder] = useState(false);
-  // Which result is expanded into its preview card. Clicking a row opens its
-  // preview rather than navigating, so the analyst can click down a list and
-  // read each one in place; the card's own "Open profile" is the way out.
+  // Which result is expanded into its preview card. Clicking a row opens its preview rather than navigating, so the analyst can click down a list and read each one in place; the card's "Open profile" button navigates to the profile.
   const [previewKey, setPreviewKey] = useState<string | null>(null);
 
   const selectedEntryId = useUIStore((s) => s.selectedEntryId);
-  // Search keeps its own Hide Read rather than sharing the feed reader's:
-  // entering a search used to force that shared preference off, silently
-  // changing the feed list behind you. Off by default — a search shows what
-  // matched, read or not. The page owns the state because the filter is applied
-  // server-side, across every match rather than the fetched page.
+  // Search keeps its own Hide Read rather than sharing the feed reader's, because turning a shared preference off on entering a search would silently change the feed list too. Off by default: a search shows what matched, read or not. The page owns the state because the server applies the filter across every match, not only the fetched page.
   const markReadOnScroll = useUIStore((s) => s.markReadOnScroll);
   const toggleMarkReadOnScroll = useUIStore((s) => s.toggleMarkReadOnScroll);
   const viewMode = useUIStore((s) => s.viewMode);
@@ -177,15 +169,12 @@ export function SearchResults({
   const recentSearches = useIntelStore((s) => s.recentSearches);
   const addRecentSearch = useIntelStore((s) => s.addRecentSearch);
 
-  // Recent searches are recorded from the debounced value, so a query is only
-  // remembered once the user stops typing it — not once per keystroke.
+  // Recent searches are recorded from the debounced value, so a query is remembered once the user stops typing it, not once per keystroke.
   useEffect(() => {
     if (debouncedQuery.trim()) addRecentSearch(debouncedQuery.trim());
   }, [debouncedQuery, addRecentSearch]);
 
-  // Saved alongside the query: the rail state the query language cannot say.
-  // Without it a saved search reopens as bare text and quietly searches a
-  // different scope than the one it was saved from.
+  // The filter rail state (scope, entity type, match kinds) is saved with the query, because the query language cannot express it. Without it a saved search reopens as bare text and searches a different scope than the one it was saved from.
   const handleSaveSearch = useCallback(async () => {
     if (!query.trim()) return;
     const name = await promptDialog({
@@ -226,8 +215,7 @@ export function SearchResults({
   const direct = useMemo(() => entities.filter((e) => e.match_kind === "direct"), [entities]);
   const mentions = useMemo(() => entities.filter((e) => e.match_kind !== "direct"), [entities]);
 
-  // Mentions are grouped by type; direct matches are few and stay in one
-  // relevance-ordered list, because splitting three rows by type is noise.
+  // Mentions are grouped by type. Direct matches are few, so they stay in one relevance-ordered list instead of being split by type.
   const mentionGroups = useMemo(() => {
     const map = new Map<string, EntitySearchResult[]>();
     for (const e of mentions) {
@@ -238,10 +226,7 @@ export function SearchResults({
     return map;
   }, [mentions]);
 
-  // The preview defaults to the best answer — the first direct match, or the
-  // first result when nothing matched by name. Deriving it (rather than storing
-  // a fallback) means a preview whose row is filtered away by the facet rail
-  // quietly hands off to the new best answer instead of blanking.
+  // The preview defaults to the first direct match, or the first result when nothing matched directly. Deriving it (rather than storing a fallback) means that when the facet rail filters away the previewed row, the preview moves to the new first result instead of going blank.
   const previewEntity = useMemo(() => {
     if (entities.length === 0) return null;
     return entities.find((e) => entityKey(e) === previewKey) ?? direct[0] ?? entities[0];
@@ -249,8 +234,7 @@ export function SearchResults({
 
   const entries: Entry[] = useMemo(() => {
     const all = entryHits.map((hit) => searchHitToEntry(hit, markedReadIds));
-    // The server already dropped what was read when the search ran; this only
-    // clears the rows read since, without waiting for a refetch.
+    // The server already dropped what was read when the search ran; this only removes rows read since then, without waiting for a refetch.
     return hideRead ? all.filter((e) => !e.is_read) : all;
   }, [entryHits, markedReadIds, hideRead]);
 
@@ -325,8 +309,7 @@ export function SearchResults({
       return next;
     });
 
-  // Collapse expansions when the answer changes underneath them, and hand the
-  // preview back to whatever the new best answer is.
+  // Collapse expanded groups when the query or type filter changes, and reset the preview to the default result.
   useEffect(() => {
     setExpandedGroups(new Set());
     setPreviewKey(null);
@@ -439,9 +422,7 @@ export function SearchResults({
   return (
     <div className={`${styles.results} ${narrow ? styles.narrow : ""}`}>
       {didYouMean && (
-        // A value ends at the first space, so `country:North Korea` filters on
-        // "North" and full-text searches "Korea" — a plausible wrong answer, not
-        // an error. The server only offers this when the longer value is real.
+        // A value ends at the first space, so `country:North Korea` filters on "North" and full-text searches "Korea", which returns wrong results without an error. The server only offers this suggestion when the longer value exists.
         <div className={styles.didYouMean}>
           <span>
             Did you mean <code>{didYouMean}</code>?
@@ -452,9 +433,7 @@ export function SearchResults({
         </div>
       )}
       {unknownFields.length > 0 && (
-        // `titel:ransomware` is not a filter and never was — the value just gets
-        // searched as text. Saying so is the difference between "no results
-        // because nothing matched" and "no results because you typed it wrong".
+        // An unknown field such as `titel:ransomware` is not a filter; it is searched as plain text. Showing this tells the user the empty result may come from a typo rather than from nothing matching.
         <div className={styles.unknownFields}>
           {unknownFields.map((f) => (
             <code key={f}>{f}:</code>
@@ -662,7 +641,7 @@ function SectionHeader({
   );
 }
 
-/** The top direct match, given room to actually answer the question. */
+/** The expanded preview card for the selected result (by default the top direct match), with its description and actions. */
 function FeaturedEntity({
   entity,
   onOpen,
@@ -681,8 +660,7 @@ function FeaturedEntity({
         <div className={styles.featuredHead}>
           <TypeBadge type={entity.type} />
           <span className={styles.featuredName}>{getSearchResultName(entity)}</span>
-          {/* Reads the entity's own kind — any row can be previewed now, so a
-              mention must not wear the direct-match badge. */}
+          {/* Uses the entity's own match kind: any row can be previewed, so a mention must not show the direct-match tag. */}
           <MatchTag field={entity.match_field} kind={entity.match_kind} />
         </div>
         {entitySubtitle(entity) && <div className={styles.featuredSub}>{entitySubtitle(entity)}</div>}
@@ -745,13 +723,9 @@ function TypeBadge({ type }: { type: string }) {
 function MatchTag({ field, kind }: { field?: string; kind?: string }) {
   if (!field) return null;
   const direct = kind === "direct";
-  // The tag exists to explain a match the row does not already explain. When
-  // the matched field IS the text on the row, saying so is noise on every
-  // result — so only alias-style matches, where the query never appears in
-  // what you can see, earn a tag.
+  // The tag explains a match the row does not already show. A direct match on a field that is the row's own text (name, title, ID) gets no tag; alias matches, where the query does not appear on the row, and all mention matches keep theirs.
   if (direct && SELF_EVIDENT_MATCH_FIELDS.has(field)) return null;
-  // A title match is identity when the query opens the title and incidental
-  // when it is merely somewhere inside it, so the same field reads two ways.
+  // A direct title match is the row's own name and returns above; a mention title match means the query appears somewhere in the title, so it is labeled "in title".
   const label = field === "title" && !direct ? "in title" : MATCH_FIELD_LABELS[field] ?? field.replace(/_/g, " ");
   return <span className={`${styles.matchTag} ${direct ? styles.matchTagDirect : ""}`}>{label}</span>;
 }

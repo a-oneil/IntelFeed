@@ -2,8 +2,7 @@ import styles from "./FilterChips.module.css";
 import type { ParsedFilter } from "@/utils/queryParser";
 import { getEntityColor } from "@/utils/entityTheme";
 
-// Short filter tokens (`type:` values and entity-search field roots) →
-// canonical entity type used by entityTheme, so chips share the profile colors.
+// Short filter tokens (`type:` values and entity-search field roots) → canonical entity type used by entityTheme, so chips share the profile colors.
 const TYPE_VALUE_TO_ENTITY: Record<string, string> = {
   threat_actor: "threat_actor",
   rule: "detection_rule",
@@ -42,8 +41,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 function getChipColor(filter: ParsedFilter): string {
   const root = filter.field.split(".")[0];
-  // Entity-search fields (cve:, ttp:, threat_actor:, malware:, rule:, and their
-  // subfields like cve.severity) take the entity's own profile color.
+  // Entity-search fields (cve:, ttp:, threat_actor:, malware:, rule:, and their subfields like cve.severity) take the entity's own profile color.
   if (TYPE_VALUE_TO_ENTITY[root]) {
     return getEntityColor(TYPE_VALUE_TO_ENTITY[root]);
   }
@@ -65,12 +63,9 @@ interface FilterChipsProps {
   filters: ParsedFilter[];
   onRemove: (filter: ParsedFilter) => void;
   /**
-   * `"strip"` (default) is the original full-width band beneath a search field:
-   * its own panel background, padding and bottom rule.
+   * `"strip"` (default) is the full-width band beneath a search field: its own panel background, padding and bottom rule.
    *
-   * `"inline"` is the chips alone, for callers that place them inside an
-   * existing row. The strip's background is a step lighter than a toolbar's, so
-   * nesting it there draws a stray lighter box around the chips.
+   * `"inline"` is the chips alone, for callers that place them inside an existing row. The strip's background is a step lighter than a toolbar's, so nesting it there draws a stray lighter box around the chips.
    */
   variant?: "strip" | "inline";
 }

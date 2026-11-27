@@ -1,5 +1,4 @@
-// The IntelFeed mark in the page headers (lib/mark.js), drawn in currentColor
-// so it takes the theme's accent like the app's own logo does.
+// The IntelFeed mark in the page headers (lib/mark.js), drawn in currentColor so it takes the theme's accent like the app's own logo does.
 
 import { markSvg } from "./mark.js";
 

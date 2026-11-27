@@ -16,10 +16,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * Payload shapes recorded from the live server on 2026-09-22 (trimmed). Each test pins a place
- * where the server differs from docs/api-reference.md or from what the app used to expect.
- */
+/** Payload shapes recorded from the live server on 2026-09-22 (trimmed). Each test pins a place where the server differs from docs/api-reference.md or from what the app expected before. */
 class LiveShapeSerializationTest {
 
     private val json = ApiJson.json
@@ -47,7 +44,7 @@ class LiveShapeSerializationTest {
 
     @Test
     fun malwareWithBareStringAssociatedActors() {
-        // As returned by live backend for newly reported families like CLOSEDQUORUM and LAMEHUG
+        // As the live backend returns it for newly reported families like CLOSEDQUORUM and LAMEHUG.
         val m = json.decodeFromString<Malware>(
             """{ "id": "m2", "name": "CLOSEDQUORUM", "malware_type": null, "malware_types": ["Backdoor"],
                  "associated_actors": ["Cisco Talos"], "targeted_sectors": ["Defense", "Government"],

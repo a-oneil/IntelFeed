@@ -2,8 +2,8 @@
 
 Every knob a job advertises has to be a real, settable setting with a UI-worthy
 label, and every setting has to live in a group some admin surface renders.
-These broke silently before: `settings.get()` returns None for an unregistered
-key, so the job just kept using its inline default forever.
+A mismatch fails silently: `settings.get()` returns None for an unregistered
+key, so the job keeps using its inline default forever.
 """
 
 from app.services.system_settings import (
@@ -36,8 +36,8 @@ def test_every_configurable_key_has_metadata():
     assert not missing, f"settings with no label/description/group: {missing}"
 
 
-def test_every_setting_group_is_labelled():
-    """An unlabelled group is a setting that renders on no admin surface."""
+def test_every_setting_group_is_labeled():
+    """An unlabeled group is a setting that renders on no admin surface."""
     unknown = {
         (key, SETTING_METADATA[key].get("group"))
         for key in CONFIGURABLE_KEYS
@@ -66,12 +66,12 @@ def test_weekly_enrichment_syncs_start_in_their_own_slots():
 
 def test_malpedia_sync_has_its_weekly_hour_to_itself():
     day, hour, _ = _weekly_slot(JOB_REGISTRY["malpedia-sync"])
-    neighbours = [
+    neighbors = [
         name
         for name, job in JOB_REGISTRY.items()
         if name != "malpedia-sync" and (slot := _weekly_slot(job)) and slot[:2] == (day, hour)
     ]
-    assert not neighbours
+    assert not neighbors
 
 
 def test_job_registry_entries_are_complete():

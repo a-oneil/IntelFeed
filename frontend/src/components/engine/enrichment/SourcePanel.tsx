@@ -1,9 +1,4 @@
-/**
- * One source, in the side panel: what it is and what it sends out, then
- * Overview (today against the cap, what's waiting), Limits, Fields (fill rates
- * and backfill) and Jobs (schedule and settings beside each job). Keys are
- * set in Keys; the panel only says which key it uses and links there.
- */
+/** One source, in the side panel: what it is and what it sends out, then Overview (today against the cap, what's waiting), Limits, Fields (fill rates and backfill) and Jobs (schedule and settings beside each job). Keys are set in Keys; the panel only says which key it uses and links there. */
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -229,8 +224,7 @@ function Overview({
 function Limits({ x, d }: { x: EnrichmentConsoleSource; d: EnrichmentSourceDetail }) {
   const update = useUpdateEnrichmentSource();
   const l = d.limits;
-  // The stored rate, not the effective one: saving a keyed rate into the row
-  // would stop the source switching back to its keyless rate without a key.
+  // The stored rate, not the effective one: saving a keyed rate into the row would stop the source switching back to its keyless rate without a key.
   const [rate, setRate] = useState(String(l.rate.requests_per_period));
   const [per, setPer] = useState(String(l.rate.period_seconds));
   const [cap, setCap] = useState(l.daily_budget != null ? String(l.daily_budget) : "");

@@ -47,8 +47,7 @@ def unit(*, similarity: float, axis: int = 1) -> list[float]:
     Each vector leans into its own axis, so two of them made with similarities
     s1 and s2 (on different axes) sit at s1*s2 to each other. That makes every
     pairwise distance in these tests something the test states outright rather
-    than something it stumbles into — which matters, because the whole feature
-    is a set of thresholds.
+    than an accident, which matters because the feature is a set of thresholds.
     """
     vec = [0.0] * DIM
     vec[0] = similarity
@@ -130,7 +129,7 @@ class TestSeeding:
         assert rows[0]["source_count"] == 3
 
     async def test_one_outlet_publishing_three_times_is_not_a_thread(self, db_session, feeds):
-        """A publisher's own series clears every similarity bar there is."""
+        """One publisher's near-identical series clears every similarity bar but is still one outlet."""
         for i in range(4):
             await make_entry(
                 db_session,
@@ -162,7 +161,7 @@ class TestSeeding:
         assert stats["seeded"] == 0
 
     async def test_bulletin_rows_are_never_threaded(self, db_session, feeds):
-        """Below the body-length floor an entry is a database row, not an article."""
+        """An entry whose body is below the length floor is a bulletin row, not an article, and is never considered."""
         for i in range(3):
             await make_entry(
                 db_session,
@@ -600,7 +599,7 @@ class TestSpine:
 
 
 class TestSimilarEntries:
-    async def test_nearest_neighbours_come_back_in_order(self, db_session, feeds):
+    async def test_nearest_neighbors_come_back_in_order(self, db_session, feeds):
         anchor = await make_entry(db_session, feeds[0], title="Anchor", similarity_to_base=1.0)
         near = await make_entry(db_session, feeds[1], title="Near", similarity_to_base=0.95, axis=2)
         # Both clear SIMILAR_FLOOR; anything under it is dropped, which is what
@@ -731,7 +730,7 @@ class TestThreadsApi:
         ]
         await assign_entries(db_session, limit=50)
         # The loudest article is the last one published, so publication order
-        # and score order disagree — which is the whole bug.
+        # and score order disagree, which is the case the bug needed.
         loudest = {"e": entries[-1].id}
         await db_session.execute(
             text("UPDATE entries SET priority_score = 9.5, priority_raw = 4.0 WHERE id = :e"), loudest
@@ -850,7 +849,7 @@ class TestCandidateSelection:
     async def test_an_article_the_seed_left_behind_joins_in_the_same_pass(self, db_session, feeds):
         """A new thread has a centroid from the moment it exists.
 
-        The seed probe keeps at most SEED_FANOUT neighbours. Whatever it leaves
+        The seed probe keeps at most SEED_FANOUT neighbors. Whatever it leaves
         behind is examined later in the same pass and must find the thread —
         otherwise it seeds a sibling, and the sibling cannot be merged either,
         because both lookups skip threads without a centroid.
@@ -889,7 +888,7 @@ class TestCandidateSelection:
 
 class TestSourceDominance:
     async def test_one_outlet_cannot_keep_adding_itself_as_echoes(self, db_session, feeds):
-        """The exemption that let six unrelated Red Hat errata become one story."""
+        """One outlet's own echoes stop at SAME_SOURCE_LIMIT; uncapped, six unrelated Red Hat errata made one story."""
         for i in range(3):
             await make_entry(
                 db_session,
@@ -923,7 +922,7 @@ class TestSourceDominance:
 
 
 class TestRoundups:
-    """A recurring catalogue is a format, not a story."""
+    """Recurring roundups (such as "CISA adds N flaws to KEV") share a format, not a story."""
 
     async def _entities(self, db_session, entry, names: list[str]) -> None:
         for name in names:
@@ -948,7 +947,7 @@ class TestRoundups:
                 axis=i + 1,
                 host=f"outlet{i}.example",
             )
-            # Each instalment catalogues different things — nothing recurs.
+            # Each installment catalogs different things — nothing recurs.
             await self._entities(db_session, entry, [f"Group-{i}-{n}" for n in range(5)])
 
         stats = await assign_entries(db_session, limit=50)
@@ -1030,7 +1029,7 @@ class TestPruning:
 
 
 class TestNarrationHandover:
-    """The heuristic spine is a floor, never a ceiling."""
+    """A heuristic spine is a fallback: it does not count as narrated, and the AI pass can still replace it."""
 
     async def _seed(self, db_session, feeds) -> uuid.UUID:
         for i in range(3):
@@ -1101,7 +1100,7 @@ class TestNarrationHandover:
 
 class TestEmbeddingText:
     def test_a_thin_summary_loses_to_the_article(self):
-        """70% of the corpus ships a teaser; embedding it throws the article away."""
+        """About 70% of entries carry only a teaser summary; embedding the teaser would lose the article."""
         text_out = build_text("Qilin hits hospital chain", "Read more", "The ransomware group Qilin " + "x" * 900)
         assert "Read more" not in text_out
         assert text_out.startswith("Qilin hits hospital chain")
@@ -1128,7 +1127,7 @@ class TestEmbeddingText:
 
 
 class TestSimilarEntriesGuards:
-    async def test_distant_neighbours_are_not_offered_as_similar(self, db_session, feeds):
+    async def test_distant_neighbors_are_not_offered_as_similar(self, db_session, feeds):
         anchor = await make_entry(db_session, feeds[0], title="Qilin hits hospital chain", host="a.example")
         await make_entry(
             db_session, feeds[1], title="Unrelated conference keynote", similarity_to_base=0.4, axis=2, host="b.example"
@@ -1142,6 +1141,6 @@ class TestSimilarEntriesGuards:
             db_session, feeds[1], title="Qilin hits hospital chain", similarity_to_base=0.999, axis=2, host="b.example"
         )
 
-        neighbours = await similar_entries(db_session, anchor.id, limit=5, exclude_ids=[copy.id])
+        neighbors = await similar_entries(db_session, anchor.id, limit=5, exclude_ids=[copy.id])
 
-        assert neighbours == []
+        assert neighbors == []

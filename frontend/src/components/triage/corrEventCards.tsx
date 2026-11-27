@@ -20,16 +20,10 @@ import {
 import { Chip } from "@/components/primitives/Chip";
 import { getEntityCssVar, getEntityLabel } from "@/utils/entityTheme";
 import type { CorrelationEvent, GroupedCorrelationEventsEntry } from "@/api/types";
-// Shared stylesheet with the correlation browser widget — the correlation
-// cards render identically in the queue's inline expansions and the browser.
+// Stylesheet shared with the correlation browser widget, so the correlation cards look the same in the queue's inline expansions and in the browser.
 import styles from "./corrEvents.module.css";
 
-/**
- * Correlation-event severity is its own three-step scale, deliberately kept on
- * literal values rather than aliased onto --severity-* or --entity-*: "low"
- * here means "informational", and the app's severity ramp paints low green,
- * which would read as "resolved" in a feed of open findings.
- */
+/** Correlation-event severity is its own three-step scale, deliberately not mapped onto --severity-* or --entity-*: "low" here means "informational", and the app's severity colors show low as green, which would look like "resolved" in a feed of open findings. */
 const CORR_SEVERITY_COLORS: Record<string, string> = {
   high: "#ef4444",
   medium: "#f59e0b",

@@ -1,4 +1,4 @@
-"""Tests for media attachment CRUD and playback progress API."""
+"""Tests that entry list and detail responses include media attachments and feed_type."""
 
 import pytest
 import pytest_asyncio

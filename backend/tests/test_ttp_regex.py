@@ -44,9 +44,8 @@ def test_word_boundary():
     """IDs embedded in other words should not match."""
     text = "The token AT1566 is not a technique ID. Neither is T1566X."
     results = extract_ttp_ids_regex(text)
-    # T1566X should not match because X follows, but AT1566 should not match due to leading A
-    # However T1566 inside T1566X will match the T1566 portion since X breaks the word boundary
-    # AT1566 should NOT match because A precedes T
+    # Neither should match: the pattern is wrapped in \b, and the A before AT1566 and the X
+    # after T1566X are word characters, so there is no word boundary at either edge.
     ids = [r["technique_id"] for r in results]
     assert "T1566" not in ids or all(t == "T1566" for t in ids)
     # AT1566 should definitely not appear

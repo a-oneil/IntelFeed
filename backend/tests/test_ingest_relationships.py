@@ -312,7 +312,7 @@ async def test_relationship_keeps_its_evidence_sentence(db_session: AsyncSession
     row = (
         await db_session.execute(select(EntityRelationship).where(EntityRelationship.source_id == actor.id))
     ).scalar_one()
-    assert row.relationship_type == "delivers"  # no longer flattened to related_to
+    assert row.relationship_type == "delivers"  # the asserted type is kept, not flattened to related_to
     assert row.description == sentence
 
 

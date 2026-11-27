@@ -32,7 +32,7 @@ router = APIRouter()
 #: restricted to participants only"; TLP:AMBER (and AMBER+STRICT) is limited
 #: to the recipient's organization. Only CLEAR and GREEN may be shared, and the
 #: rule is checked when the link is made and again on every public read, so
-#: re-marking a report pauses any link already out there.
+#: re-marking a report blocks its existing links until the marking allows sharing.
 _UNSHAREABLE_TLP = frozenset({"TLP:RED", "TLP:AMBER", "TLP:AMBER+STRICT"})
 
 

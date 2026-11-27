@@ -48,7 +48,7 @@ vi.mock("@/hooks/useEntityGlance", () => ({
   useEntityGlance: () => ({ data: glanceData }),
 }));
 
-// Observable rungs: unlink-this-sighting and the deny tombstone.
+// Observable fixes: unlink this sighting, and deny the value (a tombstone).
 const unlinkSightingMutate = vi.fn();
 const denyObservableMutate = vi.fn();
 vi.mock("@/hooks/useIntelligence", () => ({
@@ -56,8 +56,7 @@ vi.mock("@/hooks/useIntelligence", () => ({
   useDenyObservable: () => ({ mutate: denyObservableMutate, isPending: false }),
 }));
 
-// Convert / merge / unlink-all are admin-only actions; tests default to an
-// admin and one flips the role to check the gate.
+// Convert / merge / unlink-all are admin-only actions; tests default to an admin and one switches the role to check the gate.
 const authState = { user: { id: "u1", role: "admin" } };
 
 vi.mock("@/stores/authStore", () => {
@@ -66,8 +65,7 @@ vi.mock("@/stores/authStore", () => {
   return { useAuthStore, useIsVisitor: () => false };
 });
 
-// The app's own confirm replaced window.confirm here, so the stub moves with
-// it. It is async, which is why the assertions below have to wait.
+// The popover uses the app's own confirmDialog instead of window.confirm, so that is what gets stubbed. It is async, which is why the assertions below have to wait.
 const confirmDialogMock = vi.fn<(opts: unknown) => Promise<boolean>>(() => Promise.resolve(true));
 vi.mock("@/utils/dialog", () => ({
   confirmDialog: (opts: unknown) => confirmDialogMock(opts),
@@ -75,7 +73,7 @@ vi.mock("@/utils/dialog", () => ({
   alertDialog: () => Promise.resolve(),
 }));
 
-// The undo window runs its delete straight away here.
+// The undoable delete runs immediately here instead of waiting out the undo window.
 vi.mock("@/hooks/useUndoableDelete", () => ({
   useUndoableDelete: () => (opts: { onDelete: () => void; onInitiate?: () => void }) => {
     opts.onInitiate?.();
@@ -213,7 +211,7 @@ describe("EntityPopover — wrong-match menu", () => {
 
     // The analyst-scoped fixes stay available...
     expect(screen.getByText(/Never match/)).toBeDefined();
-    // ...but the instance-wide ones are gone rather than 403-ing on click.
+    // ...but the instance-wide ones are hidden instead of failing with a 403 on click.
     expect(screen.queryByText(/Wrong type: convert/)).toBeNull();
     expect(screen.queryByText("Duplicate: merge into…")).toBeNull();
     expect(screen.queryByText("Unlink from every article")).toBeNull();
@@ -229,7 +227,7 @@ describe("EntityPopover — wrong-match menu", () => {
     };
     const { onClose } = openWrongMenu(observable);
 
-    // The autolinker rungs never appear on a ledger value.
+    // The autolinker fixes never appear on an observable.
     expect(screen.queryByText(/Never match/)).toBeNull();
     expect(screen.queryByText(/Wrong type: convert/)).toBeNull();
 

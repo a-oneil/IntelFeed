@@ -133,10 +133,10 @@ async def list_campaigns(
         .where(CampaignEntity.campaign_id.in_(campaign_ids))
         .group_by(CampaignEntity.campaign_id)
     )
-    # The span of each campaign's coverage: the newest article is what marks a
-    # gone-quiet campaign, and the oldest is what the Started column falls back
-    # to when nobody declared a start_date (nothing sets one, so the column was
-    # empty on every row).
+    # The span of each campaign's coverage: the newest article shows when a
+    # campaign went quiet, and the oldest is what the Started column falls back
+    # to when start_date is unset (it is optional and usually empty, so without
+    # this fallback the column would be blank on most rows).
     span_q = (
         select(CampaignEntry.campaign_id, func.min(Entry.published_at), func.max(Entry.published_at))
         .join(Entry, Entry.id == CampaignEntry.entry_id)
@@ -870,8 +870,8 @@ async def suggest_campaign_entries(
                 candidate_counts[eid] += 1
                 candidate_overlaps[eid].append({"type": entity_type, "label": str(entity_id)})
 
-    # Same-story entries are offered whatever their overlap: the story is the
-    # evidence. Everything else still has to clear min_overlap.
+    # Same-story entries are offered whatever their overlap, since being in the
+    # same story is enough. Everything else has to reach min_overlap.
     qualifying: list[uuid.UUID] = list(same_story)
     qualifying += [
         eid for eid, count in candidate_counts.most_common() if count >= min_overlap and eid not in same_story
@@ -894,7 +894,7 @@ async def suggest_campaign_entries(
     )
     threads = {row.entry_id: row for row in thread_rows.all()}
 
-    # How much of each story the campaign already holds — the "you have 2 of 9" half.
+    # How many of each story's articles the campaign already holds (the 2 in "2 of 9").
     held_counts: dict[uuid.UUID, int] = {}
     if held_threads:
         held_rows = await db.execute(
@@ -933,8 +933,8 @@ async def suggest_campaign_entries(
             )
         )
 
-    # Surest first: the rest of a story you already track, then the heaviest
-    # entity matches.
+    # Same-story suggestions first, then the rest by shared-entity count,
+    # highest first.
     suggestions.sort(key=lambda s: (s.reason != "same_story", -s.overlap_count))
     return suggestions[:limit]
 
@@ -970,8 +970,8 @@ async def add_campaign_entries(
         .scalars()
         .all()
     )
-    # An id that matches no entry would violate the foreign key and take the
-    # whole batch down with it.
+    # An id that matches no entry would violate the foreign key and fail the
+    # whole batch.
     real = set((await db.execute(select(Entry.id).where(Entry.id.in_(wanted - existing)))).scalars().all())
 
     for entry_id in real:
@@ -1178,8 +1178,8 @@ async def sync_campaign_saved_search(
         raise AppError(code="bad_request", message="Failed to parse saved search query", status_code=400)
 
     plan = build_execution_plan(ast)
-    # `feed:`, `category:` and the rest are answered from Postgres; without this
-    # they were silently dropped from a campaign sync.
+    # `feed:`, `category:` and the other deferred filters are resolved from
+    # Postgres; skipping this would silently drop them from a campaign sync.
     await resolve_deferred_filters(db, plan)
 
     # Fetch up to 1000 matching entry IDs
@@ -1231,14 +1231,15 @@ async def sync_campaign_saved_search(
     )
 
 
-# A campaign is something you track for months; a single burst of coverage is
-# just today's news. A thread-backed candidate has to show duration — either the
-# entity carried more than one story, or one story kept moving for a week — or
-# be a genuinely large single story (``min_entries`` doubled).
+# Campaigns are tracked over weeks or months, so a single burst of coverage is
+# not enough. A thread-backed candidate has to show duration (the entity carries
+# more than one story, or its stories span at least this many days) or be a
+# large single story (at least twice ``min_entries``).
 THREAD_SUSTAINED_DAYS = 7
 
-# A key entity named in one member out of twenty is incidental to that story,
-# not its subject.
+# A thread's key entity must be counted at least this many times to make the
+# thread a candidate: one named in a single article of twenty is incidental to
+# that story, not its subject.
 THREAD_KEY_ENTITY_MIN = 2
 
 
@@ -1251,9 +1252,9 @@ async def _thread_campaign_candidates(
     """Campaign candidates seeded from story threads.
 
     Counting "this actor appeared in 3 entries in 30 days" cannot tell a story
-    that ran for a fortnight from three unrelated mentions. Threads already know
+    that ran for two weeks from three unrelated mentions. Threads already know
     which articles are the same story, so an entity carrying several of them —
-    or one that kept moving — is the candidate worth offering.
+    or one story that ran for a week or more — is the candidate worth offering.
     """
     from sqlalchemy import text as _text
 
@@ -1445,7 +1446,7 @@ async def auto_detect_campaigns(
     # entity carrying several of them is a better campaign candidate than one
     # that merely got mentioned N times. The entity-count pass below still runs,
     # for entities whose coverage never clustered (and for anything predating
-    # embeddings), and merges underneath.
+    # embeddings), and its results are merged in below.
     suggestions = await _thread_campaign_candidates(db, cutoff, min_entries, existing_entities)
 
     from app.models.malware_family import MalwareFamily as MalwareFamilyModel
@@ -1533,7 +1534,7 @@ async def auto_detect_campaigns(
 
     # Group suggestions by normalized entity name
     # Thread-backed evidence outranks raw volume for the same entity, however
-    # many entries the volume pass happened to sweep up.
+    # many entries the volume pass found.
     def _rank(s: dict) -> tuple[int, int]:
         return (1 if s.get("evidence") == "story_threads" else 0, s["entry_count"])
 
@@ -1551,10 +1552,10 @@ async def auto_detect_campaigns(
 
         if _rank(s) > existing["_rank"]:
             # A better-evidenced candidate replaces the seed outright rather than
-            # absorbing the loser's entries. Seeding a campaign with every entry
-            # that merely mentions Qilin is the noise the thread pass exists to
-            # avoid; those entries are what /suggest offers once the campaign has
-            # a shape to compare them against.
+            # absorbing the other candidate's entries. Seeding a campaign with
+            # every entry that mentions the entity (every Qilin mention, say) is
+            # the noise the thread pass is there to avoid; /suggest offers those
+            # entries later, once the campaign has articles to compare them with.
             existing.update(
                 {
                     "pivot_entity": s["pivot_entity"],
@@ -1570,7 +1571,7 @@ async def auto_detect_campaigns(
                 }
             )
         elif _rank(s) == existing["_rank"]:
-            # Same evidence, two spellings of one entity — union as before.
+            # Same evidence, two spellings of one entity: merge their entry lists.
             existing_ids = set(existing["entry_ids"])
             existing_ids.update(s["entry_ids"])
             existing["entry_ids"] = list(existing_ids)
@@ -2193,7 +2194,8 @@ async def suggest_campaign_countries(
     for country_id, item in aggregated.items():
         counts = role_counts.get(country_id, Counter())
         # Map entry-level roles (origin/target/infrastructure/mentioned) to a
-        # campaign role; default to target when signal is ambiguous.
+        # campaign role: origin when more entries say origin than target,
+        # otherwise target.
         item["suggested_role"] = "origin" if counts.get("origin", 0) > counts.get("target", 0) else "target"
         suggestions.append(item)
 

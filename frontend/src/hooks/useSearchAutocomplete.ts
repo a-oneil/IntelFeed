@@ -18,10 +18,7 @@ export interface AutocompleteSuggestion {
 /**
  * Type-ahead for the search query language, backed by /search/autocomplete.
  *
- * The endpoint decides what a token means: a bare prefix completes field names,
- * and anything containing `:` completes that field's values (from the database
- * for entity names, from a fixed list for enums). Passing the whole query rather
- * than just the token lets it use the preceding text for context.
+ * The endpoint decides what a token means: a bare prefix completes field names, and anything containing `:` completes that field's values (from the database for entity names, from a fixed list for enums). Passing the whole query rather than just the token lets it use the preceding text for context.
  */
 export function useSearchAutocomplete(partial: string, enabled: boolean) {
   const trimmed = partial.trim();

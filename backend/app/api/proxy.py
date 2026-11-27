@@ -36,7 +36,7 @@ class _FetchFailed(Exception):
 
 
 async def _fetch_image(url: str, referer: str, max_bytes: int) -> tuple[bytes, str]:
-    """The image at ``url`` and its content type, or _FetchFailed(status).
+    """Fetch the image at ``url`` and return its bytes and content type, or raise _FetchFailed(status).
 
     Both clients are the SSRF-guarded ones: every connection, redirects
     included, goes to a vetted public address (400 when one is refused). The
@@ -176,9 +176,10 @@ async def proxy_image(
     # Build a cache key that includes the resize width
     cache_url = f"{url}?w={w}" if w else url
 
-    # A visitor may only load an image an article they can see shows: from the
-    # cache (or it would confirm images only hidden articles carry) or, failing
-    # that, fetched, since anything else makes this an anonymous download relay.
+    # A visitor may only load an image shown by an article they can see. The
+    # check covers cache hits (otherwise a hit would confirm an image that only
+    # hidden articles carry) and fetches (otherwise this endpoint would be an
+    # anonymous download relay).
     if user.is_anonymous and not await _entry_shows_image(db, entry, url):
         return Response(status_code=404)
 

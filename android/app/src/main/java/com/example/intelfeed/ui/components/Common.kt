@@ -81,10 +81,7 @@ fun Badge.color(): Color =
 fun ProfileChip.color(): Color =
     ref?.type?.color() ?: colorKey?.let { ThemeEngine.entityColor(it) } ?: tone.color()
 
-/**
- * The workbench's entity colours (`--entity-*` from `/api/themes/schema`), driven by the server so
- * entity types look identical across web and mobile.
- */
+/** The workbench's entity colors (`--entity-*` from `/api/themes/schema`), driven by the server so entity types look identical across web and mobile. */
 fun EntityType.color(): Color = ThemeEngine.entityColor(this)
 
 
@@ -198,10 +195,7 @@ fun LoadingBox(modifier: Modifier = Modifier, color: Color = CyberBlue) {
     }
 }
 
-/**
- * A loading state for requests that can be slow (some searches and unread lists take 8–10 s on
- * the server). After a few seconds it says so, so the app doesn't look stuck.
- */
+/** A loading state for requests that can be slow (some searches and unread lists take 8–10 s on the server). After a few seconds it says so, so the app doesn't look stuck. */
 @Composable
 fun SlowLoadingState(message: String, modifier: Modifier = Modifier) {
     var slow by remember { mutableStateOf(false) }
@@ -277,7 +271,7 @@ fun FactRow(label: String, value: String) {
     }
 }
 
-/** Divider-ish spacer used between cards in scrolling screens. */
+/** Full-width rounded card background for content in scrolling screens. */
 @Composable
 fun CardSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Surface(color = SlateDark700.copy(alpha = 0.55f), shape = RoundedCornerShape(12.dp), modifier = modifier.fillMaxWidth()) {

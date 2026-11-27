@@ -11,7 +11,7 @@ Three pieces, kept together because they share the ``entity_norm`` SQL function:
                           the two stay in lockstep.
 
   entity_alias_index    — one row per (entity, surface form): the canonical name
-                          plus every alias of the five name+aliases entity
+                          plus every alias of the six name+aliases entity
                           tables, with the normalized form. Maintained by DB
                           triggers on those tables so every write path (AI
                           extraction, merge API alias unions, manual edits, raw
@@ -38,7 +38,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 
-# ENTITY_TYPE_REGISTRY slugs (matches entity_dedup._TYPE_JUNCTION) → table name.
+# ENTITY_TYPE_REGISTRY slugs (the entity_dedup._TYPE_JUNCTION keys plus ransomware_victim) → table name.
 ALIAS_INDEXED_TABLES: dict[str, str] = {
     "threat_actor": "threat_actors",
     "malware": "malware_families",
@@ -99,7 +99,7 @@ def alias_index_trigger_sql(table: str, slug: str) -> str:
 class EntityAliasIndex(Base):
     """Trigger-maintained (entity, surface form, normalized form) index.
 
-    ``entity_id`` is deliberately not a foreign key — it points into five
+    ``entity_id`` is deliberately not a foreign key — it points into six
     different tables; the DELETE trigger on each parent keeps rows in sync.
     """
 
@@ -127,10 +127,11 @@ class KnownAliasMap(Base):
     cluster and MITRE ATT&CK intrusion sets — refreshed on the enrichment beat
     (full replace per ``source``). The resolver consults it after string
     matching: an incoming name whose known synonym cluster maps to an existing
-    profile resolves without an AI call (kills the F4 vendor-name-blindness
-    class: "Secret Blizzard" → cluster{Turla, Krypton, Venomous Bear} → the
-    stored Turla profile). It never writes aliases to profiles — alias writes
-    still pass the Phase 2 gate.
+    profile resolves without an AI call, which catches a vendor-specific name
+    for an actor already on file: "Secret Blizzard" → cluster{Turla, Krypton,
+    Venomous Bear} → the stored Turla profile. It never writes aliases to
+    profiles — alias writes still pass the Phase 2 gate (``gate_aliases`` in
+    app/intelligence/entity_resolution.py).
     """
 
     __tablename__ = "known_alias_map"

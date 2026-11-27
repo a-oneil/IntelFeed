@@ -6,16 +6,16 @@ nominations only; rows are created by the judgment doors (analysis AI, curated
 ioc_list feeds, rule bodies, TTP observables, analysts) through
 ``get_or_create_observable``. The one regex-adjacent write path is
 ``sight_known_values``, which exact-matches candidates against values a door
-already created — sighting a known-bad string is precise; discovering strings
-by regex is what killed IOC v1.
+already created — sighting a known-bad string is precise; creating rows from
+regex matches is what filled the removed IOC v1 subsystem with junk.
 
 Candidate policy is precision-first by construction:
 
 - hashes and public IPs are always candidates (unambiguous, octet-validated,
   reserved/benign ranges gated out);
 - domains, URLs and emails become candidates only when the author defanged
-  them (``evil[.]com``, ``hxxps://``) — an author who defangs is telling you
-  it's an indicator, so ``microsoft.com`` in prose never nominates anything;
+  them (``evil[.]com``, ``hxxps://``) — defanging shows the author means it as
+  an indicator, so ``microsoft.com`` in prose never nominates anything;
 - host artifacts are never regex candidates at all — they arrive through the
   TTP observable door or an analyst.
 """
@@ -75,12 +75,12 @@ def is_defanged(token: str) -> bool:
     return bool(_DEFANG_MARKER.search(token))
 
 
-#: Kinds where defanging means anything; everything else shares verbatim.
+#: Kinds that get defanged; every other kind is shared as written.
 _DEFANGABLE_KINDS = frozenset({"ipv4", "ipv6", "domain", "url", "email"})
 
 
 def defang(kind: str, value: str) -> str:
-    """Neuter a network value the way analysts share it (mirror of the
+    """Defang a network value the way analysts share it (mirror of the
     frontend's utils/observables.ts). Non-network kinds — hashes, cmdlines,
     registry keys — pass through untouched."""
     if kind not in _DEFANGABLE_KINDS:
@@ -227,8 +227,8 @@ _REFERENCE_HOSTS = frozenset(
         "thehackernews.com",
         "therecord.media",
         "krebsonsecurity.com",
-        # Services malware uses or an article names in passing, minted by the
-        # AI door as indicators until 2026-11.
+        # Services malware uses or an article names in passing, which the AI
+        # door created as indicators before 2026-11.
         # Their bare host is never an indicator; a subdomain or full URL on one
         # still can be.
         "webhook.site",
@@ -745,8 +745,9 @@ def scan_sighting_probes(text: str, *, max_probes: int = 500) -> list[Candidate]
 #: Path fragments that mark an indicator-list file as NOT ingestable at all:
 #: known-good inventories, anything the publisher itself files under
 #: "unverified", and aggregate files whose per-list provenance is lost.
-#: (NOTE: no "filter" fragment — drb-ra's best files are literally named
-#: "*-filter-abused.csv", shared/abused infrastructure filtered OUT.)
+#: There is deliberately no "filter" fragment: some of drb-ra's most useful
+#: files are named "*-filter-abused.csv" (shared/abused infrastructure
+#: filtered out).
 IOC_LIST_PATH_DENY = (
     "whitelist",
     "allowlist",
@@ -883,7 +884,7 @@ def parse_ioc_list_body(text: str, *, max_values: int = 5000) -> list[tuple[str,
     for line in text.splitlines():
         line = line.split("#", 1)[0]
         # "//" is a comment only at line start or after whitespace — never the
-        # "//" inside https:// (which this split used to destroy).
+        # "//" inside https:// (splitting there would cut the URL).
         line = re.split(r"(?:^|\s)//", line)[0].strip()
         if not line:
             continue
@@ -1013,7 +1014,7 @@ async def get_or_create_observable(
             created_from_entry_id=entry_id,
             infra_tag=infra_tag,
             # AI-created rows carry the review flag so a capture-mode audit can
-            # filter to them. The TTP door is the same model's output riding a
+            # filter to them. The TTP door is the same model's output in a
             # different array, and the adjudicator's capture is a model's call
             # too; feed/analyst doors are curator judgment already.
             needs_review=via in ("ai_extraction", "ttp_observable", "adjudicator"),
@@ -1027,7 +1028,7 @@ async def get_or_create_observable(
         return None
     if inserted.rowcount and kind in AUTO_ENRICH_KINDS and via in AUTO_ENRICH_DOORS:
         # Reputation lookups for freshly judged infrastructure — never for the
-        # bulk feed door (16k rows of blocklist would burn every budget), and
+        # bulk feed door (16k rows of blocklist would use up every quota), and
         # at most AUTO_ENRICH_PER_ENTRY_CAP per capturing entry so a publisher
         # file's 400 hashes don't queue 400 lookups.
         key = str(entry_id) if entry_id else ""
@@ -1040,7 +1041,7 @@ async def get_or_create_observable(
             await _enqueue_auto_enrich(session, obs)
     # A later door can enrich what an earlier one left blank. infra_tag is
     # fill-only too: "this IP is a VPN exit" stays true even after an AI door
-    # later confirms it as C2 — the dual signal is the point.
+    # later confirms it as C2, and keeping both facts is intended.
     obs.role = obs.role or role
     obs.evidence = obs.evidence or evidence
     obs.label = obs.label or label
@@ -1218,7 +1219,7 @@ _TEMPLATE_MARKER_RE = re.compile(r"#\{|\$\(|\[information removed\]|…|%[us](?!
 
 #: Discovery / admin commands every incident report quotes and no ledger
 #: wants: they carry nothing attacker-chosen, so an exact match in telemetry
-#: means nothing. Matched against the whitespace-normalised, lowercased line.
+#: means nothing. Matched against the whitespace-normalized, lowercased line.
 GENERIC_COMMANDS_RE = re.compile(
     r"(?i)^(?:"
     r"whoami(?:\s+/\w+)*|systeminfo|hostname|ipconfig(?:\s+/\w+)*|ifconfig(?:\s+-?\w+)*|uname(?:\s+-\w+)?|id|pwd|w|who|last|"
@@ -1269,8 +1270,10 @@ _BARE_SYSTEM_DIR_RE = re.compile(
     r"|^%(?:temp|tmp|appdata|localappdata|programdata|userprofile|windir|systemroot|public)%\\?$"
     r"|^/(?:usr(?:/local)?/s?bin|s?bin)/[a-z0-9_.-]+$"
 )
-#: Well-known registry keys an author names as the *location* of persistence;
-#: the IOC is the value name under them, never the bare key.
+#: Bare Unix directories and system files an author names as the *location*
+#: of a technique (and, in _BARE_WELLKNOWN_KEY_RE below, well-known registry
+#: keys of persistence); the IOC is the file or value name under them, never
+#: the bare location.
 _BARE_UNIX_LOCATION_RE = re.compile(
     r"(?i)^/(?:dev/(?:shm|null|tcp|vd[a-z]|sd[a-z]|nvme\d\w*)|var/(?:tmp|log|lib|spool(?:/cron(?:/crontabs)?)?|run|www(?:/html)?)"
     r"|etc/(?:hosts|passwd|shadow|group|sudoers|crontab|cron\.d|cron\.daily|cron\.hourly|rc\.local|profile|bashrc"
@@ -1381,8 +1384,8 @@ _CMD_TEMPLATE_RE = re.compile(
 def _plausible_cmdline(value: str) -> bool:
     """A command line, not a sentence about one and not detection logic.
 
-    Prose ("disable Microsoft's Antimalware Scan Interface") is words all the
-    way down; a real command's arguments carry flags, paths, separators or
+    Prose ("disable Microsoft's Antimalware Scan Interface") is only words; a
+    real command's arguments carry flags, paths, separators or
     digits. ``OR``/``AND`` chains and field-prefixed expressions are rule
     material. Generic discovery/admin commands (``whoami /priv``,
     ``net group "Domain Admins" /domain``) are vetoed outright, and whatever
@@ -1641,7 +1644,7 @@ async def shadow_observables(
     existing = list(entry.observable_candidates or [])
     seen = {(c.get("kind"), c.get("value")) for c in existing}
     staged = 0
-    _SHADOW_CAP = 40  # a hallucination-sized array must not grow the entry unbounded
+    _SHADOW_CAP = 40  # an oversized AI array must not grow the entry unbounded
     for item in iocs or []:
         if staged >= _SHADOW_CAP:
             break
@@ -1703,8 +1706,8 @@ async def shadow_observables(
 async def store_scripts(session: AsyncSession, entry_id, scripts: list[dict]) -> int:
     """The script half of the AI door: attacker code becomes a hash-keyed row.
 
-    Identity is the sha256 of the normalized snippet (the model can't hash, so
-    we do), the snippet lives in ``content``, and a reposted loader folds into
+    Identity is the sha256 of the normalized snippet (computed here, since the
+    model can't hash), the snippet lives in ``content``, and a reposted loader folds into
     one row with sightings across write-ups.
     """
     stored = 0
@@ -1810,7 +1813,7 @@ async def store_ioc_list_observables(
     role = ioc_list_path_role(file_path, infra_tag)
 
     # Bulk, not per-value record_sighting: a big C2 list is thousands of values
-    # and the per-row path (4 statements each) blows the stage's time limit.
+    # and the per-row path (4 statements each) exceeds the stage's time limit.
     # Semantics match record_sighting exactly because each observable appears
     # at most once per entry (parse dedupes), so every genuinely new junction
     # row means exactly one new sighting.
@@ -1818,8 +1821,8 @@ async def store_ioc_list_observables(
     effective = seen_at if seen_at is not None else datetime.now(UTC)
     if effective.tzinfo is None:
         effective = effective.replace(tzinfo=UTC)
-    # Chunked: a 5000-row multi-VALUES insert (~10 params/row) would blow
-    # asyncpg's 32k bind-parameter ceiling in one statement.
+    # Chunked: a 5000-row multi-VALUES insert (~10 params/row) would exceed
+    # asyncpg's 32k bind-parameter limit in one statement.
     _CHUNK = 1000
     for i in range(0, len(pairs), _CHUNK):
         await session.execute(
@@ -1914,7 +1917,7 @@ async def store_ioc_list_observables(
 
 #: EntryTTP.observable_type -> observable kind. "header" and "other" are
 #: deliberately unmapped: they're pattern-shaped, and patterns stay on the
-#: technique (see the atoms-vs-rule-material boundary in the design doc).
+#: technique as detection-rule material, not as exact-match ledger rows.
 TTP_OBSERVABLE_KIND_MAP = {
     "domain_pattern": "domain",
     "path": "path",
@@ -1970,10 +1973,10 @@ _WIN_PATH_RE = re.compile(r"^(?:[a-zA-Z]:\\|\\\\)[^<>\n]{3,}$")
 _NIX_PATH_RE = re.compile(r"^/(?:etc|tmp|var|usr|opt|home|dev|bin|sbin|lib)/[\w./-]{2,}$")
 
 #: A code-block line nominates as a command only when it starts the way a
-#: command does. The old rule ("a word followed by a space, with one digit or
-#: punctuation mark somewhere") let every preformatted bulletin line through —
-#: "Operating System: Red Hat", "Patch Instructions:" — and AusCERT alone
-#: staged 12k of them. Either the line opens with a shell prompt, or its
+#: command does. A looser rule ("a word followed by a space, with one digit or
+#: punctuation mark somewhere") lets every preformatted bulletin line through —
+#: "Operating System: Red Hat", "Patch Instructions:" — and staged 12k of them
+#: from AusCERT alone. Either the line opens with a shell prompt, or its
 #: first token is a known executor / script host / transfer tool, or it names
 #: an executable or script file.
 _PROMPT_RE = re.compile(r"^(?:PS [A-Z]:\\[^>]*>|[a-z0-9_.\-]+@[a-z0-9_.\-]+:[~/][^$#]*[$#]|[$#>])\s+")
@@ -2213,9 +2216,9 @@ async def retro_sight_observable(session: AsyncSession, obs: Observable, *, max_
     """Retro-sight one confirmed value across the existing corpus.
 
     Exact-string search via Meilisearch (phrase query) verified against the
-    entry text — searching for a known-bad value is precise; discovering
-    values by regex was the trap. Safe by construction: only rows a judgment
-    door already created ever reach here."""
+    entry text — searching for a known-bad value is precise, unlike creating
+    values from regex matches. Only rows a judgment door already created ever
+    reach here."""
     from app.models.entry import Entry
     from app.services.meilisearch_client import search_entries
     from app.services.sanitizer import entry_text_with_translation

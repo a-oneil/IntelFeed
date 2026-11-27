@@ -1,11 +1,10 @@
 """Which feeds a user sees, and which they've muted.
 
-With `per_user_subscriptions_enabled` off (the default), behavior is the
-pre-multi-user one: a single shared feed list whose mute and active state are
-the global `Feed.is_muted` / `Feed.is_active` columns. With it on, a user sees
-the feeds they hold a `user_feed_subscriptions` row for, and both mute and
-pause come from that row — so one reader pausing a feed does not stop anyone
-else receiving it.
+With `per_user_subscriptions_enabled` off (the default), there is a single
+shared feed list whose mute and active state are the global `Feed.is_muted` /
+`Feed.is_active` columns. With it on, a user sees the feeds they hold a
+`user_feed_subscriptions` row for, and both mute and pause come from that row,
+so one reader pausing a feed does not stop anyone else receiving it.
 
 Deliberately still on the global column regardless of the flag: search's
 `is:muted` operator, the atlas/strategic map, backup export, the public RSS
@@ -38,8 +37,8 @@ def visible_feed_ids_query(
 ) -> Select:
     """Subquery of feed ids the user should see.
 
-    Matches the legacy semantics call-for-call: a category view keeps muted
-    feeds (pass include_muted=True there), the home view drops them.
+    Same rules with the flag on or off: a category view keeps muted feeds
+    (pass include_muted=True there), the home view drops them.
     """
     if enabled and user_id is not None:
         q = (
@@ -51,9 +50,9 @@ def visible_feed_ids_query(
             q = q.where(UserFeedSubscription.is_muted.is_(False))
         if active_only:
             # Both halves have to hold: the instance has not switched the feed
-            # off, and this reader has not paused their own copy. Hanging the
-            # per-user half off `active_only` means every caller that already
-            # asks for live feeds gets it without changing a line.
+            # off, and this reader has not paused their own copy. Applying the
+            # per-user check under `active_only` means every caller that already
+            # asks for live feeds gets it without changes.
             q = q.where(UserFeedSubscription.is_paused.is_(False))
     else:
         q = select(Feed.id)
@@ -63,7 +62,7 @@ def visible_feed_ids_query(
         q = q.where(Feed.category_id == category_id)
     if active_only:
         q = q.where(Feed.is_active.is_(True))
-    # An archived feed reads as deleted (services/feed_archive.py).
+    # An archived feed is treated as deleted (services/feed_archive.py).
     return q.where(Feed.archived_at.is_(None))
 
 

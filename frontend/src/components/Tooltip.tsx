@@ -21,15 +21,9 @@ interface Props {
 const GAP = 8;
 const EDGE = 8;
 
-/**
- * A plain hover card for a control that already has a name.
- *
- * Portalled and fixed-positioned rather than absolutely placed inside the
- * trigger: an absolute card centred on a trigger near the window edge (the
- * sidebar's category rows) hangs off the screen with nothing to scroll it
- * back into view. Positions here are clamped to the viewport instead, and the
- * `position` prop is the preferred side rather than a guarantee.
- */
+/** A plain hover card for a control that already has a name.
+
+    Portaled and fixed-positioned rather than absolutely placed inside the trigger: an absolute card centered on a trigger near the window edge (the sidebar's category rows) hangs off the screen with no way to scroll it back into view. Positions here are clamped to the viewport instead, and the `position` prop is the preferred side rather than a guarantee. */
 export function Tooltip({ content, children, delay = 400, position = "right", className }: Props) {
   const hoverCards = useHoverCards();
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
@@ -59,8 +53,7 @@ export function Tooltip({ content, children, delay = 400, position = "right", cl
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
   }, []);
 
-  // A fixed card can't travel with a scrolling container, so close rather than
-  // let it drift away from the row it describes.
+  // A fixed card can't move with a scrolling container, so it closes on scroll or resize instead of drifting away from the row it describes.
   useEffect(() => {
     if (!anchor) return;
     window.addEventListener("scroll", hide, true);
@@ -82,8 +75,7 @@ export function Tooltip({ content, children, delay = 400, position = "right", cl
     if (position === "right" || position === "left") {
       left = position === "right" ? anchor.right + GAP : anchor.left - GAP - card.width;
       top = anchor.top + anchor.height / 2 - card.height / 2;
-      // Flip to the other side before falling back to a clamp, so the card
-      // doesn't end up sitting on top of its own trigger.
+      // Flip to the other side before falling back to a clamp, so the card doesn't end up on top of its own trigger.
       if (position === "right" && left + card.width > vw - EDGE) left = anchor.left - GAP - card.width;
       if (position === "left" && left < EDGE) left = anchor.right + GAP;
     } else {

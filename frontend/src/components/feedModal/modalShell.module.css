@@ -7,16 +7,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  /* Above the phone sidebar drawer (100), level with the app's other modals. */
+  z-index: 1000;
   padding: var(--sp-5);
 }
 
-/*
- * Two panes, fixed chrome. The old single-column sheet put the action row at
- * the bottom of the scrolling body, so on a Telegram feed you scrolled past
- * twenty controls to reach Save. Header, rail and footer are outside the
- * scroller now; only the pane moves.
- */
+/* Two panes with a fixed header, rail and footer; only the pane scrolls. This keeps Save in view: with the action row at the bottom of a scrolling body, a Telegram feed made you scroll past twenty controls to reach it. */
 .modal {
   display: flex;
   flex-direction: column;
@@ -29,7 +25,7 @@
   border-radius: var(--r-md);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   overflow: hidden;
-  /* Belt to the portal's braces: never inherit a caller's text layout. */
+  /* The modal renders in a portal, but reset these anyway so it never inherits a caller's text layout. */
   white-space: normal;
   text-align: left;
 }
@@ -190,8 +186,7 @@
   flex-grow: 1;
 }
 
-/* Marks a pane holding unsaved edits — the reason the rail exists at all is
-   that you can no longer see every field at once. */
+/* Marks a pane that holds unsaved edits, since the fields are split across panes and not all visible at once. */
 .railDot {
   flex-shrink: 0;
   width: 6px;
@@ -292,7 +287,7 @@
   background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
-/* ===== Mobile: a drill-in list, not a squeezed two-pane ===== */
+/* ===== Mobile: the rail becomes a row of tabs above the pane ===== */
 
 @media (max-width: 767px) {
   .overlay {
@@ -311,8 +306,7 @@
     flex-direction: column;
   }
 
-  /* The rail becomes a horizontal scroller above the pane: six 44px targets
-     in a row beats a 184px column eating half a phone's width. */
+  /* The rail becomes a horizontal scroller above the pane: a row of 44px targets instead of a 184px column taking half a phone's width. */
   .rail {
     width: 100%;
     flex-direction: row;
@@ -339,5 +333,16 @@
   .cancelBtn,
   .dangerBtn {
     min-height: 44px;
+  }
+
+  /* Three buttons must fit across a 360px phone, so the padding is tighter and the change count is hidden. The tab holding an edit still shows a dot, so unsaved work stays visible. */
+  .footer {
+    padding: var(--sp-4);
+    padding-bottom: max(var(--sp-4), env(safe-area-inset-bottom));
+  }
+
+  .cleanNote,
+  .dirtyNote {
+    display: none;
   }
 }

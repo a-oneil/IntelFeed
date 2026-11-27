@@ -31,13 +31,7 @@ interface ConfirmCardProps {
   onCancel: () => void;
 }
 
-/**
- * Inline "writes-with-confirm" card rendered within the copilot thread after
- * the assistant turn that proposed a write. Shows the exact tool call (its
- * name and every argument) plus Confirm / Cancel, a disabled/pending state
- * while the request is in flight, and a resolved state (executed / cancelled /
- * error) afterward. Nothing runs until Confirm.
- */
+/** Inline "writes-with-confirm" card rendered within the copilot thread after the assistant turn that proposed a write. Shows the exact tool call (its name and every argument) plus Confirm / Cancel, a disabled/pending state while the request is in flight, and a resolved state (executed / canceled / error) afterward. Nothing runs until Confirm. */
 export function ConfirmCard({
   request,
   state,
@@ -58,7 +52,7 @@ export function ConfirmCard({
           : state.status === "error"
             ? styles.cardError
             : state.status === "cancelled"
-              ? styles.cardCancelled
+              ? styles.cardCanceled
               : ""
       }`}
       role="group"
@@ -112,7 +106,7 @@ export function ConfirmCard({
             onClick={onCancel}
             disabled={inFlight}
           >
-            {inFlight && !state.approved ? "Cancelling…" : "Cancel"}
+            {inFlight && !state.approved ? "Canceling…" : "Cancel"}
           </button>
         </div>
       )}
@@ -125,7 +119,7 @@ export function ConfirmCard({
             </span>
           )}
           {state.status === "cancelled" && (
-            <span className={styles.resolvedMuted}>✕ Cancelled</span>
+            <span className={styles.resolvedMuted}>✕ Canceled</span>
           )}
           {state.status === "error" && (
             <span className={styles.resolvedError}><IconAlertTriangle size="1em" stroke={1.75} aria-hidden /> {state.message}</span>

@@ -21,8 +21,7 @@ interface CodeMirrorEditorProps {
   readOnly?: boolean;
   validationErrors?: RuleValidationError[];
   height?: string;
-  /** Prose mode: markdown/free text, not code — drops line numbers and
-   *  active-line highlight so reports don't read like source files. */
+  /** Prose mode: markdown/free text, not code. Drops line numbers and the active-line highlight so reports don't look like source files. */
   prose?: boolean;
 }
 
@@ -103,9 +102,7 @@ const kqlMode: Parameters<typeof StreamLanguage.define>[0] = {
 };
 
 
-/* Prose mode (reports, analyst writing): markdown parsing plus document
-   typography — headings sized and weighted, syntax marks dimmed, body face
-   instead of mono — so writing a report doesn't feel like editing source. */
+/** Prose mode (reports, analyst writing): markdown parsing plus document typography (sized and weighted headings, dimmed syntax marks, body font instead of mono), so writing a report doesn't look like editing source. */
 const proseHighlight = HighlightStyle.define([
   { tag: tags.heading1, fontSize: "1.35em", fontWeight: "700", color: "var(--text-primary)" },
   { tag: tags.heading2, fontSize: "1.2em", fontWeight: "700", color: "var(--text-primary)" },

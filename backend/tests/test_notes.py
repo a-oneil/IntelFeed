@@ -176,8 +176,8 @@ async def test_create_entry_note(client: AsyncClient, auth_headers: dict, test_e
 async def test_create_entry_note_needs_no_subscription(client: AsyncClient, other_headers: dict, test_entry: Entry):
     """Feeds are shared, so any user can annotate any entry.
 
-    Notes used to be gated on a per-user feed subscription; entries are now
-    platform-wide, and the endpoint only checks that the entry exists.
+    Entries are platform-wide, so the endpoint only checks that the entry
+    exists; it does not require a per-user feed subscription.
     """
     resp = await client.post(
         f"/api/notes/entry/{test_entry.id}",

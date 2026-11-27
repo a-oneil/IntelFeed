@@ -1,18 +1,18 @@
-"""Is this somewhere the server may call?
+"""Checks whether the server may call a user-supplied URL.
 
-Anything that makes the API server fetch a URL a user typed — a webhook, a
-personal AI provider's base URL — is a server-side request forgery waiting
-for a hostname that resolves to the LAN. Checking the literal address is
-not enough: ``evil.example`` can point at 10.0.0.5. The check here resolves
+Anything that makes the API server fetch a URL a user typed (a webhook, a
+personal AI provider's base URL) is open to server-side request forgery if
+the hostname resolves to the LAN. Checking the literal address is not
+enough: ``evil.example`` can point at 10.0.0.5. The check here resolves
 the name and refuses if any address it maps to is not public.
 
-Resolve again on every call, not just when the URL is saved: DNS answers
-change, and that is the whole trick. What this does not close is a name
-that answers differently to the check and to the HTTP client moments
+Resolve again on every call, not just when the URL is saved, because DNS
+answers can change after the URL is saved. What this does not close is a
+name that answers differently to the check and to the HTTP client moments
 later (a zero-TTL rebinding attack). Closing that means connecting to the
-vetted address, which the provider SDKs the base URLs feed don't allow,
-so the operator's private-network switch and the audit trail are the
-backstop.
+checked address, which the provider SDKs that use these base URLs don't
+allow, so the operator's private-network switch and the audit trail are
+the remaining safeguards.
 """
 
 from __future__ import annotations
@@ -140,8 +140,8 @@ async def outbound_problem(url: str, *, allow_private: bool = False) -> Outbound
         try:
             addresses = [ipaddress.ip_address(hostname)]
         except ValueError:
-            # Unresolvable stays the HTTP client's error to report, as it was
-            # before this mode resolved anything.
+            # A name that does not resolve is left for the HTTP client to
+            # report as its own error.
             addresses = await resolve_host(hostname)
         for addr in addresses:
             if is_never_reachable(addr):

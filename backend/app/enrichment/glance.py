@@ -8,8 +8,8 @@ from the NVD and CVE-record weakness links). It returns a verdict **chip**
 (something you'd act on: exploited, no patch, benign scanner, EOL) or a short
 neutral **fact**, or nothing. ``glance()`` keeps the first two chips and the
 first three facts, in rule order, from sources that are on and that the
-viewer may see (visitors never see a source that sends indicators off the box
-or bars commercial use). Nothing stored means nothing shown: the popover
+viewer may see (visitors never see a source that sends indicators to an
+outside service or bars commercial use). Nothing stored means nothing shown: the popover
 looks as it would without enrichment.
 
 The rules sit here rather than on each source's outputs because most need a

@@ -102,10 +102,10 @@ def cleanup_telegram_media():
     For each file, derives the (channel_id, message_id) pair, looks up whether an
     entry exists with metadata_["channel_id"] == channel_id and metadata_["message_id"] == msg_id,
     and deletes the file if no matching entry exists. Files for entries past their feed's
-    retention_days are also pruned (the entry itself is deleted by cleanup_expired_entries).
+    retention_days are pruned once cleanup_expired_entries has deleted the entry.
 
     Soft-deleted entries (metadata_.telegram_deleted_at set) keep their media until the
-    parent entry is hard-deleted, so analysts can still inspect the artefact.
+    parent entry is hard-deleted, so analysts can still inspect the artifact.
     """
     start = time.monotonic()
     media_root = Path(settings.telegram_media_dir)
@@ -782,8 +782,8 @@ async def _cleanup_orphaned_references():
 def decay_relationship_confidence():
     """Demote stale co-occurrence relationships from probable back to possible.
 
-    Strength/recency already decay live in the pivot payload; this keeps the
-    stored typed-confidence ladder honest for relationships whose newest
+    Strength and recency already decay at read time in the pivot payload; this
+    lowers the stored confidence of co-occurrence relationships whose newest
     evidence is older than twice the recency half-life. Analyst-touched rows
     (confirmed / created / rejected) are never demoted.
     """
@@ -840,7 +840,7 @@ def prune_entity_context():
     and relation claims whose entity is gone.
 
     An expired row still shows on the profile, marked stale, until its source
-    looks again; a month on, nothing is going to.
+    refreshes it; one that has gone 30 days past expiry without a refresh is deleted.
     """
     start = time.monotonic()
     try:
@@ -868,11 +868,12 @@ async def _prune_entity_context() -> int:
 
 @celery_app.task(name="app.workers.maintenance.prune_engine_tables", soft_time_limit=300, time_limit=360)
 def prune_engine_tables():
-    """Daily: delete engine bookkeeping rows older than 30 days.
+    """Daily: delete engine bookkeeping rows older than engine_run_retention_days (default 30).
 
-    Covers entry_pipeline_runs, job_runs, ai_analysis_requests, ai_batch_jobs,
-    pending autolink matches, and the retired link validator's unreviewed
-    proposals.
+    Covers entry_pipeline_runs, job_runs, ai_analysis_requests (except those
+    whose review is still owed), ai_batch_jobs, pending autolink matches
+    (unresolved ones after 14 days), the retired link validator's unreviewed
+    proposals, and pending proposals about entities that no longer exist.
     """
     start = time.monotonic()
     try:
@@ -1346,8 +1347,9 @@ async def _backfill_rule_data_sources() -> dict:
     Telemetry feasibility joins `DetectionRule.data_sources` against the
     telemetry inventory, but only Elastic and Sentinel rules ever populated it.
     Sigma rules carry their `logsource` in `log_sources`, and Splunk searches
-    declare index/sourcetype inline — both were being ignored, so most of the
-    library counted as unevaluatable rather than covered-or-gapped.
+    declare index/sourcetype inline. Without this projection, coverage ignores
+    both and most of the library counts as unevaluatable rather than covered or
+    gapped.
 
     Artifact-scanning formats (YARA, nuclei) are skipped, not flagged: they have
     no log stream to satisfy.
@@ -1662,12 +1664,12 @@ def rank_threat_board():
     junctions and `rule_coverage` — so this is not a cache warm. It exists
     because two things the board decides on read are never written back:
 
-    * a `handled` threat reopens when new tradecraft postdates the decision, but
+    * a `handled` threat reopens when new activity postdates the decision, but
       only in the response. The stored row keeps saying `handled`, so anything
       reading `threat_board_state` directly (a digest, a notification) sees the
       opposite of what the board shows.
     * a decision outlives the entity it was made about. Merging two actors, or
-      deleting an extraction artefact, orphans its row forever.
+      deleting an extraction artifact, orphans its row forever.
 
     Runs after `rebuild-rule-coverage`, because the ranking reads that table.
     """
@@ -1732,9 +1734,10 @@ async def _rank_threat_board() -> dict:
 def promote_watchlist_threats():
     """Watched actors/malware with window activity enter the Threats board as tracked.
 
-    Watch already means "I care"; the board should believe it without a second
-    gesture. Only rows with no standing decision are promoted — a handled or
-    muted threat was decided by a human, and a beat task doesn't outrank that.
+    Watching an entity already says the analyst cares, so the board tracks it
+    without a separate action. Only rows with no standing decision are promoted:
+    a handled or muted threat was decided by a person, and a scheduled task does
+    not override that.
     """
     start = time.monotonic()
     try:
@@ -1782,12 +1785,13 @@ async def _promote_watchlist_threats() -> dict:
 
 @celery_app.task(name="app.workers.maintenance.generate_threat_briefs", soft_time_limit=1800, time_limit=1860)
 def generate_threat_briefs(limit: int | None = None):
-    """Nightly story lines for the board's open rows.
+    """Nightly AI brief for each of the board's open rows.
 
     Runs after rank_threat_board. Each brief is built only from the row's own
-    window entries and cached in ai_results keyed by a hash of that entry set,
-    so an unchanged week regenerates nothing. The board reads the cache and
-    falls back to the lead headline — this task is the only writer.
+    window entries (plus stored CVE facts for vulnerability rows) and cached in
+    ai_results keyed by a hash of that entry set, so an unchanged entry set
+    regenerates nothing. The board reads the cache and falls back to the lead
+    headline; this task is the only writer.
     """
     start = time.monotonic()
     try:
@@ -1819,12 +1823,11 @@ async def _generate_threat_briefs(limit: int | None = None) -> dict:
         await warm_settings_cache(db)
         if limit is None:
             limit = int(settings.get("threat_brief_limit") or 30)
-        # Both halves of the board get story lines. Vulnerability rows were
-        # ranked and rendered from the start but never briefed, because this
-        # fan-out only ever walked build_threat_board — so every CVE row fell
-        # back to its lead headline no matter how much was written about it.
+        # Both halves of the board get briefs: threat rows from
+        # build_threat_board and vulnerability rows from build_cve_board.
+        # Without the second call every CVE row falls back to its lead headline.
         rows = await build_threat_board(db, window=BRIEF_WINDOW, limit=limit, include_handled=False)
-        # No user_id: a brief is one shared artefact per CVE, so it is generated
+        # No user_id: a brief is one shared artifact per CVE, so it is generated
         # against the unweighted ranking rather than any one analyst's stack.
         # A stacked user's top rows sort differently, so the tail of a large
         # board can be a headline until the next run reaches it.
@@ -1901,8 +1904,8 @@ def reconcile_observable_counters():
 
     ``record_sighting`` increments; only the manual unlink endpoint recounts.
     Entry deletion (retention cleanup) cascades ``entry_observables`` rows at
-    the database, so the increment-only counters drift upward over time — this
-    nightly recount is the ground truth pass.
+    the database, so the increment-only counters drift upward over time. This
+    nightly pass resets them from the junction table.
     """
     start = time.monotonic()
     try:
@@ -1966,9 +1969,9 @@ async def _reconcile_observable_counters():
 def retro_sight_observables():
     """Retro-sight recently confirmed observables across the existing corpus.
 
-    Forward sightings happen at ingest (the observables stage); this closes the
-    other direction — a value confirmed today gets its historical mentions via
-    exact-string search, never regex discovery.
+    Forward sightings happen at ingest (the observables stage); this covers the
+    other direction: a value confirmed today is matched against older articles
+    by exact-string search, never regex discovery.
     """
     start = time.monotonic()
     try:

@@ -19,13 +19,13 @@ object SpeechText {
     private val BULLET_REGEX = Regex("(?m)^\\s*[•\\-*]\\s+")
 
     /**
-     * Cleans raw article text for natural-sounding speech:
-     * - Replaces long URLs with friendly domain mentions ("link to domain.com")
-     * - Omits 32- and 64-character hex hashes (MD5, SHA256) so the voice doesn't spell them out
-     * - Formats CVE identifiers with natural cadence pauses ("C-V-E 2024, 38077")
-     * - Strips markdown tokens and ensures headings end with a period for a breath pause
-     * - Omits code blocks
-     */
+    Cleans raw article text for natural-sounding speech:
+    - Replaces http(s) URLs with their domain ("link to domain.com")
+    - Replaces 32- to 64-character hex hashes (MD5, SHA-1, SHA-256) with "[hash]" so the voice doesn't spell them out
+    - Formats CVE identifiers with pauses ("C-V-E 2024, 38077")
+    - Strips Markdown tokens and ends headings with a period so the voice pauses after them
+    - Replaces fenced code blocks with "[code snippet omitted]"
+    */
     fun cleanForSpeech(text: String): String {
         if (text.isBlank()) return ""
         return text
@@ -52,12 +52,7 @@ object SpeechText {
             .trim()
     }
 
-    /**
-     * Splits text into pieces TextToSpeech will accept. TextToSpeech.speak() rejects anything longer
-     * than its limit (it returns ERROR and says nothing), so a long article has to be queued in
-     * parts. Splits at paragraph breaks, then sentence ends, then spaces; never inside a word
-     * unless a single "word" is longer than [max].
-     */
+    /** Splits text into pieces TextToSpeech will accept. TextToSpeech.speak() rejects anything longer than its limit (it returns ERROR and says nothing), so a long article has to be queued in parts. Splits at paragraph breaks, then sentence ends, then spaces; never inside a word unless a single "word" is longer than [max]. */
     fun chunk(text: String, max: Int = MAX_CHUNK): List<String> {
         require(max > 0)
         val chunks = mutableListOf<String>()

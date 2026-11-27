@@ -1,6 +1,4 @@
-/* Two hosts, one body: `.panel` drops in over the results under the toolbar,
-   `.card` is the enclosed block the empty state shows. Everything below the
-   container is shared. */
+/* Two containers share one body: `.panel` drops in over the results under the toolbar, and `.card` is the enclosed block the empty state shows. Every rule after these two is shared. */
 
 .panel {
   padding: var(--sp-4) var(--sp-5);
@@ -24,10 +22,7 @@
   margin-bottom: var(--sp-4);
 }
 
-/* Multi-column rather than grid: the groups are different heights (Articles has
-   eleven fields, Ransomware three), and a grid puts every row on its tallest
-   member — leaving a stripe of dead space under each short group. Columns pack
-   them continuously instead, and `break-inside` keeps a group whole. */
+/* Multi-column rather than grid: the groups are different heights (Articles has fourteen fields, Mitigations one), and a grid sizes every row to its tallest member, leaving empty space under each short group. Columns pack the groups continuously, and `break-inside` keeps each group whole. */
 .groups {
   columns: 4 210px;
   column-gap: var(--sp-6);
@@ -35,7 +30,7 @@
 
 .group {
   break-inside: avoid;
-  /* Safari still needs the legacy property to honour the break. */
+  /* Safari still needs the legacy property to honor the break. */
   -webkit-column-break-inside: avoid;
   margin-bottom: var(--sp-5);
   min-width: 0;
@@ -53,7 +48,7 @@
   color: var(--text-secondary);
 }
 
-/* Colour is the app's entity vocabulary, so a group reads as its domain. */
+/* The rule uses the entity color, so a group is marked with the entity type it covers. */
 .groupRule {
   width: 3px;
   height: 11px;
@@ -97,7 +92,7 @@
   white-space: nowrap;
 }
 
-/* Only the interactive form gets affordances — the static one is a reference. */
+/* Only the interactive (button) tokens get a pointer and hover state; the static `<code>` tokens are reference only. */
 button.token {
   cursor: pointer;
 }

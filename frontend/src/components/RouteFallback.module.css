@@ -16,8 +16,7 @@
   font-size: 0.8125rem;
   /* The spinner already reads as "working"; the text only has to say what. */
   color: var(--text-secondary);
-  /* Held back a beat so a warm chunk resolves before any text appears —
-     a flash of "Loading X…" on an instant swap is noisier than nothing. */
+  /* Fades in after a short delay so a cached chunk resolves before any text appears; a brief flash of "Loading X…" on an instant swap is more distracting than no text. */
   animation: routeFallbackReveal 0.9s ease-out both;
 }
 

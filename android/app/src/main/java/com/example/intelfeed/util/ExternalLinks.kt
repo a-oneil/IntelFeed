@@ -8,11 +8,7 @@ import android.widget.Toast
 
 object ExternalLinks {
 
-    /**
-     * Opens [url] in a browser. URLs come from feed content and aren't trusted, so only http(s)
-     * links are opened. Other schemes (deep links into other apps, file:, content:, …) are
-     * refused. A missing browser shows a toast instead of crashing.
-     */
+    /** Opens [url] in a browser. URLs come from feed content and aren't trusted, so only http(s) links are opened. Other schemes (deep links into other apps, file:, content:, …) are refused. A missing browser shows a toast instead of crashing. */
     fun openInBrowser(context: Context, url: String?) {
         val uri = url?.trim()?.takeIf { it.isNotEmpty() }?.let(Uri::parse)
         val scheme = uri?.scheme?.lowercase()

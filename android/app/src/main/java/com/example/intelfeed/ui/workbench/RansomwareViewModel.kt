@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 /** The web tracker's two views. */
 enum class RansomwareView(val label: String) { LEAK_WATCH("Leak Watch"), LANDSCAPE("Landscape") }
 
-/** Leak Watch filters, as the web's (days 3650 = all time). */
+/** Leak Watch filters, matching the web's (days = 3650 means all time). */
 data class RansomwareFilters(
     val days: Int = 7,
     val q: String = "",
@@ -163,7 +163,7 @@ class RansomwareViewModel(
         }
     }
 
-    /** Watches or unwatches the victim organisation (your own watchlist, entity type ransomware_victim), like the web's star. */
+    /** Watches or unwatches the victim organization (your own watchlist, entity type ransomware_victim), like the web's star. */
     fun toggleWatch(d: RansomwareDisclosure) {
         val victimId = d.victimId ?: return
         if (d.id in _state.value.watchBusy) return

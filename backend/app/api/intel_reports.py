@@ -44,8 +44,8 @@ async def _usable_template(
     The template list shows builtin, shared and the user's own templates. Every
     route that takes a slug has to refuse the rest too, or knowing a private
     template's slug is enough to build from (and read the sections of) it.
-    ``allow_unknown`` keeps plain report creation accepting a slug no template
-    has, as it always did.
+    ``allow_unknown`` lets plain report creation accept a slug that no template
+    has.
     """
     if slug in REPORT_TEMPLATES:
         return None
@@ -363,7 +363,7 @@ async def generate_intel_report(
     db: AsyncSession = Depends(get_db),
 ):
     """Generate a new report pre-filled from a template and linked entities."""
-    # Check builtin templates first, then DB templates
+    # Check code templates first, then DB templates
     template = REPORT_TEMPLATES.get(body.template_type)
     if not template:
         db_tmpl = await _usable_template(db, body.template_type, user)
@@ -443,8 +443,8 @@ async def generate_full_intel_report(
         db=db,
     )
 
-    # 4. Refuse now what the worker would refuse later — before the row is
-    # written, so a refusal leaves no blank report behind.
+    # 4. Run the worker's pre-flight check now, before the row is written,
+    # so a refusal leaves no blank report behind.
     await _preflight(db, user, body.template_type, content)
 
     # 5. Store focus/audience in metadata for Celery task
@@ -547,7 +547,7 @@ async def regenerate_all_sections(
         db=db,
     )
 
-    # Preserve focus/audience metadata
+    # Keep the old metadata; a focus or audience passed in replaces the stored one
     old_metadata = (report.content or {}).get("metadata", {})
     if focus is not None:
         old_metadata["focus"] = focus
@@ -555,8 +555,8 @@ async def regenerate_all_sections(
         old_metadata["audience"] = audience
     content["metadata"] = old_metadata
 
-    # Refuse now what the worker would refuse later — before the sections
-    # are cleared, so a refusal leaves the report as it was.
+    # Run the worker's pre-flight check now, before the sections are
+    # cleared, so a refusal leaves the report as it was.
     await _preflight(db, user, report.template_type, content)
 
     from sqlalchemy.orm.attributes import flag_modified
@@ -677,8 +677,8 @@ async def generate_report_from_campaign(
         db=db,
     )
 
-    # Refuse now what the worker would refuse later — before the row is
-    # written, so a refusal leaves no blank report behind.
+    # Run the worker's pre-flight check now, before the row is written,
+    # so a refusal leaves no blank report behind.
     await _preflight(db, user, template_type, content)
 
     # Set focus/audience from request
@@ -754,8 +754,8 @@ async def clone_report_as_type(
         db=db,
     )
     if generate:
-        # Refuse now what the worker would refuse later — before the row is
-        # written, so a refusal leaves no blank report behind.
+        # Run the worker's pre-flight check now, before the row is written,
+        # so a refusal leaves no blank report behind.
         await _preflight(db, user, new_template_type, content)
 
     # Preserve focus/audience from source
@@ -1001,8 +1001,8 @@ async def generate_exposure_report(
         window_days=profile.window_days,
     )
     entity_ids = await collect_entity_ids_for_entries(db, entry_ids)
-    # Kept entities always ride along, even when no in-scope entry links them
-    # (a claims-only match still belongs in the report).
+    # Kept entities are always included, even when no in-scope entry links
+    # them (a claims-only match still belongs in the report).
     for key, kept in (("actors", kept_actor_ids), ("malware", kept_malware_ids)):
         merged = list(dict.fromkeys((entity_ids.get(key) or []) + sorted(kept)))
         if merged:
@@ -1106,10 +1106,9 @@ async def attach_to_intel_report(
         elif fresh.get("items") is not None:
             sections[key] = {**old, "items": fresh["items"], "body": old.get("body") or fresh.get("body", "")}
 
-    # The sender's commentary seeds the detections body — a coverage set's
-    # skipped rules read as known gaps, and a gap is worth as much to the reader
-    # as a rule. Only ever fills an empty body: an analyst who has written there
-    # outranks whatever the sending surface wanted to say.
+    # The sender's note fills the detections section body, so a coverage set's
+    # skipped rules show up in the report as known gaps. It only fills an empty
+    # body; text an analyst already wrote there is kept.
     if body.note and isinstance(sections.get("detections"), dict) and not sections["detections"].get("body"):
         sections["detections"] = {**sections["detections"], "body": body.note}
 

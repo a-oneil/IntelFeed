@@ -161,8 +161,9 @@ async def record_claim(
             ai_result_id=ai_result_id,
             claim_key=key,
         )
-        # A repeat assertion refreshes recency (and fills in a quote the first
-        # pass lacked) without minting a second row.
+        # A repeat assertion refreshes recency and takes the latest assertion's
+        # quote and confidence (even when those are empty) without creating a
+        # second row.
         stmt = stmt.on_conflict_do_update(
             index_elements=[EntityFieldClaim.claim_key],
             set_={
@@ -219,7 +220,7 @@ async def get_entity_claims(
     """Claims for one entity, grouped per field and resolved for display.
 
     Each claim carries its article (title + feed + the feed's A–F reliability
-    grade) so the popover can show the chain without a second round trip. When
+    grade) so the popover can show where each claim came from without a second round trip. When
     ``entity_row`` is supplied, every field is also marked ``agrees`` against
     the live column value, and populated tracked fields with no claims at all
     are reported as unsourced.

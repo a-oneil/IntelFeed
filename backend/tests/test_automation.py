@@ -728,8 +728,8 @@ def test_slack_block_messages_single_payload_no_channel():
 
 @pytest.mark.asyncio
 async def test_action_track_on_threat_board(db_session: AsyncSession, auto_entry: Entry, test_user: User):
-    """The automation seed for the board's pull path — and it never outranks a
-    human decision (a handled threat stays handled)."""
+    """track_on_threat_board marks the entry's entities as tracked on the threat
+    board, but never overrides an analyst's decision (a handled threat stays handled)."""
     from sqlalchemy import text
 
     from app.automation.actions import execute_action

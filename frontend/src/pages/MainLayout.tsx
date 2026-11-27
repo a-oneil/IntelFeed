@@ -19,9 +19,7 @@ import styles from "./MainLayout.module.css";
 import { isVisitorNow, useIsVisitor } from "@/stores/authStore";
 
 interface MainLayoutProps {
-  // Priority Queue mode: renders the same list + reader shell, but pins the
-  // entry list to the signal-engine "radar" sort and always shows entries
-  // (never the search/notes panels).
+  // Priority Queue mode: renders the same list + reader shell, but pins the entry list to the signal-engine "radar" sort and always shows entries (never the search/notes panels).
   priorityMode?: boolean;
 }
 
@@ -45,12 +43,7 @@ export function MainLayout({ priorityMode = false }: MainLayoutProps = {}) {
   const markReadOnScroll = useUIStore((s) => s.markReadOnScroll);
   const markRead = useMarkRead();
 
-  // Auto-read: mark the previous entry read when the selection moves on. This
-  // lives in MainLayout (always mounted while reading) rather than in EntryList,
-  // because collapsing the entry list unmounts EntryList — and reader-internal
-  // navigation (Next/Prev, j/k) would then change the selection with no mounted
-  // effect to catch it, leaving articles unread. Covers every navigation path:
-  // list clicks, reader nav, and closing the reader / switching scope (→ null).
+  // Auto-read (when markReadOnScroll is on): mark the previous entry read when the selection moves on. This lives in MainLayout (always mounted while reading) rather than in EntryList, because collapsing the entry list unmounts EntryList, and reader navigation (Next/Prev, j/k) would then change the selection with no mounted effect to catch it, leaving articles unread. Covers every navigation path: list clicks, reader nav, and closing the reader / switching scope (→ null).
   const prevEntryIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (markReadOnScroll && prevEntryIdRef.current && prevEntryIdRef.current !== selectedEntryId) {
@@ -82,8 +75,7 @@ export function MainLayout({ priorityMode = false }: MainLayoutProps = {}) {
     }
   }, [searchParams, setActivePanel, setSelectedEntry, setSearchParams]);
 
-  // Open a story thread from ?thread=<slug>. Threads have no page of their own —
-  // they are read in this reader — so this is how one is linked to or bookmarked.
+  // Open a story thread from ?thread=<slug>. Threads have no page of their own (they are read in this reader), so this is how one is linked to or bookmarked.
   useEffect(() => {
     const threadParam = searchParams.get("thread");
     if (threadParam) {
@@ -96,8 +88,7 @@ export function MainLayout({ priorityMode = false }: MainLayoutProps = {}) {
   // Global keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // A visitor has no palette, AI, notes, tags or export: those keys do
-      // nothing for them (the help lists only what works).
+      // A visitor has no palette, AI, notes, tags or export: those keys do nothing for them (the help lists only what works).
       const visitor = isVisitorNow();
       // Cmd+K / Ctrl+K — command palette (Shift is reserved for the copilot)
       if (!visitor && (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "k") {

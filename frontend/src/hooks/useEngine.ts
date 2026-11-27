@@ -101,9 +101,7 @@ export interface PipelineStageInfo {
   description: string;
   default_enabled: boolean;
   config_schema: Record<string, unknown>;
-  /** `queued` only on the synthetic analyze row: queue rows waiting on the AI worker.
-   *  `new_error` / `new_retry` count only what came in after the check-engine
-   *  light was last cleared (the same as `error` / `retry` when it never was). */
+  /** `queued` appears only on the synthetic analyze row: queue rows waiting on the AI worker. `new_error` / `new_retry` count only what came in after the check-engine light was last cleared (the same as `error` / `retry` when it was never cleared). */
   runs_24h: {
     success: number;
     error: number;
@@ -177,8 +175,7 @@ export interface RetryErrorsResult {
   remaining: number;
 }
 
-/** Re-dispatch every stage still stuck on an error (optionally one stage) for
- *  entries ingested in the window. Admin only. */
+/** Re-dispatch every stage still stuck on an error (optionally one stage) for entries ingested in the window. Admin only. */
 export function useRetryPipelineErrors() {
   const qc = useQueryClient();
   return useMutation({
@@ -316,18 +313,13 @@ export interface ProcessingEntity {
 }
 
 export interface ProcessingStageCell {
-  /** success / error / retry are real runs. queued and skipped are synthetic
-   *  cells for a stage task that never ran (the adjudicate stage waiting on
-   *  the AI worker, or gated off before dispatch). Every `analyze` cell is
-   *  synthetic: the AI analysis writes no runs, its queue row is the state. */
+  /** success / error / retry are real runs. queued and skipped are synthetic cells for a stage task that never ran (the adjudicate stage waiting on the AI worker, or gated off before dispatch). Every `analyze` cell is synthetic: the AI analysis writes no runs, so its queue row is the state. */
   status: "success" | "error" | "retry" | "queued" | "skipped";
   duration_ms: number | null;
   error: string | null;
   retryable: boolean;
   created_at: string | null;
-  /** Stage-specific run detail: the adjudicate stage's verdict counters and
-   *  mode on a run, `{queued_at}` or `{waiting_on}` on a queued cell,
-   *  `{skipped}` on a skip, `{reused_from}` on a copied analysis. */
+  /** Stage-specific run detail: the adjudicate stage's verdict counters and mode on a run, `{queued_at}` or `{waiting_on}` on a queued cell, `{skipped}` on a skip, `{reused_from}` on a copied analysis. */
   detail?: Record<string, unknown> | null;
 }
 
@@ -394,9 +386,7 @@ export function useEngineProcessing(filters: ProcessingFilters) {
 }
 
 // ---- Autolink name lists --------------------------------------------------
-// Two comma-separated settings, same shape: "fp" is the curated vocabulary list
-// (bypassed by vendor/product/tool/mitigation, whose real names are common brand
-// words), "blocked" is the analyst list that binds for every entity type.
+// Two comma-separated settings with the same shape: "fp" is the curated vocabulary list (vendor/product/tool/mitigation bypass it, because their real names are often common words), and "blocked" is the analyst list that applies to every entity type.
 
 export type AutolinkNameList = "fp" | "blocked";
 
@@ -439,7 +429,7 @@ export function useRemoveAutolinkName(list: AutolinkNameList) {
   });
 }
 
-// --- Personalised Radar (per-analyst learned signal weights) ---------------
+// --- Personalized Radar (per-analyst learned signal weights) ---------------
 
 export interface MyRadarFamily {
   family: string;
@@ -485,8 +475,7 @@ export function useSetMyRadarPersonalized() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["engine", "my-radar"] });
-      // The Radar ordering is computed server-side per request, so the entry
-      // list has to be refetched for the toggle to take visible effect.
+      // The Radar ordering is computed server-side per request, so the entry list has to be refetched for the toggle to show.
       qc.invalidateQueries({ queryKey: ["entries"] });
     },
   });
@@ -563,15 +552,11 @@ export interface EngineHealth {
   clearedErrors: number;
 }
 
-/** One status for the whole engine, for the header light. Stopped beats
- *  errors; errors are entries still stuck at a stage (a retry to green drops
- *  them), so a red light always has something to fix behind it. An admin
- *  can clear the light: it then counts only errors and retries newer than
- *  the clear. Fewer than ERROR_LIGHT_THRESHOLD stuck entries in all don't
- *  turn it red: a stray failure is noise, ten is a pattern.
- *  The light sits on every page for every admin, so it polls once a minute;
- *  the Engine console's own observers poll faster while it is open and
- *  TanStack uses the shortest interval. */
+/**
+ * One status for the whole engine, for the header light. Stopped takes precedence over errors. Errors are entries still stuck at a stage (a successful retry removes them), so a red light always points at something to fix. An admin can clear the light; it then counts only errors and retries newer than the clear. Fewer than ERROR_LIGHT_THRESHOLD stuck entries in total don't turn it red: a single failure is usually noise, ten suggest a real problem.
+ *
+ * The light is on every page for every admin, so it polls once a minute; the Engine console's own queries poll faster while it is open, and TanStack uses the shortest interval.
+ */
 /** Stuck entries, across every stage, before the light turns red. */
 export const ERROR_LIGHT_THRESHOLD = 10;
 

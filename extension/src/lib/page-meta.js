@@ -1,5 +1,4 @@
-// Pure helpers over what capture.js read from a page. No browser APIs, so the
-// tests run them under plain node.
+// Pure helpers over what capture.js read from a page. No browser APIs, so the tests run them under plain node.
 
 const DATE_KEYS = [
   "article:published_time",
@@ -118,11 +117,7 @@ export function redditFeedBody(name) {
   };
 }
 
-/**
- * The feeds the popup offers for a page: a subreddit through IntelFeed's
- * Reddit adapter (reddit.com advertises no feed, and old.reddit's .rss links
- * would make a plain RSS feed of it), else what the page advertises.
- */
+/** The feeds the popup offers for a page: a subreddit through IntelFeed's Reddit adapter (reddit.com advertises no feed, and old.reddit's .rss links would make a plain RSS feed of it), else what the page advertises. */
 export function siteFeeds(page) {
   const name = subreddit(page.url);
   if (name) return [{ url: redditFeedBody(name).url, title: `r/${name}`, kind: "Subreddit", subreddit: name }];
@@ -139,13 +134,7 @@ const GITHUB_RESERVED = new Set(
 // What the app's Add feed → GitHub Repo form starts with.
 export const DEFAULT_REPO_PATTERNS = ["**/*.yml", "**/*.yaml"];
 
-/**
- * The repository a github.com page belongs to, ready for a github_repo feed:
- * {owner, repo, branch, paths}. On a /tree/<branch>/<dir> page the branch and
- * directory come from the URL (a branch name with a slash can't be told apart
- * from a directory, so the first segment is taken); otherwise the default
- * branch the page reports. Null off GitHub.
- */
+/** The repository a github.com page belongs to, ready for a github_repo feed: {owner, repo, branch, paths}. On a /tree/<branch>/<dir> page the branch and directory come from the URL (a branch name with a slash can't be told apart from a directory, so the first segment is taken); otherwise the default branch the page reports. Null off GitHub. */
 export function githubRepo(page) {
   let url;
   try {

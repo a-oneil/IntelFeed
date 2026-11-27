@@ -1,9 +1,4 @@
-/**
- * EntityProfilePage — the unified, full-width, config-driven entity profile.
- * One shell renders every entity type via entityProfileConfig — campaigns
- * included: a campaign is not extracted from anything, but its articles are a
- * pivot seed like any other, so it renders here rather than on a page of its own.
- */
+/** EntityProfilePage: the full-width, config-driven entity profile. One shell renders every entity type via entityProfileConfig, campaigns included: a campaign is not extracted from articles, but its articles can be pivoted on like any other entity's, so it renders here rather than on a page of its own. */
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -83,8 +78,7 @@ export function EntityProfilePage({ slug }: { slug: string }) {
   const config = entityType ? getEntityProfileConfig(entityType) : undefined;
 
   const { data: pivot, isLoading } = usePivot(entityType, needsResolve ? undefined : entityId);
-  // Types with an authoritative NVD-derived CVE list: vendor/product via CPE,
-  // weakness via the NVD weakness block.
+  // Types with an authoritative NVD-derived CVE list: vendor/product via CPE, weakness via the NVD weakness block.
   const affectedKind =
     entityType === "vendor" || entityType === "product" || entityType === "cwe" ? entityType : undefined;
   const { data: affectedCount } = useAffectedCveCount(affectedKind, needsResolve ? undefined : entityId);
@@ -94,8 +88,7 @@ export function EntityProfilePage({ slug }: { slug: string }) {
   const cveWeaknessCount = cveWeaknesses?.length ?? 0;
   const { data: graphData } = useEntityGraph(entityType, needsResolve ? undefined : entityId, 1);
   const { data: timeline } = useEntityTimeline(entityType, needsResolve ? undefined : entityId);
-  // Story threads join the event stream as first-class rows: a blue marker on
-  // the chart and a STORY row in the feed, each at the story's first coverage.
+  // Story threads are added to the event stream as their own rows: a blue marker on the chart and a STORY row in the feed, each placed at the story's first coverage.
   const { data: storyThreads } = useEntityStoryThreads(
     entityType,
     needsResolve ? undefined : entityId,
@@ -114,12 +107,10 @@ export function EntityProfilePage({ slug }: { slug: string }) {
       }));
     return [...(timeline?.events ?? []), ...storyRows];
   }, [timeline, storyThreads]);
-  // A story takes the same docked reader an article does — the profile stays
-  // on screen as the list either way.
+  // A story opens in the same docked reader an article does; the profile stays on screen as the list either way.
   const openStory = useOpenThread();
 
-  // The CVE lifecycle strip reads the detail record; OverviewTab shares the
-  // same query key, so this costs nothing when Overview is mounted too.
+  // The CVE lifecycle strip reads the detail record; OverviewTab uses the same query key, so there is no extra request when Overview is mounted too.
   const { data: cveDetail } = useCVE(entityType === "cve" && !needsResolve ? entityId : undefined);
   const { data: observableDetail } = useObservable(
     entityType === "observable" && !needsResolve ? entityId : undefined,
@@ -130,8 +121,7 @@ export function EntityProfilePage({ slug }: { slug: string }) {
   // ?tab=notes / ?tab=ai land on the Overview module that absorbed those tabs.
   const [overviewAnchor, setOverviewAnchor] = useState<"notes" | null>(null);
   const [timeWindow, setTimeWindow] = useState<MentionsWindow>("90d");
-  // The header chart ships collapsed to a pulse line; Expand unfolds the full
-  // MentionsTimeline in place and the choice sticks across profiles.
+  // The header chart starts collapsed to a sparkline; Expand shows the full MentionsTimeline in place, and the choice is remembered across profiles.
   const [pulseExpanded, setPulseExpanded] = useState(
     () => localStorage.getItem("intelfeed:pulse-expanded") === "1",
   );
@@ -140,9 +130,7 @@ export function EntityProfilePage({ slug }: { slug: string }) {
     localStorage.setItem("intelfeed:pulse-expanded", next ? "1" : "0");
   }, []);
 
-  // Stamp the visit when LEAVING the profile, not on render — stamping on
-  // mount rebased the since-last-visit baseline on every tab flip and
-  // permanently suppressed the ribbon within a session.
+  // Record the visit when leaving the profile, not on render: recording on mount reset the since-last-visit baseline on every tab switch and hid the ribbon for the rest of the session.
   useEffect(() => {
     if (!entityId) return;
     return () => {
@@ -150,12 +138,10 @@ export function EntityProfilePage({ slug }: { slug: string }) {
     };
   }, [entityId]);
   useEffect(() => {
-    // `?tab=` lets another surface open the profile *at* something — global
-    // search sends an entity note straight to Notes — and is consumed on
-    // arrival so the tab stays free to change afterwards.
+    // `?tab=` lets another page open the profile on a specific tab (global search sends an entity note straight to Notes); it is removed on arrival so the user can change tabs afterwards.
     const requested = searchParams.get("tab");
     if (requested === "notes" || requested === "ai") {
-      // The old Notes/AI tabs are Overview modules now — land there, scrolled.
+      // Notes and AI are sections of the Overview tab, so open Overview and scroll to the section.
       setActiveTab("overview");
       setOverviewAnchor(requested === "notes" ? "notes" : null);
       const next = new URLSearchParams(searchParams);
@@ -171,8 +157,7 @@ export function EntityProfilePage({ slug }: { slug: string }) {
       return;
     }
     setActiveTab(config?.tabs[0] ?? "overview");
-    // Re-running on every searchParams change would fight the user's own tab
-    // clicks; only the entity or its config changing resets the tab.
+    // Re-running on every searchParams change would override the user's own tab clicks; only a change of entity or config resets the tab.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityId, config]);
 
@@ -194,13 +179,11 @@ export function EntityProfilePage({ slug }: { slug: string }) {
     }
   }, [entity, entityType, entityId, displayName, addToRecentPivots]);
 
-  // Field-level provenance for the header's "who says so" markers — one
-  // request per profile, shared by every field on it.
+  // Field-level provenance for the header's "who says so" markers: one request per profile, shared by every field on it.
   const { data: provenance } = useEntityProvenance(entityType, entityId);
 
   const openArticle = useCallback((entryId: string) => {
-    // Every entry link on a profile opens the workbench's docked reader — the
-    // profile stays put as the list, the same pairing as the rest of the app.
+    // Every entry link on a profile opens the workbench's docked reader, with the profile staying in place as the list, as elsewhere in the app.
     useIntelStore.getState().openWorkbenchReader(entryId);
   }, []);
 
@@ -227,12 +210,10 @@ export function EntityProfilePage({ slug }: { slug: string }) {
     return <div className={styles.loading}>This entity could not be loaded.</div>;
   }
 
-  // Related arrays are truncated server-side; related_counts carries the
-  // pre-truncation totals.
+  // Related arrays are truncated server-side; related_counts carries the pre-truncation totals.
   const relatedCounts = pivot?.related_counts;
   const countOf = (key: string, arr?: unknown[]) => relatedCounts?.[key] ?? arr?.length ?? 0;
-  // The Relationships tab counts relationships (typed claims, and a country's
-  // targeting / origin rows), not every entity named in the same articles.
+  // The Relationships tab counts relationships (typed claims, and a country's targeting / origin rows), not every entity named in the same articles.
   const relationshipCount = flattenRelated(related, entityType).filter(
     (r) => !!r.item.relationship_id || (entityType === "country" && !!r.item.country_relationship),
   ).length;
@@ -270,9 +251,7 @@ export function EntityProfilePage({ slug }: { slug: string }) {
         }
       />
 
-      {/* The expanded timeline and the lifecycle strips render on every tab so
-          the tab bar doesn't jump when switching away from Overview. The
-          collapsed sparkline sits in the header itself. */}
+      {/* The expanded timeline and the lifecycle strips render on every tab so the tab bar doesn't jump when switching away from Overview. The collapsed sparkline sits in the header itself. */}
       {(pulseExpanded || entityType === "cve" || entityType === "observable") && (
         <div className={styles.heroExtras}>
           {pulseExpanded && (
@@ -293,8 +272,7 @@ export function EntityProfilePage({ slug }: { slug: string }) {
         </div>
       )}
 
-      {/* detection_gaps is in no config — it appends itself while active so
-          the rail's "Review gaps" jump gets a highlighted tab and a way back. */}
+      {/* detection_gaps is in no config; it is appended while active so the rail's "Review gaps" link gets a highlighted tab and a way back. */}
       <ProfileTabs
         tabs={
           isVisitor

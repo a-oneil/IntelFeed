@@ -289,8 +289,7 @@ describe("AISettings", () => {
     await user.click(screen.getByText("Configure"));
     expect(screen.getByDisplayValue("qwen3-8b")).toBeDefined();
 
-    // Valid JSON, but merged into every request with dict.update() — an array
-    // would break every call on this provider.
+    // Valid JSON, but the value is merged into every request with dict.update(), so an array would break every call on this provider.
     const extraBody = screen.getByRole("textbox", { name: /Extra body/ });
     await user.click(extraBody);
     await user.paste('[{"chat_template_kwargs": {}}]');

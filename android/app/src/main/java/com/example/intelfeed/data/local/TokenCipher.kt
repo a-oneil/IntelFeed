@@ -9,23 +9,17 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * Encrypts the session tokens before they're written to DataStore, with an AES-256-GCM key that
- * lives in the Android Keystore and can't be read out of it. On a rooted or compromised device the
- * DataStore file used to hold the access token and the 7-day refresh token in plain text.
- *
- * Stored form: "v1:" + hex(iv) + ":" + hex(ciphertext). Hex rather than Base64 because
- * java.util.Base64 needs Android 8 (minSdk is 24) and android.util.Base64 isn't available in JVM
- * unit tests.
- *
- * Failure handling is deliberately forgiving, so encryption can never lock someone out or crash:
- * - a value without the prefix is a token saved by an older version; it's returned as is and
- *   re-saved encrypted (see AuthPreferences.encryptStoredTokens);
- * - if the Keystore can't provide a key, tokens are stored as before (plain) rather than lost;
- * - if a stored value can't be decrypted (key deleted or invalidated), decrypt returns null and the
- *   app treats the session as signed out.
- *
- * [keyProvider] returns the key, or null when none is available; tests pass a software key.
- */
+Encrypts the session tokens before they're written to DataStore, with an AES-256-GCM key that lives in the Android Keystore and can't be read out of it, so a rooted or compromised device does not expose the access token and the 7-day refresh token in plain text.
+
+Stored form: "v1:" + hex(iv) + ":" + hex(ciphertext). Hex rather than Base64 because java.util.Base64 needs Android 8 (minSdk is 24) and android.util.Base64 isn't available in JVM unit tests.
+
+Failure handling is deliberately forgiving, so encryption can never lock someone out or crash:
+- a value without the prefix is a token saved by an older version; it's returned as is and re-saved encrypted (see AuthPreferences.encryptStoredTokens);
+- if the Keystore can't provide a key, tokens are stored in plain text rather than lost;
+- if a stored value can't be decrypted (key deleted or invalidated), decrypt returns null and the app treats the session as signed out.
+
+[keyProvider] returns the key, or null when none is available; tests pass a software key.
+*/
 class TokenCipher(private val keyProvider: () -> SecretKey?) {
 
     fun isEncrypted(stored: String): Boolean = stored.startsWith(PREFIX)

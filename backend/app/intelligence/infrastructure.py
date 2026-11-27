@@ -1,8 +1,8 @@
-"""Infrastructure for an actor, family, campaign or tool — the observables
-behind the entity, in two honest tiers.
+"""Infrastructure for an actor, family, campaign or tool: the observables
+behind the entity, in two tiers.
 
 * **Claimed** — ``entity_relationships`` edges onto the ledger (``uses`` /
-  ``communicates_with`` / ``controls``), each born from an evidence sentence
+  ``communicates_with`` / ``controls``), each created from an evidence sentence
   (the one-pass AI), an analyst, or a tool. These are the graph's edges and
   carry the trust ladder.
 * **Reported alongside** — observables sighted by a *reporting* door (never
@@ -307,7 +307,7 @@ async def get_observable_backlinks(db: AsyncSession, observable_id: uuid.UUID, *
 
 
 def infrastructure_csv_rows(payload: dict) -> list[list[str]]:
-    """Flat rows for an export: tier, kind, value, role, trust, articles, last seen."""
+    """Flat rows for an export: tier, kind, value, role, confidence, relationship, articles, last seen."""
     rows: list[list[str]] = [
         ["tier", "kind", "value", "role", "confidence", "relationship", "articles", "last_seen_at"]
     ]

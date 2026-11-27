@@ -78,13 +78,9 @@ private val BodyColor: Color
 data class EntityMark(val type: String, val id: String, val name: String, val text: String)
 
 /**
- * Renders parsed article blocks. Text is selectable (for copying indicators); links go through
- * [onLinkClick], which opens them via ExternalLinks.
+ * Renders parsed article blocks. Text is selectable (for copying indicators); links go through [onLinkClick], which opens them via ExternalLinks.
  *
- * Marks added by ArticleLinker look like the web reader's: an entity name keeps the text colour
- * and gets a 2 dp dotted underline in its type's colour (observables are also monospace); a
- * glossary term gets a thin dotted underline in the muted text colour. An entity inside a link
- * takes the tap, as on the web (the popover opens instead of the link).
+ * Marks added by ArticleLinker look like the web reader's: an entity name keeps the text color and gets a 2 dp dotted underline in its type's color (observables are also monospace); a glossary term gets a thin dotted underline in the muted text color. An entity inside a link takes the tap, as on the web (the popover opens instead of the link).
  */
 @Composable
 fun ArticleContent(
@@ -256,8 +252,7 @@ private fun DrawScope.drawUnderlines(layout: TextLayoutResult, underlines: List<
         val start = u.start.coerceIn(0, length)
         val end = u.end.coerceIn(0, length)
         if (end <= start) continue
-        // Entity: CSS `border-bottom: 2px dotted` under the inline box (descent + 1px padding).
-        // Glossary: `text-decoration: underline dotted` offset 3px, about 1px thick.
+        // Entity: CSS `border-bottom: 2px dotted` under the inline box (descent + 1px padding). Glossary: `text-decoration: underline dotted` offset 3px, about 1px thick.
         val stroke = if (u.thick) 2.dp.toPx() else 1.dp.toPx()
         val drop = if (u.thick) em * 0.24f + 2.dp.toPx() else em * 0.1f + 3.dp.toPx()
         val effect = PathEffect.dashPathEffect(floatArrayOf(0.01f, stroke * 2), 0f)
@@ -304,7 +299,7 @@ private fun ArticleHtml.RichText.toMarked(highlightQuery: String?, marks: MarkHa
                     val type = span.entityType
                     val id = span.entityId
                     val entityType = EntityType.fromKey(type)
-                    // The web falls back to the CVE colour for an entity it can't type.
+                    // The web falls back to the CVE color for an entity it can't type.
                     val color = entityType?.color() ?: EntityType.CVE.color()
                     underlines += Underline(span.start, span.end, color, thick = true)
                     val style = if (entityType == EntityType.OBSERVABLE) SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 0.94.em) else SpanStyle()
@@ -325,7 +320,7 @@ private fun ArticleHtml.RichText.toMarked(highlightQuery: String?, marks: MarkHa
                 ArticleHtml.SpanKind.GLOSSARY -> {
                     underlines += Underline(span.start, span.end, GlossaryUnderline, thick = false)
                     val id = span.glossaryId
-                    // Inside a link the link keeps the tap, as a click does on the web.
+                    // A glossary term inside a link leaves the tap to the link, as a click does on the web.
                     val inLink = spans.any { it.kind == ArticleHtml.SpanKind.LINK && it.start < span.end && it.end > span.start }
                     if (id != null && !inLink) {
                         addLink(

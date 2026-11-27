@@ -84,7 +84,7 @@ async def test_every_route_taking_a_slug_refuses_someone_elses_private_template(
     )
     assert cloned.status_code == 403, cloned.text
 
-    # A slug with no template at all still creates a plain report, as before.
+    # A slug with no template at all creates a plain report.
     plain = await client.post(
         "/api/intel-reports", json={"title": "z", "template_type": "no_such_template"}, headers=auth_headers
     )

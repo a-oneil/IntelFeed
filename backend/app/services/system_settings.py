@@ -448,7 +448,7 @@ SETTING_METADATA: dict[str, dict] = {
     "adjudication_trigger": {
         "label": "Trigger",
         "description": (
-            "all: every analysed entry (about 100 to 500 per day). created: only entries whose analysis created "
+            "all: every analyzed entry (about 100 to 500 per day). created: only entries whose analysis created "
             "an entity, added a link or relationship, promoted a pending match or captured an observable (about "
             "20 to 50 per day). Use created when reviews cannot keep up with ingest."
         ),
@@ -484,7 +484,7 @@ SETTING_METADATA: dict[str, dict] = {
     "adjudication_reclassify_consensus": {
         "label": "Reclassify Consensus",
         "description": (
-            "A type change affects the whole catalogue, so in apply mode it is applied only once reviews of this "
+            "A type change affects the whole catalog, so in apply mode it is applied only once reviews of this "
             "many different articles agree on the same target type (each earlier review's proposal counts as a "
             "vote). 1 applies the first verdict that meets the confidence floor. A name an analyst removed from a "
             "type is never proposed back into it."
@@ -784,7 +784,7 @@ SETTING_METADATA: dict[str, dict] = {
         "group": "intelligence",
     },
     "radar_personalization_enabled": {
-        "label": "Personalised Radar",
+        "label": "Personalized Radar",
         "description": (
             "Let each analyst's own Radar votes re-rank their Priority Queue. Weights are fitted nightly per user "
             "and applied at read time on top of the shared score. The stored score stays global, and any analyst "
@@ -793,7 +793,7 @@ SETTING_METADATA: dict[str, dict] = {
         "group": "intelligence",
     },
     "radar_personalization_min_samples": {
-        "label": "Personalised Radar Min Votes",
+        "label": "Personalized Radar Min Votes",
         "description": (
             "Minimum verdicts one analyst must cast in a signal family before that "
             "family gets a personal weight. Below this the family stays neutral."
@@ -801,7 +801,7 @@ SETTING_METADATA: dict[str, dict] = {
         "group": "intelligence",
     },
     "radar_personalization_window_days": {
-        "label": "Personalised Radar Window (days)",
+        "label": "Personalized Radar Window (days)",
         "description": (
             "How far back the nightly fit looks for a user's verdicts. Longer than the "
             "global 30-day nudge window because one analyst votes far less than all of them."
@@ -1150,9 +1150,9 @@ SETTING_METADATA: dict[str, dict] = {
         "group": "public_rss",
     },
     # --- Scheduled-job knobs (Engine → Maintenance / enrich stage / Jobs) ---
-    # These were previously read through settings.get() against keys that existed
-    # nowhere, so every lookup fell through to an inline default. Registering them
-    # keeps those defaults and makes them settable.
+    # The jobs read these through settings.get(), which ignores DB overrides for
+    # a key missing from CONFIGURABLE_KEYS and falls through to the job's inline
+    # default. Registering them keeps those defaults and makes them settable.
     "actor_refresh_top_n_per_run": {
         "label": "Actor Refresh: Actors Per Run",
         "description": "Threat actor profiles the weekly AI refresh rewrites per run",
@@ -1491,13 +1491,14 @@ GROUP_LABELS: dict[str, str] = {
     "public_rss": "Public RSS",
 }
 
-# Re-home settings into the Engine console sections that own the feature they
-# tune. The metadata above historically lumped every intelligence-engine knob
-# into one "intelligence" group, which dumped ~30 unrelated settings under the
+# Move settings into the Engine console section that owns the feature they
+# tune. The metadata above puts every intelligence-engine knob in one
+# "intelligence" group, which would show ~30 unrelated settings under the
 # correlation stage. `group` is display-only — it decides which admin UI panel
 # renders a setting and never touches its key, stored value, or backend
-# consumers — so relocating here is purely cosmetic. Only true correlation /
-# relationship-strength knobs stay in "intelligence" (the correlation stage).
+# consumers — so moving a setting here changes only where it appears. Only
+# correlation / relationship-strength knobs stay in "intelligence" (the
+# correlation stage).
 _ENGINE_SECTION_GROUPS: dict[str, str] = {
     # Autolink stage
     "autolinker_min_name_length": "autolink",

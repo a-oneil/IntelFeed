@@ -10,15 +10,15 @@ Coverage is deliberately NOT a rule-lifecycle concept. A technique (or CVE) is:
 - ``no_rule``       — no non-draft rule references it at all.
 
 The data-source <-> telemetry match runs in three tiers (see
-``match_data_source``): a ticked product name, a canonical behaviour id, or a
+``match_data_source``): a ticked product name, a canonical behavior id, or a
 category that has at least one ticked source. The tiers exist because the two
 sides of the comparison are written in different languages — rules name Elastic
 index patterns and Sentinel connector ids, the inventory names products, and
 ATT&CK names log channels — so a literal string test reported 1,995 of 3,053
 rules as blocked while the products they need were ticked.
 
-The matching logic mirrors the rule-detail "check feasibility" behaviour (see
-app/api/telemetry_sources.py, which now delegates here) so both surfaces agree
+The matching logic mirrors the rule-detail "check feasibility" behavior (see
+app/api/telemetry_sources.py, which delegates here) so both surfaces agree
 on what "satisfiable" means.
 """
 
@@ -52,16 +52,16 @@ def _normalize(token: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Canonical behaviour vocabulary
+# Canonical behavior vocabulary
 # ---------------------------------------------------------------------------
 # telemetry_sources.log_types is vendor free text: 864 distinct strings over
 # 1,124 assignments, 721 used exactly once. One idea has eleven spellings
 # (authentication / authentication_event / login_event / login_success / ...),
 # so a rule asking for one of them matched a fraction of the products that
 # actually emit it. Everything below collapses those spellings onto a single
-# behaviour axis that both sides of the match speak.
+# behavior axis that both sides of the match speak.
 #
-# scripts/seed/seed_log_type_aliases.py materialises this function into the
+# scripts/seed/seed_log_type_aliases.py materializes this function into the
 # log_type_alias table and telemetry_sources.log_types_canonical, which is what
 # get_available_telemetry() reads; the rule side has no table to read, so it
 # calls the function directly on its own free-text tokens.
@@ -1014,7 +1014,7 @@ _LOG_TYPE_SUFFIXES: tuple[str, ...] = (
 
 
 def canonical_log_type(raw: str) -> str | None:
-    """Map one free-text log-type string onto the canonical behaviour axis.
+    """Map one free-text log-type string onto the canonical behavior axis.
 
     Deterministic on purpose — the seeder writes exactly what this returns, so
     the table in the database and the rule-side matcher can never disagree.
@@ -1035,7 +1035,7 @@ def canonical_log_type(raw: str) -> str | None:
     return None
 
 
-# Category each behaviour belongs to, for the tier-3 answer. Ids that no single
+# Category each behavior belongs to, for the tier-3 answer. Ids that no single
 # category owns (threat.detection, config.change, audit.generic ...) are absent
 # on purpose — "some product somewhere logs it" is not a coverage claim.
 _CANONICAL_CATEGORY: dict[str, str] = {
@@ -1115,7 +1115,7 @@ _CANONICAL_CATEGORY: dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
-# Rule-side token normalisation
+# Rule-side token normalization
 # ---------------------------------------------------------------------------
 # A rule's data_sources almost never name a product. They are Elastic index
 # patterns (logs-crowdstrike.fdr*), Sentinel connector ids
@@ -1125,8 +1125,8 @@ _CANONICAL_CATEGORY: dict[str, str] = {
 # both enabled and both in the "most needed" list.
 
 # What an EDR sensor's raw telemetry stream carries, whatever the vendor calls
-# its index. Used for the agent datastreams that name a feed, not a behaviour.
-_EDR_BEHAVIOURS = (
+# its index. Used for the agent datastreams that name a feed, not a behavior.
+_EDR_BEHAVIORS = (
     "process.creation",
     "process.injection",
     "file.write",
@@ -1137,10 +1137,10 @@ _EDR_BEHAVIOURS = (
 )
 
 # Host-OS channels. They name neither a product in the inventory nor a
-# behaviour a ticked product can stand in for — an EDR emitting process.creation
+# behavior a ticked product can stand in for — an EDR emitting process.creation
 # is not the Windows Security event log — so they are answered from the category
 # that holds OS log collection. Both are empty in the default selection, which
-# is why Windows/Linux channels stay honestly blocked.
+# is why Windows/Linux channels stay blocked by default.
 _OS_UNIX_MARKERS = (
     "auditd",
     "linux",
@@ -1202,14 +1202,14 @@ _RULE_TOKEN_ALIASES: dict[str, tuple[str, ...]] = {
     "awss3": ("aws_s3",),
 }
 
-# Stems that name a telemetry feed rather than a behaviour; the feed's contents
+# Stems that name a telemetry feed rather than a behavior; the feed's contents
 # are what a rule reading it actually needs.
 _RULE_TOKEN_CANONICAL: dict[str, tuple[str, ...]] = {
-    "crowdstrike": _EDR_BEHAVIOURS,
-    "endgame": _EDR_BEHAVIOURS,
-    "endpoint": _EDR_BEHAVIOURS,
-    "sentinel_one": _EDR_BEHAVIOURS,
-    "sentinel_one_cloud_funnel": _EDR_BEHAVIOURS,
+    "crowdstrike": _EDR_BEHAVIORS,
+    "endgame": _EDR_BEHAVIORS,
+    "endpoint": _EDR_BEHAVIORS,
+    "sentinel_one": _EDR_BEHAVIORS,
+    "sentinel_one_cloud_funnel": _EDR_BEHAVIORS,
     "cloud_defend": ("process.creation", "file.write", "net.connection", "container.runtime"),
     "nsm": ("net.flow", "net.traffic"),
     "network_traffic": ("net.traffic", "net.flow"),
@@ -1249,7 +1249,7 @@ def _os_platform(norm: str) -> str | None:
 
 @lru_cache(maxsize=8192)
 def _expand_rule_token(data_source: str) -> _RuleNeed:
-    """Resolve one rule data_source into candidate product tokens + behaviour ids."""
+    """Resolve one rule data_source into candidate product tokens + behavior ids."""
     norm = _normalize(data_source)
     stem = _index_stem(norm)
     tokens = {t for t in (norm, stem) if t}
@@ -1272,7 +1272,7 @@ def _expand_rule_token(data_source: str) -> _RuleNeed:
     if platform := _os_platform(norm):
         return _RuleNeed(tuple(sorted(tokens)), (), (platform,), os_native=True)
 
-    # A product token fans out to every behaviour that product emits — an EDR
+    # A product token fans out to every behavior that product emits — an EDR
     # index yields process.creation AND dns.query AND net.connection. Mapping
     # each of those back to a category then claims the source could come from
     # endpoint_edr OR dns_security OR network_security, and tier 3 matches on
@@ -1295,8 +1295,8 @@ def _expand_rule_token(data_source: str) -> _RuleNeed:
 class TelemetryProfile:
     """What the enabled telemetry inventory can answer, at three confidences.
 
-    Behaves like the plain token set callers used to get, so anything that only
-    forwards it (or tests membership) keeps working unchanged.
+    Behaves like a plain token set (membership, iteration, len), so code that
+    only forwards it or tests membership works without knowing the tiers.
     """
 
     tokens: frozenset[str] = frozenset()
@@ -1342,7 +1342,7 @@ async def get_available_telemetry(db: AsyncSession) -> TelemetryProfile:
             canonical.update(stored)
         else:
             # scripts/seed/seed_log_type_aliases.py has not run (or this source
-            # was added since). Derive in place so behaviour matching still works.
+            # was added since). Derive in place so behavior matching still works.
             canonical.update(c for lt in source.log_types or [] if (c := canonical_log_type(lt)))
     return TelemetryProfile(frozenset(tokens), frozenset(canonical), frozenset(categories))
 
@@ -1428,7 +1428,7 @@ def match_data_source(data_source: str, available) -> str | None:
     """Strongest tier at which the inventory satisfies one required data source.
 
     - ``TIER_SOURCE``   the token resolves to a ticked product name/log type
-    - ``TIER_LOG_TYPE`` some ticked source emits the behaviour it needs
+    - ``TIER_LOG_TYPE`` some ticked source emits the behavior it needs
     - ``TIER_CATEGORY`` no field-level match, but its category has a ticked
                         source — collectable, unverified
     - ``None``          nothing matches; a rule resting on this would not fire
@@ -1478,8 +1478,8 @@ def split_data_sources(data_sources: list[str], available) -> tuple[list[str], l
 
 
 # Sensible default required-telemetry tokens for rule types whose native format
-# doesn't populate data_sources. Fixes the Sigma blind spot (Sigma fills the
-# log_sources dict, not data_sources) and gives YARA/Nuclei/Snort a signal.
+# doesn't populate data_sources. Sigma fills the log_sources dict rather than
+# data_sources, and YARA/Nuclei/Snort declare no telemetry at all.
 _YARA_TOKENS = ["file", "memory"]
 _NUCLEI_TOKENS = ["http", "web", "waf"]
 _SNORT_TOKENS = ["network", "ids"]

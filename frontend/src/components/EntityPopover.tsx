@@ -120,7 +120,7 @@ function useClampPosition(
       let left = x;
       let top = y;
 
-      // Horizontal: popover is centered via translateX(-50%), so check half-widths
+      // Horizontal: the popover is centered via translateX(-50%), so check half-widths
       const halfW = rect.width / 2;
       if (left - halfW < pad) left = halfW + pad;
       if (left + halfW > window.innerWidth - pad) left = window.innerWidth - halfW - pad;
@@ -135,13 +135,7 @@ function useClampPosition(
       setPos({ left, top });
     };
 
-    // Re-clamp whenever the popover's size changes — its content loads async
-    // (entity metadata: aliases, article counts) and can push the card off-screen
-    // after the initial measure. The Enrich / Wrong? dropdowns deliberately don't
-    // count here: they're absolutely positioned, so opening one leaves the card's
-    // box (and therefore its position) alone instead of flipping it up the page.
-    // Repositioning only changes top/left, not size, so this can't feed back into
-    // the observer.
+    // Re-clamp whenever the popover's size changes: its content loads asynchronously (entity metadata: aliases, article counts) and can push the card off-screen after the initial measure. The Wrong? dropdowns deliberately don't count here: they're absolutely positioned, so opening one leaves the card's box (and therefore its position) unchanged instead of flipping it up the page. Repositioning only changes top/left, not size, so this can't feed back into the observer.
     clamp();
     const ro = new ResizeObserver(clamp);
     ro.observe(el);
@@ -160,26 +154,23 @@ export function EntityPopover({
   readOnly,
   entryId,
 }: EntityPopoverProps) {
-  // Public read-only mode: Profile and Copy only — Search is hidden for
-  // visitors, and Enrich / Wrong? write.
+  // Public read-only mode: visitors get Profile and Copy only. Search is hidden from them, and Look up and Wrong? are hidden because they write.
   const isVisitor = useIsVisitor();
   const ref = useRef<HTMLDivElement>(null);
   const pos = useClampPosition(ref, x, y);
   const navigate = useNavigate();
   const setHeaderSearchQuery = useUIStore((s) => s.setHeaderSearchQuery);
   const [showFpMenu, setShowFpMenu] = useState(false);
-  // Which way the dropdowns open. Decided when one is opened, from the room left
-  // under the card — the card itself no longer moves to make space.
+  // Which way the dropdowns open. Decided when one is opened, from the space left under the card; the card itself does not move to make room.
   const [menuUp, setMenuUp] = useState(false);
   const [showConvertMenu, setShowConvertMenu] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
-  // What the last Look up left to say: sources that waited or failed.
+  // Notes from the last Look up: sources that were deferred or failed.
   const [lookupNotes, setLookupNotes] = useState<LookupNote[]>([]);
   const enrichEntity = useEnrichEntity();
-  // Enrichment's few words about this entity; absent until (and unless) it loads.
+  // Enrichment's short summary of this entity; undefined until it loads, and if it never does.
   const { data: glance } = useEntityGlance(entity.type, entity.id || undefined);
-  // Its latest articles, less the one being read. Visitors get only articles
-  // from feeds shown to them (the server applies the visitor filter).
+  // The entity's latest articles, minus the one being read. Visitors get only articles from feeds shown to them (the server applies the visitor filter).
   const { data: recentEntries } = useEntityRecentEntries(entity.type, entity.id || undefined, {
     enabled: !readOnly,
   });
@@ -190,18 +181,15 @@ export function EntityPopover({
   const deleteEntity = useDeleteEntity();
   const undoableDelete = useUndoableDelete();
 
-  // Convert, merge, and unlink-all are admin-only endpoints; the false-positive
-  // scopes stay open to every analyst.
+  // Convert, merge, and unlink-all are admin-only endpoints; the false-positive scopes stay open to every analyst.
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
 
-  // The entity's real name — `entity.value` is whatever surface form matched in
-  // this article, which is often an alias.
+  // The entity's canonical name; `entity.value` is whatever surface form matched in this article, which is often an alias.
   const canonicalName = entity.name ?? entity.value;
   const isAliasable = (MERGEABLE_ENTITY_TYPES as readonly string[]).includes(entity.type);
   const isAliasMatch = canonicalName.trim().toLowerCase() !== entity.value.trim().toLowerCase();
 
-  /** Roughly how tall the taller of the two menus gets. Only the choice of
-   *  direction depends on it, and the menu scrolls past this height anyway. */
+  /** Roughly how tall the taller of the two menus gets. Only the choice of direction depends on it, and the menu scrolls past this height anyway. */
   const MENU_HEIGHT = 250;
 
   const toggleFpMenu = () => {
@@ -214,8 +202,7 @@ export function EntityPopover({
     setShowConvertMenu(false);
   };
 
-  /** Look up (or refresh) at every source that applies; the glance fills in
-   *  place, and whatever waited or failed is said in words under the buttons. */
+  /** Look up (or refresh) at every source that applies. The enrichment summary updates in place, and any source that was deferred or failed gets a note under the buttons. */
   const lookUp = (sourceTypes: string[]) => {
     const labels = new Map((glance?.lookup_sources ?? []).map((s) => [s.source_type, s.label]));
     setLookupNotes((prev) => prev.filter((n) => !sourceTypes.includes(n.source_type)));
@@ -280,9 +267,7 @@ export function EntityPopover({
     onClose();
   };
 
-  // Observables live in the ledger, not the autolinker: their wrong-match
-  // rungs are the sighting unlink (entry-local) and the deny tombstone
-  // (global) — the false-positive vocabulary path can't touch them.
+  // Observables live in the IOC ledger, not the autolinker. Their wrong-match options are unlinking the sighting (this article only) and the deny tombstone (global); the false-positive vocabulary path can't touch them.
   const unlinkObservableSighting = useUnlinkEntity();
   const denyObservable = useDenyObservable();
 
@@ -317,8 +302,7 @@ export function EntityPopover({
     onClose();
   };
 
-  /** The match is so wrong the entity shouldn't exist: delete it (with its
-   *  article links and relationships), after a confirm and a 5-second undo. */
+  /** For an entity that shouldn't exist at all: delete it (with its article links and relationships) after a confirm and a 5-second undo. */
   const handleDelete = async () => {
     setShowFpMenu(false);
     const ok = await confirmDialog({
@@ -366,8 +350,7 @@ export function EntityPopover({
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      // The merge modal is portaled to <body>, so clicks inside it read as
-      // "outside the popover" — closing here would unmount the modal mid-task.
+      // The merge modal is portaled to <body>, so clicks inside it count as "outside the popover"; closing here would unmount the modal mid-task.
       if (mergeOpen) return;
       if (ref.current && !ref.current.contains(e.target as Node)) {
         onClose();
@@ -412,8 +395,7 @@ export function EntityPopover({
     (a) => a.toLowerCase() !== entity.value.toLowerCase(),
   );
   const hasGenericGrid = !!meta && (facts.length > 0 || !!meta.description || aliases.length > 0 || meta.article_count != null);
-  // The Context row: enrichment's few facts, last in the grid. Absent when
-  // there are none, so the popover reads as it would without enrichment.
+  // The Context row: enrichment's short facts, last in the grid. Omitted when there are none, so the popover looks the same as it would without enrichment.
   const glanceFacts = glance?.facts.length ? (
     <div className={`${styles.metaItem} ${styles.metaFull}`}>
       <span className={styles.metaLabel}>Context</span>
@@ -428,13 +410,7 @@ export function EntityPopover({
   ) : null;
   const sources = glance?.lookup_sources ?? [];
 
-  // Portal to <body>: the popover is `position: fixed`, but when rendered inside
-  // the AI-summary day divider it lives within the virtualized entry list, whose
-  // rows carry `transform: translateY(...)`. A transformed ancestor makes `fixed`
-  // resolve against that ancestor instead of the viewport, so the viewport-based
-  // coordinates and clamp are wrong and the popover ends up clipped/off-screen.
-  // Escaping to <body> restores true viewport positioning. (Works everywhere the
-  // popover is used, including the non-transformed reader body.)
+  // Portal to <body>: the popover is `position: fixed`, but when rendered inside the AI-summary day divider it lives within the virtualized entry list, whose rows carry `transform: translateY(...)`. A transformed ancestor makes `fixed` resolve against that ancestor instead of the viewport, so the viewport-based coordinates and clamp are wrong and the popover ends up clipped or off-screen. Rendering into <body> restores viewport positioning, and works everywhere the popover is used, including the non-transformed reader body.
   return createPortal(
     <div
       ref={ref}
@@ -671,8 +647,7 @@ export function EntityPopover({
         ) : null;
       })()}
 
-      {/* Primary actions — hidden entirely on public shared pages. The wrapper
-          is the positioning context for the two dropdowns below it. */}
+      {/* Primary actions, hidden entirely on public shared pages. The wrapper is the positioning context for the two dropdowns below it. */}
       <div className={styles.actionsWrap}>
       {!readOnly && (
         <div className={styles.actions}>
@@ -714,9 +689,7 @@ export function EntityPopover({
         </div>
       )}
 
-      {/* Observables get their own two-rung ladder: unlink the sighting here,
-          or tombstone the value globally (admin). The autolinker FP path below
-          can't touch ledger rows. */}
+      {/* Observables get their own two options: unlink the sighting here, or deny the value globally (admin only). The autolinker false-positive path below can't touch ledger rows. */}
       {!readOnly && !isVisitor && showFpMenu && entity.type === "observable" && (
         <div className={`${styles.enrichMenu} ${menuUp ? styles.menuUp : ""}`}>
           {entryId && (
@@ -748,8 +721,7 @@ export function EntityPopover({
         </div>
       )}
 
-      {/* Wrong-match menu, narrowest fix first: this article → this name →
-          this entity (type/duplicate) → this word everywhere. */}
+      {/* Wrong-match menu, narrowest fix first: this article → this name → this entity (type/duplicate) → this word everywhere. */}
       {!readOnly && !isVisitor && showFpMenu && entity.type !== "observable" && (
         <div className={`${styles.enrichMenu} ${menuUp ? styles.menuUp : ""}`}>
           {entryId && (
@@ -829,7 +801,7 @@ export function EntityPopover({
         )}
       </div>
 
-      {/* What the last Look up left to say. A key note is for admins only. */}
+      {/* Notes from the last Look up. The note about missing API keys is shown to admins only. */}
       {!readOnly && !isVisitor && (lookupNotes.length > 0 || (isAdmin && (glance?.needs_key.length ?? 0) > 0)) && (
         <div className={styles.lookupNotes} role="status">
           {lookupNotes.map((n) => (

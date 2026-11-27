@@ -1,6 +1,4 @@
-/** Why the AI analysis or the adjudicate stage didn't run (or ran and found
- *  nothing to do), in plain words. Gate codes come from `enqueue_entry_analysis`
- *  and `enqueue_adjudication`; the rest from the review task's `detail.skipped`. */
+/** Why the AI analysis or the adjudicate stage didn't run (or ran and found nothing to do), in plain words. Gate codes come from `enqueue_entry_analysis` and `enqueue_adjudication`; the rest from the review task's `detail.skipped`. */
 export const SKIP_REASONS: Record<string, string> = {
   off: "adjudication is off",
   plan: "plan turns the stage off for this feed",

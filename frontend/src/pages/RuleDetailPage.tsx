@@ -110,32 +110,30 @@ function seedHeader(seed: BenchSeed, ruleType: string): string {
       `${c}   source: ${q.entry_title}${q.paragraph_indices?.length ? ` ¶${q.paragraph_indices[0]}` : ""}`
     );
     if (q.observable_value) {
-      lines.push(`${c} observable (${q.observable_type ?? "artefact"}): ${q.observable_value}`);
+      lines.push(`${c} observable (${q.observable_type ?? "artifact"}): ${q.observable_value}`);
     }
   }
   return lines.join("\n") + "\n\n";
 }
 
-/** The drafting prompt: evidence-only, format-explicit, and the answer comes
-    back as a code block the user applies to the buffer — the same diff-accept
-    contract as Reduce noise / Evasion check. Never a silent save. */
+/** The drafting prompt: it asks for a rule built only from the evidence, in the named format, returned as a code block that the user applies to the editor buffer (the same accept-the-diff flow as Reduce noise and Evasion check). Nothing is saved without the user. */
 function draftWithAiPrompt(seed: BenchSeed, ruleType: string): string {
   const evidence = seed.quotes.length
     ? seed.quotes
         .map((q) => {
           const cite = `${q.entry_title}${q.paragraph_indices?.length ? ` ¶${q.paragraph_indices[0]}` : ""}`;
-          const obs = q.observable_value ? `\n  observable (${q.observable_type ?? "artefact"}): ${q.observable_value}` : "";
+          const obs = q.observable_value ? `\n  observable (${q.observable_type ?? "artifact"}): ${q.observable_value}` : "";
           return `- "${q.text}" (source: ${cite})${obs}`;
         })
         .join("\n")
-    : "- (no verbatim quotes captured this window; draft from the technique's documented behaviour)";
+    : "- (no verbatim quotes captured this window; draft from the technique's documented behavior)";
   return [
-    `Draft a complete ${ruleType} detection rule for ${seed.techniqueId ?? "the behaviour"}${seed.techniqueName ? ` (${seed.techniqueName})` : ""} as used by ${seed.label}.`,
+    `Draft a complete ${ruleType} detection rule for ${seed.techniqueId ?? "the behavior"}${seed.techniqueName ? ` (${seed.techniqueName})` : ""} as used by ${seed.label}.`,
     "",
     "Evidence from this window's reporting:",
     evidence,
     "",
-    "Requirements: detect the documented behaviour, not the threat name; compile any typed observable into a selection clause verbatim; keep the rule specific enough to review. Return ONLY the rule in a single code block.",
+    "Requirements: detect the documented behavior, not the threat name; compile any typed observable into a selection clause verbatim; keep the rule specific enough to review. Return ONLY the rule in a single code block.",
   ].join("\n");
 }
 
@@ -145,9 +143,7 @@ const RULE_EXT: Record<string, string> = {
   yaral: "yaral", aql: "aql", sumo: "sumo", sql: "sql",
 };
 
-/** Everything that is not the rule body is a tab in the strip under the
-    editor. Structure and Context are rails on a wide screen and only become
-    tabs once their rail has folded away. */
+/** Everything that is not the rule body is a tab in the strip under the editor. Structure and Context are side rails on a wide screen and only become tabs when the screen is too narrow for their rail. */
 type Pane = "details" | "ai" | "convert" | "history" | "structure" | "context";
 
 export default function RuleDetailPage() {
@@ -158,9 +154,7 @@ export default function RuleDetailPage() {
   const isCreateMode = id === "new";
   const fromSet = searchParams.get("from_set") === "1";
   const isExtendMode = searchParams.get("extend") === "1";
-  // The coverage workspace stashes the behaviour's evidence before navigating
-  // here: technique, quotes with typed observables, entity link, format hint.
-  // Read once; only trusted when from_set=1 rides on the URL.
+  // The coverage workspace stores the behavior's evidence in sessionStorage before navigating here: technique, quotes with typed observables, entity link, format hint. Read once; only used when from_set=1 is in the URL.
   const [benchSeed] = useState<BenchSeed | null>(() => {
     if (typeof sessionStorage === "undefined") return null;
     try {
@@ -172,14 +166,12 @@ export default function RuleDetailPage() {
   });
   const seed = fromSet ? benchSeed : null;
   const { data: rule, isLoading } = useDetectionRule(isCreateMode ? undefined : id);
-  // Extend mode: this rule is a derived_from child; show the upstream
-  // read-only beside your edit so the diff is the interface.
+  // Extend mode: this rule is a derived_from child; show the upstream rule read-only beside the edit so the two can be compared.
   const { data: upstream } = useDetectionRule(
     isExtendMode && rule?.derived_from ? rule.derived_from : undefined
   );
   const [upstreamOpen, setUpstreamOpen] = useState(true);
-  // The window's observables as a checklist: ticked items become the version
-  // note, so the change record says which evidence the extension covers.
+  // The window's observables as a checklist: ticked items become the version note, so the change record says which evidence the extension covers.
   const [coveredObs, setCoveredObs] = useState<number[]>([]);
   const toggleObs = (i: number, text: string) => {
     setCoveredObs((prev) => {
@@ -210,8 +202,7 @@ export default function RuleDetailPage() {
   const { data: relatedRules } = useRelatedRules(isCreateMode ? undefined : id);
   const { data: freshIntel } = useRuleFreshIntel(isCreateMode ? undefined : id);
   const convertRule = useConvertRule();
-  // Same key the Convert tab reads, so the tab label counts siblings without
-  // a second request.
+  // Same query key the Convert tab reads, so the tab label counts sibling conversions without a second request.
   const { data: conversionSiblings } = useQuery({
     queryKey: ["rule-conversions", id],
     enabled: !!id && !isCreateMode,
@@ -221,8 +212,7 @@ export default function RuleDetailPage() {
     },
   });
 
-  // Three columns need ~1200px. Below that each rail folds into the slide-over
-  // rather than squeezing the editor, which is the thing being worked in.
+  // Three columns need ~1200px. Below that the Context rail moves into the tab strip, and below 900px the Structure rail does too, rather than squeezing the editor.
   const railsCollapsed = useMediaQuery("(max-width: 1199px)");
   const structureCollapsed = useMediaQuery("(max-width: 899px)");
 
@@ -237,9 +227,7 @@ export default function RuleDetailPage() {
   const [ruleType, setRuleType] = useState("sigma");
   const [ruleContent, setRuleContent] = useState("");
   const [pane, setPane] = useState<Pane>("details");
-  // On a phone the tab strip is wider than the column and scrolls, so a tab
-  // selected from off-screen (History, Convert) would activate with no
-  // visible trace. Pull the active one into view whenever the pane changes.
+  // On a phone the tab strip is wider than the column and scrolls, so a tab selected while off-screen (History, Convert) would activate with no visible change. Scroll the active one into view whenever the pane changes.
   const activeTabRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     activeTabRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -260,8 +248,7 @@ export default function RuleDetailPage() {
   const [viewingVersion, setViewingVersion] = useState<string | null>(null);
   const [diffVersionNum, setDiffVersionNum] = useState<number | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
-  // What the body extractor can read out of the rule text, for Auto-fill. It
-  // is never written back as the rule's metadata (see handleSave).
+  // What the body extractor can read out of the rule text, for Auto-fill. It is never written back as the rule's metadata (see handleSave).
   const [mappedFields, setMappedFields] = useState<Record<string, unknown> | null>(null);
 
   // Rule conversions: { [ruleType]: { content, converted_at, model } }
@@ -293,8 +280,7 @@ export default function RuleDetailPage() {
     if (initializedCreate.current) return;
     initializedCreate.current = true;
 
-    // Seeded from the coverage workspace: technique + quotes as a cited
-    // comment header, format from the telemetry tier. Saving returns to the set.
+    // Seeded from the coverage workspace: technique and quotes as a cited comment header, format from the seed's suggested type. Saving returns to the set.
     if (seed) {
       const type = seed.suggestedType || "sigma";
       setRuleType(type);
@@ -497,9 +483,7 @@ export default function RuleDetailPage() {
         },
         {
           onSuccess: (newRule) => {
-            // The workspace picks the rule up from the return stash and adds it
-            // to the set; rule_coverage rows were written on create, so it
-            // counts on the board the moment it exists.
+            // The workspace reads the rule from the intelfeed-bench-return sessionStorage key and adds it to the set; rule_coverage rows are written on create, so it counts on the board as soon as it exists.
             if (!returnToSet(newRule, "new")) {
               navigate(`/workbench/rule/${newRule.id}`, { replace: true });
             }
@@ -525,11 +509,7 @@ export default function RuleDetailPage() {
     if (JSON.stringify(dataSources) !== JSON.stringify(rule.data_sources)) updates.data_sources = dataSources;
     if (JSON.stringify(sourceTtps) !== JSON.stringify(rule.source_ttps || [])) updates.source_ttps = sourceTtps;
     if (notes !== (rule.notes || "")) updates.notes = notes;
-    // Metadata goes back as the server gave it, plus the chat history. Never
-    // the extractor's output: that lacks the provenance keys (repo, owner,
-    // file_path, commit_history) and saving it turned mirrored rules into
-    // "authored here" rules with no history. Conversions are NOT persisted
-    // here either — each is a sibling detection_rules row (derived_from).
+    // Metadata goes back as the server gave it, plus the chat history. Never the extractor's output: that lacks the provenance keys (repo, owner, file_path, commit_history), and saving it would turn mirrored rules into "authored here" rules with no history. Conversions are not saved here either; each is a sibling detection_rules row (derived_from).
     const savedChat = (rule.metadata as Record<string, unknown> | null)?.ai_chat_history;
     if (JSON.stringify(savedChat ?? null) !== JSON.stringify(chatMessages.length > 0 ? chatMessages : null)) {
       const metaToSave: Record<string, unknown> = { ...((rule.metadata as Record<string, unknown> | null) || {}) };
@@ -582,8 +562,7 @@ export default function RuleDetailPage() {
       { ruleId: id, target_type: target.type, dialect: target.dialect, notes },
       {
         onSuccess: (result) => {
-          // The conversion is a sibling row now; the panel refetches the list
-          // when the mutation settles and this selects the one just written.
+          // The conversion is a sibling rule row; the panel refetches the list when the mutation settles, and this selects the one just written.
           setActiveConversionKey(result.rule_id);
         },
         onError: (err) => {
@@ -613,13 +592,11 @@ export default function RuleDetailPage() {
     setHasChanges(true);
   };
 
-  // Auto-save chat history to rule metadata (no need to click Save).
-  // Conversions live as sibling rows, not in the blob — see handleSave.
+  // Auto-save chat history to rule metadata (no need to click Save). Conversions are sibling rows, not part of the metadata; see handleSave.
   const autoSaveMeta = useCallback(
     (messages: ChatMessage[], _convs: Record<string, RuleConversion>) => {
       if (isCreateMode || !id) return;
-      // Same rule as handleSave: the stored metadata plus the chat, never the
-      // extractor's view of the body.
+      // Same rule as handleSave: the stored metadata plus the chat, never the extractor's output.
       const meta: Record<string, unknown> = { ...((rule?.metadata as Record<string, unknown> | null) || {}) };
       if (messages.length > 0) {
         meta.ai_chat_history = messages;
@@ -712,8 +689,7 @@ export default function RuleDetailPage() {
   if (!isCreateMode && isLoading) return <div className={styles.page}><AsyncStateLoading label="Loading rule…" /></div>;
   if (!isCreateMode && !rule) return <div className={styles.page}><div className={styles.loading}>Rule not found</div></div>;
 
-  // Only a root mirror is locked: an extended child carries the parent's repo
-  // keys but is the analyst's own rule.
+  // Only a mirrored root rule is locked: an extended child carries the parent's repo keys but is the analyst's own rule.
   const renameLocked = !!rule?.source_repo && !rule?.derived_from;
   const conversionCount = (conversionSiblings?.length ?? 0) + Object.keys(conversions).filter(
     (t) => !conversionSiblings?.some((s) => s.rule_type === t)

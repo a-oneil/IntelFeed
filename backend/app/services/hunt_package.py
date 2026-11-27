@@ -1,11 +1,12 @@
 """The hunt package: one zip with everything a hunter takes away from an entity.
 
 Downloaded from the profile's Next steps card and the Threats board drawer.
-It replaces the research bundle those buttons used to hand out (the newest
-hundred articles, every co-mentioned entity, a flat ATT&CK layer), which for
-a ransomware actor was mostly leak-site posts and other groups' names.
+It replaces an earlier research bundle (the newest hundred articles, every
+co-mentioned entity, a flat ATT&CK layer), which for a ransomware actor was
+mostly leak-site posts and other groups' names; that is why each file below
+is selected and ranked rather than dumped.
 
-What goes in, and why each file earns its place:
+What goes in:
 
 - ``README.md``: what is in the zip, the counts, what was left out and why.
 - ``profile.md``: the profile export (assessment, aliases, facts).
@@ -15,14 +16,17 @@ What goes in, and why each file earns its place:
 - ``telemetry.md``: the data sources the hunts need, collected or not.
 - ``detections/``: rules written for this entity in their own formats, and
   the analyst's saved rule sets under ``detections/sets/``.
-- ``attack_layer.json``: the claimed techniques, coloured by rule coverage;
+- ``attack_layer.json``: the claimed techniques, colored by rule coverage;
   ``attack_layer_mentioned.json`` the ones its articles only mention.
 - ``entities.md`` / ``entities.json``: claimed relationships first, then
-  co-mentions, kept apart and labelled as such.
+  co-mentions, kept apart and labeled as such.
 - ``iocs.csv`` / ``iocs.stix.json``: the observables ledger's rows from the
-  entity's articles, with confidence and first/last seen.
+  entity's articles, with confidence and first/last seen; the STIX bundle
+  holds only the rows that pass the publish rules.
 - ``timeline.csv``: every linked article, one row each.
-- ``articles/``: full text of the articles that carry the most techniques.
+- ``articles/``: full text of up to ``ARTICLE_CAP`` articles, leak-site posts
+  skipped: those naming the entity in the title first, then those a claim
+  rests on, then the ones with the most techniques.
 
 A file with nothing to put in it is left out, and README says so.
 """
@@ -72,7 +76,7 @@ _QUERY_EXT = {
     "panther": "py",
     "sigma": "yml",
 }
-# Navigator colours: has a rule / rule can't run (logs not collected) / no rule.
+# Navigator colors: has a rule / rule can't run (logs not collected) / no rule.
 _COVERAGE_COLOR = {"covered": "#3fb950", "library_only": "#d29922", "no_rule": "#f85149"}
 _COVERAGE_WORDS = {
     "covered": "has a rule",
@@ -219,7 +223,7 @@ def _layer(name: str, rows: list[dict], status: dict[str, dict]) -> dict:
         "name": name,
         "versions": {"attack": "16", "navigator": "5.1.0", "layer": "4.5"},
         "domain": "enterprise-attack",
-        "description": "Colour: green has a rule, amber has a rule whose logs aren't collected, red no rule. "
+        "description": "Color: green has a rule, amber has a rule whose logs aren't collected, red no rule. "
         "Score: articles reporting the technique.",
         "techniques": techniques,
         "gradient": {"colors": ["#ffffff", "#ffffff"], "minValue": 0, "maxValue": top},
@@ -396,7 +400,7 @@ async def build_hunt_package(
         for path, content in await build_set_bundle(db, summary):
             files.append((f"{folder}/{path}", content))
 
-    # ATT&CK layers: claimed techniques coloured by coverage, mentions apart.
+    # ATT&CK layers: claimed techniques colored by coverage, mentions apart.
     ttps = (pivot.get("related") or {}).get("ttps") or []
     status = await classify_techniques(db, [t.get("technique_id") for t in ttps if t.get("technique_id")])
     claimed_ttps = [t for t in ttps if t.get("relationship_id")]
@@ -578,7 +582,7 @@ async def build_hunt_package(
     if claimed_ttps:
         readme.append(
             f"- `attack_layer.json` — {len(claimed_ttps)} claimed technique{'' if len(claimed_ttps) == 1 else 's'} "
-            "for ATT&CK Navigator, coloured by rule coverage, scored by articles."
+            "for ATT&CK Navigator, colored by rule coverage, scored by articles."
         )
     if mentioned_ttps:
         readme.append(

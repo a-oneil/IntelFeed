@@ -48,7 +48,7 @@ def normalize_patterns(raw: str | None) -> str | None:
     """Validate what a client sent and return the text to store.
 
     Blank lines and duplicates (ignoring case) are dropped, each line is
-    trimmed, and the analyst's own capitalisation is kept for display. ``None``
+    trimmed, and the analyst's own capitalization is kept for display. ``None``
     or an all-blank value clears the filter. Raises a 422 ``AppError`` naming
     the first bad line.
     """

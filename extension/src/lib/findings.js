@@ -2,7 +2,7 @@
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** "2 actors, 3 CVEs, 5 techniques, 1 rule", or "" when nothing was found. */
+/** "2 actors, 3 CVEs, 5 techniques, 1 detection rule", or "" when nothing was found. */
 export function summarize(results) {
   if (!results) return "";
   const parts = [];

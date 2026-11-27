@@ -1,7 +1,6 @@
 .page {
   padding: 20px var(--sp-6);
-  /* The workbench content area is a flex row — without an explicit width the
-     page shrinks to its content instead of filling the column. */
+  /* The workbench content area is a flex row — without an explicit width the page shrinks to its content instead of filling the column. */
   width: 100%;
   max-width: 1400px;
   margin: 0 auto;
@@ -50,11 +49,7 @@
   letter-spacing: 0.5px;
 }
 
-/* Fill and text come from the same semantic token. These were previously a
-   hardcoded olive/green fill under a tokenised foreground, which both split
-   the pair across themes (the fill could not follow --warning/--success) and
-   dropped .statusDraft to 4.46:1. color-mix composites over whatever ground
-   the theme supplies: 5.71:1 on --bg-primary, 5.05:1 on --bg-secondary. */
+/* Fill and text come from the same semantic token, so the pair follows --warning/--success across themes. A hardcoded fill under a tokenized foreground split the pair across themes and dropped .statusDraft to 4.46:1 contrast. color-mix composites over whatever background the theme supplies: 5.71:1 on --bg-primary, 5.05:1 on --bg-secondary. */
 .statusDraft {
   background: color-mix(in srgb, var(--warning) 18%, transparent);
   color: var(--warning);
@@ -896,8 +891,7 @@
   flex-shrink: 0;
 }
 
-/* A Chip — colour, size and shape come from the primitive; this is additive
-   only (case + tracking). */
+/* A Chip: color, size and shape come from the primitive; this only adds case and tracking. */
 .sectionTypeBadge {
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -1128,9 +1122,7 @@
   text-align: left;
 }
 
-/* Sizing comes from the global .caret-glyph (--fs-caret); this sets only
-   colour and alignment. The glyph itself swaps ▸/▾ like every other
-   expander in the app. */
+/* Sizing comes from the global .caret-glyph (--fs-caret); this sets only color and alignment. The glyph itself swaps ▸/▾ like every other expander in the app. */
 .templateExpanderChevron {
   color: var(--text-secondary);
   align-self: center;

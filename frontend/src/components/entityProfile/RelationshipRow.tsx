@@ -1,11 +1,4 @@
-/**
- * RelationshipRow — one relationship on the trust ladder: entity identity +
- * trust chip (corroborated · MITRE / AI ×N / you, reported, signal) + plain
- * evidence facts (articles · feeds · recency) with a quiet bar, expandable
- * into the contributing articles (with the co-mention trend), and pin /
- * reject / unlink actions on hover. Strength words never appear — evidence
- * volume is shown as what it is.
- */
+/** RelationshipRow: one relationship row. Shows the related entity, a trust chip (corroborated with its provenance, or signal; reported rows get no chip), and the evidence counts (articles · feeds · recency). Clicking the counts expands the contributing articles, grouped by story, with the monthly co-mention trend. Pin / reject / unlink buttons appear on hover. Strength words are never shown; evidence volume is shown as raw counts. */
 import { useState } from "react";
 import type { EntityType } from "@/stores/intelStore";
 import { getEntityColor, getEntityLabel } from "@/utils/entityTheme";
@@ -65,7 +58,7 @@ export function RelationshipRow({
   const s = item.strength;
   const trust = trustOf(item);
   const evidence = item.proximity_entries ?? [];
-  // Public read-only mode: the evidence reads, nothing on the row edits.
+  // Public read-only mode: visitors can read the evidence but get no edit actions on the row.
   const isVisitor = useIsVisitor();
   const canModerate = !isVisitor && !!item.relationship_id && trust?.tier !== "corroborated";
 
@@ -77,8 +70,7 @@ export function RelationshipRow({
     s?.last_seen ? timeAgo(s.last_seen).replace(/ ago$/, "") : null,
   ].filter(Boolean);
 
-  // Evidence structure: the shape phrase is the row's new information — the
-  // counts shrink to confirmation. Stories group the evidence panel.
+  // The structure phrase (from evidence_structure) is the row's main information; the counts back it up. Stories group the articles in the evidence panel.
   const phrase = structurePhrase(item);
   const stories = item.evidence_structure?.stories ?? [];
   const storyIndexOf = new Map<string, number>();
@@ -110,12 +102,10 @@ export function RelationshipRow({
           <span className={styles.relType}>{getEntityLabel(type)}</span>
           {meta && <span className={styles.entityMeta}>{meta}</span>}
           {!trust && item.country_relationship && (
-            // Geography rows carry a junction-derived verb but no typed
-            // relationship — keep the verb visible ("targeted by", "origin of").
+            // Geography rows have a verb derived from the junction table but no typed relationship, so show the verb as a chip ("targeted by", "origin of").
             <span className={`${styles.trustChip} ${styles.trustSignal}`}>{verbChipLabel(item)}</span>
           )}
-          {/* Chip economy: reported is the unmarked default — a chip on 90% of
-              rows carries no information and buries the corroborated ones. */}
+          {/* Reported rows get no chip: it is the default tier, and a chip on 90% of rows carries no information and hides the corroborated ones. */}
           {trust && trust.tier !== "reported" && (
             <span
               className={`${styles.trustChip} ${TRUST_CLASS[trust.tier]}`}
@@ -136,8 +126,7 @@ export function RelationshipRow({
           )}
         </button>
 
-        {/* One reading direction: name → shape phrase → counts hard right.
-            The phrase is the row's information; the counts are confirmation. */}
+        {/* Left to right: name, then the structure phrase, then the counts at the far right. The phrase is the row's main information; the counts back it up. */}
         {phrase && hasEvidence && (
           <button
             className={styles.structPhraseBtn}
@@ -204,9 +193,7 @@ export function RelationshipRow({
           )}
           {stories.length > 0
             ? (() => {
-                // Group contributing articles under their story; the rest
-                // (loose mentions + entries outside the sampled window) sit
-                // in a dimmed tail so the panel reads as incidents, not a list.
+                // Group contributing articles under their story; the rest (loose mentions and entries outside the sampled window) go in a dimmed "Outside these stories" group at the end.
                 const grouped: Array<Array<(typeof evidence)[number]>> = stories.map(() => []);
                 const rest: typeof evidence = [];
                 for (const pe of evidence) {

@@ -9,11 +9,7 @@ import {
 
 const SECTIONS: OverviewSectionKey[] = ["context", "exploit", "affected", "reading", "activity", "workspace"];
 
-/**
- * Which rows are open comes from the stored choice read against the rows the
- * page has now: every row starts closed, stale ids drop, and nothing the page
- * lacks is ever handed back to be stored.
- */
+/* Which rows are open comes from the stored choice checked against the rows the page has now: Everything mode opens every row; in Brief mode every row starts closed, stale ids are dropped, and nothing the page lacks is ever handed back to be stored. */
 describe("resolveOpenSections", () => {
   it("opens every row in Everything mode, whatever is stored", () => {
     expect(resolveOpenSections([], SECTIONS, "everything")).toEqual(SECTIONS);
@@ -33,20 +29,14 @@ describe("resolveOpenSections", () => {
   });
 });
 
-/**
- * Every profile stacks its Overview rows in the same order, whatever rows the
- * type has: Context directly under the brief, Hunts just before Stories &
- * reading, Activity and Workspace last. The per-type config only says which
- * rows exist.
- */
+/* Every profile orders its Overview rows the same way, whatever rows the type has: Context directly under the brief, Hunts just before Stories & reading, and Stories & reading, Activity and Workspace last. The per-type config only says which rows exist. */
 describe("Overview section order", () => {
   it("puts Context first, Hunts before reading, and reading, activity, workspace last for every type", () => {
     for (const [type, config] of Object.entries(ENTITY_PROFILE_CONFIG)) {
       const rows = orderedOverviewSections(config.overviewSections).filter((k) => k !== "hunts");
       const all = orderedOverviewSections(config.overviewSections);
       if (all.includes("hunts")) expect(all[all.indexOf("reading") - 1], type).toBe("hunts");
-      // A campaign is an internal object no enrichment source applies to, so
-      // it has no Context row; every other type leads with it.
+      // A campaign is an internal object no enrichment source applies to, so it has no Context row; every other type starts with it.
       if (type !== "campaign") expect(rows[0], type).toBe("context");
       expect(rows.slice(-3), type).toEqual(["reading", "activity", "workspace"]);
     }

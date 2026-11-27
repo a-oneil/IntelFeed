@@ -1,8 +1,4 @@
-/**
- * Coverage: how full each field the sources fill is, who fills it, and the
- * one thing to do about the rest. "Ask the AI" appears only where no lookup
- * source can fill the gap.
- */
+/** Coverage: how full each field the sources fill is, who fills it, and the one thing to do about the rest. "Ask the AI" appears only where no lookup source can fill the gap. */
 import { useState } from "react";
 import { toast } from "sonner";
 

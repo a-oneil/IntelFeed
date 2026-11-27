@@ -36,9 +36,10 @@ router = APIRouter()
 
 
 def unreviewed_relationship_condition():
-    """Edges the machine drew that nobody has settled: an analyst confirming or
-    rejecting one changes its source, the reviewers set its verdict. A
-    disputed edge (one article keeps it, another demotes it) stays."""
+    """Edges from an automated source (auto_extracted, co_occurrence) with no final verdict yet.
+    An analyst confirming or rejecting an edge changes its source, and the reviewers set its
+    verdict; either takes it out of this set. A disputed edge (one article keeps it, another
+    demotes it) has an open verdict and stays in."""
     from app.services.edge_settlement import OPEN_VERDICTS
     from app.services.entry_adjudication import REVIEWABLE_EDGE_SOURCES
 

@@ -13,22 +13,12 @@ import { Chip } from "@/components/primitives";
 import { fileTypeLabel, formatBytes, ingestFileUrl, originalState, uploadMeta } from "@/utils/ingest";
 import styles from "./EntryTableView.module.css";
 
-/**
- * A row is an article, or a story thread standing in for the articles it
- * folded. The Priority Queue serves both, and the API withholds every member of
- * a live thread from the entry page — so a table that only knew about entries
- * would lose the thread row *and* the 23 articles behind it.
- */
+/** A row is an article, or a story thread standing in for the articles it folded. The Priority Queue serves both, and the API withholds every member of a live thread from the entry page, so a table that only knew about entries would lose the thread row *and* the articles behind it. */
 type TableRow =
   | { kind: "entry"; entry: Entry; counts?: EntryIntelCounts }
   | { kind: "thread"; thread: StoryThread; score: number };
 
-/**
- * Thread ids and entry ids are both UUIDs, so a thread row's id is namespaced
- * before anything can mistake one for the other. Keyed on the slug rather than
- * the id because `selectedThreadSlug` is what the store holds, which makes the
- * active-row highlight a comparison instead of a lookup.
- */
+/** Thread ids and entry ids are both UUIDs, so a thread row's id is namespaced to keep anything from mistaking one for the other. Keyed on the slug rather than the id because `selectedThreadSlug` is what the store holds, which makes the active-row highlight a comparison instead of a lookup. */
 const threadRowId = (slug: string) => `thread:${slug}`;
 
 /** What a cell shows for a value the row genuinely doesn't have. */
@@ -43,8 +33,7 @@ const subjectNames = (r: TableRow) =>
     ? r.thread.key_entities.map((e) => e.label)
     : [...(r.counts?.actors ?? []), ...(r.counts?.malware ?? [])];
 
-// Regex-based strip is ~100× cheaper than DOMParser and runs on every row per
-// filter keystroke; good enough for a one-line preview cell.
+// Regex-based strip is ~100× cheaper than DOMParser and runs on every row per filter keystroke; good enough for a one-line preview cell.
 const stripCache = new Map<string, string>();
 function stripHtmlFast(html: string): string {
   const cached = stripCache.get(html);
@@ -102,10 +91,7 @@ function opportunityRank(r: TableRow): number {
   return 0;
 }
 
-/**
- * Per-entry intel tallies. A thread reports 0, not its members' sum: these
- * counts are what *this row's* article yielded, and a thread row has no article.
- */
+/** Per-entry intel tallies. A thread reports 0, not its members' sum: these counts are what *this row's* article yielded, and a thread row has no article. */
 const intelCount = (pick: (c: EntryIntelCounts) => number | undefined) => (r: TableRow) =>
   r.kind === "thread" || !r.counts ? 0 : (pick(r.counts) ?? 0);
 
@@ -115,15 +101,9 @@ function CountCell({ value, tone }: { value: number; tone?: string }) {
 }
 
 /**
- * Server-sortable columns and the SortOrder values they map to. Everything else
- * sorts client-side over the loaded rows.
+ * Server-sortable columns and the SortOrder values they map to. Everything else sorts client-side over the loaded rows.
  *
- * These headers are inert in Priority Queue mode: /entries/priority-queue takes
- * no sort order, it always serves its own ranking with the thread rows already
- * slotted in by score. Clicking one moves the arrow and the stored preference
- * but not the queue — which predates threads and isn't changed here. What
- * matters for threads is the client sorts below: every `sortValue` answers for
- * a thread row, so a client sort can neither throw on one nor drop it.
+ * These headers have no effect on the server in Priority Queue mode: /entries/priority-queue takes no sort order and always serves its own ranking, with the thread rows already placed by score. Clicking one moves the arrow and the stored preference but not the queue. What matters for threads is the client sorts below: every `sortValue` handles a thread row, so a client sort can neither throw on one nor drop it.
  */
 const SERVER_SORTS: Record<string, { asc: SortOrder; desc: SortOrder }> = {
   title: { asc: "title_asc", desc: "title_desc" },
@@ -131,14 +111,7 @@ const SERVER_SORTS: Record<string, { asc: SortOrder; desc: SortOrder }> = {
   words: { asc: "shortest", desc: "longest" },
 };
 
-/*
- * Client filters: a column's `textValue` is the text its cell shows, and a cell
- * showing the "·" placeholder contributes "". So a thread answers the filters it
- * has an answer for — title, summary, actors/malware, state, the outlet count
- * under Source — and drops out of the ones it doesn't, including every ">0"
- * toggle over per-entry intel counts. Surviving a filter it can't satisfy would
- * claim the row holds a value it doesn't have.
- */
+/* Client filters: a column's `textValue` is the text its cell shows, and a cell showing the "·" placeholder contributes "". So a thread matches the filters it has a value for (title, summary, actors/malware, state, the outlet count under Source) and drops out of the ones it doesn't, including every ">0" toggle over per-entry intel counts. Passing a filter it can't satisfy would claim the row holds a value it doesn't have. */
 const COLUMNS: DataTableColumn<TableRow>[] = [
   {
     key: "status", label: "State", width: 64, minWidth: 48, hideable: true,
@@ -153,8 +126,7 @@ const COLUMNS: DataTableColumn<TableRow>[] = [
       { value: "bookmarked", label: "⚑" },
     ],
     choiceMatch: (r, v) => {
-      // A thread is unread while any member is; it is never starred or
-      // bookmarked — those are marks an analyst puts on an article.
+      // A thread is unread while any member is; it is never starred or bookmarked, since those are marks an analyst puts on an article.
       if (r.kind === "thread") {
         return v === "unread" ? r.thread.unread_count > 0
           : v === "read" ? r.thread.unread_count === 0
@@ -205,9 +177,7 @@ const COLUMNS: DataTableColumn<TableRow>[] = [
     serverSort: true,
     render: (r) => {
       if (r.kind === "thread") {
-        // The same ⟲ the compact list marks a thread with, so the row reads as
-        // the same object in either view. "11 outlets · 23 articles · 6 new"
-        // rides in the tooltip — the grid has no second line to put it on.
+        // The same ⟲ the compact list marks a thread with, so the row reads as the same object in either view. "11 outlets · 23 articles · 6 new" goes in the tooltip because the grid has no second line to put it on.
         return (
           <span
             className={styles.threadTitle}
@@ -235,8 +205,7 @@ const COLUMNS: DataTableColumn<TableRow>[] = [
     key: "date", label: "Date", width: 120, minWidth: 90, hideable: true,
     serverSort: true,
     render: (r) => {
-      // A story has no publication date; `last_seen` is the closest thing —
-      // when coverage of it last moved.
+      // A story has no publication date; `last_seen` is the closest thing: when coverage of it last changed.
       const at = r.kind === "thread" ? r.thread.last_seen : r.entry.published_at;
       return (
         <span className={table.dateCell} title={at ? new Date(at).toLocaleString() : undefined}>
@@ -247,9 +216,7 @@ const COLUMNS: DataTableColumn<TableRow>[] = [
   },
   {
     key: "signal", label: "Signal", width: 76, minWidth: 56, hideable: true,
-    // This column is the signal engine's score for the row's own content, which
-    // for a thread is its best member (`top_score`) — not the queue's
-    // ranking score, which can carry a read-time lift the entry column doesn't.
+    // This column is the signal engine's score for the row's own content, which for a thread is its best member (`top_score`), not the queue's ranking score, which can carry a read-time lift the entry column doesn't.
     sortValue: (r) => r.kind === "thread"
       ? (r.thread.top_score ?? r.score)
       : (r.entry.priority_score ?? -1),
@@ -267,8 +234,7 @@ const COLUMNS: DataTableColumn<TableRow>[] = [
   },
   {
     key: "subject", label: "Actors / Malware", width: 170, minWidth: 90, hideable: true,
-    // A thread's key entities answer the same question this column asks of an
-    // article: who or what is this about.
+    // A thread's key entities answer the same question this column asks of an article: who or what is this about.
     textValue: (r) => subjectNames(r).join(", "),
     sortValue: (r) => (subjectNames(r)[0] ?? "￿").toLowerCase(),
     render: (r) => {
@@ -384,12 +350,7 @@ const COLUMNS: DataTableColumn<TableRow>[] = [
       ? <span className={table.dateCell}>{Math.ceil(r.entry.word_count / 200)} min</span>
       : ZERO_CELL,
   },
-  /*
-   * Manual Uploads only. Hidden everywhere else by default; the uploads feed
-   * registers under its own table id (see `uploadsFeed`), whose default layout
-   * turns them on, so a feed of files reads as a file table without a page of
-   * its own.
-   */
+  /* Manual Uploads only. Hidden everywhere else by default; the uploads feed registers under its own table id (see `uploadsFeed`), whose default layout turns them on, so a feed of files shows as a file table without needing a page of its own. */
   {
     key: "file", label: "File", width: 240, minWidth: 120, hideable: true, defaultHidden: true,
     textValue: (r) => (r.kind === "entry" ? uploadMeta(r.entry.metadata)?.filename ?? "" : ""),
@@ -453,8 +414,7 @@ const COLUMNS: DataTableColumn<TableRow>[] = [
   },
 ];
 
-/** Columns a visitor's rows never fill: read/star/bookmark state, and the
- *  PIR, rule, AI, opportunity and note counts the server strips for them. */
+/** Columns a visitor's rows never fill: read/star/bookmark state, and the PIR, rule, AI, opportunity and note counts the server strips for them. */
 const VISITOR_HIDDEN_COLUMNS = new Set(["status", "pir", "rules", "ai", "opportunity", "notes"]);
 const VISITOR_COLUMNS = COLUMNS.filter((c) => !VISITOR_HIDDEN_COLUMNS.has(c.key));
 
@@ -466,13 +426,7 @@ const rowClass = (r: TableRow) =>
 
 interface EntryTableViewProps {
   entries: Entry[];
-  /**
-   * Priority Queue rows, when the list is in priority mode. The queue
-   * interleaves story threads with entries and the API withholds every article
-   * a live thread absorbed, so `entries` alone is missing both the thread row
-   * and the articles standing behind it. Omitted everywhere else: the plain
-   * /entries list never carries a thread.
-   */
+  /** Priority Queue rows, when the list is in priority mode. The queue interleaves story threads with entries and the API withholds every article a live thread absorbed, so `entries` alone is missing both the thread row and the articles behind it. Omitted everywhere else: the plain /entries list never carries a thread. */
   queueRows?: PriorityQueueRow[];
   intelBadges?: Record<string, EntryIntelCounts>;
   totalCount?: number;
@@ -480,11 +434,7 @@ interface EntryTableViewProps {
   isFetchingNextPage: boolean;
   fetchNextPage: () => void;
   isLoading: boolean;
-  /**
-   * The Manual Uploads feed is selected. The table registers under a second
-   * id so its layout (File / Size / Original on, Source off) is remembered
-   * apart from the ordinary entries table.
-   */
+  /** The Manual Uploads feed is selected. The table registers under a second id so its layout (File / Size / Original on, Source off) is remembered separately from the ordinary entries table. */
   uploadsFeed?: boolean;
 }
 
@@ -511,8 +461,7 @@ export function EntryTableView({
   // A visitor has no bulk actions, so no row checkboxes either.
   const isVisitor = useIsVisitor();
 
-  // Defensive dedupe: a duplicate row id would collide as a React key and as a
-  // virtualizer position-cache key, rendering stacked ghost rows.
+  // Defensive dedupe: a duplicate row id would collide as a React key and as a virtualizer position-cache key, rendering stacked duplicate rows.
   const rows: TableRow[] = useMemo(() => {
     const seen = new Set<string>();
     const out: TableRow[] = [];
@@ -544,17 +493,9 @@ export function EntryTableView({
     [rows],
   );
 
-  /*
-   * Selection is entry-scoped: it feeds bulk actions that POST `entry_ids`, so
-   * a thread's row id must never reach `setEntrySelection` — the API would take
-   * "thread:<slug>" for an article that doesn't exist. Checking a thread instead
-   * selects the articles it folded, which is what the row stands for, and the
-   * row reads back as checked once all of them are.
-   *
-   * Dropping the members again when the thread row comes back unchecked is safe
-   * because the queue withholds a live thread's members from the entry rows —
-   * they are never separately selectable while the thread row is on screen.
-   */
+  /* Selection is entry-scoped: it feeds bulk actions that POST `entry_ids`, so a thread's row id must never reach `setEntrySelection`, or the API would take "thread:<slug>" for an article that doesn't exist. Checking a thread instead selects the articles it folded, which is what the row stands for, and the row reads back as checked once all of them are selected.
+
+  Dropping the members again when the thread row is unchecked is safe because the queue withholds a live thread's members from the entry rows, so they are never separately selectable while the thread row is on screen. */
   const tableSelection = useMemo(() => {
     if (threads.length === 0) return selectedEntryIds;
     const out = new Set(selectedEntryIds);
@@ -606,8 +547,7 @@ export function EntryTableView({
       rows={rows}
       getRowId={(r) => (r.kind === "thread" ? threadRowId(r.thread.slug) : r.entry.id)}
       rowClass={rowClass}
-      // The reader holds a thread or an article, never both — selecting either
-      // clears the other — so exactly one of these is ever set.
+      // The reader holds a thread or an article, never both (selecting either clears the other), so exactly one of these is ever set.
       activeRowId={selectedThreadSlug ? threadRowId(selectedThreadSlug) : selectedEntryId}
       onRowClick={(r) =>
         r.kind === "thread" ? setSelectedThread(r.thread.slug) : setSelectedEntry(r.entry.id)

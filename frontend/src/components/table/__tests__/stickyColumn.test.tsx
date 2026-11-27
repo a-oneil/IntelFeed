@@ -24,7 +24,7 @@ function renderTable() {
   );
 }
 
-/** Column keys, left to right, as the header renders them. */
+/** Header labels, left to right, as the header renders them (an empty string for an unlabeled column). */
 function headerKeys(container: HTMLElement): string[] {
   const row = container.querySelector('[class*="headerRow"]');
   return Array.from(row?.children ?? []).map((cell) =>

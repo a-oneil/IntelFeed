@@ -26,12 +26,7 @@ beforeEach(() => {
   invalidateQueries.mockClear();
 });
 
-/**
- * The personal-key policy lives in system settings, but My AI, the reader
- * panel's key dots and the copilot header read it from their own endpoints.
- * A save that only refreshed ["system-settings"] left those stale until
- * their own staleTime ran out.
- */
+/** The personal-key policy lives in system settings, but My AI, the reader panel's key dots and the copilot header read it from their own endpoints. A save that refreshes only ["system-settings"] leaves those stale until their own staleTime runs out. */
 describe("system settings mutations", () => {
   it("refresh My AI and the copilot config on update", () => {
     useUpdateSystemSettings();

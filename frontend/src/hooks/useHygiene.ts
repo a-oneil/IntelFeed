@@ -124,8 +124,7 @@ export interface FeedRow {
   payload: Record<string, unknown>;
   actions: string[];
   links: FeedLink[];
-  /** Who proposed it: the post-analysis adjudicate stage (article in hand; every
-   *  link-log row), the catalogue-wide duplicate review (two profiles side by side), or a scan. */
+  /** Who proposed it: the post-analysis adjudicate stage (which reads the article; every link-log row comes from it), the catalog-wide duplicate review (which compares two profiles), or a scan. */
   origin: ProposalOrigin | null;
   /** What applying it changes (the Review tab's Domain facet). */
   domain: ProposalDomain;
@@ -133,8 +132,7 @@ export interface FeedRow {
   context?: string | null;
   /** The verdict's confidence, where the stage gave one. */
   confidence?: Confidence | null;
-  /** History: who applied it — a person (named in applied_by_name where the
-   *  row recorded them), the adjudicator at ingest, or the duplicate review. */
+  /** History: who applied it — a person (named in applied_by_name where the row recorded them), the adjudicator at ingest, or the duplicate review. */
   applied_by?: AppliedBy | null;
   applied_by_id?: string | null;
   applied_by_name?: string | null;
@@ -169,8 +167,7 @@ export interface FeedFilters {
   /** Only unapplied proposals (review-queue mode) — skips applied history. */
   pending?: boolean;
   origin?: ProposalOrigin;
-  /** Pending scan proposals no entry can carry to the adjudicate stage —
-   *  listed for manual disposition; nothing automatic touches them. */
+  /** Pending scan proposals with no entry to send them through the adjudicate stage. They are listed for a person to resolve; nothing automatic touches them. */
   orphaned?: boolean;
   /** One entity's rows (the Review queue's expand). */
   entity_type?: string;
@@ -295,10 +292,7 @@ export function useApplyReclassifyGroups() {
   });
 }
 
-/** One row of the Review queue: every pending proposal about one entity,
- *  from both logs, with what each kind wants done. A row about something
- *  that is not a catalogue entity (an edge, an article's assessment) has
- *  entity_id null and carries its own row_ids. */
+/** One row of the Review queue: every pending proposal about one entity, from both logs, with what each kind wants done. A row about something that is not a catalog entity (an edge, an article's assessment) has entity_id null and carries its own row_ids. */
 export interface ReviewGroup {
   key: string;
   entity_type: string;
@@ -374,10 +368,7 @@ export function invalidateAfterReview(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["extraction"] });
 }
 
-/** Dismiss what the filters show: the named groups, or with no `items`
- *  every proposal the filters select (Dismiss all). Each dismissal sticks:
- *  a type change for the entity, a duplicate pair as two things, an
- *  adjudicator verdict for its article. */
+/** Dismiss what the filters show: the named groups, or with no `items` every proposal the filters select (Dismiss all). Each dismissal is remembered so it is not proposed again: a type change for that entity, a duplicate pair as two separate entities, an adjudicator verdict for that article. */
 export function useDismissReview() {
   const qc = useQueryClient();
   return useMutation({
@@ -401,10 +392,7 @@ interface ReviewApplyBatch extends ReviewApplyResult {
   unapplied: string[];
 }
 
-/** Apply what the filters show for the named groups, in server batches,
- *  until every row has been tried once: rows a batch leaves pending (failed,
- *  or nothing to do) go back as `exclude`, so the next batch moves on. Type
- *  changes are left to the chips; assessments are never applied. */
+/** Apply what the filters show for the named groups, in server batches, until every row has been tried once (or more than 5,000 rows were left pending): rows a batch leaves pending (failed, or nothing to do) go back as `exclude`, so the next batch moves on. Type changes are left to the chips; assessments are never applied. */
 export function useApplyReview() {
   const qc = useQueryClient();
   return useMutation({
@@ -425,9 +413,7 @@ export function useApplyReview() {
   });
 }
 
-/** Run the duplicate review now: likely-duplicate pairs go to the model on
- *  the AI worker and come back as Merge proposals. Only dispatches; a run
- *  already in progress is reported, not doubled. */
+/** Run the duplicate review now: likely-duplicate pairs go to the model on the AI worker and come back as Merge proposals. Only dispatches; if a run is already in progress, the response says so and no second run starts. */
 export function useScanDuplicates() {
   const qc = useQueryClient();
   return useMutation({
@@ -475,12 +461,7 @@ export type BulkApplyRequest = ReviewScope & { limit?: number };
 
 const BULK_APPLY_KEY = ["hygiene", "bulk-apply"] as const;
 
-/**
- * Queue a background Apply all. The whole backlog (thousands of rows on a
- * busy instance) used to go through one request, which the client gave up
- * on at 15 s while the server kept applying. Poll the returned job with
- * useBulkApplyProgress.
- */
+/** Queue a background Apply all. It runs as a job because the whole backlog (thousands of rows on a busy instance) is too much for one request: the client timed out at 15 s while the server kept applying. Poll the returned job with useBulkApplyProgress. */
 export function useStartBulkApply() {
   return useMutation({
     mutationFn: async (body: BulkApplyRequest) => {

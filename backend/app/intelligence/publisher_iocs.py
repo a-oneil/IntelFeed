@@ -4,11 +4,11 @@ Talos, Bitdefender Labs and Datadog Security Labs keep their authoritative
 indicator lists in GitHub repositories and link them from the article ("IOCs
 for this research can also be found at our GitHub repository"). Those files
 are cleaner than the article body — Talos's ``.json`` is a STIX 2.0 bundle
-whose MISP labels carry the role — and the body is where the *behavioural*
+whose MISP labels carry the role — and the body is where the *behavioral*
 observables live. This door fetches the linked file, parses it with the
 publisher's own format, and writes the atoms through ``get_or_create_observable``
 with ``via="publisher_ioc"``, sighted on the **article's** entry so the
-attribution and evidence story stays attached to the write-up.
+attribution and evidence stay attached to the write-up.
 
 It is a judgment door (a publisher curated the list), not regex over prose:
 only allow-listed repositories are ever fetched, every value still passes

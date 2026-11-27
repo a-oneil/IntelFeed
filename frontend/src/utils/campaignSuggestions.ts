@@ -5,12 +5,7 @@ export type SuggestionGroup =
   | { kind: "story"; slug: string; title: string; held: number; total: number; items: CampaignSuggestion[] }
   | { kind: "entry"; item: CampaignSuggestion };
 
-/**
- * A campaign holding two articles of a nine-article story should be offered the
- * other seven as one row, not seven rows that happen to share entities. Stories
- * the campaign is already part of come first — that is the surest match there
- * is — and a story contributing a single article is just that article.
- */
+/** A campaign holding two articles of a nine-article story should be offered the other seven as one row, not seven rows that happen to share entities. Stories the campaign is already part of come first — that is the surest match there is — and a story contributing a single article is just that article. */
 export function groupSuggestions(suggestions: CampaignSuggestion[]): SuggestionGroup[] {
   const stories = new Map<string, Extract<SuggestionGroup, { kind: "story" }>>();
   const groups: SuggestionGroup[] = [];

@@ -186,7 +186,7 @@ class Relation:
     list of other names to try when ``name`` matches nothing) to a key of
     every listed row; with no ``item`` the list holds plain names.
 
-    A triple the relationship matrix allows only the other way round (a
+    A triple the relationship matrix allows only the other way around (a
     malware family ``communicates_with`` an observable) is stored that way:
     an observable's source names the family, the connection runs from it.
     ``hold=False`` drops a name that resolves to nothing instead of holding

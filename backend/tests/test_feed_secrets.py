@@ -1,4 +1,4 @@
-"""Feed credentials stay on the server, and the Telegram mentions list is a pure read.
+"""Feed credentials stay on the server, and listing Telegram mentions writes nothing.
 
 A GitHub token, an NVD API key and the (encrypted) Bluesky app password live in
 ``adapter_config``. The API masks them, an edit that echoes the mask back keeps

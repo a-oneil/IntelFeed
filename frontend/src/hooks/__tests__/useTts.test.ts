@@ -38,8 +38,7 @@ describe("useTts cancellation", () => {
   });
 
   it("still plays through the global player after the caller unmounts", async () => {
-    // A day divider scrolled out of the virtual list, or a closed reader, must
-    // not drop the audio the user asked for.
+    // A day divider scrolled out of the virtual list, or a closed reader, must not drop the audio the user asked for.
     const response = deferred<typeof ready>();
     mocks.post.mockReturnValueOnce(response.promise);
     const { result, unmount } = renderHook(() => useTts());
@@ -51,7 +50,7 @@ describe("useTts cancellation", () => {
     expect(mocks.play).toHaveBeenCalledTimes(1);
   });
 
-  it("stops polling when cancelled and clears preparing state", async () => {
+  it("stops polling when canceled and clears preparing state", async () => {
     vi.useFakeTimers();
     mocks.post.mockResolvedValue({ data: { status: "pending", cache_key: "audio-1" } });
     const { result } = renderHook(() => useTts());
@@ -66,7 +65,7 @@ describe("useTts cancellation", () => {
     expect(mocks.play).not.toHaveBeenCalled();
   });
 
-  it("keeps a superseded request cancelled when a new request starts", async () => {
+  it("keeps a superseded request canceled when a new request starts", async () => {
     const oldResponse = deferred<typeof ready>();
     const newResponse = deferred<typeof ready>();
     mocks.post.mockReturnValueOnce(oldResponse.promise).mockReturnValueOnce(newResponse.promise);

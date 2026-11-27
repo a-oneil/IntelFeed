@@ -49,9 +49,7 @@ describe("onboarding step selection", () => {
   });
 
   it("never leaves a non-admin with a gutted wizard", () => {
-    // The old flow gave a second analyst five steps: welcome, theme, shortcuts,
-    // docs and a CLI install guide. Dropping setup must mean *more* product
-    // content, not a shorter wizard.
+    // A non-admin must not end up with only welcome, theme, shortcuts, docs and a CLI install guide. Dropping setup must mean more product content, not a shorter wizard.
     const steps = visibleSteps(false, READY);
     expect(steps.length).toBe(nonSetup);
     expect(steps.length).toBeGreaterThanOrEqual(9);
@@ -68,14 +66,12 @@ describe("onboarding step selection", () => {
   });
 
   it("shows setup steps while readiness is still unknown", () => {
-    // Showing a step that turns out to be unnecessary is a far smaller failure
-    // than hiding the seeding step from an instance that genuinely needs it.
+    // Showing a step that turns out to be unnecessary is a far smaller failure than hiding the seeding step from an instance that needs it.
     expect(visibleSteps(true, undefined)).toEqual(STEPS);
   });
 
   it("does not treat the auto-created claude_code provider as a chosen one", () => {
-    // main.py seeds a claude_code provider at startup for the copilot's default assignment,
-    // so its presence says nothing about whether anyone picked a provider.
+    // main.py seeds a claude_code provider at startup for the copilot's default assignment, so its presence says nothing about whether anyone picked a provider.
     const ai = STEPS.find((s) => s.id === "ai")!;
     expect(skipReason(ai, true, FRESH)).toBeNull();
     expect(skipReason(ai, true, READY)).toBe("already set up");

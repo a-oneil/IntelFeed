@@ -9,7 +9,7 @@ keyword presence in entry text, with tiered relevance:
 - low:    a single keyword found in the body
 
 Machine-record content (rule-repo files, NVD vuln records) is excluded from
-auto-matching — those entries are categories of data, not reporting signal.
+auto-matching — those entries are data records, not reporting.
 """
 
 import logging
@@ -127,7 +127,7 @@ def _evaluate_requirement(
     if match_type is None:
         return None
 
-    # Per-PIR minimum relevance gate (None = keep all, backwards compatible)
+    # Per-PIR minimum relevance gate (None = keep all, backward compatible)
     if req.min_relevance and RELEVANCE_RANK.get(relevance, 0) < RELEVANCE_RANK.get(req.min_relevance, 0):
         return None
 

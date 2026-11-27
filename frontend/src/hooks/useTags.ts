@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 import type { Tag } from "@/api/types";
 
-/** How a tag looks and who sees it: colour, chip rendering, chip tooltip, and scope. */
+/** How a tag looks and who sees it: color, chip rendering, chip tooltip, and scope. */
 export interface TagPresentation {
   color?: string;
   display_as_chip?: boolean;
@@ -54,8 +54,7 @@ export function useUpdateTag() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tags"] });
-      // Promoting/demoting or recolouring changes how every card draws the tag;
-      // a scope flip changes which cards carry it and what the facet rail counts.
+      // Promoting/demoting or recoloring changes how every card draws the tag; a scope change changes which cards carry it and what the facet rail counts.
       queryClient.invalidateQueries({ queryKey: ["entries"] });
       queryClient.invalidateQueries({ queryKey: ["entry"] });
       queryClient.invalidateQueries({ queryKey: ["entry-tags"] });
@@ -101,7 +100,7 @@ export function useRemoveTagFromEntry() {
       queryClient.invalidateQueries({ queryKey: ["tags"] });
       queryClient.invalidateQueries({ queryKey: ["entry-tags", variables.entryId] });
       queryClient.invalidateQueries({ queryKey: ["entries"] });
-      // The chip × lives on the reader and search cards too.
+      // The chip's remove button is also on the reader and on search cards.
       queryClient.invalidateQueries({ queryKey: ["entry", variables.entryId] });
       queryClient.invalidateQueries({ queryKey: ["unified-search"] });
     },

@@ -1,10 +1,7 @@
 /**
  * Scroll the CodeMirror instance inside `root` to a 1-indexed line.
  *
- * Goes through the DOM rather than an EditorView handle because the outline is
- * the only caller and CodeMirrorEditor exposes no imperative API. Rule bodies
- * are tens of lines, so CM6 has them all rendered; the proportional fallback
- * covers the pathological long rule where it does not.
+ * Goes through the DOM rather than an EditorView handle because the outline is the only caller and CodeMirrorEditor exposes no imperative API. Rule bodies are tens of lines, so CM6 has them all rendered; the proportional fallback covers an unusually long rule where it does not.
  */
 export function scrollEditorToLine(root: HTMLElement | null, line: number, flashClass?: string) {
   if (!root || line < 1) return;

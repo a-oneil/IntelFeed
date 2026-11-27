@@ -90,7 +90,7 @@ def test_html_href_extraction():
 
 
 def test_handle_too_short_rejected():
-    # Telegram requires 5+ char usernames; we accept 3+ but reject reserved short paths
+    # Telegram requires 5+ character usernames; the extractor accepts 3+, so a 2-character path is rejected
     links = extract_links("https://t.me/ab")
     assert links == []
 

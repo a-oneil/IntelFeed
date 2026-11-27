@@ -73,19 +73,19 @@ function formatDuration(seconds: number): string {
 
 /** DataTable id the entry table registers under — see EntryTableView. */
 const ENTRIES_TABLE_ID = "entries";
-/** Most fields one squeezed row can carry before the line stops being readable. */
+/** Most fields one narrow-pane row shows before the line stops being readable. */
 const MAX_META_FIELDS = 4;
-/** Stable empty identity, so a non-fallback row's memo never breaks on it. */
+/** Shared empty array, so rows that don't use the fallback get a stable prop and their memo holds. */
 const NO_META_COLUMNS: string[] = [];
 
 interface MetaColumn {
   /** Mirrors the table column's `defaultHidden` — hidden until enabled. */
   defaultHidden?: boolean;
-  /** Inline projection; null when this entry has nothing to say for the column. */
+  /** Inline rendering of the cell; null when this entry has no value for the column. */
   render: (entry: Entry, counts?: EntryIntelCounts) => ReactNode;
 }
 
-/** Tags that stay a quiet label — the ones not promoted to a badge-row chip. */
+/** Tags shown as plain labels: the ones not promoted to a badge-row chip. */
 function plainTagsOf(entry: Entry) {
   return (entry.tags ?? []).filter((t) => !t.display_as_chip);
 }
@@ -122,19 +122,11 @@ function opportunityLabel(c?: EntryIntelCounts): string | null {
 }
 
 /**
- * Inline projections of the entry table's columns, keyed by the same column
- * keys EntryTableView declares and listed in the same declaration order.
+ * Inline versions of the entry table's columns, keyed by the same column keys EntryTableView declares and listed in the same declaration order.
  *
- * EntryTableView's `COLUMNS` array isn't exported and isn't ours to change, so
- * this is a deliberately compact mirror of the *cells*. The visibility and
- * ordering decision is not mirrored — that still comes from the one source of
- * truth, `uiStore.tables["entries"]` layered over `DEFAULT_TABLE_LAYOUTS`
- * exactly the way DataTable layers them (see visibleMetaColumnKeys).
+ * EntryTableView's `COLUMNS` array isn't exported, so this is a deliberately compact copy of the *cells*. Visibility and ordering are not copied: they still come from `uiStore.tables["entries"]` layered over `DEFAULT_TABLE_LAYOUTS`, the same way DataTable layers them (see visibleMetaColumnKeys).
  *
- * Three declared columns are deliberately absent: `status` (the row already
- * shows read/starred/bookmarked state), `title` (it *is* the row heading), and
- * `summary` (a paragraph, not metadata). DataTable's checkbox column never
- * appears here — it isn't part of the declared column set at all.
+ * Three declared columns are deliberately absent: `status` (the row already shows read/starred/bookmarked state), `title` (it is the row heading), and `summary` (a paragraph, not metadata). DataTable's checkbox column never appears here; it isn't part of the declared column set.
  */
 const META_COLUMNS: Record<string, MetaColumn> = {
   source: {
@@ -169,7 +161,7 @@ const META_COLUMNS: Record<string, MetaColumn> = {
     defaultHidden: true,
     render: (_e, c) => (c?.notes ? `${c.notes} note${c.notes === 1 ? "" : "s"}` : null),
   },
-  // Chips already lead the badge row; this column carries the quiet tags.
+  // Chip tags already lead the badge row; this column shows the plain tags.
   tags: { render: (e) => plainTagNames(e) },
   type: { defaultHidden: true, render: (e) => (e.feed_type ? e.feed_type.replace(/_/g, " ") : null) },
   domain: { defaultHidden: true, render: (e) => domainOf(e.url) },
@@ -180,11 +172,7 @@ const META_COLUMNS: Record<string, MetaColumn> = {
   },
 };
 
-/**
- * The entry table's currently-visible columns, in the user's configured order.
- * Resolution follows DataTable's: the user's stored layout wins, then the
- * instance preset, then the column's own default.
- */
+/** The entry table's currently-visible columns, in the user's configured order. Resolution follows DataTable's: the user's stored layout wins, then the instance preset, then the column's own default. */
 function visibleMetaColumnKeys(layout?: {
   columnVisibility: Record<string, boolean>;
   columnOrder: string[];
@@ -201,12 +189,7 @@ function visibleMetaColumnKeys(layout?: {
   );
 }
 
-/**
- * "Mark read" split button: the primary half marks the whole view read, the ▾
- * half offers the same All plus Above (everything before the selected entry,
- * also on Shift+M). The menu is portalled because the toolbar clips its
- * overflow to pan horizontally in a narrow pane.
- */
+/** "Mark read" split button: the primary half marks the whole view read, the ▾ half offers the same All plus Above (everything before the selected entry, also on Shift+M). The menu renders in a portal because the toolbar clips its overflow to scroll horizontally in a narrow pane. */
 function MarkReadSplitButton({
   onMarkAll,
   onMarkAbove,
@@ -317,8 +300,7 @@ function MarkReadSplitButton({
   );
 }
 
-// Memoized entry row — prevents re-renders when other rows' selection changes
-// Exported for reuse in search results
+// Memoized entry row, so a row doesn't re-render when another row's selection changes. Exported for reuse in search results.
 export const EntryRow = memo(function EntryRow({
   entry,
   isSelected,
@@ -347,10 +329,7 @@ export const EntryRow = memo(function EntryRow({
   /**
    * Keep full title contrast on an already-read entry.
    *
-   * In the feed list, dimming a read row is the point — it is a triage queue.
-   * A search result is not: you asked for it, and whether you happened to read
-   * it before says nothing about how legible it should be. The unread dot is
-   * untouched, so read and unread are still distinguishable.
+   * The feed list is a triage queue, so it dims read rows. A search result is not: whether you read it before says nothing about how legible it should be. The unread dot is unchanged, so read and unread are still distinguishable.
    */
   undimRead?: boolean;
   /** Intel badge data for this entry */
@@ -360,11 +339,7 @@ export const EntryRow = memo(function EntryRow({
   aiAnalysis?: boolean;
   /** Whether feed auto-extracts on ingest */
   autoExtract?: boolean;
-  /**
-   * Table-view fallback only: the entry table's visible column keys, rendered
-   * as the row's metadata line in place of the generic source + age header.
-   * Empty/absent everywhere else, which keeps the row exactly as it was.
-   */
+  /** Table-view fallback only: the entry table's visible column keys, rendered as the row's metadata line in place of the generic source + age header. Empty or absent everywhere else, which leaves the row's normal layout unchanged. */
   metaColumns?: string[];
 }) {
   const isVisitor = useIsVisitor();
@@ -406,8 +381,7 @@ export const EntryRow = memo(function EntryRow({
         />
       </div>
       <div className={styles.entryContent}>
-        {/* The column-meta line carries source/age/etc itself, so the generic
-            header would only repeat (or contradict) the user's Columns choice. */}
+        {/* The column-meta line shows source/age/etc itself, so the generic header would only repeat (or contradict) the user's Columns choice. */}
         {!useColumnMeta && (
           <div className={styles.entryHeader}>
             <FeedNameMenuButton feedId={entry.feed_id} className={styles.feedNameBtn}>
@@ -559,14 +533,11 @@ const MagazineCard = memo(function MagazineCard({
 });
 
 interface EntryListProps {
-  // When set, pins the list to this sort order (e.g. the Priority Queue forces
-  // "radar") without touching the user's persisted feed sort.
+  // When set, pins the list to this sort order (e.g. the Priority Queue forces "radar") without touching the user's persisted feed sort.
   sortOverride?: SortOrder;
-  // When true, slots story-thread rows into the ranked list (Priority Queue
-  // only), absorbing the loaded members each one folds.
+  // When true, inserts story-thread rows into the ranked list (Priority Queue only); each thread row replaces the loaded articles it groups.
   withThreads?: boolean;
-  // Priority Queue mode: uses its own Hide Read preference (defaults on) kept
-  // separate from the main feed's, so hiding read here doesn't affect the reader.
+  // Priority Queue mode: uses its own Hide Read preference (defaults on) kept separate from the main feed's, so hiding read here doesn't affect the reader.
   priorityMode?: boolean;
 }
 
@@ -594,9 +565,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
   const sortOrderPref = useUIStore((s) => s.sortOrder);
   const setSortOrder = useUIStore((s) => s.setSortOrder);
   const sortOrder = sortOverride ?? sortOrderPref;
-  // Radar left the sort dropdown (the Priority Queue is its home now, via
-  // sortOverride). A "radar" preference persisted before that change would
-  // leave the select blank and the list silently signal-sorted — normalize it.
+  // The sort dropdown has no "radar" option; only the Priority Queue uses it, via sortOverride. An older persisted "radar" preference would leave the select blank and the list sorted by signal without any indication, so reset it to "newest".
   useEffect(() => {
     if (sortOrderPref === "radar") setSortOrder("newest");
   }, [sortOrderPref, setSortOrder]);
@@ -629,13 +598,9 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     return map;
   }, [feedsData]);
   const [changeTypeFilter, setChangeTypeFilter] = useState("");
-  // The day-divider chip currently narrowing the list to its own day's articles.
-  // Local rather than persisted: it is a "what is this?" drill-down on one
-  // divider, not a view preference to come back to tomorrow.
+  // The day-divider chip currently filtering the list to its own day's articles. Local rather than persisted: it is a drill-down on one divider, not a view preference to keep.
   const [dayFocus, setDayFocus] = useState<DayFocus | null>(null);
-  // The Priority Queue is served by its own ranking endpoint, which doesn't take
-  // these filters — so its dividers show the chips as labels rather than
-  // offering a toggle that would do nothing.
+  // The Priority Queue is served by its own ranking endpoint, which doesn't take these filters, so its dividers show the chips as labels rather than as toggles that would do nothing.
   const onDayFocus = priorityMode ? undefined : setDayFocus;
 
   const selectedFeed = feedsData?.items.find((s) => s.id === selectedFeedId);
@@ -648,27 +613,17 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     () => localStorage.getItem("intelfeed-kbd-hint-dismissed") === "1",
   );
   const bulkMode = selectedEntryIds.size > 0;
-  // Table view governs read/unread filtering itself via its State column
-  // filter, so the global Hide Read toggle is hidden there and must not
-  // silently shape the query behind an invisible control.
-  // The table needs room for its columns, its header and its per-column filter
-  // row. Opening the reader squeezes the list to `entryListWidth` (300px by
-  // default), where the title column ends up ~60px wide and unreadable. Below
-  // this threshold the list falls back to the compact rows instead. The stored
-  // preference is untouched, so closing the reader restores the table.
+  // Table view handles read/unread filtering itself via its State column filter, so the global Hide Read toggle is hidden there and must not affect the query from behind a hidden control.
+  // The table needs room for its columns, its header and its per-column filter row. Opening the reader narrows the list to `entryListWidth` (300px by default), where the title column ends up ~60px wide and unreadable. Below this threshold the list falls back to the compact rows instead. The stored preference is unchanged, so closing the reader restores the table.
   const TABLE_MIN_WIDTH = 520;
-  // True whenever the list is sharing the pane with an open reader and has
-  // been squeezed below the width its full chrome needs.
+  // True whenever the list shares the pane with an open reader and is narrower than the table view needs.
   const isNarrowPane =
     !isMobile && readerOpen && !entryListCollapsed && entryListWidth < TABLE_MIN_WIDTH;
   const tableTooNarrow = viewMode === "table" && isNarrowPane;
   const effectiveViewMode: typeof viewMode = tableTooNarrow ? "compact" : viewMode;
   const isTableView = effectiveViewMode === "table";
 
-  // Fallback rows carry the table's configured columns as their metadata line,
-  // so the Columns choice still means something when the table can't render.
-  // Read-only consumption of the table's persisted layout — DataTable and
-  // EntryTableView remain the owners of it.
+  // Fallback rows show the table's configured columns as their metadata line, so the Columns choice still applies when the table can't render. This only reads the table's persisted layout; DataTable and EntryTableView own it.
   const entriesTableLayout = useUIStore((s) => s.tables?.[ENTRIES_TABLE_ID]);
   const metaColumnKeys = useMemo(
     () => (tableTooNarrow ? visibleMetaColumnKeys(entriesTableLayout) : NO_META_COLUMNS),
@@ -690,17 +645,13 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     return undefined;
   }, [virtualFolder]);
 
-  // The engaged chip narrows to its own day, which is always inside whatever
-  // window the folder already asked for — so the later of the two `since`
-  // values wins rather than the day quietly widening a "last 24 hours" view.
+  // The active chip limits the list to its own day. The later of the two `since` values wins, so the day filter never widens a folder window such as "last 24 hours".
   const focusWindow = useMemo(
     () => (dayFocus ? dayWindowIso(dayFocus.dayKey) : null),
     [dayFocus],
   );
 
-  // Changing scope changes which days exist, so a chip engaged on a day that is
-  // no longer in the list would leave an empty pane with nothing visible to
-  // clear it.
+  // Changing scope changes which days exist, so a chip active on a day that is no longer in the list would leave an empty pane with nothing visible to clear it.
   useEffect(() => {
     setDayFocus(null);
   }, [selectedFeedId, selectedCategoryId, virtualFolder]);
@@ -721,12 +672,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     dedup: true,
   };
 
-  // Filter subset that defines the daily-summary cache key. Excludes time-window
-  // and sort fields (the divider's day_key captures the date) so navigating
-  // between "today" / "last 24h" / "all time" doesn't blow the cache. Also
-  // excludes `is_read` — the summary describes the day's intel regardless of
-  // which entries the viewer has read, so the Hide Read toggle (and the act
-  // of marking the day read) shouldn't move us to a different cache slot.
+  // Filter subset that defines the daily-summary cache key. Excludes time-window and sort fields (the divider's day_key captures the date) so switching between "today" / "last 24h" / "all time" doesn't invalidate the cache. Also excludes `is_read`: the summary describes the day's intel regardless of which entries the viewer has read, so the Hide Read toggle (and marking the day read) shouldn't switch to a different cache entry.
   const summaryFilters: DailySummaryFilters = useMemo(
     () => ({
       feed_id: selectedFeedId || undefined,
@@ -744,15 +690,11 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     ],
   );
 
-  // Threads marked-read & cleared this session live in the UI store, so clearing
-  // one from the reader's top bar drops its row here too — and hands its members
-  // back to the queue as standalone entries.
+  // Threads marked read and cleared this session live in the UI store, so clearing one from the reader's top bar removes its row here too and returns its articles to the queue as standalone entries.
   const dismissedThreadIds = useUIStore((s) => s.dismissedThreadIds);
   const dismissThread = useUIStore((s) => s.dismissThread);
 
-  // Priority Queue mode is served by one endpoint that ranks entries and story
-  // threads together; everywhere else uses the plain entry list. Only one of the
-  // two queries runs.
+  // Priority Queue mode is served by one endpoint that ranks entries and story threads together; everywhere else uses the plain entry list. Only one of the two queries runs.
   const priorityQuery = usePriorityQueue({
     enabled: priorityMode,
     unreadOnly: effectiveShowUnreadOnly,
@@ -779,15 +721,8 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     enabled: isMobile,
   });
 
-  // Flatten pages and drop duplicate IDs — cursor pagination can re-serve an
-  // entry across page boundaries (ties / null published_at), and duplicate IDs
-  // collide as React keys and as virtualizer position-cache keys, stacking two
-  // copies of the row on top of each other.
-  // Priority Queue rows, deduped by the id they carry — cursor pagination can
-  // re-serve a row across a page boundary, and a duplicate collides as a React
-  // key and as a virtualizer position-cache key, stacking two copies of the row
-  // on top of each other. Deduping here (not separately in `entries`) keeps the
-  // rendered rows and the flat entry stream indexed the same.
+  // Flatten pages and drop duplicate IDs (the `entries` memo below): cursor pagination can return an entry again across page boundaries (ties / null published_at), and duplicate IDs collide as React keys and as virtualizer position-cache keys, stacking two copies of the row on top of each other.
+  // Priority Queue rows, deduped by the id they carry, for the same reason. Deduping here (not separately in `entries`) keeps the rendered rows and the flat entry list indexed the same.
   const queueRows = useMemo(() => {
     if (!priorityMode) return [];
     const seen = new Set<string>();
@@ -810,8 +745,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     return raw.filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true)));
   }, [priorityMode, queueRows, listQuery.data]);
 
-  // When the current view has no unread entries, fall back to showing all
-  // without overwriting the user's persisted "Hide Read" preference.
+  // When the current view has no unread entries, fall back to showing all without overwriting the user's persisted "Hide Read" preference.
   useEffect(() => {
     if (!isTableView && !isLoading && entries.length === 0 && hideReadPref && !unreadFallbackActive) {
       setUnreadFallbackActive(true);
@@ -823,16 +757,12 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     setUnreadFallbackActive(false);
   }, [selectedFeedId, selectedCategoryId, virtualFolder, setUnreadFallbackActive]);
 
-  // Hide Read is on, but this scope has no unread left, so the list is showing
-  // read entries anyway. Unannounced, that reads as a broken toggle — every
-  // entry marked read, yet the list is still full.
-  // `entries.length > 0` matters: a scope that is empty read-or-unread also
-  // trips the fallback, and "you're all caught up" over an empty list is a lie.
+  // Hide Read is on, but this scope has no unread left, so the list is showing read entries anyway. Without a banner that looks like a broken toggle: every entry is marked read, yet the list is still full.
+  // `entries.length > 0` matters: a scope with no entries at all also triggers the fallback, and "you're all caught up" over an empty list would be wrong.
   const caughtUpFallback =
     hideReadPref && unreadFallbackActive && !isTableView && !isLoading && entries.length > 0;
 
-  // Mobile: continuously record list scroll position so we can restore it
-  // when the reader closes (CSS display:none resets scrollTop on re-show).
+  // Mobile: continuously record list scroll position so we can restore it when the reader closes (CSS display:none resets scrollTop on re-show).
   useEffect(() => {
     if (!isMobile) return;
     const el = scrollRef.current;
@@ -857,8 +787,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
 
   // Group consecutive CVE entries from the same feed
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
-  // Day-collapse state lives in uiStore so it persists across reload/navigation.
-  // collapseAllMode keeps days that load in later collapsed too (see effect).
+  // Day-collapse state lives in uiStore so it persists across reload/navigation. collapseAllMode keeps days that load in later collapsed too (see effect).
   const collapsedDaysArr = useUIStore((s) => s.collapsedDays);
   const collapseAllMode = useUIStore((s) => s.collapseAllMode);
   const toggleDayCollapsed = useUIStore((s) => s.toggleDayCollapsed);
@@ -874,21 +803,17 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
   // Day dividers only make sense when entries are date-ordered
   const showDividers = sortOrder === "newest" || sortOrder === "oldest";
   const { data: totalCount } = useEntriesCount(filters);
-  // Threads render collapsed: the row is the fold, and expanding it is a
-  // deliberate "show me the spine" rather than the default state.
+  // Threads render collapsed by default: the row stands for the whole thread, and the user expands it to see the thread's timeline.
   const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set());
   const virtualItems2D = useMemo<QueueItem[]>(() => {
-    // The queue arrives already ranked and already folded — only the CVE
-    // grouping is left to do. Day dividers don't apply: it isn't date-ordered.
+    // The queue arrives already ranked with threads already grouped; only the CVE grouping is left to do. Day dividers don't apply: it isn't date-ordered.
     if (priorityMode) return queueItems(queueRows);
     const withDividers = injectDayDividers(displayItems, showDividers);
     return filterCollapsedDays(withDividers, collapsedDays);
   }, [priorityMode, queueRows, displayItems, showDividers, collapsedDays]);
   const magazineItems = useMemo<(MagazineItem | DayDividerItem)[]>(() => {
     if (effectiveViewMode !== "magazine") return [];
-    // Built from the queue rows, not from `entries`: the endpoint withholds
-    // every article a thread absorbed, so a grid mapped over the entry stream
-    // drops a whole story — the thread card and the coverage behind it both.
+    // Built from the queue rows, not from `entries`: the endpoint leaves out every article a thread groups, so a grid built from the entry list would drop a whole story (both the thread card and its articles).
     const items: MagazineItem[] = priorityMode
       ? magazineQueueItems(queueRows)
       : entries.map((entry, i) => ({ type: "single" as const, entry, flatIndex: i }));
@@ -898,16 +823,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     );
   }, [priorityMode, queueRows, entries, effectiveViewMode, showDividers, collapsedDays]);
 
-  // Every day key rendered by the *active* view — powers the collapse-all /
-  // expand-all toolbar toggle. Derived from the same injected item list the
-  // view renders (dividers survive collapse-filtering) so the key set matches
-  // exactly what's on screen. Magazine renders ungrouped singles while the list
-  // renders CVE-grouped items, and a group can straddle midnight — so the two
-  // views can surface different day dividers, and reading from the wrong one
-  // would leave some days uncollapsed. In the Priority Queue the list forgoes
-  // dividers entirely (it isn't date-ordered) while magazine would date a
-  // thread by its last beat — moot today, since the queue's forced "radar" sort
-  // turns dividers off in both.
+  // Every day key rendered by the active view, used by the collapse-all / expand-all toolbar toggle. Derived from the same item list the view renders (collapse filtering keeps the dividers) so the key set matches what's on screen. Magazine renders ungrouped singles while the list renders CVE-grouped items, and a group can span midnight, so the two views can show different day dividers; reading from the wrong one would leave some days expanded. In the Priority Queue the list has no dividers (it isn't date-ordered) while magazine would date a thread by its latest article; in practice the queue's forced "radar" sort turns dividers off in both.
   const activeDividerItems = effectiveViewMode === "magazine" ? magazineItems : virtualItems2D;
   const allDayKeys = useMemo(
     () =>
@@ -920,13 +836,11 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     collapseAllMode ||
     (allDayKeys.length > 0 && allDayKeys.every((k) => collapsedDays.has(k)));
   const toggleAllDays = useCallback(() => {
-    // Collapsed → expand all and leave the mode; otherwise enter collapse-all
-    // mode and collapse every rendered day. The effect below keeps days that
-    // stream in afterward collapsed while the mode stays on.
+    // Collapsed → expand all and leave the mode; otherwise enter collapse-all mode and collapse every rendered day. The effect below keeps days that load afterward collapsed while the mode stays on.
     if (allDaysCollapsed) expandAllDays();
     else collapseAllDays(allDayKeys);
   }, [allDaysCollapsed, allDayKeys, expandAllDays, collapseAllDays]);
-  // While collapse-all is active, fold any newly-loaded days into the set.
+  // While collapse-all is active, add any newly loaded days to the collapsed set.
   useEffect(() => {
     if (collapseAllMode) mergeCollapsedDays(allDayKeys);
   }, [collapseAllMode, allDayKeys, mergeCollapsedDays]);
@@ -958,8 +872,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
       if (!item) return baseSize;
       if (item.type === "divider") return 32;
       if (item.type === "thread") {
-        // Collapsed the row is one line; expanded it is the spine, which is
-        // roughly one beat per day of coverage rather than one per article.
+        // Collapsed, the row is one line; expanded, it shows the thread's timeline (roughly one row per day of coverage rather than one per article), estimated from the article count capped at 8.
         if (!expandedThreads.has(item.key)) return 46;
         return 44 + Math.min(item.thread.entry_count, 8) * 62;
       }
@@ -999,8 +912,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     virtualizer.measure();
   }, [effectiveViewMode, expandedGroups, expandedThreads, virtualItems2D.length, virtualizer]);
 
-  // When async content (intel badges) loads, force visible elements to re-measure
-  // via the DOM. This is more reliable than measure() which only resets estimates.
+  // When async content (intel badges) loads, force visible elements to re-measure via the DOM. This is more reliable than measure(), which only resets estimates.
   const scrollContainerRef = scrollRef;
   useLayoutEffect(() => {
     if (!intelBadges) return;
@@ -1024,9 +936,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     }
   }, [virtualItems, virtualItems2D.length, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  // NOTE: auto-read (mark the previous entry read on selection change) lives in
-  // MainLayout, not here — EntryList unmounts when the list is collapsed, so an
-  // effect here misses reader-internal navigation. See MainLayout.
+  // Auto-read (mark the previous entry read on selection change) lives in MainLayout, not here: EntryList unmounts when the list is collapsed, so an effect here would miss navigation inside the reader.
 
   const handleEntryClick = useCallback((entry: Entry) => {
     setSelectedEntry(entry.id);
@@ -1076,8 +986,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
       if (item.type === "single") {
         result.push(item.entry);
       } else {
-        // For collapsed groups, use the first entry as representative;
-        // for expanded groups, include all entries
+        // For collapsed groups, use the first entry as representative; for expanded groups, include all entries
         if (expandedGroups.has(item.flatIndex)) {
           result.push(...item.entries);
         } else {
@@ -1099,10 +1008,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      // A <select> counts as typing too. Without it, every dropdown in every
-      // modal above this list leaked its keystrokes through: with a feed's
-      // "Poll interval" focused, j/k and the arrows navigated the list behind
-      // the dialog, s starred, m marked read and Enter opened an article.
+      // A <select> counts as typing too. Without it, keystrokes in any dropdown in a modal above this list reach the list: with a feed's "Poll interval" focused, j/k and the arrows navigated the list behind the dialog, s starred, m marked read and Enter opened an article.
       if (
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
@@ -1110,11 +1016,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
         target?.isContentEditable
       ) return;
 
-      // Enter on a focused OUTSIDE link means "follow it". Without this the
-      // shortcut below preventDefault()s the keypress and opens the selected
-      // entry's own URL instead — the link never fires, and neither does the
-      // external-link confirmation that guards it. Links within the app are
-      // left exactly as they were.
+      // Enter on a focused external link means "follow it". Without this the shortcut below calls preventDefault() on the keypress and opens the selected entry's own URL instead; the link never fires, and neither does the external-link confirmation that guards it. Links within the app are not affected.
       if (e.key === "Enter") {
         const link = target?.closest("a[href]");
         if (link instanceof HTMLAnchorElement && isExternalWebUrl(link.getAttribute("href") ?? "")) return;
@@ -1136,9 +1038,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
           return false;
         });
 
-      // Step by list order, falling back to the visit trail — with auto-read on,
-      // the article you just came from is already gone from a Hide-Read list, so
-      // list indexes alone can't walk backwards.
+      // Step by list order, falling back to the visit history: with auto-read on, the article you just came from is already gone from a Hide Read list, so list indexes alone can't step backward.
       const step = (direction: "prev" | "next") => {
         const targetId = adjacentEntryId(
           direction,
@@ -1226,9 +1126,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
             )}
           </div>
           <div className={styles.toolbarRight}>
-            {/* Narrow pane (reader open): the secondary controls move into a
-                menu rather than panning off the edge of an invisible
-                scroll strip, where they were effectively unreachable. */}
+            {/* Narrow pane (reader open): the secondary controls move into a menu rather than scrolling off the edge of a strip with a hidden scrollbar, where they are hard to reach. */}
             {isNarrowPane ? (
               <ToolbarDropdown
                 label="More"
@@ -1240,8 +1138,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                   </svg>
                 }
               >
-                {/* "Mark above read" lives on the Mark read split button now,
-                    at both widths — it isn't repeated here. */}
+                {/* "Mark above read" is on the Mark read split button at both widths, so it isn't repeated here. */}
                 {!isTableView && showDividers && allDayKeys.length > 0 && (
                   <DropdownItem
                     label={allDaysCollapsed ? "Expand all days" : "Collapse all days"}
@@ -1305,8 +1202,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
               </ToolbarDropdown>
             ) : (
               <>
-            {/* Hide Read stays hidden in table view — the table's State column
-                filter owns read/unread there. Auto-read applies everywhere. */}
+            {/* Hide Read stays hidden in table view, where the table's State column filter handles read/unread. Auto-read applies everywhere. */}
             {!isTableView && !isVisitor && (
               <button
                 className={`${styles.toolbarBtn} ${effectiveShowUnreadOnly ? styles.toolbarBtnActive : ""} ${caughtUpFallback ? styles.toolbarBtnPaused : ""}`}
@@ -1415,9 +1311,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
         </div>
       )}
 
-      {/* A chip can filter its day down to nothing, which would take the divider
-          — and the lit chip that clears it — off screen with it. This bar is the
-          one control that is always there while a focus is engaged. */}
+      {/* A chip can filter its day down to nothing, which would take the divider and the active chip that clears it off screen. This bar is the one control that is always visible while a day filter is active. */}
       {dayFocus && !priorityMode && (
         <div className={styles.dayFocusBar}>
           <span className={styles.dayFocusLabel}>
@@ -1453,8 +1347,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
         </div>
       )}
 
-      {/* View-matched loading placeholders; table view renders its own
-          skeleton rows under its sticky header instead. */}
+      {/* View-matched loading placeholders; table view renders its own skeleton rows under its sticky header instead. */}
       {isLoading && !isTableView && (
         effectiveViewMode === "magazine" ? <MagazineSkeleton /> : <EntryListSkeleton />
       )}
@@ -1463,9 +1356,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
         /* Table view — flat, sortable, filterable grid of all entries */
         <EntryTableView
           entries={entries}
-          // Priority mode: the table needs the queue rows, not the flattened
-          // entries — `entries` drops the thread rows, and the server already
-          // withheld the articles those threads absorbed.
+          // Priority mode: the table needs the queue rows, not the flattened entries; `entries` drops the thread rows, and the server already left out the articles those threads group.
           queueRows={priorityMode ? queueRows : undefined}
           intelBadges={intelBadges}
           totalCount={totalCount ?? undefined}
@@ -1552,8 +1443,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                 );
               }
               if (item.type === "thread") {
-                // No expand-in-place here: the spine is a stack of beats, a
-                // row's shape rather than a card's. The card opens the story.
+                // No expand-in-place here: the thread's timeline is a vertical list that fits a row, not a card. Clicking the card opens the story.
                 return (
                   <MagazineThreadCard
                     key={item.key}
@@ -1579,9 +1469,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
             })}
           </div>
           {isFetchingNextPage && <div className={styles.loading}>Loading more...</div>}
-          {/* Counted over the rendered cards, not over `entries` — a queue made
-              entirely of story threads has no standalone entries and would
-              otherwise claim it was empty underneath a full grid. */}
+          {/* Counted over the rendered cards, not over `entries`: a queue made entirely of story threads has no standalone entries and would otherwise show the empty message under a full grid. */}
           {!isLoading && magazineItems.length === 0 && (
             <div className={styles.empty}>No entries to display</div>
           )}
@@ -1807,8 +1695,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
   );
 }
 
-/** Zero-count folders used to say "No entries to display", which reads as
-    broken and teaches nothing. Each folder explains how it gets a count. */
+/** Empty state for the Watched, Bookmarked and Starred folders: instead of a bare "No entries to display", which looks broken, each folder explains how articles get into it. */
 function EmptyFolderState({ folder }: { folder: string | null }) {
   const navigate = useNavigate();
   if (folder === "watched") {

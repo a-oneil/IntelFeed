@@ -22,8 +22,7 @@ export interface StageRun {
 }
 
 export interface EntryRuns {
-  /** Overall verdict: an error outranks a finished score, and a queued AI
-   *  pass behind a finished score is still in flight. */
+  /** Overall status: an error takes precedence over a finished score, and an entry with a finished score but a queued AI pass is still in flight. */
   status: "complete" | "errored" | "in_flight" | "unknown";
   /** Every pipeline stage in execution order (translate only when it ran). */
   runs: StageRun[];
@@ -80,9 +79,7 @@ function stateText(run: StageRun): string {
   }
 }
 
-/** Per-entry pipeline status (engine phase 5). The trigger is whatever the
- *  caller passes as children — in the reader, the published timestamp — turned
- *  into a quiet link; nothing is fetched until it is opened. */
+/** Per-entry pipeline status popover. The trigger is whatever the caller passes as children (in the reader, the published timestamp), rendered as a plain button; nothing is fetched until it is opened. */
 export function EntryPipelineStatus({
   entryId,
   className,

@@ -139,8 +139,8 @@ async def delete_user(
     if user.role == "system":
         raise AppError(code="forbidden", message="The system service account cannot be deleted", status_code=403)
 
-    # Automation rules execute with their owner's identity; disable them rather
-    # than letting the FK SET NULL leave them firing as nobody.
+    # Automation rules run with their owner's identity; disable them rather than
+    # let the FK's SET NULL leave them running with no owner.
     from sqlalchemy import update as sa_update
 
     from app.models.automation_rule import AutomationRule

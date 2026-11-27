@@ -24,7 +24,7 @@ class ThreatBoardItem(BaseModel):
     prior_rule_repos: dict[str, int] = Field(description="Prior-rule count per upstream repo")
     last_seen: str | None
     state: str = Field(description="open | tracked | handled | muted")
-    is_generic: bool = Field(description="Held out of the ranking as an extraction artefact")
+    is_generic: bool = Field(description="Held out of the ranking as an extraction artifact")
     score: float
     action: str = Field(description="write | extend | diff | audit | merge | review")
     articles: int = Field(default=0, description="Distinct window entries behind the attention count")

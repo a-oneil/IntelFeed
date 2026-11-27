@@ -397,7 +397,7 @@ export const useThingStore = create<ThingState>()(
 
 ### CSS Modules
 
-Each component has a `.module.css` file next to it. There is no Tailwind. Colours and spacing come from CSS variables defined in `src/index.css`, including the entity colours (`--entity-actor`, `--entity-malware` and so on). Themes swap those variables at run time with `applyTheme()`, which also picks readable text colours from the background.
+Each component has a `.module.css` file next to it. There is no Tailwind. Colors and spacing come from CSS variables defined in `src/index.css`, including the entity colors (`--entity-actor`, `--entity-malware` and so on). Themes swap those variables at run time with `applyTheme()`, which also picks readable text colors from the background.
 
 ```tsx
 import styles from "./ThingCard.module.css";
@@ -568,7 +568,7 @@ Commit the migration with the model change. On deploy the API applies it on star
 
 - **Change existing components** before adding new ones.
 - **No inline styles.** Styles go in the component's `.module.css`.
-- **Colours and sizes** come from CSS variables in `src/index.css`.
+- **Colors and sizes** come from CSS variables in `src/index.css`.
 - **Names:** `PascalCase` for components, `camelCase` for functions, `use` prefix for hooks.
 - **Check phone width** for any visual change.
 - **Error messages** are short and say what to do next.
@@ -637,7 +637,7 @@ docker compose -f docker-compose.dev.yml exec celery-worker celery -A app.worker
 ### Frontend
 
 - Vite serves source maps in dev, so the browser's DevTools show your real source lines.
-- If a theme colour does not apply, inspect the element's computed styles to see which variable wins.
+- If a theme color does not apply, inspect the element's computed styles to see which variable wins.
 
 ### Workers & Search
 

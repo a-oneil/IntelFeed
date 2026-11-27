@@ -225,7 +225,7 @@ async def test_enqueue_created_trigger_needs_something_new(db_session: AsyncSess
     # Only an autolinker link to an established entity: nothing new.
     await _link_actor(db_session, entry, "Warlock")
     assert await enqueue_adjudication(db_session, entry.id, {}, _payload()) == adj.SKIPPED_NOTHING_NEW
-    # A minted entity on the same entry flips it.
+    # An entity the analysis created on the entry is something new, so the review is queued.
     await _link_actor(db_session, entry, "Water Utility Co", source="ai", minted=True, article_count=1)
     entry2 = await _make_entry(db_session, feed)
     await _request(db_session, entry2)
@@ -278,7 +278,7 @@ async def test_enqueue_creates_request_row_for_manual_runs(db_session: AsyncSess
 @pytest.mark.asyncio
 async def test_manifest_lists_links_with_provenance_and_candidates(db_session: AsyncSession, feed):
     entry = await _make_entry(db_session, feed)
-    # The catalogue already holds Warlock as malware with 14 articles.
+    # The catalog already holds Warlock as malware with 14 articles.
     warlock = MalwareFamily(name="Warlock", aliases=["Warlock Ransomware"], article_count=14)
     db_session.add(warlock)
     await db_session.flush()
@@ -1727,8 +1727,8 @@ async def test_feed_tags_origin_and_filters_adjudicator_rows(client, admin_heade
                 "entry_id": str(entry.id),
                 "entity": {"name": "Water Utility Co", "aliases": [], "article_count": 1},
             },
-            after={"reason": "victim organisation", "confidence": "high"},
-            reasoning="victim organisation",
+            after={"reason": "victim organization", "confidence": "high"},
+            reasoning="victim organization",
             applied=False,
         )
     )
@@ -2103,8 +2103,8 @@ async def test_backlog_owes_a_second_look_to_articles_with_pending_verdicts(db_s
 @pytest.mark.asyncio
 async def test_shadow_runs_never_sample_the_rolling_breaker(db_session: AsyncSession, feed, monkeypatch):
     """The rolling breaker pauses dispatch for an hour. A shadow run changes
-    nothing, so sampling one would throttle the soak that is meant to collect
-    verdicts at full rate."""
+    nothing, so sampling one would throttle the shadow period that is meant to
+    collect verdicts at full rate."""
     _use_fake_redis(monkeypatch)
     await _seed_settings(db_session, adjudication_mode="shadow")
     cfg = await adj._settings(db_session)
@@ -2342,7 +2342,7 @@ async def test_keep_counter_never_touches_shadow_or_demoted_edges(db_session: As
 )
 async def test_demote_never_touches_analyst_or_corroborated_edges(db_session: AsyncSession, feed, source, verdict):
     """One article failing to assert a claim is not grounds to overrule an
-    analyst, an external catalogue, or the three reviews that corroborated it."""
+    analyst, an external catalog, or the three reviews that corroborated it."""
     entry = await _make_entry(db_session, feed)
     edge = await _edge_for(db_session, entry)
     edge.source = source
@@ -2449,7 +2449,7 @@ def test_the_prompt_still_demands_a_verdict_on_every_edge():
 
 
 @pytest.mark.asyncio
-async def test_backfill_selects_only_undecided_analysed_entries(db_session: AsyncSession, feed):
+async def test_backfill_selects_only_undecided_analyzed_entries(db_session: AsyncSession, feed):
     from app.models.ai_result import AIResult
     from app.models.ai_task import AITask
 
@@ -2459,7 +2459,7 @@ async def test_backfill_selects_only_undecided_analysed_entries(db_session: Asyn
     db_session.add(task)
     await db_session.flush()
 
-    async def analysed(entry):
+    async def analyzed(entry):
         db_session.add(
             AIResult(
                 entry_id=entry.id,
@@ -2474,22 +2474,22 @@ async def test_backfill_selects_only_undecided_analysed_entries(db_session: Asyn
         )
 
     undecided = await _make_entry(db_session, feed)
-    await analysed(undecided)
+    await analyzed(undecided)
     waiting = await _make_entry(db_session, feed)
-    await analysed(waiting)
+    await analyzed(waiting)
     row = await _request(db_session, waiting)
     row.adjudication_status = adj.SKIPPED_BUDGET
     done = await _make_entry(db_session, feed)
-    await analysed(done)
+    await analyzed(done)
     row = await _request(db_session, done)
     row.adjudication_status = adj.COMPLETED
     row.adjudicated_at = datetime.now(UTC)
-    never_analysed = await _make_entry(db_session, feed)
+    never_analyzed = await _make_entry(db_session, feed)
     await db_session.flush()
 
     picked = set(await adj.select_backfill_entries(db_session))
     assert picked == {undecided.id, waiting.id}
-    assert done.id not in picked and never_analysed.id not in picked
+    assert done.id not in picked and never_analyzed.id not in picked
 
 
 @pytest.mark.asyncio
@@ -3564,7 +3564,7 @@ async def test_the_link_cap_keeps_the_rows_only_this_review_can_judge(db_session
     assert f"link:threat_actor:{minted.id}" in ids
     assert f"link:threat_actor:{asserted.id}" in ids
     assert len(dropped) == 5 and all(it.source == "auto_link" for it in dropped)
-    # One slot is left over after the two that matter, and it goes to the bulk.
+    # One slot is left over after those two, and it goes to one of the established autolinker links.
     assert len([b for b in bulk if f"link:threat_actor:{b.id}" in ids]) == 1
     # The model is told the list is partial, and the note is never an item.
     assert "not in this list" in block and "_note" not in ids
@@ -3608,7 +3608,7 @@ async def test_scope_entities_only_reviews_what_this_article_minted(db_session: 
     assert {it.item_id for it in items} == {f"link:threat_actor:{minted.id}"}
     assert "T1486" not in block
 
-    # `links` alone keeps every link but answers no catalogue question, so
+    # `links` alone keeps every link but answers no catalog question, so
     # nothing is veto- or merge-eligible.
     items, _ = await build_manifest(db_session, entry, _payload(), scope={"links"})
     assert {it.item_id for it in items} == {
@@ -3849,7 +3849,7 @@ async def test_review_domain_facet_spans_both_logs(client, admin_headers, db_ses
     resp = await client.post("/api/admin/hygiene/bulk-apply", headers=admin_headers, json={"domain": "relationships"})
     assert resp.json()["total"] == 1
 
-    # Dismiss honours the facet too.
+    # Dismiss honors the facet too.
     resp = await client.post(
         "/api/admin/hygiene/review-groups/dismiss", headers=admin_headers, json={"domain": "relationships"}
     )
@@ -4134,7 +4134,7 @@ async def test_held_link_is_a_links_proposal():
     assert proposal_domain("entity_maintenance", adj.ACTION_HELD_LINK) == "links"
 
 
-async def _analysed(db_session, entry, payload):
+async def _analyzed(db_session, entry, payload):
     from app.models.ai_result import AIResult
     from app.models.ai_task import AITask
 
@@ -4162,19 +4162,19 @@ async def _analysed(db_session, entry, payload):
 
 @pytest.mark.asyncio
 async def test_settle_runs_late_holds_against_the_stored_analysis(db_session: AsyncSession, feed):
-    from app.intelligence.autolink_reconcile import settle_held_on_analysed_entries
+    from app.intelligence.autolink_reconcile import settle_held_on_analyzed_entries
 
     named, royal, held_named = await _held_royal(db_session, feed, resolution=None)
     other, _royal, held_other = await _held_royal(db_session, feed, resolution=None, royal=royal)
     _waiting, _royal, held_waiting = await _held_royal(db_session, feed, resolution=None, royal=royal)
-    await _analysed(db_session, named, _payload(malware=[{"name": "Royal"}]))
-    await _analysed(db_session, other, _payload())
+    await _analyzed(db_session, named, _payload(malware=[{"name": "Royal"}]))
+    await _analyzed(db_session, other, _payload())
     for entry in (named, other):
         row = await _request(db_session, entry)
         row.adjudication_status = adj.COMPLETED
     await db_session.flush()
 
-    totals = await settle_held_on_analysed_entries(db_session)
+    totals = await settle_held_on_analyzed_entries(db_session)
     assert totals == {"entries": 2, "promoted": 1, "rejected": 1}
     assert held_named.resolution == "promoted" and held_other.resolution == "rejected"
     assert held_waiting.resolution is None  # its analysis has not run; it settles when it lands

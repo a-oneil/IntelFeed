@@ -1,4 +1,4 @@
-"""Smoke tests for the round-2 dashboard board widgets.
+"""Smoke tests for the dashboard board widgets.
 
 Mirrors tests/test_widgets.py: hit the endpoint with auth, assert 200 and the
 top-level response shape. A few tests seed rows to prove the aggregate actually
@@ -167,7 +167,7 @@ async def test_triage_flow(client: AsyncClient, auth_headers: dict, db_session, 
     assert "days" in data
     assert "backlog" in data
     # Calendar-aligned: exactly `days` full days ending today, no partial leading
-    # column (an unaligned start used to emit a 15th, near-empty phantom day).
+    # column (an unaligned start would add a 15th, mostly empty day).
     assert len(data["days"]) == 14
     assert data["days"][-1]["date"] == datetime.now(UTC).date().isoformat()
     assert sum(d["read"] for d in data["days"]) == 1
@@ -320,7 +320,7 @@ async def test_day_window_endpoints_accept_the_full_range_band(client: AsyncClie
 
 @pytest.mark.asyncio
 async def test_kev_matches_exposes_kev_fields(client: AsyncClient, auth_headers: dict, db_session):
-    """kev-matches now carries is_kev + kev_due_date for the deadline column."""
+    """kev-matches carries is_kev + kev_due_date for the deadline column."""
     from app.models.entry import Entry
     from app.models.feed import Feed
 

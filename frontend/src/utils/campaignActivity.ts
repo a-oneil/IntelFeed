@@ -1,8 +1,4 @@
-/**
- * A campaign nobody has added to in this long has stopped being tracked, whether
- * or not its status says so. Two months is roughly when a story that is still
- * running would have produced something.
- */
+/** A campaign nobody has added to in this long has stopped being tracked, whether or not its status says so. Two months is roughly when a story that is still running would have produced something. */
 export const QUIET_AFTER_DAYS = 60;
 
 /** Days since the campaign's newest article, or null when it holds none. */

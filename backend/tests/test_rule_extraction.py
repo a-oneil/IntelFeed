@@ -125,7 +125,7 @@ def test_two_spl_queries_in_one_article_get_distinct_numbered_titles():
 
 
 def test_spl_in_html_pre_is_not_extracted_twice():
-    """The query is read from its <pre> block and again from the flattened text."""
+    """The query is read from its <pre> block and again from the flattened text, but stored once."""
     html = (
         "<p>Run this:</p><pre>index=wineventlog EventCode=4698 TaskContent=&quot;*rundll32*&quot;<br>"
         "| stats count by host, TaskName</pre>"

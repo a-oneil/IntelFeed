@@ -57,9 +57,7 @@ export interface ExtractionParams {
   offset?: number;
 }
 
-// entity_type → REST slug used by the per-type delete/update endpoints.
-// Observables are absent on purpose: a ledger row has no /entities/… resource
-// (it is removed by tombstone, see useDeleteExtractionEntity).
+// entity_type → REST slug used by the per-type delete/update endpoints. Observables are absent on purpose: a ledger row has no /entities/… resource (see useDeleteExtractionEntity and useDeleteExtractionEntities for how observables are removed).
 const DELETE_SLUGS: Partial<Record<ExtractionType, string>> = {
   threat_actor: "threat-actors",
   malware: "malware",
@@ -72,18 +70,14 @@ const DELETE_SLUGS: Partial<Record<ExtractionType, string>> = {
 // Only these types support the /entities/{type}/merge endpoint.
 export const MERGEABLE_TYPES = new Set<ExtractionType>(["threat_actor", "malware", "tool"]);
 
-// Types whose canonical name is editable and that carry a free-text alias list.
-// CVE/TTP identities are their external ids (CVE-…, T…) and cannot be renamed
-// or aliased from here.
+// Types whose canonical name is editable and that carry a free-text alias list. CVE/TTP identities are their external ids (CVE-…, T…) and cannot be renamed or aliased from here.
 export const NAMEABLE_TYPES = new Set<ExtractionType>(["threat_actor", "malware", "tool"]);
 export const ALIAS_TYPES = new Set<ExtractionType>(["threat_actor", "malware", "tool"]);
 
-// Types /entities/convert can reclassify *from*. Observables aren't entities
-// with a name to re-home — an IP is an IP — so their rows get no convert menu.
+// Types /entities/convert can reclassify *from*. Observables have no name that could belong to another type (an IP address is always an IP address), so their rows get no convert menu.
 export const CONVERTIBLE_TYPES = new Set<ExtractionType>(["threat_actor", "malware", "tool", "cve", "ttp"]);
 
-// Every type /entities/convert understands, for the per-row "Convert to…" menu.
-// cve/ttp need an external identifier when they are the *target*.
+// Every type /entities/convert accepts, for the per-row "Convert to…" menu. cve/ttp need an external identifier when they are the *target*.
 export const CONVERT_TARGETS: { key: string; label: string; needsIdentifier?: "cve" | "ttp" }[] = [
   { key: "threat_actor", label: "Threat Actor" },
   { key: "malware", label: "Malware Family" },
@@ -135,8 +129,7 @@ export function useInvalidateExtraction() {
   const qc = useQueryClient();
   return () => {
     qc.invalidateQueries({ queryKey: ["extraction"] });
-    // Observable rows are shared with the ledger browser, which keys its own
-    // queries — a deny/confirm here has to refresh both surfaces.
+    // Observable rows are shared with the ledger browser, which has its own query keys, so a deny/confirm here has to refresh both views.
     qc.invalidateQueries({ queryKey: ["observables"] });
   };
 }
@@ -155,7 +148,7 @@ export function useConfirmExtraction() {
   });
 }
 
-/** "These two are different things" — the pair stops counting as a likely duplicate. */
+/** Marks two entities as different things, so the pair no longer counts as a likely duplicate. */
 export function useNotDuplicate() {
   const invalidate = useInvalidateExtraction();
   return useMutation({
@@ -171,9 +164,7 @@ export function useDeleteExtractionEntity() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ entityType, id, entryId }: { entityType: ExtractionType; id: string; entryId?: string }) => {
-      // From a per-entry drawer, removing an observable means removing THIS
-      // article's sighting — never a global tombstone (that is the ledger's
-      // deny action, with its own confirm). The row itself stays.
+      // From a per-entry drawer, removing an observable means removing THIS article's sighting, never a global tombstone (that is the ledger's deny action, with its own confirm). The observable row itself stays.
       if (entityType === "observable") {
         if (!entryId) throw new Error("Removing an observable from a drawer needs its entry id");
         await api.delete(`/entries/${entryId}/observables/${id}`);
@@ -190,14 +181,11 @@ export function useDeleteExtractionEntity() {
   });
 }
 
-/** Delete from Engine › Entities: drops the entities AND adds their names to
- *  the analyst do-not-recreate denylist, so the one-pass extractor and the
- *  autolinker stop re-minting them. The plain per-entity delete above (used by
- *  the entry drawer) deliberately does not deny.
+/**
+ * Delete from Engine › Entities: deletes the entities AND adds their names to the analyst do-not-recreate denylist, so the one-pass extractor and the autolinker stop re-creating them. The plain per-entity delete above (used by the entry drawer) deliberately does not deny.
  *
- *  Observables have no name denylist: `deny` (the default) tombstones the
- *  ledger rows in place; `deny: false` hard-deletes them, leaving the values
- *  free to be captured again. Other types ignore the flag. */
+ * Observables have no name denylist: `deny` (the default) tombstones the ledger rows in place; `deny: false` hard-deletes them, so the values can be captured again. Other types ignore the flag.
+ */
 export function useDeleteExtractionEntities() {
   const invalidate = useInvalidateExtraction();
   return useMutation({
@@ -229,8 +217,7 @@ export interface ExtractionBulkResult {
   skipped: number;
 }
 
-/** The Entities lens's bulk buttons: act on every entity the table's filters
- *  show (Confirm all, Delete all, Merge all, Not duplicates). */
+/** The Entities lens's bulk buttons: act on every entity the table's filters match (Confirm all, Delete all, Merge all, Not duplicates). */
 export function useExtractionBulk() {
   const invalidate = useInvalidateExtraction();
   const qc = useQueryClient();
@@ -379,8 +366,7 @@ export function useRemoveDenylistEntry() {
   });
 }
 
-/** The articles behind an entity in the Review lenses: its creating article
- * first, then its newest links, each with the paragraph naming it. */
+/** The articles behind an entity in the Review lenses: the article it was created from first, then its newest links, each with the paragraph that names it. */
 export function useEntityEvidence(entityType: string, entityId: string | null) {
   return useQuery({
     queryKey: ["extraction", "evidence", entityType, entityId],

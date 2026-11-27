@@ -1,4 +1,4 @@
-"""Tests for github_rule_import service — Phase 3 of GitHub repo feeds."""
+"""Tests for the github_rule_import service, which imports rules from GitHub repo feeds."""
 
 import uuid
 from datetime import UTC, datetime
@@ -939,8 +939,7 @@ class TestScoreRuleRelevance:
 
         score = await score_rule_relevance(db, entry, uuid.uuid4())
         # 10 (authority) + 5 (stable) + 20 (3 techniques breadth) = 35
-        # Coverage gap: all 3 are uncovered → min(3*12, 35) = 35
-        # Total could be up to 70 depending on coverage query
+        # Coverage gap: all 3 are uncovered → min(3*12, 35) = 35, for a total of 70
         assert score >= 35
 
     @pytest.mark.asyncio
@@ -958,7 +957,7 @@ class TestScoreRuleRelevance:
         db.execute.return_value = MockRowResult([])
 
         score = await score_rule_relevance(db, entry, uuid.uuid4())
-        # 5 (one technique) + some coverage gap
+        # 5 (one technique) + 12 (one uncovered technique) = 17
         assert score >= 5
 
     @pytest.mark.asyncio

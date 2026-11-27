@@ -51,8 +51,7 @@ describe("describeStages", () => {
   });
 
   it("turns the AI off for one feed without disturbing autolinking", () => {
-    // The gap this closes: mode="none" was the only lever, and it killed
-    // autolinking and extraction too.
+    // Without a separate AI switch, mode="none" would be the only way to stop the AI, and it turns off autolinking and extraction too.
     const vals = values({ ai_analysis_enabled: false });
     expect(stage(vals, "ai").on).toBe(false);
     expect(stage(vals, "autolink").on).toBe(true);
@@ -78,8 +77,7 @@ describe("describeStages", () => {
   });
 
   it("gives no row to the ledger scan, which is not this feed's to switch", () => {
-    // `_scan_entry_observables` never reads the Feed, so a checkbox for it was
-    // decoration. The sentence below still reports that it happens.
+    // `_scan_entry_observables` never reads the Feed, so a checkbox for it would do nothing. The summary sentence still reports that the scan happens.
     const ids = describeStages(values(), ctx()).map((s) => s.id);
     expect(ids).not.toContain("observables");
   });
@@ -165,15 +163,13 @@ describe("summarizeStages", () => {
   it("says plainly that nothing is extracted, ledger included", () => {
     const text = summarizeStages(values({ intel_extraction_mode: "none" }), ctx(true));
     expect(text).toContain("Nothing is pulled out of them");
-    // The ledger scan follows the master switch now, so the sentence must not
-    // promise it is still happening.
+    // The ledger scan follows the master switch, so the sentence must not say it still happens.
     expect(text).toContain("no indicator matching");
     expect(text).toContain("no CVE lookups or saved rules");
   });
 
-  it("says what still happens to an article the feed does not analyse", () => {
-    // Scoring, story threads and automations ignore the mode; the sentence
-    // used to say "no scoring".
+  it("says what still happens to an article the feed does not analyze", () => {
+    // Scoring, story threads and automations ignore the mode, so the sentence must not say "no scoring".
     const text = summarizeStages(values({ intel_extraction_mode: "none" }), ctx(true));
     expect(text).toContain("get a priority score");
     expect(text).toContain("story threads");
@@ -213,8 +209,7 @@ describe("pipeline plans", () => {
     const p = plan({ autolink: { enabled: false } }, { autolink: "category", extract: "legacy" });
     const autolink = describeStages(values(), ctx(true, p)).find((r) => r.id === "autolink")!;
 
-    // The plan wins over the Feed booleans, so a checkbox here would write a
-    // value nothing reads.
+    // The plan takes precedence over the Feed booleans, so a checkbox here would write a value nothing reads.
     expect(autolink.scope).toBe("plan");
     expect(autolink.planScope).toBe("category");
     expect(autolink.disabled).toBe(true);
@@ -231,9 +226,8 @@ describe("pipeline plans", () => {
     expect(regex.on).toBe(true);
   });
 
-  it("keeps extraction off on an unanalysed feed even when a plan enables it", () => {
-    // The extract task checks mode none itself, so the plan's "enabled" never
-    // reaches it.
+  it("keeps extraction off on an unanalyzed feed even when a plan enables it", () => {
+    // The extract task checks for mode "none" itself, so the plan's "enabled" has no effect on it.
     const p = plan({ extract: { enabled: true } }, { autolink: "legacy", extract: "global" });
     const rows = describeStages(
       values({ intel_extraction_mode: "none", auto_extract_on_ingest: true, extract_detection_rules: true }),
@@ -252,7 +246,7 @@ describe("pipeline plans", () => {
     expect(text).not.toContain("tagged with entities you already track");
   });
 
-  it("reports the ledger scan only while the feed is analysed", () => {
+  it("reports the ledger scan only while the feed is analyzed", () => {
     expect(summarizeStages(values(), ctx(true))).toContain(
       "checked against your IOC list"
     );

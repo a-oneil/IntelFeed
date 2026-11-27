@@ -417,7 +417,7 @@
 /* --------------------------------------------------------------- phone --- */
 @media (max-width: 720px) {
   .main { grid-template-columns: 1fr; }
-  /* The rail becomes a horizontal chapter strip rather than eating the screen. */
+  /* The rail becomes a horizontal chapter strip so it does not take up the whole screen above the content. */
   .rail {
     display: flex;
     gap: 2px;

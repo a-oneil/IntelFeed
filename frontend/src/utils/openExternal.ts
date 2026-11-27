@@ -8,9 +8,7 @@ import {
   type InterceptContext,
 } from "@/utils/externalLinks";
 
-/**
- * Everything the link decision needs, read from the stores at call time.
- */
+/** Everything the link decision needs, read from the stores at call time. */
 export function currentInterceptContext(): InterceptContext {
   const { mode, trustedHosts } = readExternalLinkSettings(useAuthStore.getState().user);
   return {
@@ -21,20 +19,15 @@ export function currentInterceptContext(): InterceptContext {
 }
 
 /**
- * `window.open` for a URL that came from feed content, behind the same
- * confirmation as a clicked link. Use this instead of `window.open` wherever
- * the app opens a feed-supplied external URL from code, because the click
- * listener in ExternalLinkGuard never sees those.
+ * `window.open` for a URL that came from feed content, behind the same confirmation as a clicked link. Use this instead of `window.open` wherever the app opens a feed-supplied external URL from code, because the click listener in ExternalLinkGuard never sees those.
  *
- * `features` is passed through untouched when no confirmation is needed, so
- * swapping this in doesn't change what the caller's tab gets.
+ * `features` is passed through untouched when no confirmation is needed, so swapping this in doesn't change what the caller's tab gets.
  */
 export function openExternalUrl(
   url: string,
   { features = "noopener,noreferrer", text = "" }: { features?: string; text?: string } = {},
 ): void {
-  // Not an outside link (same site, or not a web URL): only allow safe
-  // same-origin relative paths (never protocol-relative // or javascript:/data:).
+  // Not an outside link (same site, or not a web URL): only allow safe same-origin relative paths (never protocol-relative // or javascript:/data:).
   if (!isExternalWebUrl(url)) {
     const trimmed = url.trim();
     if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
@@ -59,11 +52,7 @@ export function openExternalUrl(
   openAllowedExternal(url, features);
 }
 
-/**
- * Open an outside URL that has already passed the confirmation: a new tab by
- * default, or this tab when Settings → Reading → "Open links in new tab" is
- * off.
- */
+/** Open an outside URL that has already passed the confirmation: a new tab by default, or this tab when Settings → Reading → "Open links in new tab" is off. */
 export function openAllowedExternal(url: string, features = "noopener,noreferrer"): void {
   if (currentReadingPrefs().open_links_new_tab) {
     window.open(url, "_blank", features);

@@ -164,7 +164,7 @@ def test_three_sources_one_key_manual_lookups_not_for_profit():
     for source_type in ABUSECH:
         cls = SOURCE_REGISTRY[source_type]
         assert cls.requires == (Key(),) and cls.shared_key_group == "abuse_ch"
-        # A lookup sends the observable to abuse.ch: never on its own.
+        # A lookup sends the observable to abuse.ch, so it only runs when someone asks (manual trigger).
         assert cls.egress == Egress.SHARES_IOC and cls.default_trigger_mode == "manual"
         assert cls.license.commercial_ok is False
         assert cls.scope == {"status": ("active",)}
@@ -183,7 +183,7 @@ def test_reading_the_exports():
 
     rows = list(read_export(io.StringIO(URLHAUS_CSV)))
     assert [r["url_status"] for r in rows] == ["online", "offline", "offline"]
-    # A URL speaks for itself and for its host.
+    # A URL row yields keys for the URL and for its host.
     assert URLhausAdapter.export_keys(rows[0]) == [
         ("url", "http://vektorex.com/source/Z/5016223.exe"),
         ("domain", "vektorex.com"),
@@ -553,7 +553,7 @@ async def test_an_export_withdraws_only_what_it_wrote(db_session, ledger):
     key = _key()
     fewer = _zipped("\n".join(line for line in THREATFOX_CSV.splitlines() if "139.180.203.104" not in line))
 
-    # A lookup reaches what the export doesn't hold: the export leaves it be.
+    # A lookup can find what the export doesn't hold; the export leaves that result alone.
     await _lookup(db_session, ledger, "threatfox", ip, SEARCH_IOC)
     looked_up = await _context(db_session, ip.id, "threatfox")
     stats = await sync_export(db_session, _gateway("threatfox", _server(fewer), key), key, ThreatFoxAdapter)
@@ -561,14 +561,14 @@ async def test_an_export_withdraws_only_what_it_wrote(db_session, ledger):
     assert await _context(db_session, ip.id, "threatfox") == looked_up
     assert await _edges_to(db_session, ip.id)
 
-    # The export answers it, and so owns it: once it leaves, it is withdrawn.
+    # A result the export wrote belongs to the export: once the IOC drops out of it, the result is withdrawn.
     full = _zipped(THREATFOX_CSV)
     await sync_export(db_session, _gateway("threatfox", _server(full), key), key, ThreatFoxAdapter)
     stats = await sync_export(db_session, _gateway("threatfox", _server(fewer), key), key, ThreatFoxAdapter)
     assert stats["withdrawn"] == 1
     assert await _context(db_session, ip.id, "threatfox") == {}
 
-    # A lookup after an export answer takes it over.
+    # A lookup after the export wrote the result takes ownership of it.
     await sync_export(db_session, _gateway("threatfox", _server(full), key), key, ThreatFoxAdapter)
     await _lookup(db_session, ledger, "threatfox", ip, SEARCH_IOC, refresh=True)
     stats = await sync_export(db_session, _gateway("threatfox", _server(fewer), key), key, ThreatFoxAdapter)

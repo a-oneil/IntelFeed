@@ -121,7 +121,7 @@ describe("CampaignIntakeComposer", () => {
     });
 
     await waitFor(() => expect(screen.getByText(/actor: is not a field/)).toBeInTheDocument());
-    // A caution, not a refusal — the query still runs as text.
+    // A warning, not an error: the query still runs as plain text.
     expect(screen.getByRole("button", { name: "Follow" })).toBeEnabled();
   });
 

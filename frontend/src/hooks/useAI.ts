@@ -121,9 +121,7 @@ export function useDeleteAIProvider() {
 // --- Personal AI (Settings → My AI) ---
 
 export function useMyAIPolicy(enabled = true) {
-  // The cheap read: the admin's policy and whether I have any routes. Keyed
-  // under "my-ai" so every mutation that invalidates the overview refreshes
-  // this too.
+  // The cheap read: the admin's policy and whether the current user has any routes. Keyed under "my-ai" so every mutation that invalidates the overview refreshes this too.
   return useQuery({
     queryKey: ["my-ai", "policy"],
     queryFn: async () => {
@@ -143,8 +141,7 @@ export function useMyAI(enabled = true) {
       return data;
     },
     enabled,
-    // Read on every reader AI panel for the key dots; the mutations that
-    // change it invalidate it, so it can stay fresh for a while.
+    // Read on every reader AI panel for the key dots; the mutations that change it invalidate it, so a long staleTime is safe.
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -199,10 +196,7 @@ export function useDeleteMyRoute() {
 /**
  * Test a provider and route the AI tasks at it, in one call.
  *
- * Creating a provider configures nothing — work runs off task assignments, and
- * the startup seeder only fills those from a provider that already existed when
- * the API booted. Without this, a provider added through the UI did nothing
- * until the next restart.
+ * Creating a provider configures nothing: work runs off task assignments, and the startup seeder only fills those from a provider that already existed when the API booted. Without this call, a provider added through the UI does nothing until the next restart.
  */
 export function useCommissionAIProvider() {
   const qc = useQueryClient();
@@ -234,8 +228,7 @@ export function useTestAIProvider() {
       );
       return data;
     },
-    // Test refreshes the provider's cached model list server-side — refetch so
-    // newly pulled models show up in the assignment dropdowns immediately.
+    // Test refreshes the provider's cached model list server-side; refetch so newly pulled models show up in the assignment dropdowns immediately.
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ai-providers"] }),
   });
 }
@@ -352,10 +345,7 @@ export interface AgentToolDef {
   mutating?: boolean;
 }
 
-/**
- * The backend agent-tool registry (GET /api/tools/tools). Used by the Prompt
- * Workspace's Ollama tools editor; `mutating` tools are never offered there.
- */
+/** The backend agent-tool registry (GET /api/tools/tools). Used by the Prompt Workspace's Ollama tools editor; `mutating` tools are never offered there. */
 export function useAgentTools(opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["agent-tools"],
@@ -541,8 +531,7 @@ export function useRunAIOnEntry() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["ai-results", data.entry_id] });
     },
-    // Every call, failed ones included, counts toward the personal caps the
-    // My AI overview and the copilot config report.
+    // Every call, failed ones included, counts toward the personal caps the My AI overview and the copilot config report.
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["my-ai"] });
       qc.invalidateQueries({ queryKey: ["copilot-config"] });
@@ -668,12 +657,7 @@ export interface CopilotContext {
   read_only?: boolean;
 }
 
-/**
- * A pending "write-with-confirm" action proposed by the agent. Arrives on the
- * copilot stream (right before `done`) as a `confirm_request` event, one per
- * write the model asked for. Nothing has run: the user must approve/cancel it
- * via {@link CopilotConfirmResponse}.
- */
+/** A pending "write-with-confirm" action proposed by the agent. Arrives on the copilot stream (right before `done`) as a `confirm_request` event, one per write the model asked for. Nothing has run yet: the user must approve or cancel it via {@link CopilotConfirmResponse}. */
 export interface CopilotConfirmRequest {
   action_id: string;
   /** The registry tool that will run. */
@@ -727,9 +711,7 @@ export interface StreamCopilotOptions {
 }
 
 /**
- * Streams the global copilot answer via SSE-over-fetch. EventSource can't set
- * an Authorization header, so we use fetch() + a ReadableStream reader that
- * parses SSE `data:` frames.
+ * Streams the global copilot answer via SSE-over-fetch. EventSource can't set an Authorization header, so this uses fetch() + a ReadableStream reader that parses SSE `data:` frames.
  *
  * Backend events (discriminated by `type`):
  *   - {type:"chunk", text}                                        → onChunk
@@ -740,7 +722,7 @@ export interface StreamCopilotOptions {
  *   - {type:"error", message}                                     → onError
  *
  * Tolerates absence of tool_call/tool_result frames (degrades to plain text).
- * Resolves the base URL the same way api/client.ts does (baseURL "/api").
+ * Uses the same "/api" base URL as api/client.ts.
  */
 export async function streamCopilotChat(
   options: StreamCopilotOptions,
@@ -865,7 +847,7 @@ export async function streamCopilotChat(
     return;
   }
 
-  // Stream ended without an explicit `done` frame — still resolve gracefully.
+  // Stream ended without an explicit `done` frame: still resolve gracefully.
   if (!doneEmitted) options.onDone(null);
 }
 

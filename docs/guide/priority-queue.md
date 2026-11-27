@@ -88,7 +88,7 @@ to be about attacks on healthcare.
 buttons. All users' votes together adjust the shared ranking by at most 10%
 either way, so a few votes cannot change what everyone sees.
 
-If an admin has turned on **Personalised Radar**, a **Your Radar** card
+If an admin has turned on **Personalized Radar**, a **Your Radar** card
 appears under **Settings → Reading**. Switch it on and your own votes set a
 personal weight for each signal family, refitted nightly. These weights change
 the order of article lists sorted by `sort:radar`. They don't reorder the

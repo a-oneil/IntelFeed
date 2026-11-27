@@ -1,20 +1,18 @@
-"""Is this instance actually usable yet?
+"""Onboarding status: is this instance usable yet?
 
-The onboarding wizard used to onboard people into *configuring* IntelFeed
-without ever checking the configuration took. The two failure modes it could
-not see are the ones that bite hardest on a fresh install:
+The onboarding wizard uses this to check that the configuration worked. It
+covers the two common failures on a fresh install:
 
 * **Nothing seeded.** The autolinker matches entry text against a vocabulary of
   countries, techniques, weaknesses, vendors and products. With none of it
-  seeded, articles ingest perfectly and link to absolutely nothing — and the
-  only symptom is empty entity pages, which reads as "this product is broken"
-  rather than "run the seeder".
-* **Nothing polled.** You can finish a wizard having added forty feeds and
-  still be looking at an empty reader, with no way to tell whether that is
-  normal latency or a dead configuration.
+  seeded, articles ingest but link to nothing, and the only symptom is empty
+  entity pages, which gives no hint that the fix is to run the seeder.
+* **Nothing polled.** A user can finish the wizard with forty feeds added and
+  still see an empty reader, with no way to tell whether that is normal
+  latency or a broken configuration.
 
-So this endpoint answers both, cheaply, as counts the wizard can show and
-re-poll. It is read-only and takes no arguments.
+This endpoint reports both as counts the wizard can show and re-poll. It is
+read-only and takes no arguments.
 """
 
 import os
@@ -59,10 +57,9 @@ def _seed_command() -> str:
     """The whole line to paste, compose file included.
 
     The seeders run inside the api container, so the command depends on which
-    compose file this instance runs under — which the browser has no way to
-    know. The UI used to wrap the script in a hardcoded `-f
-    docker-compose.prod.yml`, wrong on every dev install, so resolve it here
-    off the same ENV var config.py reads.
+    compose file this instance runs under, which the browser cannot know. A
+    hardcoded `-f docker-compose.prod.yml` in the UI is wrong on every dev
+    install, so the server picks the file from the same ENV var config.py reads.
     """
     env = os.getenv("ENV", "development").lower()
     compose = "docker-compose.prod.yml" if env == "production" else "docker-compose.dev.yml"
@@ -107,7 +104,7 @@ class AIStatus(BaseModel):
     active: str | None
     # Enabled task assignments pointing at an active provider the admin chose.
     # A provider row on its own runs nothing: work only happens when a task is
-    # routed to it, which is the gap the wizard's AI step used to leave open.
+    # routed to it, so the wizard's AI step checks this count too.
     tasks_assigned: int
 
 
@@ -117,7 +114,7 @@ class OnboardingStatus(BaseModel):
     entries: EntriesStatus
     autolink: AutolinkStatus
     ai: AIStatus
-    # True once the instance can demonstrate itself: seeded, polling, ingesting.
+    # True once reference data is seeded, a feed has polled and entries exist.
     ready: bool
 
 
@@ -203,8 +200,9 @@ async def onboarding_status(
             .order_by(AIProvider.created_at)
         )
     ).all()
-    # Startup seeds an active CLI provider for link validation. Prefer a
-    # provider the admin chose, even if it was registered after that seed.
+    # Startup seeds an active claude_code CLI provider for the tasks pinned to
+    # it (the copilot and a few agentic tasks). Prefer a provider the admin
+    # chose, even if it was registered after that seed.
     active_types = [p_type for p_type, is_active in provider_rows if is_active]
     active = next((p_type for p_type in active_types if p_type != "claude_code"), None)
     if active is None:

@@ -476,7 +476,7 @@ async def test_run_task_retries_past_a_current_provider_error(db_session, feed, 
 async def test_run_task_still_dedups_a_current_answer(db_session, feed, analysis_task, test_user, monkeypatch):
     from app.ai.engine import run_task
 
-    entry = await _make_entry(db_session, feed, title="Already analysed")
+    entry = await _make_entry(db_session, feed, title="Already analyzed")
     db_session.add(_current_row(entry, analysis_task, SAMPLE_PARSED))
     await db_session.flush()
     provider = _stub_provider(monkeypatch, analysis_task)

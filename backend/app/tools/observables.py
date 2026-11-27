@@ -1,6 +1,6 @@
-"""Observables ledger tools that *work* the ledger, not just read it: promote
-a candidate, correct a row, deny a value, pivot from an actor or family to its
-infrastructure, and export a filtered slice.
+"""Observables ledger tools beyond plain lookup: promote a candidate, correct a
+row, deny a value, pivot from an actor or family to its infrastructure, and
+export a filtered set.
 
 Read tools (``get_observable`` / ``search_observables``) live in ``read.py``.
 This module is mixed, so every write passes ``mutating=True`` explicitly;

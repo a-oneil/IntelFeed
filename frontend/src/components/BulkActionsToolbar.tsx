@@ -75,8 +75,7 @@ export const BulkActionsToolbar = memo(function BulkActionsToolbar({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // The toolbar is a horizontal scroll strip, so dropdown panels render in a
-  // portal with fixed positioning pinned to their trigger button.
+  // The toolbar scrolls horizontally, so dropdown panels render in a portal with fixed positioning anchored to their trigger button.
   useLayoutEffect(() => {
     if (!showTagDropdown && !showExtractMenu) return;
     const update = () => {
@@ -409,8 +408,7 @@ export const BulkActionsToolbar = memo(function BulkActionsToolbar({
         <button
           className={`${styles.btn} ${styles.btnAccent}`}
           onClick={() =>
-            // Pin the selection in the global copilot (article contents are
-            // injected server-side, capped) and let the analyst ask.
+            // Pin the selection in the global copilot (the server adds the article contents, capped) and let the analyst ask.
             useUIStore.getState().openCopilotWith({
               context: { entry_ids: ids, label: `${ids.length} selected articles` },
               lockContext: true,

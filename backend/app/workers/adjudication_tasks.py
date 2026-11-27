@@ -38,7 +38,7 @@ _redis_client: redis.Redis | None = None
 
 
 def _redis() -> redis.Redis:
-    """One sync client per worker process (the lock is a two-call affair)."""
+    """One sync client per worker process (the lock needs a SET NX and a DELETE)."""
     global _redis_client
     if _redis_client is None:
         _redis_client = redis.from_url(settings.redis_url, decode_responses=True)
@@ -269,7 +269,7 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
     time_limit=660,
 )
 def backfill_entry_adjudications(limit: int = 500, since_days: int | None = None) -> dict:
-    """One-off walk: queue every analysed entry the stage has not decided on,
+    """One-off walk: queue every analyzed entry the stage has not decided on,
     newest first, through the normal gates. Backfill draws on its share of
     each hour's budget only (live entries keep the rest); the ones that do
     not fit wait as `skipped_budget` and the resweep drains them, newest

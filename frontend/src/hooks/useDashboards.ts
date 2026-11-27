@@ -25,10 +25,7 @@ export function useDashboard(id: string | null) {
   });
 }
 
-/**
- * Seed a user who owns no dashboards with the instance default board set.
- * No-op (returns what they already have) for anyone with boards of their own.
- */
+/** Seed a user who owns no dashboards with the instance default board set. No-op (returns what they already have) for anyone with boards of their own. */
 export function useSeedDefaultDashboards() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -75,15 +72,13 @@ export function useReorderDashboards() {
     mutationFn: async (ids: string[]) => {
       await api.put("/dashboards/reorder", { ids });
     },
-    // Reordering is a direct-manipulation gesture — without an optimistic write
-    // the tab snaps back to its old slot until the round-trip lands.
+    // Reordering is a drag gesture: without an optimistic write the tab jumps back to its old position until the request completes.
     onMutate: async (ids: string[]) => {
       await queryClient.cancelQueries({ queryKey: ["dashboards"] });
       const previous = queryClient.getQueryData<PaginatedResponse<Dashboard>>(["dashboards"]);
       if (previous) {
         const rank = new Map(ids.map((id, i) => [id, i]));
-        // Only the passed ids are re-ranked; boards outside this strip (other
-        // prefixes) keep the sort_order they already had.
+        // Only the passed ids are re-ranked; boards outside this tab strip (other prefixes) keep the sort_order they already had.
         const items = previous.items.map((d) =>
           rank.has(d.id) ? { ...d, sort_order: rank.get(d.id)! } : d,
         );

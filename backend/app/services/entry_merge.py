@@ -2,7 +2,7 @@
 
 A feed that churns guids stores the same post many times (one row per fetch).
 ``plan_same_url_merges`` groups a feed's rows by the same item key the fetcher
-dedups on (normalised link + title + enclosure, see ``app.services.dedup``) and
+dedups on (normalized link + title + enclosure, see ``app.services.dedup``) and
 picks the earliest row of each group as the keeper. ``merge_entries`` then
 moves everything that references the copies onto the keeper and deletes the
 copies.
@@ -64,7 +64,7 @@ class FeedMergePlan:
     rows: int = 0
     #: dupe id -> keeper id
     mapping: dict = field(default_factory=dict)
-    #: keys (normalised URL) whose rows were left alone because titles or
+    #: keys (normalized URL) whose rows were left alone because titles or
     #: enclosures differ — distinct items sharing a link
     distinct_items_sharing_url: int = 0
     rows_sharing_url_not_merged: int = 0

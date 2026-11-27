@@ -713,8 +713,7 @@
   background: var(--bg-tertiary);
 }
 
-/* Accent left borders per entity type — sourced from the canonical
-   --entity-* palette so sidebar sections match the inline highlight colors. */
+/* Accent left borders per entity type, from the canonical --entity-* palette so sidebar sections match the inline highlight colors. */
 .sectionAccentIOC .sectionHeader { border-left-color: var(--entity-ttp); }
 .sectionAccentTTP .sectionHeader { border-left-color: var(--entity-ttp); }
 .sectionAccentCVE .sectionHeader { border-left-color: var(--entity-cve); }
@@ -977,16 +976,13 @@
 
 /* ─── Shared Entity Styles ─── */
 
-/* Residual styling for the entity-card type `Chip`. Only the properties Chip
-   does not own, plus font-weight — doubled, since Chip sets 600 and a single
-   class would win only by bundle order. */
+/* Extra styling for the entity-card type `Chip`: only the properties Chip does not set, plus font-weight. The selector is doubled because Chip sets 600 and a single class would win only by bundle order. */
 .typeBadge.typeBadge {
   font-weight: 700;
   text-transform: uppercase;
 }
 
-/* The URL card's type chip picks up the card's own accent instead of the
-   default chip foreground. Doubled for the same reason. */
+/* The URL card's type chip uses the card's own accent instead of the default chip foreground. Doubled for the same reason. */
 .typeBadgeURL.typeBadgeURL {
   color: var(--entity-accent);
 }
@@ -1076,9 +1072,7 @@
 
 /* ─── Severity Badges ─── */
 
-/* Severity + exploit markers are `Chip tone="toned"`; the per-level colour now
-   comes from SEVERITY_TINT in WorkbenchPanel.tsx. Only the type treatment is
-   left here (font-weight doubled — Chip sets 600). */
+/* Severity and exploit markers are `Chip`s; the per-level severity color comes from severityChipProps in WorkbenchPanel.tsx (via severityChipColors in utils/severity.ts). Only the type treatment is set here (font-weight doubled because Chip sets 600). */
 .severityBadge.severityBadge {
   font-weight: 700;
   text-transform: uppercase;
@@ -1588,9 +1582,7 @@
   }
 }
 
-/* Chip derives this fill's foreground from --danger. It used to be
-   --accent-text, which is derived from --accent — white on the light-red fill
-   in any dark-accent theme. */
+/* Chip derives this fill's foreground from --danger. --accent-text would be wrong here: it is derived from --accent and comes out white on the light-red fill in any dark-accent theme. */
 .kevTag.kevTag {
   font-weight: 700;
   text-transform: uppercase;
@@ -1676,10 +1668,7 @@
   padding: var(--sp-1) 7px;
   border-radius: var(--r-sm);
   background: var(--accent-bg);
-  /* --accent-text is contrastText(--accent): correct only when the fill IS the
-     accent. This fill is --accent-bg, a 12% accent wash over the dark panel, so
-     a light accent (the default coral) derives BLACK here and the label went
-     invisible — 1.09:1. The accent itself on its own wash measures 4.36:1. */
+  /* Not --accent-text: that is contrastText(--accent), correct only when the fill is the accent itself. This fill is --accent-bg, a 12% accent wash over the dark panel, so a light accent (the default coral) derives black text here, unreadable at 1.09:1. The accent on its own wash measures 4.36:1. */
   color: var(--accent);
 }
 .articleIntelChip {

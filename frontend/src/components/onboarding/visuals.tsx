@@ -1,13 +1,9 @@
 /**
- * Schematics for the three steps where geometry *is* the content.
+ * Schematics for the three onboarding steps that explain a layout.
  *
- * A three-panel reader described in prose doesn't land, and a screenshot would
- * be locked to whichever of the 51 themes it was captured in and stale the next
- * time a surface moves. These draw the shape instead, from `currentColor` and
- * the theme tokens, so they follow whatever theme the reader is actually using.
+ * A three-panel reader is hard to picture from prose, and a screenshot would be locked to the theme it was captured in and go stale the next time the UI changes. These draw the shape instead, from the theme's CSS variables, so they follow whatever theme the reader is using.
  *
- * Decorative by design: the prose beside each one carries the meaning, so they
- * are `aria-hidden` rather than competing with it for a screen reader.
+ * Each schematic is an SVG with `role="img"` and an `aria-label` that describes it in one sentence for screen readers; the prose beside it carries the detail.
  */
 
 import styles from "./OnboardingWizard.module.css";

@@ -89,8 +89,7 @@
   padding: var(--sp-5);
 }
 
-/* Disabled rules recede: desaturated and dimmed, but readable, and they lift
-   back to full strength on hover so acting on one still feels direct. */
+/* Disabled rules are desaturated and dimmed but still readable, and return to full strength on hover so they are easy to act on. */
 .ruleCardDisabled {
   background: var(--bg-primary);
   border-style: dashed;
@@ -118,8 +117,7 @@
   flex-shrink: 0;
 }
 
-/* Enabled/disabled is a state, not an entity type — --success and a neutral
-   text token, never an --entity-* alias that happens to match the old hex. */
+/* Enabled/disabled is a state, not an entity type, so it uses --success and a neutral text token, never an --entity-* color. */
 .active {
   background: var(--success);
 }
@@ -174,12 +172,8 @@
   letter-spacing: 0.03em;
 }
 
-/* The label filter and the rule-card labels are Chips now. Only the bespoke
-   hover survives: on a rule card the label chip DELETES the label, so its
-   hover has to read as destructive rather than as Chip's neutral highlight.
-   The class is repeated three times so it outranks Chip's own
-   `.clickable.toned:hover` — that selector is also (0,3,0), so a mere double
-   would have TIED and fallen back to stylesheet order in the bundle. */
+/* The label filter and the rule-card labels are Chips. Only the hover is custom: on a rule card, clicking the label chip DELETES the label, so its hover has to look destructive rather than like Chip's neutral highlight.
+   The class is repeated three times so it outranks Chip's own `.clickable.toned:hover`: that selector is also (0,3,0), so repeating the class only twice would tie and fall back to stylesheet order in the bundle. */
 .ruleLabelChip.ruleLabelChip.ruleLabelChip:hover {
   background: color-mix(in srgb, var(--danger) 12%, transparent);
   border-color: var(--danger);

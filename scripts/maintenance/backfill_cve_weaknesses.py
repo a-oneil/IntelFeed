@@ -1,8 +1,8 @@
 """Re-derive cve_weaknesses rows from every stored nvd_data blob.
 
-The NVD `weaknesses` block has been collected on every CVE since enrichment
-began but was never parsed — only the first CWE string was ever read, and only
-for display. This sweep turns all of it into rows.
+The NVD `weaknesses` block is stored on every enriched CVE, but before the
+cve_weaknesses table existed only the first CWE string was read, and only for
+display. This sweep turns all of it into rows.
 
 Idempotent on (cve_id, cwe_ref), so it is safe to re-run: rows that already
 exist get their FK filled if the catalog has since gained the entry, and a

@@ -12,7 +12,7 @@ fixing mistakes. The types:
 - **Vendor** and **product**: who makes software, and the software itself.
 - **Country** and **sector**: where and which industries are involved.
 - **Tool**: software attackers use that isn't malware, such as Mimikatz.
-- **Mitigation**: a defence that counters a technique.
+- **Mitigation**: a defense that counters a technique.
 - **Observable**: an indicator of compromise (IOC), such as an IP address,
   domain, file hash or command line.
 - **Campaign**: an investigation you create. See
@@ -59,7 +59,7 @@ instead. On actors, malware, CVEs, techniques, tools and campaigns, **Download h
 package** first has AI draft up to five hunts from everything reported (a
 line in Next steps shows it running; you can leave the page), then downloads
 one zip: an ATHF hunt file and a query per hunt, the rules written for the
-entity, an ATT&CK Navigator layer coloured by rule coverage, its entities with
+entity, an ATT&CK Navigator layer colored by rule coverage, its entities with
 the claimed ones kept apart from mere co-mentions, IOCs as CSV and STIX, and
 the key articles. The hunts then show in a **Hunts** row at the top of the
 sections below. Below that, each section is a single closed row that opens in place:
@@ -90,7 +90,7 @@ under **Settings → Engine → Enrichment**:
 | NVD | CVE details, CVSS severity scores, dates |
 | EPSS | How likely a CVE is to be exploited |
 | CISA KEV | Whether a CVE is known to be exploited, and the fix-by date |
-| MITRE ATT&CK | The catalogue of techniques and tactics |
+| MITRE ATT&CK | The catalog of techniques and tactics |
 | VulnCheck / CVEDetails | More CVE data |
 | OSV | Open-source vulnerability data |
 | Malpedia | Actor and malware profiles and aliases |
@@ -150,7 +150,7 @@ also served as blocklists, SIEM lookup files and a TAXII 2.1 feed.
 
 Relationships link two entities, such as "this actor uses that malware", with
 the articles that said so and a confidence. They come from the MITRE ATT&CK
-catalogue, article text and analysts. One backed by MITRE and eleven articles
+catalog, article text and analysts. One backed by MITRE and eleven articles
 shows as stronger than one backed by a single article.
 
 In the graph view, click a cluster to filter the list to it.

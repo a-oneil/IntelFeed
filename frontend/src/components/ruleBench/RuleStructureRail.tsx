@@ -16,9 +16,7 @@ interface RuleStructureRailProps {
   onSelectLine: (line: number) => void;
 }
 
-/** Left column: the rule's own outline, where the rule came from, and what it
-    is about. Provenance is read-only reference, so it sits beside attribution
-    rather than in the Details tab. */
+/** Left column: the rule's own outline, where the rule came from, and what it is about. Provenance is read-only, so it sits beside attribution rather than in the Details tab. */
 export function RuleStructureRail({
   ruleContent,
   ruleType,
@@ -75,7 +73,7 @@ export function RuleStructureRail({
               )}
               {!rule?.source_repo && rule?.license && (
                 <div className={bench.kv}>
-                  <span>licence</span>
+                  <span>license</span>
                   <span className={`${bench.kvStatus} ${bench.ok}`}>{rule.license}</span>
                 </div>
               )}

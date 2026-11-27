@@ -34,14 +34,14 @@ EPSS_MULT = 2.0
 WEAPONIZED_MULT = 1.8
 WEAPONIZED_STATES = ("weaponized", "active_exploitation")
 
-# coverage_mult by posture — applied to display/ordering in a later phase; kept
-# here so the posture→weight mapping lives in one place.
+# coverage_mult by posture. Not applied to display or ordering yet; kept here
+# so the posture→weight mapping lives in one place.
 COVERAGE_MULT = {"blind": 1.3, "no_rule": 1.2, "defended": 0.9}
 
 # classify_cves status → posture label used across the UI.
 _STATUS_TO_POSTURE = {"covered": "defended", "library_only": "blind", "no_rule": "no_rule"}
-# Action urgency, worst first: a rule you can't feed (blind) > nothing authored
-# (no_rule) > already positioned (defended).
+# Action urgency, worst first: a rule whose telemetry is missing (blind) > no
+# rule written (no_rule) > covered by a rule (defended).
 _POSTURE_RANK = {"blind": 0, "no_rule": 1, "defended": 2}
 
 

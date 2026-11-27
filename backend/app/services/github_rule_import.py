@@ -719,8 +719,9 @@ async def _import_single_rule(
     # Dedup: check by entry_id, then by file path in metadata
     file_path = (entry.metadata_ or {}).get("file_path", "")
     # Extended and converted children copy the parent's entry_id; the mirror is
-    # the root row, and counting a child made scalar_one_or_none() raise
-    # MultipleResultsFound, so any repo file someone had converted stopped syncing.
+    # the root row. Without the derived_from filter a converted repo file matches
+    # several rows (scalar_one_or_none() raised MultipleResultsFound and the file
+    # stopped syncing).
     result = await db.execute(
         select(DetectionRule)
         .options(raiseload(DetectionRule.entry))
@@ -1050,7 +1051,7 @@ async def process_github_entry(
     entry: Entry,
     user_id: uuid.UUID,
 ) -> dict:
-    """Full Phase 3 pipeline for a single github_repo entry.
+    """Full import pipeline for a single github_repo entry.
 
     Orchestrates rule import, TTP/CVE linking, cross-referencing, and metadata tagging.
     Returns a summary dict of what was done.

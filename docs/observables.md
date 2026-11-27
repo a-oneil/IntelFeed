@@ -47,7 +47,7 @@ The scanner also refuses:
 - **Advisory sources.** Entries with a GitHub `content_type` (Sigma, Nuclei, LOLDrivers repositories), feeds in a category in `observables_codeblock_skip_categories` (default "Security Advisories, Government / CERT"), and NVD feeds nominate **only defanged values** (bare hex there is a checksum, a dotted quad a version); their code blocks nominate nothing.
 - **Version numbers.** "9.4.0.0 through 9.4.0.25", "20.15.6.1 and earlier", "from X to Y", or a dotted quad after version/release/affected wording with no address wording nearby.
 - **Commit hashes.** Hex in commit / fixed-in / version context with no sample, hash or file word nearby. A 40-hex value with git wording on its line or the line above (`commit`, `merge`, `revert`, `git`, `GitHub`, a `| Commit |` cell, a git log `Author:` line below) and no sample or SHA1 wording is not staged.
-- **Certificate and header hashes.** A hash labelled, or nested under a YAML/JSON key, `TBS`, `RichPEHeaderHash`, `Thumbprint`, `SerialNumber`, `Certificates`, `Signer` or `Signatures` (the LOLDrivers driver layout) describes a certificate or PE header, not the file. The sample's own hashes and its `Authentihash` still nominate.
+- **Certificate and header hashes.** A hash labeled, or nested under a YAML/JSON key, `TBS`, `RichPEHeaderHash`, `Thumbprint`, `SerialNumber`, `Certificates`, `Signer` or `Signatures` (the LOLDrivers driver layout) describes a certificate or PE header, not the file. The sample's own hashes and its `Authentihash` still nominate.
 - **Glued table cells.** The scan reads renderer text (`cell | cell`); a TLD shaped like `com` + letters (`pobelstudio.comdomain`) is rejected.
 - **Placeholders and reference sites.** `attacker.com`, `contoso.com`; sandbox, catalog, vendor and social sites (VirusTotal, urlscan, GitHub, MITRE, Microsoft Learn, Telegram API, IP-echo services); the bare apex of shared hosting (`amazonaws.com`, `github.io`). Their subdomains can still be candidates.
 - **Hashes inside longer tokens.** 32/40/64 hex inside a hostname, path segment or identifier (`pub-9ee1bf…a.r2.dev`). Cloud dev platforms (`r2.dev`, `pages.dev`, `trycloudflare.com`, `ngrok`, `vercel.app`, …) are in `SHARED_INFRA_SUFFIXES`: their apex never nominates, and rows under them are never published.
@@ -71,7 +71,7 @@ python scripts/maintenance/rescan_observable_candidates.py --purge-all-scan --pu
 | | `ja3`, `ja4`, `cert_fingerprint` | never decays | Correct fingerprint shape |
 | hash | `md5`, `sha1`, `sha256` | never decays | Length sets the kind; the AI analysis path rejects hex its evidence calls a key, token or secret, a certificate TBS digest, a RichPE header hash, a thumbprint or a git commit |
 | host | `cmdline`, `path`, `registry`, `scheduled_task`, `service_name`, `mutex`, `named_pipe`, `user_agent`, `http_header` | never decays | See below |
-| script | `script` | never decays | SHA-256 of the normalised snippet (kept in `content`) |
+| script | `script` | never decays | SHA-256 of the normalized snippet (kept in `content`) |
 
 Host rules (`_plausible_cmdline`, `_plausible_path_atom`, and the branches of `validate_kind_value`):
 

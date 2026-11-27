@@ -2,11 +2,7 @@ import { IconAlertTriangle } from "@tabler/icons-react";
 import { Spinner } from "@/components/primitives";
 import styles from "./AsyncState.module.css";
 
-/**
- * Shared loading/error/empty placeholders for pages and panels that don't
- * warrant a bespoke skeleton (see Skeleton.tsx for those). Pick one variant
- * per render — these render a single state, not a state machine.
- */
+/** Shared loading/error/empty placeholders for pages and panels that don't need a custom skeleton (see Skeleton.tsx for those). Each component renders one state; the caller picks which one to render. */
 
 interface AsyncStateProps {
   icon?: string;
@@ -16,10 +12,7 @@ interface AsyncStateProps {
   retryLabel?: string;
 }
 
-/**
- * Spinner + what it is loading. `compact` drops it to a single padded row for
- * a small slot inside an already-populated panel; the default fills the pane.
- */
+/** Spinner plus a label saying what is loading. `compact` shrinks it to a single padded row for a small slot inside an already-populated panel; the default fills the pane. */
 export function AsyncStateLoading({
   label = "Loading…",
   compact,

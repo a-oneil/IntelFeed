@@ -47,11 +47,7 @@ export interface EntryIntelCounts {
 
 const BATCH_SIZE = 100; // API limit
 
-/**
- * Fetch intel counts for a batch of entry IDs.
- * Automatically splits into batches of 100 (the API limit) and merges results.
- * Returns a map of entry_id -> counts. Only entries with extracted entities are included.
- */
+/** Fetch intel counts for a list of entry IDs. Splits them into batches of 100 (the API limit) and merges the results. Returns a map of entry_id -> counts. Only entries with extracted entities are included. */
 export function useEntryIntelBadges(entryIds: string[]) {
   // Split entry IDs into stable batches of 100
   const batches = useMemo(() => {

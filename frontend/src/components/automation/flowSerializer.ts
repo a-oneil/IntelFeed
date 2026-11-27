@@ -1,10 +1,7 @@
 import type { Node, Edge } from "@xyflow/react";
 import type { AutomationRule } from "@/api/types";
 
-/**
- * Convert a flow graph (nodes + edges) into the automation rule JSON
- * structure expected by the backend API.
- */
+/** Convert a flow graph (nodes + edges) into the automation rule JSON structure expected by the backend API. */
 export function flowToRule(
   nodes: Node[],
   edges: Edge[],
@@ -16,8 +13,7 @@ export function flowToRule(
   const actionNodes = nodes.filter((n) => n.type === "action");
   const branchNodes = nodes.filter((n) => n.type === "branch");
 
-  // Determine which condition/action/branch nodes are connected to the trigger
-  // via edges (directly or through conditions)
+  // Determine which condition/action/branch nodes are connected to the trigger via edges (directly or through conditions)
   const connectedConditionIds = new Set<string>();
   const connectedActionIds = new Set<string>();
   const connectedBranchIds = new Set<string>();
@@ -48,7 +44,7 @@ export function flowToRule(
     }
   }
 
-  // Also include conditions that connect to actions/branches
+  // Also include actions/branches that a connected condition points to
   for (const edge of edges) {
     if (connectedConditionIds.has(edge.source)) {
       const targetNode = nodes.find((n) => n.id === edge.target);
@@ -115,12 +111,11 @@ export function flowToRule(
     ...connectedBranchIds,
   ]);
 
-  // Build action-to-action edge map for topological sort
+  // Build the edge map between executable nodes (actions + branches) for topological sort
   const execEdgeMap = new Map<string, string[]>();
   for (const edge of edges) {
     if (executableIds.has(edge.source) && executableIds.has(edge.target)) {
-      // Skip branch->action edges that use "then"/"else" handles — those
-      // are sub-chain connections, not sequential flow
+      // Skip branch->action edges that use "then"/"else" handles: those are sub-chain connections, not sequential flow
       if (
         connectedBranchIds.has(edge.source) &&
         (edge.sourceHandle === "then" || edge.sourceHandle === "else")
@@ -137,7 +132,7 @@ export function flowToRule(
   for (const targets of execEdgeMap.values()) {
     for (const t of targets) hasIncomingExecEdge.add(t);
   }
-  // Nodes that are targets of branch "then"/"else" edges also have incoming
+  // Nodes that are targets of branch "then"/"else" edges also count as having an incoming edge
   for (const edge of edges) {
     if (
       connectedBranchIds.has(edge.source) &&
@@ -170,8 +165,7 @@ export function flowToRule(
   for (const root of roots) visit(root.id);
   for (const id of executableIds) visit(id);
 
-  // Helper: collect the sub-chain of action nodes connected from a branch's
-  // "then" or "else" handle
+  // Helper: collect the sub-chain of action nodes connected from a branch's "then" or "else" handle
   function collectBranchSubChain(
     branchId: string,
     handle: "then" | "else"
@@ -247,8 +241,7 @@ export function flowToRule(
     };
   }
 
-  // Build the final actions list from the sorted executable IDs,
-  // skipping nodes that are part of a branch sub-chain
+  // Build the final actions list from the sorted executable IDs, skipping nodes that are part of a branch sub-chain
   const branchSubChainIds = new Set<string>();
   for (const bId of connectedBranchIds) {
     for (const handle of ["then", "else"] as const) {
@@ -313,10 +306,7 @@ export function flowToRule(
   };
 }
 
-/**
- * Convert an existing AutomationRule into a set of flow nodes and edges
- * for rendering in React Flow.
- */
+/** Convert an existing AutomationRule into a set of flow nodes and edges for rendering in React Flow. */
 export function ruleToFlow(rule: AutomationRule): {
   nodes: Node[];
   edges: Edge[];

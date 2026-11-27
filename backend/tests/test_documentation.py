@@ -8,7 +8,7 @@ BASE_URL = "/api/documentation"
 
 @pytest.fixture
 def docs_dir(tmp_path, monkeypatch):
-    """Point the router at a scratch docs/ tree so tests don't ride on repo content."""
+    """Point the router at a scratch docs/ tree so tests don't depend on repo content."""
     root = tmp_path / "docs"
     (root / "diagrams").mkdir(parents=True)
     (root / "README.md").write_text("# IntelFeed Documentation\n\nTechnical documentation for IntelFeed.\n")
@@ -179,7 +179,7 @@ async def test_asset_served_with_header_auth(client: AsyncClient, auth_headers: 
 
 @pytest.mark.asyncio
 async def test_asset_served_with_query_token(client: AsyncClient, auth_headers: dict, docs_asset):
-    """An <img> tag cannot set a header, so the token rides in the query string."""
+    """An <img> tag cannot set a header, so the token is passed in the query string."""
     token = auth_headers["Authorization"].split(" ", 1)[1]
     resp = await client.get(f"{BASE_URL}/assets/screenshots/dashboard.png?token={token}")
     assert resp.status_code == 200
@@ -188,7 +188,7 @@ async def test_asset_served_with_query_token(client: AsyncClient, auth_headers: 
 
 @pytest.mark.asyncio
 async def test_asset_route_is_not_shadowed_by_the_page_route(client: AsyncClient, auth_headers: dict, docs_asset):
-    """`/{slug:path}` would swallow `assets/...` if declared first — it must not."""
+    """`/{slug:path}` would match `assets/...` if declared first — it must not."""
     resp = await client.get(f"{BASE_URL}/assets/screenshots/dashboard.png", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/png"

@@ -242,8 +242,8 @@ async def test_cooccurrence_stores_semantic_direction(db_session, test_entry, te
     assert (rel.source_type, rel.source_id) == ("threat_actor", test_threat_actor.id)
     assert (rel.target_type, rel.target_id) == ("malware", malware_row.id)
     assert rel.relationship_type == "uses"
-    # New edges always start at "possible" — probable is earned by multi-feed
-    # corroboration, never granted on first sight.
+    # New edges always start at "possible"; an edge moves to probable only once
+    # evidence from two or more feeds backs it.
     assert rel.confidence == "possible"
     assert rel.evidence_entry_ids == [test_entry.id]
 
@@ -278,8 +278,8 @@ async def test_cooccurrence_respects_rejected(db_session, test_entry, test_threa
 
 @pytest.mark.asyncio
 async def test_cooccurrence_draws_nothing_for_a_pair_with_no_verb(db_session, test_feed):
-    """(tool, ttp) has no verb in the map: a "related_to" from the same
-    paragraph is co-mention restated as a claim (detection-rule tags, mostly)."""
+    """(tool, ttp) has no verb in the map, so a same-paragraph mention would only give a "related_to" edge that
+    repeats the co-mention as a claim (these pairs come mostly from detection-rule tags). Nothing is stored."""
     tool = Tool(name="TestTool")
     ttp = TTP(technique_id="T9999", technique_name="Test Technique")
     db_session.add_all([tool, ttp])
@@ -361,8 +361,8 @@ async def test_cooccurrence_blocks_pairs_outside_matrix(db_session, test_feed):
 
     # The only edge allowed out of this trio is tool exploits cve — but that
     # pair is unmapped, so only its canonical related_to would apply, which the
-    # matrix rejects (canonical direction is cve→tool). Expect zero rows for
-    # the country pairs specifically.
+    # matrix rejects (canonical direction is cve→tool). Expect no row with a
+    # country at either end and no cve→tool row.
     await create_cooccurrence_relationships(db_session, entry.id)
     rows = (await db_session.execute(select(EntityRelationship))).scalars().all()
     assert all("country" not in (r.source_type, r.target_type) for r in rows)

@@ -4,11 +4,8 @@ import type { FeedForm } from "../useFeedForm";
 import styles from "../fields.module.css";
 
 /**
- * The three things that are the reader's own, not the instance's: what this
- * feed is called in their sidebar, where it is filed, and whether it counts.
- *
- * Deliberately the one editable pane a non-admin shares with an admin, because
- * these are the API's curation fields — the only ones it accepts from them.
+ * The settings that belong to the reader, not the instance: what this feed is called in their sidebar, which category it is filed under, and whether it counts toward unread.
+ * This is the one editable pane a non-admin shares with an admin, because these are the API's curation fields, the only ones it accepts from a non-admin.
  */
 export function IdentityPane({
   feed,
@@ -21,8 +18,7 @@ export function IdentityPane({
 }) {
   const { data: categories } = useCategories();
   const { values, set } = form;
-  // Pausing is the caller's own once subscriptions are on; with the flag off it
-  // is the single shared switch, which only an admin may throw.
+  // With per-user subscriptions on, pausing affects only the caller's copy; with the flag off it is one shared switch that only an admin may change.
   const canPause = Boolean(feed.per_user) || isAdmin;
 
   return (
@@ -97,10 +93,7 @@ export function IdentityPane({
         <span className={styles.checkText}>
           <span className={styles.checkLabel}>Count toward unread</span>
           <span className={styles.hint}>
-            {/* The control is the positive ("counts"), so the hint explains the
-                unchecked state and names what the rest of the app calls it —
-                the sidebar folds these under "Muted". Nothing here mentions
-                other readers: that is the Readers pane's subject. */}
+            {/* The checkbox is phrased positively ("counts"), so the hint explains the unchecked state and uses the name the rest of the app gives it: the sidebar groups these feeds under "Muted". Other readers are covered in the Readers pane, not here. */}
             When off, articles keep arriving and the feed still opens normally,
             but they stop adding to your unread count. The sidebar lists such feeds under Muted.
           </span>

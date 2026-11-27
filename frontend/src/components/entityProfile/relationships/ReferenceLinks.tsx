@@ -1,10 +1,4 @@
-/**
- * ReferenceLinks — links that come from reference data rather than articles:
- * a CVE's weaknesses (NVD, the vendor, CISA) and affected products (NVD CPE);
- * a weakness's place in the CWE catalog, its CAPEC attack patterns and the
- * CVEs that have it. These are published facts, so they carry no evidence
- * panel — only where they come from.
- */
+/** ReferenceLinks — links that come from reference data rather than articles: a CVE's weaknesses (NVD, the vendor, CISA) and affected products (NVD CPE); a weakness's place in the CWE catalog, its CAPEC attack patterns and the CVEs that have it. These are published facts, so they carry no evidence panel, only a label naming their source. */
 import type { EntityType } from "@/stores/intelStore";
 import { formatVersionRange, useAffectedCves, useCveAffectedRows } from "@/hooks/useAffectedCves";
 import { useCVEWeaknesses, useCWE, useCWEFamily } from "@/hooks/useIntelligence";

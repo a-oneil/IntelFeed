@@ -57,7 +57,7 @@ async def discover_my_channels(
             status_code=502,
         ) from e
 
-    # Build a set of (channel_id) and (username) already subscribed
+    # Collect the channel IDs and usernames that already have a feed
     feed_rows = await db.execute(select(Feed).where(Feed.feed_type == "telegram", Feed.archived_at.is_(None)))
     subscribed_channel_ids: set[int] = set()
     subscribed_usernames: set[str] = set()
@@ -89,7 +89,7 @@ async def discover_my_channels(
             }
         )
 
-    # Sort: unsubscribed first (so the operator's eye lands on the "to add" candidates),
+    # Sort: unsubscribed first (these are the channels the operator may want to add),
     # then by subscriber count desc.
     items.sort(key=lambda x: (x["is_subscribed"], -1 * (x.get("subscribers") or 0)))
 
@@ -472,7 +472,7 @@ async def subscribe_to_telegram_mention(
     handle = ch.display_handle
     url = f"https://t.me/{handle}"
 
-    # Refuse to clobber an existing telegram feed at the same URL, unless it
+    # Refuse to duplicate an existing Telegram feed at the same URL, unless it
     # was deleted: then subscribing brings it back.
     from app.services.feed_archive import revive_feed
 

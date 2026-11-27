@@ -1,4 +1,4 @@
-"""Catalogue-wide duplicate review: an AI task that judges likely-duplicate pairs.
+"""Catalog-wide duplicate review: an AI task that judges likely-duplicate pairs.
 
 The adjudicate stage only merges an entity minted by the article it is
 reviewing, so two entries that both already exist ("APT29" and "Cozy Bear
@@ -22,7 +22,9 @@ that. It is deterministic about *which* pairs to ask about and leaves the
   file         — a "same" verdict becomes an ``adjudication_merge`` proposal
                  in the maintenance log (the loser is the entity, the keeper
                  the target), which the Review tab shows as a Merge row with
-                 Apply / Dismiss. Nothing is merged without a person. A
+                 Apply / Dismiss. The next run asks about the pair again; a
+                 second "same" at or above the confidence floor applies the
+                 merge, and any other answer withdraws the proposal. A
                  "different" or "unsure" verdict is logged as
                  ``merge_review_distinct`` so the pair is not asked again for
                  a while. A merge that contradicts another pending one (the
@@ -413,7 +415,7 @@ def _side(label: str, p: dict) -> str:
     if not p:
         return f"  {label}: (deleted)"
     aliases = ", ".join(p["aliases"]) if p["aliases"] else "none"
-    origin = "created by AI extraction" if p.get("created_via") == "ai_extraction" else "catalogue entry"
+    origin = "created by AI extraction" if p.get("created_via") == "ai_extraction" else "catalog entry"
     line = f'  {label}: id={p["id"]}  name="{p["name"]}"  aliases=[{aliases}]  articles={p["article_count"]}  {origin}'
     if p.get("subtype"):
         line += f"  type={p['subtype']}"

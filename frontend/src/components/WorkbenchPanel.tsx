@@ -57,14 +57,7 @@ import { useOpenEntry } from "@/utils/openEntry";
 import styles from "./WorkbenchPanel.module.css";
 import { useIsVisitor } from "@/stores/authStore";
 
-/**
- * Severity chip colours come from the shared `severityChipColors` helper — the
- * one place that pairs each --severity-* fill with a measured foreground. The
- * old local map painted the fill hue as TEXT (`.severityHigh` was a raw
- * #e74c3c); this fills instead, so the foreground has to be derived, not
- * guessed. An unrecognised severity has no fill, so it falls back to the
- * neutral chip rather than rendering white-on-nothing.
- */
+/** Severity chip colors come from the shared `severityChipColors` helper, the one place that pairs each --severity-* fill with a measured foreground color. The chip is filled with the severity color, so its text color comes from the helper instead of being guessed. An unrecognized severity has no fill, so it falls back to the neutral chip instead of rendering white text on no background. */
 function severityChipProps(level: string | null | undefined) {
   const colors = severityChipColors(level);
   return { tone: colors.tint ? ("solid" as const) : ("default" as const), ...colors };
@@ -111,8 +104,7 @@ export default function WorkbenchPanel({
 
   // In readOnly mode, pass empty entryId to hooks so they don't fire (enabled: !!entryId)
   const fetchId = readOnly ? "" : entryId;
-  // Public read-only mode: the extracted intel reads like the share page's —
-  // no extraction, rules, campaigns or observables, nothing that edits.
+  // Public read-only mode: visitors see the extracted intel the way the share page shows it, with no extraction, rules, campaigns, observables or editing.
   const isVisitor = useIsVisitor();
   const editLocked = readOnly || isVisitor;
 
@@ -133,8 +125,7 @@ export default function WorkbenchPanel({
     { entry_id: entryId },
     { enabled: !editLocked && !!entryId },
   );
-  // Observables stay off the map unless asked for — ledger atoms as nodes is
-  // the graph bloat the design guards against.
+  // Observables are left off the graph unless the toggle is on, because showing every observable as a node clutters the graph.
   const [graphObservables, setGraphObservables] = useState(false);
   const { data: graphData, isLoading: graphLoading } = useEntryGraph(fetchId, graphObservables);
   const { data: glossaryMatches, isLoading: glossaryLoading } = useDetectGlossaryTerms(fetchId);
@@ -206,8 +197,7 @@ export default function WorkbenchPanel({
     });
     setExtractionStatus(statuses);
 
-    // Auto-expand sections that have data after extraction
-    // We use a short delay to allow query cache to update
+    // Auto-expand sections that have data after extraction, after a short delay so the query cache can update.
     setTimeout(() => {
       const sectionsToExpand = new Set<string>();
       if (ttps?.length) sectionsToExpand.add("ttps");
@@ -317,7 +307,7 @@ export default function WorkbenchPanel({
         {/* Extraction status banners — hidden in readOnly */}
         {!readOnly && <ExtractionStatusBanner status={extractionStatus.ttps} label="TTP" />}
 
-        {/* Sections in fixed alphabetical order \u2014 stable between articles */}
+        {/* Sections in a fixed, mostly alphabetical order, so they stay in the same place between articles */}
         <AccordionSection
           title="CVEs"
           count={cveCount}
@@ -386,8 +376,7 @@ export default function WorkbenchPanel({
                       const pathSegment = nodeType;
                       navigate(`/workbench/${pathSegment}/${rawId}`);
                     }}
-                    // Docked in the workbench this swaps the dock rather than
-                    // bouncing the analyst out to the feed.
+                    // When docked in the workbench, this replaces the docked article instead of sending the analyst back to the feed.
                     onEntryClick={openEntry}
                   />
                 </div>
@@ -850,8 +839,7 @@ function ObservableList({ payload, readOnly }: { payload: ObservableEntryPayload
   const grouped = OBSERVABLE_KIND_GROUPS.map(
     ([label, kinds]) => [label, items.filter((i) => kinds.includes(i.kind))] as const,
   );
-  // Self-healing: a kind the groups don't know yet still renders instead of
-  // silently vanishing while the header counts it.
+  // A kind missing from OBSERVABLE_KIND_GROUPS still renders under "Other" instead of disappearing while the header counts it.
   const knownKinds = new Set(OBSERVABLE_KIND_GROUPS.flatMap(([, kinds]) => kinds));
   const groups = [...grouped, ["Other", items.filter((i) => !knownKinds.has(i.kind))] as const].filter(
     ([, rows]) => rows.length > 0,
@@ -925,7 +913,7 @@ function ObservableList({ payload, readOnly }: { payload: ObservableEntryPayload
 function KillChainStrip({ entryId, readOnly }: { entryId: string; readOnly?: boolean }) {
   const navigate = useNavigate();
   const { data: phases } = useEntryKillChain(readOnly ? undefined : entryId);
-  // Only worth showing once the attack spans at least two ordered phases.
+  // Show the strip only when the attack spans at least two ordered phases.
   const ordered = (phases || []).filter((p) => p.tactic !== null);
   if (ordered.length < 2) return null;
   return (
@@ -1270,8 +1258,7 @@ function MalwareList({ malware, entryId, hasExtracted, readOnly }: { malware: Ma
 
 /* ─── Sector List ─── */
 
-/** The industries this article describes as targeted — the AI's judgment,
- *  never a word match, so there is no "wrong match" affordance here. */
+/** The industries this article describes as targeted. These come from the AI's judgment, never a word match, so there is no "wrong match" control here. */
 function SectorList({ sectors, entryId, hasExtracted, readOnly }: { sectors: EntrySector[]; entryId: string; hasExtracted: boolean; readOnly?: boolean }) {
   const navigate = useNavigate();
   if (!sectors.length)
@@ -1569,9 +1556,7 @@ function RuleList({
   const deleteRule = useDeleteDetectionRule();
   const undoableDelete = useUndoableDelete();
   const [copied, setCopied] = useState<string | null>(null);
-  // The list rows are lightweight (no rule_content); fetch the full rule lazily
-  // when a row is expanded in the authed panel. In readOnly mode the preloaded
-  // rules already carry rule_content.
+  // The list rows are lightweight (no rule_content), so the signed-in panel fetches the full rule when a row is expanded. In readOnly mode the preloaded rules already carry rule_content.
   const { data: expandedRule } = useDetectionRule(!readOnly && expandedId ? expandedId : undefined);
   const contentOf = (rule: DetectionRule | DetectionRuleListItem): string =>
     ("rule_content" in rule && rule.rule_content) || (expandedRule?.id === rule.id ? expandedRule.rule_content : "") || "";

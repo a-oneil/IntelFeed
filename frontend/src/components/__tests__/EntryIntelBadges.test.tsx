@@ -73,7 +73,7 @@ describe("EntryIntelBadges personal-state markers", () => {
   it("renders a note marker from the note count instead of a 'Notes' count chip", () => {
     render(<EntryIntelBadges counts={{ ...baseCounts, notes: 2 }} />);
     expect(screen.getByLabelText("2 analyst notes")).toBeInTheDocument();
-    // The note is a personal marker now, not an evidence chip
+    // The note is a personal marker, not an evidence chip
     expect(screen.queryByText("Notes")).not.toBeInTheDocument();
   });
 

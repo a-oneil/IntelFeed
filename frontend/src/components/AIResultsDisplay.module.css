@@ -239,8 +239,7 @@
   border: 1px solid color-mix(in srgb, var(--danger) 15%, transparent);
 }
 
-/* The chip carries size, shape and the severity tint (see SEVERITY_TINTS);
-   only casing and the gap to the blocks below it are local. */
+/* The chip sets size, shape and the severity tint (see SEVERITY_TINTS); only casing and the gap to the blocks below it are set here. */
 .severityBadge {
   text-transform: uppercase;
   margin-bottom: var(--sp-3);

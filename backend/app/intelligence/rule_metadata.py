@@ -240,17 +240,16 @@ def extract_and_apply(rule, explicit_fields: set[str] | None = None) -> dict:
 
 # --- data_sources derivation -------------------------------------------------
 #
-# `data_sources` is what telemetry feasibility joins against the telemetry
-# inventory, but map_metadata_to_fields() only ever filled it from Splunk
-# data-models and Sentinel connectors. Sigma rules — the format that most
-# consistently declares its telemetry — carry a structured `logsource`
-# {product, service, category} that was only stored in `log_sources` and never
-# projected, so the majority of the rule library was invisible to coverage
-# analysis.
+# `data_sources` is the field telemetry feasibility joins against the telemetry
+# inventory. map_metadata_to_fields() fills it only from Splunk data models and
+# data_source and from Sentinel connectors. Sigma rules, the format that most
+# consistently declares its telemetry, carry a structured `logsource`
+# {product, service, category} that is stored in `log_sources`; without this
+# derivation most of the rule library would be invisible to coverage analysis.
 #
-# Names are emitted "product:service" to match the channel-level naming MITRE
-# now uses in its detection strategies ("WinEventLog:Sysmon", "auditd:SYSCALL"),
-# so both sides of the join speak the same dialect.
+# Names are emitted as "product:service" to match the channel-level naming MITRE
+# uses in its detection strategies ("WinEventLog:Sysmon", "auditd:SYSCALL"), so
+# both sides of the join use the same names.
 
 # Sigma product/service pairs that have a well-known channel name.
 _SIGMA_CHANNEL_ALIASES: dict[tuple[str, str], str] = {
@@ -271,8 +270,8 @@ _SIGMA_CHANNEL_ALIASES: dict[tuple[str, str], str] = {
 _SPL_SOURCE_RE = re.compile(r"\b(?:index|sourcetype|datamodel)\s*=\s*[\"']?([\w.:*-]+)", re.IGNORECASE)
 
 # Rule formats that scan artifacts rather than log streams. A YARA signature has
-# no log source to satisfy, so leaving data_sources empty is correct — flagging
-# them as telemetry gaps would be a category error.
+# no log source to satisfy, so leaving data_sources empty is correct; flagging
+# them as telemetry gaps would be wrong.
 NON_TELEMETRY_RULE_TYPES = frozenset({"yara", "nuclei"})
 
 

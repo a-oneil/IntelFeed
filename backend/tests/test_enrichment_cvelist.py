@@ -169,7 +169,7 @@ def test_cisa_scores_a_cve_its_cna_left_unscored():
     assert parsed["adp_cvss"]["score"] == 9.1
     assert parsed["cvss_severity"] == "CRITICAL"
     assert parsed["cvss_scored_by"] == "CISA-ADP · CVSS 3.1"
-    # MITRE writes "n/a" for vendor, product and version: no row says nothing.
+    # MITRE writes "n/a" for vendor, product and version, so no affected row is made.
     assert parsed["affected"] == []
 
 
@@ -205,7 +205,7 @@ async def test_a_lookup_fetches_the_raw_record_and_a_404_is_not_found(upstream):
     missing = await adapter.enrich("cve", "CVE-2024-3401")
     assert missing.parsed_data == {"found": False} and missing.ttl_hours == 30 * 24
 
-    # A malformed id never leaves the box.
+    # A malformed id is never sent upstream.
     sent = len(upstream.requests)
     assert (await adapter.enrich("cve", "CVE-2024-XXXXX")).parsed_data == {"found": False}
     assert len(upstream.requests) == sent

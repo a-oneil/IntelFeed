@@ -19,7 +19,7 @@ the same maintenance log (``entity_maintenance_log``):
                                   Merge proposals on the Review tab
                                   (``services/entity_merge_review.py``).
 
-An entity minted by one article is judged against the catalogue at creation
+An entity minted by one article is judged against the catalog at creation
 by the adjudicate stage (``services/entry_adjudication.py``); the merge
 review is for pairs that both already exist.
 
@@ -114,11 +114,6 @@ async def _resolve_system_user(db: AsyncSession) -> uuid.UUID | None:
 
 
 # ============================================================
-# Entity-merge maintenance — kickoff + per-cluster
-# ============================================================
-
-
-# ============================================================
 # Actor profile refresh — kickoff + per-actor
 # ============================================================
 
@@ -151,7 +146,7 @@ async def _kickoff_refresh_async() -> dict:
         invalidate_cache()
         await _ensure_cache(db)
 
-        # Knobs are read after the warm — see _kickoff_merge_async.
+        # Read settings after the cache warm above so a change made in the UI applies to this run.
         top_n = int(settings.get("actor_refresh_top_n_per_run") or 20)
         min_days_since_refresh = int(settings.get("actor_refresh_min_age_days") or 60)
         activity_window_days = int(settings.get("actor_refresh_activity_window_days") or 90)
@@ -241,7 +236,7 @@ async def _refresh_actor_async(actor_id: uuid.UUID) -> dict:
         invalidate_cache()
         await _ensure_cache(db)
 
-        # Knobs are read after the warm — see _kickoff_merge_async.
+        # Read settings after the cache warm above so a change made in the UI applies to this run.
         activity_window_days = int(settings.get("actor_refresh_activity_window_days") or 90)
         sample_n = int(settings.get("actor_refresh_sample_n") or 20)
 
@@ -389,8 +384,8 @@ async def _refresh_actor_async(actor_id: uuid.UUID) -> dict:
 # rejected, unpublished, or a hallucinated ID), which is exactly when invented
 # prose is least welcome. The profile's manual AI-refresh button is unaffected.
 # cve: assessments come from NVD data, not prose. observable: an AI-drafted
-# "dossier" for an IP address is v1's junk-prose problem reborn — the ledger's
-# description stays analyst-written or empty.
+# description for an IP address is the junk prose the first IOC design produced;
+# the ledger's description stays analyst-written or empty.
 ASSESSMENT_BACKFILL_EXCLUDED_TYPES = frozenset({"cve", "observable"})
 
 
@@ -700,12 +695,12 @@ async def _backfill_assessment_async(entity_type: str, entity_id: uuid.UUID, ref
 #
 # `kickoff_name_normalization_ai` walks the five entity tables, batches names
 # into groups of ~30, and dispatches one `process_name_normalization_batch`
-# per group on the ai queue. Each batch task asks Claude to judge
+# per group on the ai queue. Each batch task asks the AI to judge
 # every name in the batch and emit `keep` or `rename` decisions; rename
 # decisions become `normalize_name` proposals in EntityMaintenanceLog.
 #
-# Pure renames only — alias collisions / merge candidates belong to the
-# merge_engine flow, not here.
+# Pure renames only — alias collisions and merge candidates belong to the
+# merge review (services/entity_merge_review.py), not here.
 
 
 _NAME_NORMALIZATION_BATCH_SIZE = 30
@@ -931,12 +926,12 @@ async def _process_name_normalization_batch_async(entity_type: str, batch: list[
 
 
 # ───────────────────────────────────────────────────────────────────
-# AI gap research — Claude Code with web search fills missing entity fields.
-# Triggered by the Entity Hygiene → "Enrich N" buttons via the
-# /admin/hygiene/enrichment-gaps/enrich endpoint.
+# AI gap research — the AI provider, using web search, fills missing entity fields.
+# Triggered by the "Ask the AI for 10" button in the Engine enrichment console's
+# Coverage view, via the /admin/hygiene/enrichment-gaps/enrich endpoint.
 # ───────────────────────────────────────────────────────────────────
 
-# Per-(entity_type, field) prompt guidance Claude sees in the system message.
+# Per-(entity_type, field) guidance, rendered into the FIELD GUIDANCE section of the prompt.
 # Each entry tells the model what format to return and where to look.
 _GAP_FIELD_GUIDANCE: dict[tuple[str, str], str] = {
     ("threat_actor", "description"): (
@@ -1148,9 +1143,8 @@ async def _ai_enrich_gap_batch_async(entity_type: str, field: str, batch: list[d
                 continue
 
             confidence = (d.get("confidence") or "").lower()
-            # Direct-write only on high confidence (per the design pick).
-            # Medium / low get logged as suggestions in the AIResult row but
-            # don't touch the entity column.
+            # Write to the entity only on high confidence. Medium and low
+            # values stay in the AIResult row but don't touch the entity column.
             if confidence != "high":
                 skipped_low_conf += 1
                 continue
@@ -1220,8 +1214,8 @@ async def _ai_enrich_gap_batch_async(entity_type: str, field: str, batch: list[d
                         status="success",
                     )
                 )
-                # Drop a row into the unified hygiene feed so the user can SEE
-                # what the AI just did (subject, value, source URLs).
+                # Log the fill to EntityMaintenanceLog so the user can see what
+                # the AI changed (entity, value, source URLs).
                 db.add(
                     EntityMaintenanceLog(
                         entity_type=entity_type,
@@ -1313,7 +1307,7 @@ async def _apply_ai_gap_value(
     if field == "mitre_id":
         if (getattr(entity, "mitre_id", None) or "").strip():
             return False
-        # Accept G#### / S#### / numeric forms — strip anything else.
+        # Accept only G#### / S#### IDs; reject anything else.
         cleaned = raw_value.strip().upper()
         if not (cleaned.startswith(("G", "S")) and cleaned[1:].isdigit()):
             return False
@@ -1372,7 +1366,7 @@ async def _apply_ai_gap_value(
 
 @celery_app.task(bind=True, max_retries=1, soft_time_limit=1800)
 def review_duplicate_entities(self) -> dict:
-    """Judge the most likely duplicate pairs in the catalogue and file Merge
+    """Judge the most likely duplicate pairs in the catalog and file Merge
     proposals for the ones the model calls the same thing. Runs on the ai
     queue; a handful of calls per run, paced by the batch settings. One run at
     a time: the daily job and the Review tab's button can coincide, and two

@@ -20,8 +20,7 @@ export interface DocumentationPage {
   markdown: string;
 }
 
-// Docs are files on disk, picked up without a restart — refetch often enough
-// that a page dropped into docs/ shows up in a session that is already open.
+// Docs are files on disk, picked up without a restart, so refetch often enough that a page added to docs/ shows up in a session that is already open.
 const DOC_STALE_TIME = 5 * 60 * 1000;
 
 export function useDocumentationIndex() {

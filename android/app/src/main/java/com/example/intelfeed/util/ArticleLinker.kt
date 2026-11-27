@@ -6,27 +6,17 @@ import com.example.intelfeed.util.ArticleHtml.Span
 import com.example.intelfeed.util.ArticleHtml.SpanKind
 
 /**
- * Marks phrases in parsed article text the way the web reader does, in the web's order:
- *
- * 1. GLOSSARY terms (the web's `glossary-term` spans): `\b` word boundaries, any case, longest
- *    phrase first.
- * 2. ENTITY names (the web's EntityHighlighter): `(?<!\w)name(?!\w)`, any case, longest first.
- *    Text already inside a glossary term is skipped. On the same phrase the entity listed last
- *    wins, as in the web's lookup map.
- * 3. KEYWORD phrases (the app's tracked keywords and matched requirement keywords; the web has no
- *    equivalent): whole words, not inside links, code or anything already marked.
- *
- * Like the web, glossary and entity matching runs one HTML text node at a time
- * ([RichText.breaks]), so a name split by markup isn't matched, while names inside links and
- * code are. `\w` is ASCII there (JavaScript regexes without the `u` flag), so it is here too.
- * Plain Kotlin, so it runs off the main thread and is unit-tested on the JVM.
- */
+Marks phrases in parsed article text the way the web reader does, in the web's order:
+
+1. GLOSSARY terms (the web's `glossary-term` spans): `\b` word boundaries, any case, longest phrase first.
+2. ENTITY names (the web's EntityHighlighter): `(?<!\w)name(?!\w)`, any case, longest first. Text already inside a glossary term is skipped. On the same phrase the entity listed last wins, as in the web's lookup map.
+3. KEYWORD phrases (the app's tracked keywords and matched requirement keywords; the web has no equivalent): whole words, not inside links, code or anything already marked.
+
+Like the web, glossary and entity matching runs one HTML text node at a time ([RichText.breaks]), so a name split by markup isn't matched, while names inside links and code are. `\w` is ASCII there (JavaScript regexes without the `u` flag), so it is here too. Plain Kotlin, so it can run off the main thread and be unit-tested on the JVM.
+*/
 object ArticleLinker {
 
-    /**
-     * A phrase to mark. ENTITY terms carry the entity; GLOSSARY terms carry the term id in
-     * [entityId]; KEYWORD terms carry nothing else.
-     */
+    /** A phrase to mark. ENTITY terms carry the entity; GLOSSARY terms carry the term id in [entityId]; KEYWORD terms carry nothing else. */
     data class Term(
         val text: String,
         val kind: SpanKind,
@@ -39,12 +29,10 @@ object ArticleLinker {
     private const val W = "[A-Za-z0-9_]"
     private const val JS_WORD_BOUNDARY = "(?:(?<=$W)(?!$W)|(?<!$W)(?=$W))"
 
-    // Keyword phrases are the app's own; they keep the earlier Unicode-aware whole-word rule.
+    // Keyword phrases are the app's own, so they use a Unicode-aware whole-word rule rather than JavaScript's ASCII \w.
     private const val KEYWORD_MIN_LENGTH = 2
 
-    // Keyed by the source list's identity plus the terms. Each entry keeps the source list and the
-    // terms and both are checked on a hit: an identity hash alone can collide, which would have
-    // shown another article's highlights.
+    // Keyed by the source list's identity plus the terms. Each entry keeps the source list and the terms and both are checked on a hit: an identity hash alone can collide, which would show another article's highlights.
     private class CacheEntry(val source: List<Block>, val terms: List<Term>, val result: List<Block>)
 
     private val cache = java.util.Collections.synchronizedMap(
@@ -155,10 +143,7 @@ object ArticleLinker {
             return if (added.isEmpty()) rich else rich.copy(spans = rich.spans + added)
         }
 
-        /**
-         * Calls [block] with each [from, to) stretch of [text] that is one text node: split at
-         * [breaks] and at the edges of [skip], with the [skip] ranges themselves left out.
-         */
+        /** Calls [block] with each [from, to) stretch of [text] that is one text node: split at [breaks] and at the edges of [skip], with the [skip] ranges themselves left out. */
         private inline fun forEachSegment(text: String, breaks: List<Int>, skip: List<IntRange>, block: (Int, Int) -> Unit) {
             val cuts = sortedSetOf(0, text.length)
             breaks.forEach { if (it in 1 until text.length) cuts += it }

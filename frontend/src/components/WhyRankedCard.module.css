@@ -6,7 +6,7 @@
   margin: var(--sp-4) 0 0;
 }
 
-/* The left rule carries the band, so the card reads while scrolling past it. */
+/* The left border shows the priority band, so the band is visible while scrolling past the card. */
 .edge_high {
   border-left-color: var(--danger);
 }
@@ -56,8 +56,7 @@
   color: var(--text-secondary);
 }
 
-/* Collapsed state: the top reason, truncated rather than wrapped so the strip
-   stays one line at any reader width. */
+/* Collapsed state: the top reason, truncated rather than wrapped so the strip stays one line at any reader width. */
 .leadText {
   flex: 1;
   min-width: 0;
@@ -94,8 +93,7 @@
 }
 
 /* ── The ledger ──────────────────────────────────────────────────────
-   One row per signal, ordered by real contribution. Replaces the old family
-   bars *and* the reason list, which were the same data in two languages. */
+   One row per signal, ordered by contribution. It is the single view of the signals, rather than family bars plus a reason list that showed the same data twice. */
 .ledger {
   list-style: none;
   margin: 0;
@@ -159,7 +157,7 @@
   color: var(--danger);
 }
 
-/* ── Footer: one line for the personal lift, replacing the old boxed panel ── */
+/* ── Footer: one line for the personal lift ── */
 .footer {
   display: flex;
   align-items: baseline;
@@ -207,7 +205,7 @@
   color: var(--accent);
 }
 
-/* ── "Show the math": the receipt, for auditing the number in place ── */
+/* ── "Show the math": the per-signal breakdown, for checking the number in place ── */
 .math {
   margin: 0 var(--sp-4);
   padding: 0.6rem 0 0.2rem;
@@ -276,8 +274,7 @@
   color: var(--text-muted);
 }
 
-/* ── Family accents. Referenced dynamically via `bg_${family}` / `fam_${family}`,
-   so a static grep finds no call site for most of them. ── */
+/* ── Family accents. Referenced dynamically via `bg_${family}` / `fam_${family}`, so a static grep finds no call site for most of them. ── */
 .fam_severity {
   color: var(--danger);
 }

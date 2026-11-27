@@ -2,8 +2,8 @@
 """Regenerate the skill CLIs' TOOLS dicts from the backend agent-tool registry.
 
 The two skill CLIs (claude/skills/intelfeed, claude/skills/intelfeed-lite) carry hand-readable
-copies of the backend tool definitions. Historically these were maintained by
-hand and drifted badly. This script makes the backend registry the single
+copies of the backend tool definitions. Maintained by hand, they drifted out of
+sync with the backend. This script makes the backend registry the single
 source of truth: it fetches the live definitions and rewrites each CLI's
 `TOOLS: dict[str, dict] = {...}` block in place, leaving the rest of the file
 untouched.
@@ -14,8 +14,8 @@ document export are outside its read-only retrieval charter).
 
 The full CLI's WRITE_TOOLS denylist (the INTELFEED_READ_ONLY gate) is also
 generated here: every registry tool flagged ``mutating``, plus the
-EXTRA_WRITE_TOOLS below. Before this it was hand-maintained and silently
-missed 50 of 79 mutating tools after the 2026-08 registry expansion.
+EXTRA_WRITE_TOOLS below. When it was maintained by hand it missed 50 of 79
+mutating tools after the 2026-08 registry expansion, without any error.
 
 It also writes intelfeed-mcp/registry.json, the MCP server's offline copy of
 the registry (the server reads the live one from /api/tools/tools when it can).
@@ -57,8 +57,8 @@ LITE_EXCLUDE = {
 }
 
 # Gated in read-only mode even though the registry calls them non-mutating.
-# Empty: the AI extraction tools, run_ai_task and generate_detection_rules that
-# used to need this are flagged mutating in the registry itself, so every
+# Empty: the AI extraction tools, run_ai_task and generate_detection_rules,
+# which once needed this, are flagged mutating in the registry itself, so every
 # read-only boundary (agent tokens, the Ollama read-only copilot, this gate)
 # agrees. Add a name here only for a tool the registry cannot flag.
 EXTRA_WRITE_TOOLS: set[str] = set()

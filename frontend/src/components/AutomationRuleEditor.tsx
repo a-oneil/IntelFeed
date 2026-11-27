@@ -1433,8 +1433,7 @@ export function AutomationRuleEditor({ rule, onClose }: Props) {
                               <label>{f.label}</label>
                               {f.fieldType === "select" ? (
                                 <select
-                                  // An unset select shows the default the backend falls back to
-                                  // (its placeholder), not "Select...".
+                                  // An unset select shows the default the backend falls back to (its placeholder), not "Select...".
                                   value={configToDisplay(action.config, f.key) || f.placeholder}
                                   onChange={(e) =>
                                     updateActionConfig(i, f.key, e.target.value, action.type)

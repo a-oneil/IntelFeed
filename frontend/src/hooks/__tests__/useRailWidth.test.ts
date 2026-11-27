@@ -22,10 +22,7 @@ describe("useRailWidth", () => {
     expect(result.current.width).toBe(700);
   });
 
-  // Bounds used to be enforced only inside setRailWidth, so a width persisted
-  // under an older min came straight back out of localStorage. For the docked
-  // reader that rendered the pane as an invisible sliver: the article link
-  // worked, the reader just had no width to show it in.
+  // Bounds are enforced on read, not only inside setRailWidth: otherwise a width persisted under an older minimum comes straight back out of localStorage, and the docked reader renders as an invisible sliver (the article link works, but the pane has no width to show it in).
   it("clamps a stale persisted width below the current minimum", () => {
     useUIStore.setState({ railWidths: { "workbench-reader": 12 } });
     const { result } = renderHook(() => useRailWidth("workbench-reader", READER));

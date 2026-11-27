@@ -1,8 +1,4 @@
-// What the hover card shows for a highlighted entity, built from the entity
-// payload /api/autolink/scan attaches to each match. Mirrors the app's
-// popover: frontend/src/utils/entityPopoverMeta.ts (facts, aliases, links per
-// type) and the CVE and technique grids in frontend/src/components/EntityPopover.tsx.
-// No browser APIs.
+// What the hover card shows for a highlighted entity, built from the entity payload /api/autolink/scan attaches to each match. Mirrors the app's popover: frontend/src/utils/entityPopoverMeta.ts (facts, aliases, links per type) and the CVE and technique grids in frontend/src/components/EntityPopover.tsx. No browser APIs.
 
 const SEVERITY_COLORS = {
   critical: "#dc2626",
@@ -164,8 +160,7 @@ export function cardView(type, e, name) {
 
   const aliases = type === "cwe" ? e.alternate_terms : e.aliases;
   view.aliases = (aliases || []).filter((a) => a && a.toLowerCase() !== String(name).toLowerCase()).slice(0, 6);
-  // Entity fields can be filled by AI or by hand, so only https links are shown:
-  // the page script puts them on the visited site, where a javascript: link would run.
+  // Entity fields can be filled by AI or by hand, so only https links are shown: the page script puts them on the visited site, where a javascript: link would run.
   view.links = view.links.filter((l) => /^https:\/\//i.test(l.url)).slice(0, 4);
   view.artifacts = view.artifacts.slice(0, 4);
   return view;

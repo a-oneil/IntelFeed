@@ -121,7 +121,7 @@ async function renderResults(entryId) {
     state.textContent = found
       ? `Still processing. So far: ${found}.`
       : "IntelFeed is still processing this page. If notifications are on in Settings, one says what it found when it is done.";
-    // The popup stays open only while it is in use; poll gently until then.
+    // Check again every 5 seconds while the popup is open (it closes when it loses focus).
     resultTimer = setTimeout(() => renderResults(entryId), RESULT_POLL_MS);
   } else {
     state.textContent = found ? extra.join(" · ") : "Nothing was found in it.";

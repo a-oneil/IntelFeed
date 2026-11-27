@@ -27,8 +27,7 @@ interface EntityGlance {
 export const entityGlanceKey = (entityType: string, entityId: string) =>
   ["entity-glance", entityType, entityId] as const;
 
-/** The highlight popover's glance. Optional by design: a failed request
- *  leaves the popover as it is without enrichment. */
+/** The highlight popover's glance. Optional by design: a failed request leaves the popover as it is, without enrichment. */
 export function useEntityGlance(entityType: string, entityId: string | undefined) {
   return useQuery({
     queryKey: entityGlanceKey(entityType, entityId ?? ""),

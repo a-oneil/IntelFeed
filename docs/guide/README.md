@@ -22,7 +22,7 @@ stands on its own. For the phone app, see [IntelFeed for Android](../android-app
 | [Campaigns and reports](campaigns-and-reports.md) | Grouping an investigation, then writing it up |
 | [Automation and AI](automation-and-ai.md) | Rules that run on their own, and the copilot |
 | [Notes and sharing](notes-and-sharing.md) | Notes, comments, share links, exports |
-| [Settings and personalising](settings.md) | Themes, reading preferences, tags, and where each setting lives |
+| [Settings and personalizing](settings.md) | Themes, reading preferences, tags, and where each setting lives |
 | [Users and access](users-and-access.md) | For admins: registration, invite links, accounts, public read-only mode |
 | [When something isn't working](troubleshooting.md) | Dead feeds, wrong links, silent automations, odd rankings |
 
@@ -31,7 +31,7 @@ stands on its own. For the phone app, see [IntelFeed for Android](../android-app
 IntelFeed collects security articles from feeds. It reads each one and links
 what it finds to a profile page. Those things are called **entities**: threat
 actors (the groups behind attacks), malware, CVEs (published software flaws),
-ATT&CK techniques (standard names for attacker behaviour), vendors, products,
+ATT&CK techniques (standard names for attacker behavior), vendors, products,
 countries, tools and more.
 
 In a normal feed reader, you read an article and it is gone. Here, an article

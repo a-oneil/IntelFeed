@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 @celery_app.task(name="app.workers.thread_tasks.rebuild_story_threads", soft_time_limit=1200, time_limit=1260)
 def rebuild_story_threads(limit: int | None = None):
-    """Attach new articles to the stories they continue; seed the ones that broke."""
+    """Attach new articles to the stories they continue; start threads for new stories."""
     start = time.monotonic()
     try:
         stats = run_async(_rebuild_story_threads(limit))
@@ -44,10 +44,11 @@ async def _rebuild_story_threads(limit: int | None = None) -> dict:
         await warm_settings_cache(db)
         stats = await assign_entries(db, limit=int(limit or settings.get("thread_sweep_limit") or 1500))
         # Hand the changed threads to the scorer. Popped rather than returned:
-        # the id list is plumbing, and job_runs records this dict verbatim.
+        # the id list is internal, and job_runs records this dict verbatim.
         changed = stats.pop("touched_thread_ids", [])
-        # Every thread renders from beats, so a thread without them is invisible.
-        # This fills the gap immediately; the nightly pass rewrites them properly.
+        # Every thread renders from its beat rows, so a thread without any does
+        # not show. This writes a non-AI spine right away; the nightly narration
+        # pass replaces it with an AI-written one.
         stale = (
             (
                 await db.execute(
@@ -110,9 +111,9 @@ async def _narrate_story_threads(limit: int | None = None) -> dict:
         # Only threads that need a spine, busiest live ones first: a story nobody
         # is still writing about does not need a fresh spine tonight, and a
         # thread whose written spine still describes its members does not need
-        # one at all. Selecting by recency alone spent the whole nightly budget
-        # on threads that immediately returned "cached" while a hundred others
-        # kept their day-grouped headlines.
+        # one at all. Selecting by recency alone would spend the whole nightly
+        # budget on threads that return "cached" while many others keep their
+        # day-grouped headlines.
         rows = (
             (
                 await db.execute(

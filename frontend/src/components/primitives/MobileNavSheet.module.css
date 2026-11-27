@@ -1,5 +1,4 @@
-/* Mobile only. The hosting page renders this instead of its sidebar under
-   767px; above that the sidebar is a real column and none of this exists. */
+/* Mobile only. The hosting page renders this instead of its sidebar under 767px; above that the sidebar is a normal column and this component is not rendered. */
 
 .trigger {
   display: flex;
@@ -30,8 +29,7 @@
   color: var(--text-secondary);
 }
 
-/* The section you are on is the label — the trigger answers "where am I?"
-   as well as "how do I move?". */
+/* The trigger's label is the current section, so it shows where you are as well as opening the nav. */
 .triggerLabel {
   flex: 1;
   min-width: 0;
@@ -41,8 +39,7 @@
   white-space: nowrap;
 }
 
-/* Only visible during the slide — the open panel covers the viewport. It still
-   earns its place as the tap target behind a half-open sheet. */
+/* Only visible during the slide, since the open panel covers the viewport. It is still the tap target behind a half-open sheet. */
 .backdrop {
   position: fixed;
   inset: 0;
@@ -50,11 +47,7 @@
   z-index: 300;
 }
 
-/* Full-viewport, exactly like the app sidebar on this breakpoint: same 100vw /
-   100dvh panel, same slide, same safe-area insets. A narrow drawer beside a
-   sliver of the page read as a different mechanism from the main menu one tap
-   away — there is only one way a menu opens on a phone here. Nothing shows
-   behind it, so the drawer's edge border and shadow are gone with it. */
+/* Full-viewport, exactly like the app sidebar on this breakpoint: same 100vw / 100dvh panel, same slide, same safe-area insets. A narrow drawer beside a strip of the page would look like a different mechanism from the main menu, and every menu on a phone opens the same way. Nothing shows behind it, so the sheet has no edge border or shadow. */
 .sheet {
   position: fixed;
   inset: 0;
@@ -69,8 +62,7 @@
   padding-right: env(safe-area-inset-right, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
   box-sizing: border-box;
-  /* Slides rather than collapsing to zero width — a width transition on a
-     fixed panel just snaps. */
+  /* Slides in with a transform rather than animating width, because a width transition on a fixed panel snaps instead of animating. */
   transform: translateX(-100%);
   visibility: hidden;
   transition: transform 0.25s ease, visibility 0.25s;
@@ -114,8 +106,7 @@
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  /* Both navs open with a filter box, and neither carries a top margin of its
-     own — without this it sits flush against the header rule. */
+  /* Both navs open with a filter box, and neither carries a top margin of its own — without this it sits flush against the header rule. */
   padding-top: var(--sp-4);
   padding-bottom: var(--sp-6);
 }

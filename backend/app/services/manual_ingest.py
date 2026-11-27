@@ -117,8 +117,9 @@ async def fetch_url_document(url: str) -> ParsedDocument:
     """Fetch a page and reduce it to sanitized HTML + text. No database.
 
     Reuses the poller's readability extraction (bot-protection impersonation,
-    robots.txt, Google News unwrapping), then falls back to a plain fetch for a
-    title and og:image. Both paths go through the SSRF-vetted client.
+    robots.txt, Google News unwrapping); when that returns nothing, falls back
+    to a plain fetch of the raw HTML, its title and og:image. Both paths go
+    through the SSRF-vetted client.
     """
     validate_http_url(url)
     parsed = urlparse(url)
@@ -296,7 +297,8 @@ async def ingest_page(
     fetched from one of their feeds), that entry is returned with ``created``
     False. With ``html`` the URL is not fetched, so pages behind a login, a
     paywall or robots.txt can still be sent. The entry's metadata records
-    ``source: extension_page`` and the sender's user id.
+    ``source: extension_page`` (``url_ingest`` when the URL was fetched) and
+    the sender's user id.
     """
     url = normalize_page_url(url)
     existing = await find_entry_by_url(db, url, user_id)

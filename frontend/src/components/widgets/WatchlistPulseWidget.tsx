@@ -17,8 +17,7 @@ export default function WatchlistPulseWidget({ config }: Props) {
   const selectEntity = useIntelStore((s) => s.selectEntity);
   const setActiveSection = useIntelStore((s) => s.setActiveSection);
 
-  // Watchable types are a superset of profile-able ones: ransomware victims
-  // have no entity profile, so they open the tracker instead.
+  // Watchable types are a superset of the types with profiles: ransomware victims have no entity profile, so they open the tracker instead.
   const PROFILED: EntityType[] = [
     "threat_actor",
     "malware",

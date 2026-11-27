@@ -14,11 +14,11 @@ judgment created it — the one-pass analysis AI (with a role and an evidence
 sentence), a curated ``ioc_list`` feed, a TTP observable, or an analyst.
 The observables pipeline stage may then *sight* a
 known value in new entries (exact match against this table is safe; regex
-discovery was the trap).
+discovery is what filled v1 with junk).
 
 Confidence decays per kind: infrastructure rotates (ips fastest), behavior
 persists (hashes and host artifacts never decay). A new sighting resets the
-clock. ``scripts/`` rows are hash-keyed: ``value`` is the sha256 of the
+clock. ``kind="script"`` rows are hash-keyed: ``value`` is the sha256 of the
 normalized snippet and ``content`` holds the code itself.
 """
 
@@ -129,8 +129,8 @@ class Observable(Base):
     #: The sentence the capturing door quoted as its reason.
     evidence: Mapped[str | None] = mapped_column(Text)
 
-    # --- confidence & lifecycle (resurrected from IOC v1's schema, this time
-    # with surfaces that read it) ---
+    # --- confidence & lifecycle (columns carried over from IOC v1's schema,
+    # where nothing read them; here the UI does) ---
     base_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.8)
     current_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.8)
     confidence_pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")

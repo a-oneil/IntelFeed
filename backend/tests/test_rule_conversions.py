@@ -3,8 +3,8 @@
 A conversion used to live in ``metadata.rule_conversions`` on its parent, which
 made it invisible to /detection-rules/search, unversioned, unexportable on its
 own and deleted with the parent. ``detection_rules.derived_from`` makes it a
-row. These tests pin the properties that were previously missing, plus the
-on-write coverage resolution that both paths now trigger.
+row. These tests pin the properties the metadata copy lacked, plus the
+on-write coverage resolution that both paths trigger.
 """
 
 import uuid
@@ -114,7 +114,7 @@ async def test_convert_creates_a_sibling_rule(db_session, client, auth_headers, 
     # parent's status.
     assert sibling.is_draft is True
     assert sibling.title == "LockBit Shadow Copy Deletion (Elastic QL)"
-    # The old response keys still answer the old question.
+    # The response keeps its earlier keys (source_type, target_type, tokens_used).
     assert payload["source_type"] == "sigma"
     assert payload["target_type"] == "elastic_ql"
     assert payload["tokens_used"] == 150
@@ -211,7 +211,7 @@ async def test_conversions_endpoint_is_empty_for_an_unconverted_rule(client, aut
 
 
 async def test_sibling_survives_its_parent(db_session, client, auth_headers, parent_rule, fake_converter):
-    """The blob was deleted with the parent; a row is only detached from it."""
+    """A metadata copy was deleted with its parent; a sibling row is only detached from it."""
     fake_converter()
     await _convert(client, auth_headers, parent_rule.id)
 
@@ -261,8 +261,8 @@ async def test_creating_a_rule_resolves_coverage_immediately(db_session, client,
     rows = (await db_session.execute(select(RuleCoverage).where(RuleCoverage.rule_id == rule_id))).scalars().all()
     resolved = {(r.entity_type, r.entity_key) for r in rows}
     assert (entity_types.TTP, "T1490") in resolved
-    # source_cves was accepted by the create schema and then dropped on the
-    # floor, so an advisory-derived rule resolved to no CVE at all.
+    # Regression: source_cves was accepted by the create schema and then
+    # discarded, so an advisory-derived rule resolved to no CVE at all.
     assert (entity_types.CVE, "CVE-2026-4242") in resolved
 
 
@@ -290,7 +290,7 @@ async def test_updating_a_rules_tags_re_resolves_coverage(db_session, client, au
 
 
 async def test_a_resolver_failure_does_not_fail_the_save(client, auth_headers):
-    """Coverage is derived data — losing a save over it would be a worse trade."""
+    """Coverage is derived data, so a resolver error must not lose the save."""
     with patch("app.services.rule_coverage.resolve_rule", side_effect=RuntimeError("vocab down")):
         resp = await client.post(
             "/api/detection-rules",

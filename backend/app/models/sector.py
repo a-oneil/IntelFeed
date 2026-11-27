@@ -2,8 +2,8 @@
 
 A sector is a closed-vocabulary noun (see ``app.intelligence.sectors``): one
 row per canonical slug, seeded rather than extracted, never merged, never
-reclassified, never autolinked. It exists as a table so a sector can be landed
-on — profile, pivot, timeline, watch, workbench list — the way a country can.
+reclassified, never autolinked. It exists as a table so a sector gets a profile,
+pivots, a timeline, watches and a workbench list, the way a country does.
 
 Ids are deterministic (``sector_uuid(slug)``) so every install agrees on them;
 the ORM default below derives the id from the slug when a caller omits it.

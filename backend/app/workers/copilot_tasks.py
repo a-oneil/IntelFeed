@@ -1,5 +1,5 @@
 """Celery task that runs a global-copilot CLI turn on the dedicated
-``claude_code`` worker and streams its events back to the api over Redis.
+``ai`` worker (celery-worker-ai) and streams its events back to the api over Redis.
 
 Why this exists (prod topology): the interactive copilot drives the Claude Code
 CLI, which needs OAuth credentials at ``~/.claude/.credentials.json``. Only

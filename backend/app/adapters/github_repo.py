@@ -177,7 +177,7 @@ class GitHubRepoAdapter(ExtendedAdapter):
       the branch HEAD.  Falls back to commits mode when the diff exceeds GitHub's
       250-commit / 300-file limit.
 
-    On first poll, applies ``backfill_days`` (default 30) to limit how far back the
+    On first poll, applies ``backfill_days`` (default 90) to limit how far back the
     initial import reaches.
     """
 
@@ -398,21 +398,21 @@ class GitHubRepoAdapter(ExtendedAdapter):
             if not _matches_any_pattern(fp, paths):
                 continue
 
-            # Find the latest commit that touched this file from the commits list
+            # Default to the head SHA (or the base when the range lists no commits)
             commit_sha = head_sha or base_sha
             commit_message = ""
             commit_author = "unknown"
             commit_timestamp = None
 
-            # Walk commits in reverse (newest first) to find the last one touching this file
+            # Take the newest commit in the range (the loop breaks on its first pass)
             for commit in reversed(compare_data.get("commits", [])):
                 commit_sha = commit["sha"]
                 commit_message = commit.get("commit", {}).get("message", "")
                 commit_author = _extract_commit_author(commit)
                 commit_timestamp = commit.get("commit", {}).get("author", {}).get("date")
-                # The compare API doesn't tell us which commit changed which file,
-                # so we use the newest commit as the reference for all files.
-                # This is a trade-off for efficiency.
+                # The compare API doesn't say which commit changed which file, so the
+                # newest commit is used for every file. Finding the exact commit would
+                # cost one extra request per file.
                 break
 
             file_changes[fp] = {
@@ -591,7 +591,7 @@ class GitHubRepoAdapter(ExtendedAdapter):
         when the blob moved on (or nothing is stored to compare) the file is
         listed again as ``modified``, stamped with the last commit that touched
         it, so the worker can bring the entry and its rule up to date. Without
-        ``known_blobs`` every known guid is skipped, as before.
+        ``known_blobs`` every known guid is skipped.
 
         Uses the Git Trees API (recursive) which returns the full tree in a
         single request, then fetches content for each listed file individually.

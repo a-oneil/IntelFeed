@@ -2,12 +2,7 @@ import SimpleTagEditor from "@/components/SimpleTagEditor";
 import bench from "./bench.module.css";
 import styles from "./RuleDetailsForm.module.css";
 
-// Hyphenated to match what the backend stores — these are ATT&CK's own slugs
-// (`kill_chain_phases.phase_name`), the same ones `TTP.tactic` holds. An
-// underscored copy here would leave every chip unselected on rules that use
-// them, and saving would appear to do nothing once the API folded the spelling
-// back. `stealth` and `defense-impairment` are the v18 split of defense-evasion,
-// which is kept for rules written before it.
+// Hyphenated to match what the backend stores: these are ATT&CK's own slugs (`kill_chain_phases.phase_name`), the same ones `TTP.tactic` holds. Underscored values here would leave every chip unselected on rules that use them, and saving would appear to do nothing once the API converted the spelling back. `stealth` and `defense-impairment` are the ATT&CK v18 split of defense-evasion, which is kept for rules written before it.
 const TACTIC_OPTIONS = [
   "reconnaissance", "resource-development", "initial-access", "execution",
   "persistence", "privilege-escalation", "defense-evasion", "stealth",
@@ -32,13 +27,7 @@ interface RuleDetailsFormProps {
   onAutoFill: () => void;
 }
 
-/**
- * The Details tab: the four fields you type into. Severity lives in the
- * headline row, telemetry in the right rail's "Fields vs inventory" card and
- * provenance in the left rail, so nothing here repeats what the page already
- * shows. Status, level, log source and ATT&CK ids are in the rule body in the
- * editor above; "Auto-fill" is how they get into these fields.
- */
+/** The Details tab: the four fields you type into. Severity is in the headline row, telemetry in the right rail's "Fields vs inventory" card and provenance in the left rail, so nothing here repeats what the page already shows. Status, level, log source and ATT&CK ids are in the rule body in the editor above; "Auto-fill" copies them into these fields. */
 export function RuleDetailsForm({ values, onChange, mappedFields, onAutoFill }: RuleDetailsFormProps) {
   const canAutoFill = !!mappedFields && Object.keys(mappedFields).length > 0;
 

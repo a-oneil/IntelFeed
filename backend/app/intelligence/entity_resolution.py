@@ -4,10 +4,8 @@ Phases 1–2 of the entity creation guardrails (docs/engine-settings.md). Every
 automated entity creation path (AI extraction stores, Cybergeist sync, CLI write
 tools) and the manual UI route through :func:`resolve_entity_creation` before minting a
 profile; the gates and normalized matching live here so all call sites inherit
-them. Phase 3 (pending tier / one-pass resolution) hooks into the ``held``
-decisions this module already emits — a held decision today logs an advisory
-and (in shadow) still creates; Phase 3 turns those into ``pending_entities``
-rows.
+them. A ``held`` decision logs an advisory to EntityMaintenanceLog; in shadow
+mode the entity is still created.
 
 Flags (system_settings-overridable via ``settings.get``):
 
@@ -20,8 +18,8 @@ Flags (system_settings-overridable via ``settings.get``):
       EntityMaintenanceLog and still create; on = enforce.
 
 Every decision (matched / blocked / held / created / tombstone) is written to
-EntityMaintenanceLog with a ``resolution_*`` action so the whole system is
-auditable from the Hygiene/maintenance-log UI.
+EntityMaintenanceLog with a ``resolution_*`` action, so every decision can be
+audited from the maintenance log.
 
 No fuzzy auto-merge, ever: descriptor-stripped and trigram matches only route
 to a ``held`` advisory. Entities are never auto-renamed.
@@ -49,8 +47,8 @@ from app.models.threat_actor import ThreatActor
 from app.models.tool import TOOL_TYPES, Tool
 from app.models.vendor import Vendor
 
-# ENTITY_TYPE_REGISTRY slugs → model. Order matters for the cross-type check
-# (actor/malware/tool are the contaminating trio; vendor/product close the loop).
+# ENTITY_TYPE_REGISTRY slugs → model for the types resolve_entity_creation
+# handles. Every caller looks a model up by slug, so the order is not used.
 RESOLVED_MODELS: dict[str, type] = {
     "threat_actor": ThreatActor,
     "malware": MalwareFamily,
@@ -63,7 +61,7 @@ RESOLVED_MODELS: dict[str, type] = {
 # Normalization (Phase 1)
 # ---------------------------------------------------------------------------
 
-# Single canonical leetspeak direction (plan §3.1): 0→o 1→l 3→e 4→a 5→s 7→t $→s @→a.
+# One leetspeak direction, digits/symbols to letters: 0→o 1→l 3→e 4→a 5→s 7→t $→s @→a.
 _LEET_MAP = str.maketrans({"0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "$": "s", "@": "a"})
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 _TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9]+")
@@ -190,7 +188,7 @@ def normalize_entity_name(name: str, entity_type: str | None = None) -> Normaliz
     leading, trailing = _TYPE_DESCRIPTORS.get(entity_type or "", ((), ()))
     tokens = _strip_phrases(_tokens(name), leading, trailing)
 
-    # Version-token strip (F8): trailing v-prefixed / dotted numbers, only
+    # Version-token strip: trailing v-prefixed / dotted numbers, only
     # while the remaining stem stays ≥ 4 chars folded.
     while len(tokens) > 1 and _VERSION_TOKEN_RE.match(tokens[-1]) and len(_fold("".join(tokens[:-1]))) >= 4:
         tokens = tokens[:-1]
@@ -214,8 +212,8 @@ def normalize_entity_name(name: str, entity_type: str | None = None) -> Normaliz
 
 
 # ---------------------------------------------------------------------------
-# Generic-name gate patterns (Phase 2.1) — ported from the plan §2.1 / the
-# tools-audit junk_reason() pattern set (scratchpad/build_tool_plan.py).
+# Generic-name gate patterns (Phase 2.1), taken from the tools audit's
+# junk_reason() pattern set.
 # ---------------------------------------------------------------------------
 
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
@@ -225,8 +223,8 @@ _HASH_RE = re.compile(r"^[0-9a-f]{32}$|^[0-9a-f]{40}$|^[0-9a-f]{64}$", re.IGNORE
 # type and an ingest pipeline for those. Minting a *second* row for the same id
 # under another type is what breaks the autolinker: both rows enter the
 # Aho-Corasick vocabulary, so every mention of the id links to the CVE and to
-# the impostor, and the pair then correlates with itself forever. Malware may
-# of course be *related* to a CVE — that belongs in entity_relationships.
+# the duplicate, and the two then correlate with each other on every mention.
+# Malware can be *related* to a CVE; that belongs in entity_relationships.
 #
 # Anchored form catches "CVE-2026-55193" and "CVE-2026-55193 ransomware"; the
 # unanchored form catches "Exploit for CVE-2026-55193". Both require digits
@@ -280,7 +278,7 @@ _LEADING_ARTICLES = frozenset({"the", "a", "an", "this", "these", "those", "that
 
 # Continents, regions and blocs. An article that says "targets North America"
 # names a place, never an adversary, a family or a tool. Countries are gated
-# separately against the country catalogue (``_country_named``), which knows
+# separately against the country catalog (``_country_named``), which knows
 # every demonym and alias; this list covers what no country row holds.
 _REGION_NAMES = frozenset(
     "north america|south america|central america|latin america|latam|the americas|americas|"
@@ -350,7 +348,7 @@ _AV_PREFIX_RE = re.compile(
 _AV_TAXONOMY_RE = re.compile(r"^\S+[./!]\S+[./!]\S+$")  # ≥2 dotted segments, no spaces
 _SANDBOX_ID_RE = re.compile(r"\.sbx(\.|$)", re.IGNORECASE)
 
-# Tools-audit pattern set (F13) — ported verbatim from the audit script.
+# Tools-audit pattern set (F13), copied unchanged from the audit script.
 _CLI_FLAG_RE = re.compile(r"^--?\S")
 _FUNC_CALL_RE = re.compile(r"[A-Za-z0-9_\]]\([^)]*\)")
 _ACRONYM_PARENS_RE = re.compile(r"\s\([A-Z0-9/]{1,6}\)")
@@ -381,9 +379,10 @@ _PHYSICAL_OBJECT_RE = re.compile(
 )
 
 # --- Tool semantic gates (2026-09) -----------------------------------------
-# The F13 pattern set above only rejects code-artifact *shapes*. It let eleven
-# weeks of dependency names, vulnerable packages and API symbols through. A tool is software WIELDED during an
-# intrusion; a library that is merely imported, shipped or exploited is not.
+# The F13 pattern set above only rejects code-artifact *shapes*, and over eleven
+# weeks it let dependency names, vulnerable packages and API symbols through. A
+# tool is software an attacker runs during an intrusion; a library that is only
+# imported, shipped or exploited is not.
 #
 # These run after the resolver's exact/normalized matchers, so a known tool
 # quoted with a version ("Cobalt Strike 4.9") has already resolved and never
@@ -420,7 +419,7 @@ _VERSION_IN_NAME_RE = re.compile(r"(?:^|\s)v?\d+\.\d+[\w.]*(?:\s|$)")
 _SCRIPT_FILE_RE = re.compile(r"\.(ps1|py|sh|go|rb|php|jsp|aspx?|bin|class|jar|pl|lua|vbs|bat|cmd|hta)$", re.I)
 _BINARY_FILE_RE = re.compile(r"\.(exe|dll|sys|ocx|scr)$", re.IGNORECASE)
 # Absolute paths ("/bin/sh", "/dev/kvm", "C:\ProgramData\...") and URL
-# routes ("/j_security_check") are artefacts or observables, never a tool.
+# routes ("/j_security_check") are artifacts or observables, never a tool.
 _ABS_PATH_RE = re.compile(r"^(?:/|\\|[A-Za-z]:\\)")
 # A plural category noun at the end makes a phrase, not a name: "VPN
 # software", "remote desktop sessions", "email authentication protocols".
@@ -430,7 +429,7 @@ _TOOL_CATEGORY_TAIL = frozenset(
 )
 
 # Signed Windows binaries the prompt's LOLBAS carve-out is meant to admit.
-# Anything else with a binary extension is a sideload target or crash artefact.
+# Anything else with a binary extension is a sideload target or crash artifact.
 _LOLBAS_ALLOWLIST = frozenset(
     """
     at.exe atbroker.exe bash.exe bitsadmin.exe bginfo.exe cdb.exe certoc.exe certreq.exe certutil.exe
@@ -553,7 +552,7 @@ def is_tool_concept_name(name: str) -> bool:
 # sentences are real quotes; the junk came from what they quote. A defender
 # running Ghidra or FakeNet-NG passed the tool door because it asked only that
 # someone operates the software. New tools are attacker tools; defender
-# software still links to a catalogue row that already exists.
+# software still links to a catalog row that already exists.
 _DEFENDER_RE = re.compile(
     r"\b(?:defenders?|responders?|incident response|analysts?|researchers?|investigators?|"
     r"security teams?|blue teams?|soc|admins?|administrators?|it teams?|vendors?|customers?|users?|"
@@ -995,8 +994,8 @@ _KNOWN_CONSTANT_RE = re.compile(
 _HEX_LITERAL_RE = re.compile(r"^0x[0-9a-f]+$", re.IGNORECASE)
 _DIGITS_ONLY_RE = re.compile(r"^\d+$")
 # Numeric names that really are tracked groups. "764" is the FBI-tracked
-# extortion network, "7777" the Quad7 botnet; an existing row resolves before the gate anyway, this
-# keeps a fresh install able to create it.
+# extortion network, "7777" the Quad7 botnet. An existing row resolves before
+# the gate anyway; this lets a fresh install create them.
 _NUMERIC_ACTOR_ALLOWLIST = frozenset({"764", "7777"})
 
 # Descriptions of an actor rather than its name: "China-nexus", "North
@@ -1239,9 +1238,9 @@ def generic_name_reason(entity_type: str, name: str, norm: NormalizedName | None
 
 
 async def _country_named(db: AsyncSession, name: str) -> str | None:
-    """The catalogue country whose name or alias ``name`` is, else None. Used
+    """The catalog country whose name or alias ``name`` is, else None. Used
     to keep "Iran" / "North Korea" / "Chinese" out of the actor, malware and
-    tool catalogues: an article attributes to a country, it does not name one
+    tool catalogs: an article attributes to a country, it does not name one
     as the adversary."""
     from app.models.country import Country
 
@@ -1396,8 +1395,7 @@ class ResolutionDecision:
       tombstone — name was folded cross-type; ``tombstone`` carries the target.
       blocked   — a gate fired and is enforced. Do not create.
       held      — candidate match / cross-type hit, enforced. Do not create;
-                  a maintenance-log advisory was written (Phase 3 turns these
-                  into pending_entities rows). When the hold was an unambiguous
+                  a maintenance-log advisory was written. When the hold was an unambiguous
                   cross-type hit, ``link_target`` names the surviving entity of
                   the other type — callers holding an entry_id should link to it
                   (same handling as ``tombstone``) so suppressing the duplicate
@@ -2142,12 +2140,13 @@ async def gate_aliases(
 ) -> list[str]:
     """Filter incoming aliases through the quality gate. Returns the survivors.
 
-    Rejections are logged (``alias_rejected``); cross-entity collisions —
-    an alias already owned by a *different* same-type entity — additionally
-    write ``alias_conflict`` rows for the Hygiene tab (the Qilin↔ShinyHunters
-    rule). In shadow mode rejections still log but aliases pass through, except
-    collisions, which are always dropped: writing a contested alias is what
-    caused the contamination this plan exists to stop.
+    Rejections are logged (``alias_rejected``); collisions — an alias already
+    owned by a *different* same-type entity, or another type's canonical name —
+    write ``alias_conflict`` rows instead (the Qilin↔ShinyHunters case). In
+    shadow mode rejections still log but aliases pass through, except
+    collisions and CVE ids, which are always dropped: a contested alias written
+    to a profile makes the autolinker link every mention of it to both
+    entities.
     """
     from app.intelligence.autolinker import is_common_english_word, is_junk_alias
 
@@ -2236,8 +2235,8 @@ async def gate_aliases(
 
             # Cross-type: an alias that is another type's *canonical* name is
             # how "Agrius" (the group) ended up on DEADWOOD (its wiper). The two
-            # are genuinely different entities, so the autolinker then links
-            # every mention to both and they correlate with themselves forever.
+            # are different entities, so the autolinker then links every
+            # mention to both and they correlate with each other on every mention.
             # That relationship belongs in entity_relationships, not an alias.
             # Dropped regardless of gate mode, like same-type collisions.
             owner = (
@@ -2320,9 +2319,9 @@ def enrichment_content_ok(entity_name: str, content: str | None) -> tuple[bool, 
     """Cheap relevance check before persisting external-lookup content onto an
     entity profile. Returns (ok, reject_reason).
 
-    A wrong description is worse than none — it anchors every later AI
-    resolution to the wrong identity (the actor-764 / Wikipedia-year-764
-    problem)."""
+    A wrong description is worse than none: every later AI resolution reads
+    it and resolves to the wrong identity (the actor 764 once received
+    Wikipedia's article on the year 764)."""
     if not content or not content.strip():
         return False, "empty"
     first_para = next((c.strip() for c in content.split("\n\n") if c.strip() and not c.strip().startswith("#")), "")

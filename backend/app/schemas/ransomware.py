@@ -1,4 +1,4 @@
-"""Pydantic schemas for the ransomware victim tracker API (plan §7).
+"""Pydantic schemas for the ransomware victim tracker API.
 
 Powers the two UI surfaces: Leak Watch (the disclosures feed) and Ransomware
 Landscape (the stats dashboard).
@@ -9,8 +9,9 @@ from datetime import date, datetime
 
 from pydantic import BaseModel
 
-# Canonical group → CVD-validated color slug from the mockups. The frontend maps
-# the slug to a CSS var (--g-lockbit …); colour is always paired with the label.
+# Canonical group → color slug, from a palette checked for color vision
+# deficiency (CVD). The frontend maps the slug to a CSS var (--g-lockbit …);
+# color is always paired with the label.
 _GROUP_COLORS = {
     "lockbit": "lockbit",
     "cl0p": "clop",

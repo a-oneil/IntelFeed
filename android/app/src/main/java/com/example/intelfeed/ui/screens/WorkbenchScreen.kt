@@ -112,8 +112,7 @@ fun WorkbenchScreen(uiState: IntelFeedUiState, viewModel: IntelFeedViewModel, mo
     LaunchedEffect(nearEnd, uiState.workbenchItems.size, uiState.workbenchHasMore) {
         if (nearEnd && uiState.workbenchHasMore) viewModel.loadMoreWorkbench()
     }
-    // Only when the tab really changes: this screen is re-created when you come back from a
-    // profile, and scrolling to the top then lost your place in the list.
+    // Scroll to the top only when the tab actually changes: this screen is re-created when you come back from a profile, and scrolling to the top then would lose your place in the list.
     var scrolledForTab by rememberSaveable { mutableStateOf(tab) }
     LaunchedEffect(tab) {
         if (tab != scrolledForTab) {

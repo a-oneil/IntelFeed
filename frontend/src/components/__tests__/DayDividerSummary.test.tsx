@@ -47,9 +47,7 @@ vi.mock("@/hooks/useDailySummary", () => ({
   useGenerateDailySummary: () => generateMock,
 }));
 
-// The summary body now hosts a text-selection menu that fetches AI tasks of
-// its own. These tests are about the Listen button, so stub it out rather than
-// standing up a QueryClientProvider for it.
+// The summary body hosts a text-selection menu that fetches AI tasks of its own. These tests are about the Listen button, so the menu is stubbed out instead of setting up a QueryClientProvider for it.
 vi.mock("@/components/SummarySelectionMenu", () => ({
   SummarySelectionMenu: () => null,
 }));

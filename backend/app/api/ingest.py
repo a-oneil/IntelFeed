@@ -624,8 +624,9 @@ async def entry_results(
     status = (await entry_pipeline_status(db, entry_id))["status"]
     state = {"complete": "done", "errored": "errored"}.get(status, "processing")
     if status == "unknown" and not _recently_created(entry):
-        # No pipeline record yet is normal for a new entry: run rows are written
-        # only when a stage starts, and the queue may be behind.
+        # A new entry often has no pipeline record yet (run rows are written only
+        # when a stage starts, and the queue may be behind), so only an older
+        # entry with none reports `unknown`.
         state = "unknown"
     return EntryResultsResponse(
         entry_id=entry_id,

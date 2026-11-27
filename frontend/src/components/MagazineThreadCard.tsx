@@ -13,22 +13,13 @@ interface MagazineThreadCardProps {
 }
 
 /**
- * One unfolding story as a card in the magazine grid.
+ * One story thread as a card in the magazine grid.
  *
- * A sibling of the article cards, not an ornament on one: in the Priority Queue
- * the articles a story absorbed never reach the grid, so this card is the only
- * place that coverage exists. It leads with the count line — "11 outlets · 23
- * articles · 6 new" is the card's whole argument for standing where twenty-odd
- * article cards would have.
+ * It is a separate card next to the article cards, not a decoration on one: in the Priority Queue the articles a story absorbed are not shown in the grid, so this card is the only place that coverage appears. It leads with the count line ("11 outlets · 23 articles · 6 new"), which shows how many article cards it stands in for.
  *
- * Deliberately image-less. The lead article's art would cost a request per
- * card, and the fetch would buy a disguise: a story is not an article and the
- * grid reads better when the difference is visible at a glance. The ⟲ glyph,
- * the accent rule and the count line carry that difference — the same vocabulary
- * ThreadRow uses in the list views.
+ * It has no image on purpose. The lead article's image would cost a request per card and would make a story look like an article; the grid is easier to scan when the difference is visible at a glance. The ⟲ glyph, the accent border and the count line mark that difference, the same markers ThreadRow uses in the list views.
  *
- * Opening it puts the story in the reader. There is no expand-in-place: the
- * spine is a vertical list of beats, which is a row's shape, not a card's.
+ * Opening it shows the story in the reader. There is no expand-in-place: the thread's spine (its timeline) is a vertical list, which fits a row, not a card.
  */
 export function MagazineThreadCard({ thread, score, onOpen }: MagazineThreadCardProps) {
   const band = signalBand(score);

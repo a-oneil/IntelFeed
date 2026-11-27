@@ -23,11 +23,11 @@ logger = logging.getLogger(__name__)
 # to Python 3.13, ``(?s:<body>)\z`` from 3.14. ``_glob_match`` concatenates
 # several translated pieces, so that trailing anchor has to come off each one.
 #
-# This used to be ``.rstrip(r"\Z$")``, which strips *characters* in that set
-# rather than a suffix. When 3.14 changed the spelling to a lowercase ``\z`` it
-# silently stopped removing anything, leaving a stray anchor mid-pattern so
-# every ``**`` rule stopped matching and detection rules were mis-typed. Ask the
-# running interpreter for its own anchor instead of hard-coding a spelling.
+# A hard-coded ``.rstrip(r"\Z$")`` does not work: it strips *characters* in that
+# set rather than a suffix, so with 3.14's lowercase ``\z`` it removes nothing,
+# leaves a stray anchor mid-pattern, and every ``**`` rule stops matching (which
+# gave detection rules the wrong content type). The anchor is read from the
+# running interpreter instead of hard-coding a spelling.
 _FNMATCH_ANCHOR = fnmatch_translate("").partition(")")[2]
 
 if not _FNMATCH_ANCHOR.startswith("\\"):  # pragma: no cover - guards a stdlib change
@@ -109,7 +109,7 @@ def detect_content_type(owner: str, repo: str, file_path: str, content: str | No
     """Detect the content type of a file based on repo and path patterns.
 
     A per-repo pattern wins. Otherwise the extension decides, and a generic
-    YAML or TOML file is then read: a file that is recognisably a rule format
+    YAML or TOML file is then read: a file that is recognizably a rule format
     the importer supports (Sigma, Sentinel analytics rule, Splunk detection,
     Anvilogic Armory, Elastic TOML) is typed as that rule, whichever repo it
     sits in.
@@ -149,7 +149,7 @@ def _sigma_errors_besides_status(content: str) -> list[str]:
 
     Sigma rules outside SigmaHQ often leave ``status`` out; the rule is still
     a usable Sigma rule (it imports as a draft), so that one error doesn't
-    count against recognising it.
+    count against recognizing it.
     """
     from app.intelligence.rule_validation import validate_sigma
 
@@ -166,7 +166,7 @@ def _valid(rule_type: str, query: str) -> bool:
 
 
 def sniff_rule_format(content: str, base_type: str) -> str | None:
-    """Recognise a supported rule format from a generic YAML/TOML file's content.
+    """Recognize a supported rule format from a generic YAML/TOML file's content.
 
     Returns the content type, or None when the file isn't a rule the importer
     supports. Each candidate is checked with the rule validator, so a file that
@@ -533,11 +533,11 @@ def _extract_splunk_metadata(content: str, content_type: str) -> dict:
             return value if isinstance(value, list) else [value]
         return []
 
-    # splunk/security_content restructured its detection schema: mitre_attack_id,
-    # analytic_story and data_source now sit at the TOP LEVEL and `tags` is
-    # empty. Reading only tags.* silently yielded no ATT&CK mapping for every
-    # detection on the newer schema. Prefer top level, fall back to tags so the
-    # older files (and any other repo still using them) keep working.
+    # splunk/security_content's current detection schema puts mitre_attack_id,
+    # analytic_story and data_source at the TOP LEVEL and leaves `tags` empty, so
+    # reading only tags.* finds no ATT&CK mapping for those detections. Prefer the
+    # top level and fall back to tags so older files (and any other repo still
+    # using that layout) keep working.
     mitre_ids = _listy(data.get("mitre_attack_id"), tags.get("mitre_attack_id"))
     analytic_stories = _listy(data.get("analytic_story"), tags.get("analytic_story"))
     # `data_source` names the telemetry in prose ("Windows Event Log Security

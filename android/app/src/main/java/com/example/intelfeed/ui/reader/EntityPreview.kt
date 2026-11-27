@@ -10,11 +10,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import java.net.URLEncoder
 import java.util.Locale
 
-/**
- * What the reader shows when a highlighted name is tapped: the web reader's entity popover
- * (EntityPopover), built from the linked-intel rows the reader already has. [value] is the phrase
- * as written in the article; the popover's Search and Copy use it, like the web.
- */
+/** What the reader shows when a highlighted name is tapped: the web reader's entity popover (EntityPopover), built from the linked-intel rows the reader already has. [value] is the phrase as written in the article; the popover's Search and Copy use it, like the web. */
 data class EntityPreview(
     val type: EntityType,
     val id: String,

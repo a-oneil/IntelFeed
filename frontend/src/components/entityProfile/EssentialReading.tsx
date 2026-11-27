@@ -1,8 +1,4 @@
-/**
- * EssentialReading — the three highest-signal articles mentioning this entity
- * in the last 30 days, ranked by the signal engine. The activity chart says how
- * much is being written; this says which pieces are worth reading.
- */
+/** EssentialReading — the three highest-signal articles mentioning this entity in the last 30 days, ranked by the signal engine. The activity chart says how much is being written; this says which pieces are worth reading. */
 import { useEntityTopEntries } from "@/hooks/useEntityProfile";
 import { formatDate } from "@/utils/formatDate";
 import type { EntityType } from "@/stores/intelStore";

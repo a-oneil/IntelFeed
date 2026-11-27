@@ -136,7 +136,7 @@ article you need, press `Shift+M`, and everything you skipped is marked read.
 - **Tag**: a searchable label, such as `to-rule` or `false-positive`. Saved
   searches are often built on tags.
 
-**Settings → Tags** lets you rename, recolour and merge tags, such as `to-rule`
+**Settings → Tags** lets you rename, recolor and merge tags, such as `to-rule`
 and `to_rule`.
 
 ## Clearing a big inbox

@@ -50,8 +50,7 @@ export type EntityNode = LayoutNode;
 export type EntityEdge = LayoutEdge;
 export type { GraphStoryCluster };
 
-/** Row-level facts the inspector shows for a node — supplied by the tab from
- * the pivot payload (trust chip text, evidence shape phrase, counts). */
+/** Row-level facts the inspector shows for a node, supplied by the tab from the pivot payload (trust chip text, evidence shape phrase, counts). */
 export interface GraphNodeInfo {
   trust?: string | null;
   phrase?: string | null;
@@ -80,23 +79,19 @@ interface EntityGraphProps {
   onNodeClick?: (nodeId: string, nodeType: string) => void;
   onEdgeCreate?: (sourceId: string, sourceType: string, targetId: string, targetType: string) => void;
   onEntryClick?: (entryId: string) => void;
-  /** When provided, the graph offers a "story" layout (default) that groups
-   * nodes by incident inside labeled boxes — same nodes, edges, and
-   * interactions as the network layout. */
+  /** When provided, the graph offers a "story" layout (the default) that groups nodes by incident inside labeled boxes, with the same nodes, edges and interactions as the network layout. */
   storyClusters?: GraphStoryCluster[];
   onClusterClick?: (cluster: GraphStoryCluster) => void;
   /** Inspector facts per node id. */
   nodeInfo?: Map<string, GraphNodeInfo>;
-  /** Neighbor sets fetched on demand per node ("Expand connections") —
-   * with their own story clusters when the pivot carries evidence structure. */
+  /** Neighbor sets fetched on demand per node ("Expand connections"), with their own story clusters when the pivot carries evidence structure. */
   expansions?: Map<string, { nodes: EntityNode[]; edges: EntityEdge[]; clusters?: GraphStoryCluster[] }>;
   onToggleExpand?: (nodeId: string, nodeType: string, expand: boolean) => void;
   /** Open the story thread behind a cluster (when it has a slug). */
   onOpenThread?: (slug: string) => void;
   /** Live search text — matching nodes stay lit, everything else dims. */
   highlightQuery?: string;
-  /** Fetch the detection rules covering a selected ttp/cve node — the
-   * inspector lists them under the coverage line. */
+  /** Fetch the detection rules covering a selected ttp/cve node; the inspector lists them under the coverage line. */
   onFetchCoveringRules?: (node: EntityNode) => Promise<CoveringRule[]>;
   onOpenRule?: (ruleId: string) => void;
   width?: number;
@@ -148,9 +143,7 @@ function EntityGraphInner({
   const containerRef = useRef<HTMLDivElement>(null);
   const flow = useReactFlow();
 
-  // Selection is the graph's core interaction: click selects (node, cluster,
-  // or edge) and the inspector explains it; double-click navigates. Nothing
-  // navigates on a single click.
+  // A single click selects a node, cluster or edge and the inspector describes it; a double-click navigates. Nothing navigates on a single click.
   const [selected, setSelected] = useState<Selected>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
@@ -197,14 +190,11 @@ function EntityGraphInner({
     };
   }, [onEdgeCreate]);
 
-  // Where each node ended up last layout (graph-space centers), so the next
-  // layout starts from there, and positions the user dragged by hand.
+  // Each node's position from the last layout (graph-space centers), so the next layout starts from there, plus the positions the user dragged by hand.
   const previousRef = useRef<Map<string, Point>>(new Map());
   const draggedRef = useRef<Map<string, { x: number; y: number; parentId?: string }>>(new Map());
 
-  // Reset when the seed entity changes — node ids recur across profiles (the
-  // same country appears on many maps), so stale drags and pill expansions
-  // from the previous profile must not carry over.
+  // Reset when the seed entity changes. Node ids recur across profiles (the same country appears on many graphs), so drags and pill expansions from the previous profile must not carry over.
   const seedId = nodes[0]?.id;
   const prevSeedRef = useRef(seedId);
   useEffect(() => {
@@ -219,9 +209,7 @@ function EntityGraphInner({
   }, [seedId]);
 
   // ── Merge on-demand expansions into the base graph ─────────────
-  // Expanded nodes' claims and stories join the SAME node/edge/cluster sets
-  // the layout consumes — no parallel rendering path, so expanding an
-  // expansion node just works (any node is a real node).
+  // Expanded nodes' claims and stories join the SAME node/edge/cluster sets the layout consumes. There is no separate rendering path, so a node that came from an expansion can itself be expanded like any other node.
   const allNodes = useMemo(() => {
     if (!expansions || expansions.size === 0) return nodes;
     const m = new Map(nodes.map((n) => [n.id, n]));
@@ -252,8 +240,7 @@ function EntityGraphInner({
   const clusterById = useMemo(() => new Map(allClusters.map((c) => [c.id, c])), [allClusters]);
   const nodeById = useMemo(() => new Map(allNodes.map((n) => [n.id, n])), [allNodes]);
 
-  // Edge ids stay stable across layouts: endpoints + label, with a counter
-  // only when the same pair carries the same label twice.
+  // Edge ids stay stable across layouts: endpoints + label, with a counter only when the same pair carries the same label twice.
   const keyedEdges = useMemo(() => {
     const count = new Map<string, number>();
     return allEdges.map((edge) => {
@@ -264,20 +251,17 @@ function EntityGraphInner({
     });
   }, [allEdges]);
 
-  // Nodes from expansions are always shown in the network layout — the user
-  // asked for them; the per-type cap is for the seed's own neighbors.
+  // Nodes from expansions are always shown in the network layout because the user asked for them; the per-type cap applies only to the seed's own neighbors.
   const expansionIds = useMemo(() => {
     const s = new Set<string>();
     if (expansions) for (const [id, ex] of expansions) { s.add(id); for (const n of ex.nodes) s.add(n.id); }
     return s;
   }, [expansions]);
 
-  // Panel shape, in coarse steps so resizing doesn't re-run the layout on
-  // every pixel.
+  // Panel aspect ratio, rounded to steps of 0.25 so resizing doesn't re-run the layout on every pixel.
   const aspect = useStore((st) => (st.width && st.height ? Math.round((st.width / st.height) * 4) / 4 : 2));
 
-  // What each expansion brought in, keyed back to the node expanded, so the
-  // story layout draws it beside that node.
+  // What each expansion brought in, keyed back to the node that was expanded, so the story layout draws it beside that node.
   const { anchorOf, clusterAnchor } = useMemo(() => {
     const anchorOf = new Map<string, string>();
     const clusterAnchor = new Map<string, string>();
@@ -292,8 +276,7 @@ function EntityGraphInner({
   }, [nodes, expansions]);
 
   // ── Layout ─────────────────────────────────────────────────────
-  // Only the layout on screen is computed: the story one is the costlier,
-  // and in Network mode its result would be thrown away.
+  // Only the layout on screen is computed: the story layout is the more expensive one, and in Network mode its result would be thrown away.
   const hasStories = allClusters.length > 0;
   const storyActive = layoutMode === 'story' && hasStories;
   const storyLayout = useMemo(() => !storyActive ? null : computeStoryLayout({
@@ -390,9 +373,7 @@ function EntityGraphInner({
     setFlowNodes(out);
   }, [positions, storyActive, storyLayout, nodeById, seedId, setFlowNodes]);
 
-  // In Stories, the seed's line to each story member is a "spoke": the box
-  // already says they are related, so spokes only draw for the hovered or
-  // selected node, and each story gets one line from the seed instead.
+  // In the story layout, the seed's line to each story member is a "spoke". The box already shows they are related, so spokes only draw for the hovered or selected node, and each story gets one line from the seed instead.
   const flowEdges = useMemo<EntityFlowEdge[]>(() => {
     const memberOf = storyActive ? storyLayout!.memberOf : null;
     const out: EntityFlowEdge[] = visibleEdges.map(({ id, edge }) => {
@@ -441,8 +422,7 @@ function EntityGraphInner({
     return { nodes: ns, edges: es };
   }, [hoveredNodeId, visibleEdges]);
 
-  // Search highlight: matching nodes stay lit, the rest recede. The tab's
-  // search box drives this — no separate find UI.
+  // Search highlight: matching nodes stay lit and the rest dim. The tab's search box drives this; the graph has no find UI of its own.
   const hq = (highlightQuery ?? '').trim().toLowerCase();
   const searchMatches = useMemo(() => {
     if (!hq) return null;
@@ -471,8 +451,7 @@ function EntityGraphInner({
     toggleExpand,
   }), [seedId, nodeInfo, showNodeLabels, showEdgeLabels, linking, expandable, isExpanded, toggleExpand]);
 
-  // Hover, selection and search go through a store: each node and edge
-  // re-renders only when its own dimming or highlight changes.
+  // Hover, selection and search go through a store, so each node and edge re-renders only when its own dimming or highlight changes.
   const [uiStore] = useState(() => new GraphUiStore());
   useLayoutEffect(() => {
     uiStore.set({
@@ -485,8 +464,7 @@ function EntityGraphInner({
     });
   }, [uiStore, hover, hoveredNodeId, selected, searchMatches]);
 
-  // Detection rules covering the selected ttp/cve node — fetched lazily on
-  // first selection, cached per node id for the life of the component.
+  // Detection rules covering the selected ttp/cve node, fetched on first selection and cached per node id for the life of the component.
   const [coveringRules, setCoveringRules] = useState<Map<string, CoveringRule[] | 'loading'>>(new Map());
   useEffect(() => {
     if (!onFetchCoveringRules || !selected || selected.kind !== 'node') return;
@@ -527,8 +505,7 @@ function EntityGraphInner({
     }
     const node = nodeById.get(n.id);
     if (!node) return;
-    // Click only selects. Loading a node's connections is the +/− badge (or
-    // the inspector), so inspecting never grows the graph by accident.
+    // Click only selects. Loading a node's connections is done with the +/− badge (or the inspector), so inspecting never grows the graph by accident.
     setSelected({ kind: 'node', id: node.id });
   }, [nodeById]);
 

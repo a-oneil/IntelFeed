@@ -129,9 +129,7 @@
   opacity: 0.6;
 }
 
-/* Job-name tags. Chip's `toned` tone supplies box, wash and border from the
-   tint; only the uppercase face and the gap from the name are local
-   (properties Chip never sets, so a single class is enough). */
+/* Job-name tags. Chip's `toned` tone supplies the box, background and border from the tint; only the uppercase text and the gap from the name are local (properties Chip never sets, so a single class is enough). */
 .nameTag {
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -422,11 +420,9 @@
 
 /* ─── Per-job settings ───────────────────────────────── */
 
-/* The knobs that tune a job, reachable from the job itself rather than only
-   from whichever Engine panel owns their settings group. */
+/* The settings that tune a job, reachable from the job itself rather than only from whichever Engine panel owns their settings group. */
 .settingsToggle {
-  /* Block, not inline — .jobSchedule above is an inline-flex row, so an inline
-     toggle lands on the same line as the schedule text. */
+  /* Block, not inline: .jobSchedule above is an inline-flex row, so an inline toggle lands on the same line as the schedule text. */
   display: block;
   margin-top: var(--sp-2);
   padding: 0;

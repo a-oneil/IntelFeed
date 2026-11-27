@@ -1,14 +1,9 @@
 /**
- * EntityActionsMenu — the entity maintenance menu, shared by the profile hero
- * and the workbench entity tables. High-frequency actions sit at the top and
- * destructive ones live below a separator.
+ * EntityActionsMenu — the entity maintenance menu, shared by the profile header and the workbench entity tables. Frequently used actions sit at the top and destructive ones below a separator.
  *
  * Two variants:
  * - "header": anchored under the profile's ⋯ button (absolute positioning).
- * - "row":    opened from a table row's ⋯ cell. Positions itself fixed against
- *             the trigger so it escapes the table's scroll clipping, and adds
- *             the actions a profile doesn't need buttons for — Open profile and
- *             Edit (the profile's inline editors gathered into one form).
+ * - "row": opened from a table row's ⋯ cell. Positions itself fixed against the trigger so it escapes the table's scroll clipping, and adds the actions a profile doesn't need buttons for — Open profile and Edit (the profile's inline editors gathered into one form).
  */
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -23,8 +18,7 @@ import { confirmDialog } from "@/utils/dialog";
 
 const WATCHABLE_TYPES = ["threat_actor", "malware", "cve", "tool", "vendor", "product", "country", "sector"];
 
-/** Report entity_ids buckets by entity type — types without a bucket attach
- *  their linked articles only. */
+/** Report entity_ids buckets by entity type — types without a bucket attach their linked articles only. */
 const ENTITY_ID_BUCKETS: Record<string, string> = {
   threat_actor: "actors",
   malware: "malware",
@@ -82,8 +76,7 @@ export function EntityActionsMenu({
   displayName: string;
   /** Row payload, used to seed the edit form (the profile passes its entity). */
   entity?: EntitySearchResult;
-  /** Entries linked to the entity; the report wizard needs their ids. Row
-   *  callers omit this and the pivot is fetched on demand. */
+  /** Entries linked to the entity; the report wizard needs their ids. Row callers omit this and the pivot is fetched on demand. */
   entries?: Array<{ id: string }>;
   /** Called when the entity this menu acts on stops existing (delete, convert). */
   onNavigateAway?: () => void;
@@ -133,8 +126,7 @@ export function EntityActionsMenu({
   const deleteEntity = useDeleteEntity();
   const denyEntityName = useDenyEntityName();
   const denyObservable = useDenyObservable();
-  // An observable has no name to ban — its "don't bring it back" is the deny
-  // tombstone, which keeps the row instead of deleting it.
+  // An observable has no name to ban — its "don't bring it back" is the deny tombstone, which keeps the row instead of deleting it.
   const isObservable = entityType === "observable";
   const canDeny = DENIABLE_ENTITY_TYPES.has(entityType) || (isObservable && isAdmin);
 
@@ -167,8 +159,7 @@ export function EntityActionsMenu({
     };
   }, [menuOpen, isRow, closeMenu]);
 
-  // Anchor a row menu to its trigger, flipping above the row when the space
-  // below it can't hold the menu.
+  // Anchor a row menu to its trigger, flipping above the row when the space below it can't hold the menu.
   const anchorToTrigger = useCallback(() => {
     const el = triggerRef.current;
     if (!isRow || !el) return;
@@ -176,8 +167,7 @@ export function EntityActionsMenu({
     const right = Math.max(8, window.innerWidth - rect.right);
     const below = window.innerHeight - rect.bottom - 12;
     const above = rect.top - 12;
-    // Open downward unless the row sits low enough that flipping buys real
-    // room; either way the menu scrolls inside whatever space it gets.
+    // Open downward unless the row sits low enough that flipping buys real room; either way the menu scrolls inside whatever space it gets.
     setAnchor(
       below < 240 && above > below
         ? { bottom: window.innerHeight - rect.top + 4, right, maxHeight: above }
@@ -214,14 +204,11 @@ export function EntityActionsMenu({
         }
       : undefined;
 
-  // A virtualized row is inside a `transform`ed wrapper, which would become the
-  // containing block for anything position:fixed — so row popovers and modals
-  // are portaled out to the body instead.
+  // A virtualized row is inside a `transform`ed wrapper, which would become the containing block for anything position:fixed — so row popovers and modals are portaled out to the body instead.
   const escapeRow = (node: ReactNode) =>
     isRow
       ? createPortal(
-          // React events still bubble through a portal, so the row's own click
-          // handler is stopped here rather than on every popover inside.
+          // React events still bubble through a portal, so the row's own click handler is stopped here rather than on every popover inside.
           <div onClick={(e) => e.stopPropagation()}>{node}</div>,
           document.body,
         )
@@ -231,8 +218,7 @@ export function EntityActionsMenu({
 
   const handleDelete = useCallback(
     (deny: boolean) => {
-      // Denying an observable keeps its row as the tombstone, so that path
-      // replaces the delete rather than preceding it.
+      // Denying an observable keeps its row as the tombstone, so that path replaces the delete rather than preceding it.
       const tombstone = isObservable && deny;
       undoableDelete({
         label: `${entityType.replace(/_/g, " ")} "${displayName}"`,
@@ -284,8 +270,7 @@ export function EntityActionsMenu({
     );
   };
 
-  // Row menus have no pivot loaded, so the linked entries the wizard reports on
-  // are fetched at click time.
+  // Row menus have no pivot loaded, so the linked entries the wizard reports on are fetched at click time.
   const handleGenerateReport = async () => {
     let entryIds = (entries ?? []).map((e) => e.id);
     if (entryIds.length === 0) {
@@ -646,11 +631,7 @@ export function EntityActionsMenu({
   );
 }
 
-/**
- * A table row's ⋯ actions cell. Renders an inert trigger and swaps in the real
- * menu on first click — EntityActionsMenu mounts around twenty data hooks, and
- * a hundred loaded rows shouldn't each pay for them.
- */
+/** A table row's ⋯ actions cell. Renders an inert trigger and swaps in the real menu on first click — EntityActionsMenu mounts around twenty data hooks, and a hundred loaded rows shouldn't each pay for them. */
 export function EntityRowActionsCell({
   entityType,
   entityId,

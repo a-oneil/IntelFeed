@@ -400,8 +400,8 @@ async def test_retro_sight_observable(db_session, monkeypatch):
 
 
 def test_ioc_list_path_gate_blocks_non_indicator_files():
-    """The v1 relapse vector: feed repos also ship VPN/RMM/unverified
-    inventories — 81% of the first dev backfill was exactly that junk."""
+    """Feed repos also ship VPN/RMM/unverified inventories; 81% of the first
+    dev backfill was that junk, so the path gate has to keep it out."""
     from app.intelligence.observables import ioc_list_path_allowed, ioc_list_path_tag
 
     assert ioc_list_path_allowed("feeds/IPC2s-90day.csv")
@@ -412,7 +412,7 @@ def test_ioc_list_path_gate_blocks_non_indicator_files():
     assert not ioc_list_path_allowed("feeds/unverified/IPC2s-30day.csv")
     assert not ioc_list_path_allowed("data/whitelist.txt")
     assert not ioc_list_path_allowed("data/all.txt")  # the everything-aggregate
-    assert ioc_list_path_allowed(None)  # unknown provenance keeps the old behavior
+    assert ioc_list_path_allowed(None)  # unknown provenance is allowed
     # Dual-use infrastructure files are ALLOWED but tagged — kept as context,
     # excluded from publishing.
     assert ioc_list_path_tag("vpn/NordVPNIPs.csv") == "vpn"
@@ -1303,7 +1303,7 @@ def test_html_rendered_scan_keeps_table_cells_apart():
     glued = {c.value for c in scan_candidates(html_to_text(html))}
     rendered = {c.value for c in scan_candidates(html_to_analysis_text(html))}
     assert "pobelstudio.com" in rendered
-    assert "pobelstudio.com" not in glued or rendered  # the renderer is what the stage scans now
+    assert "pobelstudio.com" not in glued or rendered  # the stage scans the renderer's output
 
 
 def test_driver_yaml_certificate_and_richpe_hashes_never_nominate():
@@ -1456,7 +1456,7 @@ async def test_review_skips_candidates_todays_validators_reject(db_session):
 
 @pytest.mark.asyncio
 async def test_observables_skip_a_feed_switched_off(db_session, monkeypatch):
-    """ "Analyse this feed: off" has to include the ledger.
+    """ "Analyze this feed: off" has to include the ledger.
 
     The curated ioc_list door creates rows straight from a body, so without this
     a feed the operator had switched off could still mint observables.
@@ -1497,7 +1497,7 @@ async def test_observables_skip_a_feed_switched_off(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_observables_run_for_an_analysed_feed(db_session, monkeypatch):
+async def test_observables_run_for_an_analyzed_feed(db_session, monkeypatch):
     """The companion guard, so the test above cannot pass vacuously."""
     import contextlib
 
@@ -1510,7 +1510,7 @@ async def test_observables_run_for_an_analysed_feed(db_session, monkeypatch):
         yield db
 
     feed = Feed(
-        title="Analysed",
+        title="Analyzed",
         url=f"https://on-{uuid.uuid4().hex}.example.com/rss",
         feed_type="rss",
         intel_extraction_mode="selective",

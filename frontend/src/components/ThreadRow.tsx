@@ -33,10 +33,7 @@ function beatDate(iso: string | null): string {
 /**
  * One unfolding story as a single row in the entry list.
  *
- * Collapsed it replaces the pile: the story's name, how many outlets carried
- * it, and how much of it is new since you last looked. Expanded it shows the
- * spine — one line per wave of coverage — rather than the articles, because the
- * articles are the thing the thread exists to stop you from scrolling through.
+ * Collapsed, it stands in for the story's articles: the story's name, how many outlets carried it, and how much of it is new since you last looked. Expanded, it shows the spine (one line per wave of coverage) rather than the articles, because the thread exists so you don't have to scroll through every article.
  */
 export function ThreadRow({
   thread,
@@ -50,7 +47,7 @@ export function ThreadRow({
   selectedEntryId,
 }: ThreadRowProps) {
   const band = signalBand(score);
-  // Beats only matter once the row is open, so the detail fetch waits for it.
+  // The spine is only shown once the row is open, so the detail fetch waits for it.
   const { data: detail, isLoading } = useThread(expanded ? thread.slug : null);
 
   return (

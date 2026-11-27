@@ -128,7 +128,7 @@ async def test_infrastructure_endpoints_and_pivot(client, auth_headers, db_sessi
     nothing = await client.get(f"/api/observables?linked_entity=malware:{uuid.uuid4()}", headers=auth_headers)
     assert nothing.status_code == 200 and nothing.json()["total"] == 0
     assert (await client.get("/api/observables?linked_entity=cve:x", headers=auth_headers)).status_code == 400
-    # Honest empty state: the count of this family's articles with staged candidates.
+    # Empty state: the count of this family's articles with staged candidates.
     assert body["counts"]["staged_candidate_articles"] == 0
     e.observable_candidates = [{"kind": "domain", "value": "staged.example-bad.net", "origin": "ai"}]
     await db_session.commit()

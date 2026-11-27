@@ -1,7 +1,4 @@
-/* Tags lives inside SettingsPage's section shell, so this file deliberately
-   mirrors SettingsPage.module.css: same card surface, same body-face type
-   scale, same button sizing. Anything that drifts from those tokens reads as
-   a different app the moment you tab between settings sections. */
+/* Tags lives inside SettingsPage's section shell, so this file deliberately mirrors SettingsPage.module.css: same card surface, same body type scale, same button sizing. Anything that drifts from those tokens looks out of place when you switch between settings sections. */
 
 .card {
   background: var(--bg-secondary);
@@ -243,17 +240,14 @@
 
 /* ─── Table ───────────────────────────────────────────── */
 
-/* Sits inside the card, so it carries no border of its own — the head rule
-   and row separators match SettingsPage's .usersTable. */
+/* Sits inside the card, so it has no border of its own; the header rule and row separators match SettingsPage's .usersTable. */
 .table {
   width: 100%;
 }
 
 .row {
   display: grid;
-  /* Actions size to their buttons (six of them since Share/Unshare) rather
-     than a fixed track they'd overflow across the count column; the name
-     column gives way instead. */
+  /* The actions column sizes to its buttons (six of them, including Share/Unshare) rather than a fixed track they would overflow into the count column; the name column shrinks instead. */
   grid-template-columns: 34px minmax(0, 1fr) 130px max-content;
   align-items: center;
   gap: var(--sp-3);
@@ -329,8 +323,7 @@
   height: 16px;
   border-radius: var(--r-sm);
   cursor: pointer;
-  /* Hairline scrim over an arbitrary user-chosen tag colour, not a themed
-     border — it has to read against every swatch, so it stays a literal. */
+  /* A hairline overlay on an arbitrary user-chosen tag color, not a themed border: it has to stay visible against every swatch, so it is a literal value. */
   border: 1px solid rgba(255, 255, 255, 0.15);
   padding: 0;
   display: block;
@@ -471,7 +464,7 @@
   padding: 0 4px;
 }
 
-/* Same mark, tinted so "global" reads apart from "chip" at a glance. */
+/* Same mark, tinted so "global" is easy to tell apart from "chip". */
 .globalMark {
   color: var(--accent-detect);
   border-color: color-mix(in srgb, var(--accent-detect) 45%, transparent);

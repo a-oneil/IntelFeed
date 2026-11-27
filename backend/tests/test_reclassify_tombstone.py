@@ -62,7 +62,7 @@ async def test_store_malware_suppressed_by_tombstone_links_actor(db_session, tes
 
     stored = await store_malware(db_session, test_entry.id, [{"name": "Akira"}])
 
-    assert stored == []  # no shadow malware returned
+    assert stored == []  # no malware row returned
     assert await _count_malware(db_session, "Akira") == 0  # nothing recreated
 
     link = (

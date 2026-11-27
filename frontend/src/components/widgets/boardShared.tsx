@@ -1,10 +1,7 @@
 /**
  * Shared primitives for the board widgets.
  *
- * House style: no chart library — everything is inline SVG or CSS, matching
- * the existing widgets. Series colors come from a CVD-validated ordering
- * checked against the card surface (#161b22); the raw --rgroup-* theme hues
- * fail adjacent-pair colorblind separation when stacked.
+ * No chart library: everything is inline SVG or CSS, matching the other widgets. Series colors come from an ordering validated for color vision deficiency (CVD) against the card surface (#161b22); the raw --rgroup-* theme hues fail adjacent-pair colorblind separation when stacked.
  */
 import { useEffect, useState } from "react";
 import styles from "./widgets.module.css";
@@ -110,25 +107,16 @@ export function Sparkline({
 }
 
 /**
- * Clamp the dashboard's injected `days` into an endpoint's supported band.
+ * Clamp the dashboard's injected `days` into an endpoint's supported range.
  *
- * The global range maps "all" to 36500 and "24h" to 1; day-series endpoints
- * can serve neither (one would build a 100-year grid, the other is below the
- * minimum window). Clamping keeps the widget following the global range
- * without tripping the API's bounds — an out-of-range value 422s and the
- * widget silently falls back to its empty state.
+ * The global range maps "all" to 36500 and "24h" to 1; day-series endpoints can serve neither (one would build a 100-year grid, the other is below the minimum window). Clamping keeps the widget following the global range without exceeding the API's bounds: an out-of-range value returns 422 and the widget silently falls back to its empty state.
  */
 export function clampDays(days: unknown, min: number, max: number): number | undefined {
   if (typeof days !== "number" || Number.isNaN(days)) return undefined;
   return Math.min(max, Math.max(min, Math.round(days)));
 }
 
-/**
- * Pixel size of a chart's box, for use as its SVG viewBox. A fixed viewBox
- * stretched to the widget scales every label and bar with it, so on a wide
- * widget 10px axis text renders at 16px+; drawn in the box's own pixels it
- * stays 10px. Holds the design size until the first measurement.
- */
+/** Pixel size of a chart's box, for use as its SVG viewBox. A fixed viewBox stretched to the widget scales every label and bar with it, so on a wide widget 10px axis text renders at 16px+; drawn in the box's own pixels it stays 10px. Returns the design size until the first measurement. */
 export function useChartSize(designW: number, designH: number) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ w: designW, h: designH });

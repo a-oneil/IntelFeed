@@ -230,8 +230,8 @@ def render_entity_profile_markdown(pivot: dict, *, related_limit: int = 50) -> s
                 if verb:
                     direction = " (inbound)" if item.get("relationship_direction") == "inbound" else ""
                     bits.append(verb.replace("_", " ") + direction)
-                # Trust ladder, matching the profile UI: corroborated / reported /
-                # signal for typed claims; plain co-mention otherwise.
+                # Confidence label, matching the profile UI: corroborated /
+                # reported / signal for typed claims; co-mentioned otherwise.
                 conf = item.get("relationship_confidence")
                 if conf == "confirmed":
                     src = item.get("relationship_source")

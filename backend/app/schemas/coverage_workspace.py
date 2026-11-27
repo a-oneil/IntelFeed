@@ -14,7 +14,7 @@ class WorkspaceQuote(BaseModel):
         None, description="domain_pattern | path | cmdline | registry | client_id | header | hash | other"
     )
     observable_value: str | None = Field(
-        None, description="The concrete artefact, verbatim: what a rule draft compiles into a selection clause"
+        None, description="The concrete artifact, verbatim: what a rule draft compiles into a selection clause"
     )
 
 
@@ -35,7 +35,7 @@ class WorkspaceChannel(BaseModel):
     tier: str | None = Field(description="source | log_type | category, or null when nothing matches")
 
 
-class WorkspaceBehaviour(BaseModel):
+class WorkspaceBehavior(BaseModel):
     technique_id: str
     technique_name: str
     tactic: str | None
@@ -88,13 +88,13 @@ class CoverageWorkspaceResponse(BaseModel):
     label: str
     window: str
     articles: list[WorkspaceArticle]
-    behaviours: list[WorkspaceBehaviour]
+    behaviours: list[WorkspaceBehavior]
     article_total: int = Field(0, description="Every article in the window; `articles` above is a capped page")
     article_contributed_total: int = Field(0, description="Of those, the ones that carried at least one technique")
-    missing_categories: list[str] = Field(description="Categories the below-line behaviours need")
+    missing_categories: list[str] = Field(description="Categories the below-line behaviors need")
     below_line_count: int
     threat_prior_rules: int = Field(
-        0, description="Rules resolving to the threat itself: candidates for every behaviour"
+        0, description="Rules resolving to the threat itself: candidates for every behavior"
     )
     threat_prior_rules_strong: int = Field(0, description="Of those, high or medium confidence")
     cve: dict | None = Field(
@@ -113,7 +113,7 @@ class PriorRuleItem(BaseModel):
     repo: str
     license: str | None
     is_draft: bool
-    scope: str = Field(description="technique (tagged with this behaviour) | threat (names the threat itself)")
+    scope: str = Field(description="technique (tagged with this behavior) | threat (names the threat itself)")
     via: str = Field(description="tag | meta | text: which resolver writer produced the match")
     confidence: str = Field(description="high | medium | low; low is a story-tag or body-text hit")
     matched_on: str | None = Field(description="The literal that matched, so a text row stays auditable")
@@ -163,12 +163,12 @@ class SetItem(BaseModel):
     op: str = Field(
         pattern="^(adopt|extend|new|skip)$",
         description=(
-            "What is being done with the rule, not its state. A skip is a judgement "
+            "What is being done with the rule, not its state. A skip is a judgment "
             "worth keeping: it explains the gap to the next person who opens this threat."
         ),
     )
     rule_id: uuid.UUID | None = Field(None, description="Library rule for adopt/extend/skip; null for a new draft")
-    technique_id: str | None = Field(None, description="Behaviour this item answers")
+    technique_id: str | None = Field(None, description="Behavior this item answers")
     title: str | None = Field(None, description="Overrides the library title; server fills it in when omitted")
     rule_type: str | None = None
     note: str | None = Field(None, description="Why this item is in the set, e.g. the clause an extend adds")

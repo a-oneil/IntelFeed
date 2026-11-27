@@ -1109,8 +1109,8 @@ _SECTOR_VICTIM_WINDOW_DAYS = 90
 async def _attach_sector_counts(db: AsyncSession, sectors: list[Sector]) -> None:
     """Batch the per-sector counts the workbench columns show.
 
-    ``victim_count`` is leak-site disclosures in the last 90 days — the recent
-    ground truth, not the all-time pile the ransomware page already sums.
+    ``victim_count`` is leak-site disclosures in the last 90 days, not the
+    all-time total the ransomware page already shows.
     """
     if not sectors:
         return
@@ -1289,7 +1289,7 @@ async def get_sector_profile(
         for c in campaigns_q.scalars().all()
     ]
 
-    # --- leak-site victims: the richest victimology signal in the platform ---
+    # --- leak-site victims ---
     victims_all = (
         await db.execute(
             select(func.count()).select_from(VictimDisclosure).where(VictimDisclosure.sector == sector.slug)
@@ -2098,7 +2098,7 @@ async def get_rule_telemetry_vocabulary(
     """The rail's Telemetry values, split by whether the inventory answers them.
 
     Lets the library tick "everything we collect" in one click: the match is
-    tiered and fuzzy (a ticked product name, a canonical behaviour id, or a
+    tiered and fuzzy (a ticked product name, a canonical behavior id, or a
     category with a ticked source), so the client cannot derive this list by
     comparing strings against the telemetry inventory itself.
 
@@ -2225,9 +2225,9 @@ async def get_coverage_board(
         item_type, coverage_type = "threat_actor", entity_types.THREAT_ACTOR
         ranked = [(str(r[0]), r[1], None, str(r[0]), r[2]) for r in rows]
 
-    # One aggregate over the materialised resolution, instead of a COUNT per row.
-    # `source_actors` is written by nothing, so the actor branch counted zero
-    # forever until rule_coverage started resolving names out of rule text.
+    # One aggregate over the materialized resolution, instead of a COUNT per row.
+    # Nothing writes `source_actors`, so counting it gives zero for every actor;
+    # rule_coverage resolves actor names out of rule text instead.
     #
     # Two counts, because they answer different questions. `rule_count` is the
     # whole inventory — every resolved rule, weak evidence included. The strong
@@ -2426,15 +2426,15 @@ async def get_detection_rule(
 
 
 async def _resolve_coverage(db: AsyncSession, rule: DetectionRule) -> None:
-    """Materialise this rule's entity coverage now, inside the caller's transaction.
+    """Materialize this rule's entity coverage now, inside the caller's transaction.
 
     Without this the resolver only runs on the nightly backstop, so a rule
     authored from an article is invisible to the board and to every
-    `rule_coverage` join for up to a day — exactly the window in which someone
-    would go looking for it.
+    `rule_coverage` join for up to a day, which is when someone is most likely
+    to look for it.
 
-    Never fatal: coverage is derived data, and losing a save because the
-    autolinker vocabulary could not be built would be a much worse trade.
+    Never fatal: coverage is derived data, and failing the save because the
+    autolinker vocabulary could not be built would be worse.
     """
     from app.services.rule_coverage import resolve_rule
 
@@ -2592,8 +2592,8 @@ async def create_detection_rule(
         severity=body.severity,
         tags=body.tags,
         source_ttps=body.source_ttps,
-        # Accepted by DetectionRuleCreate since it was written but never
-        # assigned, so a rule authored against an advisory resolved to zero CVEs.
+        # DetectionRuleCreate accepts source_cves; without this assignment a rule
+        # authored against an advisory resolves to zero CVEs.
         source_cves=body.source_cves,
         is_draft=body.is_draft,
         log_sources=body.log_sources,
@@ -2787,11 +2787,11 @@ CONVERSION INSTRUCTIONS:
 Return ONLY the converted rule content — no explanation, no markdown fences, just the raw rule text."""
 
     config = resolved.config
-    # Bound the provider call below the gunicorn worker timeout (180s) and
-    # nginx's proxy_read_timeout. Unbounded, a slow claude_code CLI call plus
-    # its automatic retry outlasts the worker and the request dies as a 502
-    # instead of a readable error. Passing an explicit per-call timeout also
-    # forces the CLI provider to a single attempt.
+    # Bound the provider call below the gunicorn worker timeout (330s in
+    # docker-compose.prod.yml) and nginx's proxy_read_timeout. Unbounded, a slow
+    # claude_code CLI call plus its automatic retry outlasts the worker and the
+    # request dies as a 502 instead of a readable error. Passing an explicit
+    # per-call timeout also forces the CLI provider to a single attempt.
     ledger = dict(
         caller=Caller.user(user.id),
         task=task,
@@ -2858,7 +2858,7 @@ Return ONLY the converted rule content — no explanation, no markdown fences, j
         "tokens_output": response.tokens_output,
         "tokens_used": response.tokens_input + response.tokens_output,
         "cost": float(cost),
-        # The conversion is now a rule of its own. Callers that only wanted the
+        # The conversion is stored as a rule of its own. Callers that only want the
         # text still get it above; these two say where it landed.
         "rule_id": str(sibling.id),
         "title": sibling.title,
@@ -2878,21 +2878,21 @@ async def _upsert_conversion_sibling(
 ) -> DetectionRule:
     """Store a conversion as a real rule row hanging off its parent.
 
-    It used to be a JSON blob in `metadata.rule_conversions`: absent from
-    /detection-rules/search, absent from detection_rule_versions, not exportable
-    on its own, and deleted with the parent. A KQL translation of a Sigma rule is
-    a rule — the thing you hand to whoever runs Sentinel — so it gets a row.
+    A JSON blob in `metadata.rule_conversions` would be absent from
+    /detection-rules/search and detection_rule_versions, not exportable on its
+    own, and deleted with the parent. A KQL translation of a Sigma rule is a rule
+    (the thing you hand to whoever runs Sentinel), so it gets a row.
 
     One sibling per (parent, target format, dialect). Re-converting rewrites that
-    row and snapshots the previous body as a version, rather than accumulating a
-    pile of near-identical rules every time someone re-runs the model. The
+    row and snapshots the previous body as a version, rather than adding another
+    near-identical rule every time someone re-runs the model. The
     dialect matters only where one format holds several languages (elastic_ql
     is ES|QL and EQL); rows written before dialects existed carry none and
     match a dialect-less request.
 
     The parent's entity mappings (techniques, CVEs, actors, entries) are copied
     across: the translation detects the same thing, and without them the sibling
-    would resolve to nothing and read as an unattributed orphan on the board.
+    would resolve to no entities and show as unattributed on the board.
     `data_sources` and `log_sources` are deliberately *not* copied — those are
     format-specific and get re-extracted from the converted body below.
     """
@@ -3188,7 +3188,7 @@ GUIDELINES:
             yield {"event": "error", "data": _json.dumps({"error": str(e)})}
         finally:
             # The client went away mid-stream. sse-starlette cancels this task,
-            # so the write has to be shielded or it is cancelled at its first
+            # so the write has to be shielded or it is canceled at its first
             # await. The prompt reached the provider either way, so even a call
             # abandoned before its first token is spend: a disconnect-and-retry
             # loop must not be free.
@@ -4349,10 +4349,10 @@ async def scan_text_matches(db: AsyncSession, text: str | None, *, visitor: bool
 
     await _ensure_vocabulary(db)
     # Off the event loop: scan_text is pure CPU (Aho-Corasick over ~20k surface
-    # forms) with nothing to await, so running it inline froze every other
-    # request multiplexed on this gunicorn worker until it finished. A single
-    # slow scan was dragging unrelated requests on the same page past the
-    # frontend's 15s timeout.
+    # forms) with nothing to await, so running it inline blocks every other
+    # request multiplexed on this gunicorn worker until it finishes. A single
+    # slow scan pushed unrelated requests on the same page past the frontend's
+    # 15s timeout.
     raw = await asyncio.to_thread(scan_text, text)
     if not raw:
         return []
@@ -5476,9 +5476,9 @@ def _cwe_to_response(
 
 
 #: Recursive ancestor walk over parent_cwe_id, used to roll descendant CVE counts
-#: up the abstraction ladder. NVD tags a CVE at whatever level the analyst chose,
+#: up the abstraction hierarchy. NVD tags a CVE at whatever level the analyst chose,
 #: so a Class or Pillar's *direct* count is close to meaningless — CWE-664 has 2
-#: direct links and ~24k rolled up. The depth guard is belt-and-braces: view 1000
+#: direct links and ~24k rolled up. The depth guard is a safeguard: view 1000
 #: is a tree, but a malformed catalog refresh must not hang the API.
 _MAX_LADDER_DEPTH = 12
 
@@ -5728,7 +5728,7 @@ async def get_cwe_family(
 ):
     """Where a weakness sits on the ladder: lineage to the pillar, children, siblings.
 
-    The direct analogue of /ttps/{id}/related-techniques, and it feeds the same
+    The direct analog of /ttps/{id}/related-techniques, and it feeds the same
     shape of Overview panel.
     """
     cwe = await _load_cwe(db, cwe_id)
@@ -5881,7 +5881,7 @@ async def get_cve_weaknesses(
 async def _entity_weakness_profile(db: AsyncSession, join_col, entity_id: uuid.UUID, limit: int) -> list[CWEVendorRow]:
     """Weakness mix for a vendor or product, derived through cve_affected.
 
-    Deliberately derived rather than materialised: the join is two hops and both
+    Deliberately derived rather than materialized: the join is two hops and both
     are indexed, and a stored table would be a third thing to drift out of sync
     with NVD.
     """
@@ -6442,7 +6442,7 @@ async def get_cwe_affected_cves(
 ):
     """CVEs carrying this weakness per the NVD weakness block, with severity/KEV counts.
 
-    The CWE analogue of /vendors/{id}/affected-cves, reusing the same filters,
+    The CWE analog of /vendors/{id}/affected-cves, reusing the same filters,
     sort, counts and response shape — `matched_cwe` says which descendant
     actually matched when the subtree is included.
     """

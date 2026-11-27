@@ -4,9 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { EngineMatrix } from "../engine/EngineMatrix";
 
-// The console's own state: which tab is open, which panels, which window.
-// Data hooks and the tabs' bodies are stubbed; each stub shows the props the
-// console hands it.
+// Tests the console's own state: which tab is open, which panels, which time window. Data hooks and the tabs' bodies are stubbed; each stub shows the props the console passes it.
 vi.mock("@/hooks/useEngine", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/hooks/useEngine")>()),
   useEngineProcessing: () => ({ data: { pages: [] }, isLoading: false, hasNextPage: false }),

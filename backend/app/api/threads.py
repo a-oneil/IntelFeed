@@ -1,4 +1,4 @@
-"""Story threads — one unfolding story instead of twenty-three articles.
+"""Story threads API: the articles covering one unfolding story, grouped into one thread.
 
 Read-only over what the sweeper (app.intelligence.story_threads) and the
 narrator (app.services.thread_narrative) have already written, plus the one
@@ -79,12 +79,12 @@ async def get_thread(
     thread_id = row["id"]
     members = await story_threads.thread_members(db, thread_id, user.id)
     if user.is_anonymous:
-        # The thread tables are raw SQL, outside the ORM filter: a visitor's
-        # thread is rebuilt from its visible members alone. The stored spine
-        # (beats drawn from every member, or written by AI) gives way to the
-        # day-grouping one over those members, computed here and not stored;
-        # the yield counts them only; the nearest threads, titled from members
-        # of their own, are left out.
+        # The thread tables are read with raw SQL, so the ORM's visitor filter
+        # does not apply: a visitor's thread is rebuilt from its visible members
+        # only. The stored spine (beats drawn from every member, or written by
+        # AI) is replaced by a day-grouped spine over those members, computed
+        # here and not stored; the yield counts only those members; nearest
+        # threads are left out, because their titles come from their own members.
         shown = set(row["entry_ids"])
         members = [
             {**m, "duplicate_of_entry_id": m["duplicate_of_entry_id"] if m["duplicate_of_entry_id"] in shown else None}

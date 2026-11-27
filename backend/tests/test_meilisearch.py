@@ -237,7 +237,7 @@ class TestSearchEntries:
 
 class TestEntityIndexing:
     def test_entity_indexes_defined(self):
-        """ENTITY_INDEXES should define all 4 entity types."""
+        """ENTITY_INDEXES should define the CVE, TTP, threat actor and malware indexes."""
         assert "entities_cve" in meilisearch_client.ENTITY_INDEXES
         assert "entities_ttp" in meilisearch_client.ENTITY_INDEXES
         assert "entities_threat_actor" in meilisearch_client.ENTITY_INDEXES

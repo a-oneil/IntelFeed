@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "maintenance"
+# scripts/ is at the repo root on a host checkout; the dev api container bind-mounts it at /app/scripts.
+_BACKEND = Path(__file__).resolve().parents[1]
+SCRIPTS = next(
+    (d for d in (_BACKEND / "scripts" / "maintenance", _BACKEND.parent / "scripts" / "maintenance") if d.is_dir()),
+    _BACKEND.parent / "scripts" / "maintenance",
+)
 
 
 def _load(name: str):

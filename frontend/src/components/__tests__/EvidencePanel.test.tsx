@@ -137,7 +137,7 @@ describe("EvidencePanel", () => {
     expect(screen.getByText("aliases: none")).toBeTruthy();
     expect(screen.getByText("aliases: Ghostwriter, TA445")).toBeTruthy();
     expect(screen.getByText("created by the analysis · first seen 2026-11-19")).toBeTruthy();
-    expect(screen.getByText("catalogue entry")).toBeTruthy();
+    expect(screen.getByText("catalog entry")).toBeTruthy();
     expect(screen.getByText(/72 articles · nation-state/)).toBeTruthy();
     expect(screen.queryByText(/no article or recorded evidence/)).toBeNull();
   });

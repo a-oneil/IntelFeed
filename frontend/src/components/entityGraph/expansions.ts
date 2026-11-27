@@ -1,11 +1,7 @@
 /**
  * Which on-demand expansions survive a collapse.
  *
- * An expansion is keyed by the node that was expanded. It stays only while
- * that node is reachable from the base graph: a base node, or a node brought
- * in by another surviving expansion. Expansions that only keep each other
- * alive (Y and Z both expanded from X, each listing the other) go when X is
- * collapsed.
+ * An expansion is keyed by the node that was expanded. It stays only while that node is reachable from the base graph: a base node, or a node brought in by another surviving expansion. Expansions that only keep each other alive (Y and Z both expanded from X, each listing the other) go when X is collapsed.
  */
 export function pruneExpansions<T extends { nodes: Array<{ id: string }> }>(
   expansions: Map<string, T>,

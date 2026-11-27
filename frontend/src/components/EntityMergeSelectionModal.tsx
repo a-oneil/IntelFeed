@@ -1,10 +1,4 @@
-/**
- * EntityMergeSelectionModal — fold the rows checked in a workbench entity table
- * into one profile. Same engine as EntityMergeIntoModal (one
- * POST /entities/{type}/merge carrying the keeper plus every target), differing
- * only in where the candidates come from — an existing selection instead of a
- * search — so it shares that modal's stylesheet.
- */
+/** EntityMergeSelectionModal — merge the rows checked in a workbench entity table into one profile. Uses the same request as EntityMergeIntoModal (one POST /entities/{type}/merge carrying the keeper plus every target) and differs only in where the candidates come from (an existing selection instead of a search), so it shares that modal's stylesheet. */
 import { useState } from "react";
 import { toast } from "sonner";
 import { useMergeEntities } from "@/hooks/useEntityProfile";
@@ -23,7 +17,7 @@ function mergeErrorMessage(err: unknown): string {
   return data?.error?.message || data?.message || (err as Error)?.message || "Unknown error";
 }
 
-/** The richest profile is the sane default keeper — it has the most to lose. */
+/** The profile with the most articles is the default keeper, since it has the most to lose. */
 function defaultKeeper(entities: MergeSelectionEntity[]): string {
   return entities.reduce((best, e) =>
     (e.article_count ?? 0) > (best.article_count ?? 0) ? e : best,

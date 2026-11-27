@@ -147,9 +147,10 @@ async def link_entry_to_entity(
 ) -> None:
     """Idempotently link an entry to a canonical entity of ``entity_type``.
 
-    Used when a shadow-entity creation is suppressed by a reclassify tombstone:
-    the association still needs to reach the surviving entity, which lives in a
-    different table than the one the caller was creating in. Bumps the survivor's
+    Used when a shadow-entity creation is suppressed by a reclassify tombstone or
+    a cross-type hold: the association still needs to reach the surviving entity,
+    which lives in a different table than the one the caller was creating in.
+    Bumps the survivor's
     ``article_count`` / ``last_seen_at`` only when a new link row is inserted.
     """
     spec = _TYPE_JUNCTION.get(entity_type)

@@ -189,7 +189,7 @@ async def update_tag(
         affected = await rehome(db, tag)
         reindex.update(affected)
         # A flip to global publishes everyone's private tagging of this tag to
-        # the whole team; worth a line in the log with who did it.
+        # the whole team, so it is logged along with the user who did it.
         logger.info(
             "tag %r made %s by user %s (%d entries re-homed)",
             tag.name,

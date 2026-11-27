@@ -55,8 +55,7 @@
 }
 
 .thread {
-  /* Tall enough to hold a real answer without the page jumping as it streams,
-     capped so the composer stays in view on a laptop screen. */
+  /* Tall enough to hold a real answer without the page jumping as it streams, capped so the composer stays in view on a laptop screen. */
   min-height: 220px;
   max-height: 46vh;
   overflow-y: auto;

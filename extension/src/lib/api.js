@@ -1,11 +1,6 @@
-// The IntelFeed API client. Runs only in the background worker: every page of
-// the extension asks the worker (messages.js), so there is one fetcher and one
-// refresh in flight at a time. Refresh tokens rotate — two contexts refreshing
-// with the same token would have the second one refused and sign the user out.
+// The IntelFeed API client. Runs only in the background worker: every page of the extension asks the worker (messages.js), so there is one fetcher and one refresh in flight at a time. Refresh tokens rotate — two contexts refreshing with the same token would have the second one refused and sign the user out.
 //
-// Requests leave from the worker, which holds host permission for the
-// server's origin (granted on the options page), so the server needs no CORS
-// entry for the extension.
+// Requests leave from the worker, which holds host permission for the server's origin (granted on the options page), so the server needs no CORS entry for the extension.
 
 import * as store from "./store.js";
 
@@ -40,13 +35,7 @@ export function normalizeServer(input) {
   return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
 }
 
-/**
- * The match pattern host permission is requested for. Without the port:
- * Firefox ignores a port in a match pattern, so `http://localhost:3001/*`
- * reports as granted but never applies, and every request fails CORS
- * (bugzilla.mozilla.org/show_bug.cgi?id=1362809). Chrome treats a pattern
- * without a port as any port, so both browsers grant the same thing.
- */
+/** The match pattern host permission is requested for. Without the port: Firefox ignores a port in a match pattern, so `http://localhost:3001/*` reports as granted but never applies, and every request fails CORS (bugzilla.mozilla.org/show_bug.cgi?id=1362809). Chrome treats a pattern without a port as any port, so both browsers grant the same thing. */
 export function originPattern(server) {
   const { protocol, hostname } = new URL(server);
   return `${protocol}//${hostname}/*`;
@@ -100,17 +89,10 @@ export async function signOut() {
 
 let refreshing = null;
 
-// Every extension context that might refresh (the worker, and in Firefox an
-// event page that can be restarted) shares this lock, so only one refresh
-// token is ever in flight.
+// Every extension context that might refresh (the worker, and in Firefox an event page that can be restarted) shares this lock, so only one refresh token is ever in flight.
 const withLock = (fn) => (globalThis.navigator?.locks ? navigator.locks.request("intelfeed-refresh", fn) : fn());
 
-/**
- * Trade the refresh token for a new pair. Refresh tokens are single-use: a
- * second refresh with the same token is refused. So this runs one at a time,
- * skips the trade when the access token that failed has already been replaced,
- * and only signs out when the token the server refused is still the current one.
- */
+/** Trade the refresh token for a new pair. Refresh tokens are single-use: a second refresh with the same token is refused. So this runs one at a time, skips the trade when the access token that failed has already been replaced, and only signs out when the token the server refused is still the current one. */
 export function refreshSession(failedAccess) {
   refreshing ??= withLock(async () => {
     const { server, access, refresh } = await store.load();
@@ -132,12 +114,7 @@ export function refreshSession(failedAccess) {
   return refreshing;
 }
 
-/**
- * An authenticated request. On a 401 the session is refreshed once and the
- * request repeated. Resolves to the parsed JSON body (null for 204), or to
- * `{status, body}` when `raw` is set. `form` (a FormData) is sent as
- * multipart instead of `body`.
- */
+/** An authenticated request. On a 401 the session is refreshed once and the request repeated. Resolves to the parsed JSON body (null for 204), or to `{status, body}` when `raw` is set (a 404 then resolves instead of throwing). `form` (a FormData) is sent as multipart instead of `body`. */
 export async function request(path, { method = "GET", query, body, form, raw = false } = {}) {
   let sentWith = null;
   const send = async () => {

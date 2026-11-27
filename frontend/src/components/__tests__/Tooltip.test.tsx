@@ -6,9 +6,7 @@ const rect = (r: Partial<DOMRect>): DOMRect =>
   ({ x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0,
      toJSON: () => ({}), ...r } as DOMRect);
 
-/** jsdom measures everything as 0x0, so stand in real geometry: a category row
- *  hard against the left window edge, and a card far wider than the space to
- *  its left — the shape that used to hang off-screen. */
+/** jsdom measures everything as 0x0, so mock real geometry: a category row against the left window edge, and a card much wider than the space to its left, the layout in which the card would extend off-screen. */
 function mockGeometry() {
   vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
     this: Element,
@@ -19,8 +17,7 @@ function mockGeometry() {
   });
 }
 
-/** Swap in a matchMedia that answers the given queries true, everything else
- *  false — the setup mock's default is a desktop with a mouse. */
+/** Swap in a matchMedia that answers the given queries true, everything else false — the setup mock's default is a desktop with a mouse. */
 function mockMedia(matching: RegExp) {
   const real = window.matchMedia;
   window.matchMedia = ((query: string) => ({ ...real(query), matches: matching.test(query) })) as typeof window.matchMedia;
@@ -68,8 +65,7 @@ describe("Tooltip", () => {
     act(() => void vi.advanceTimersByTime(400));
 
     const card = screen.getByRole("tooltip");
-    // Centred on the row the card would start at 12 + 50 - 280 = -218; the
-    // clamp pulls it back to the 8px viewport margin.
+    // Centered on the row the card would start at 12 + 50 - 280 = -218; the clamp pulls it back to the 8px viewport margin.
     expect(parseFloat(card.style.left)).toBe(8);
     expect(parseFloat(card.style.left) + 560).toBeLessThanOrEqual(window.innerWidth);
   });

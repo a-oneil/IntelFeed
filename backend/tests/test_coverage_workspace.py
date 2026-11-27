@@ -1,12 +1,12 @@
-"""Coverage Workspace — articles, behaviours, prior rules and the assembled set.
+"""Coverage Workspace — articles, behaviors, prior rules and the assembled set.
 
 The two things worth failing a build over live here:
 
-* a behaviour whose ATT&CK channels match nothing in the inventory is a
+* a behavior whose ATT&CK channels match nothing in the inventory is a
   *sourcing* item, not a detection gap — it sorts below the divider and carries
   the category that is missing;
 * a `low` rule_coverage row matched body text or a Splunk story tag. It is real
-  inventory, but it never outranks a rule that names the behaviour, and the
+  inventory, but it never outranks a rule that names the behavior, and the
   payload says how many of the candidates are weak.
 """
 
@@ -59,7 +59,7 @@ async def _seed_threat(
     quote="the loader wrote to the user's vault directory",
     published_days_ago=1,
 ):
-    """One actor, `entries` articles, techniques riding the first article."""
+    """One actor, `entries` articles, techniques linked to the first article."""
     actor = ThreatActor(name=name)
     db_session.add(actor)
     await db_session.flush()
@@ -90,8 +90,8 @@ async def _seed_threat(
 
 
 @pytest.mark.asyncio
-class TestBehaviours:
-    async def test_unsourced_behaviour_sorts_below_the_line_with_its_category(
+class TestBehaviors:
+    async def test_unsourced_behavior_sorts_below_the_line_with_its_category(
         self, db_session, test_feed, cloud_inventory
     ):
         actor, _ = await _seed_threat(
@@ -201,7 +201,7 @@ class TestArticles:
             entries=3,
             techniques=[("T1566", "Phishing", CLOUD_CHANNELS)],
         )
-        # The technique rides entries[0]; the other two are recaps.
+        # The technique is linked to entries[0]; the other two are recaps.
         entries[1].published_at = datetime.now(UTC) - timedelta(days=2)
         entries[2].published_at = datetime.now(UTC) - timedelta(days=3)
         await db_session.commit()
@@ -385,7 +385,7 @@ class TestSavedSets:
 
 @pytest.mark.asyncio
 class TestFaces:
-    """One Detection tab, four faces: the CVE and technique workspaces."""
+    """The Detection tab's CVE and technique workspaces."""
 
     async def test_cve_face_carries_exploitation_context_and_accepts_both_keys(
         self, db_session, test_feed, cloud_inventory
@@ -425,8 +425,8 @@ class TestFaces:
             assert [b.technique_id for b in ws.behaviours] == ["T1190"]
 
     async def test_technique_face_is_a_bench_for_one_technique_only(self, db_session, test_feed, cloud_inventory):
-        # Two techniques ride the same article; the T1078.004 face must not
-        # show its neighbour's row.
+        # Two techniques share the same article; the T1078.004 workspace must not
+        # show its neighbor's row.
         actor, _ = await _seed_threat(
             db_session,
             test_feed,
@@ -471,8 +471,8 @@ class TestApi:
         assert body["behaviours"][-1]["technique_id"] == "T1574.002"
 
     async def test_unsupported_entity_type_is_a_400_not_an_empty_workspace(self, client, auth_headers):
-        # CVEs and techniques gained faces of their own; vendors did not — a
-        # tab that could only render an empty ladder shouldn't exist.
+        # CVEs and techniques have their own workspaces; vendors do not, because
+        # a tab that could only render an empty ladder shouldn't exist.
         resp = await client.get("/api/coverage-workspace/vendor/Microsoft", headers=auth_headers)
         assert resp.status_code == 400
 
@@ -523,7 +523,7 @@ class TestApi:
             f"/api/coverage-workspace/sets/{summary_id}/export?format=markdown", headers=auth_headers
         )
         assert md.status_code == 200
-        assert "## Behaviours" in md.json()["payload"]["markdown"]
+        assert "## Behaviors" in md.json()["payload"]["markdown"]
 
         # zip: a real archive a browser can download.
         z = await client.get(f"/api/coverage-workspace/sets/{summary_id}/export.zip", headers=auth_headers)
@@ -536,7 +536,7 @@ class TestApi:
             assert "MANIFEST.md" in zf.namelist()
 
     async def test_skip_persists_with_its_reason(self, client, auth_headers, db_session, test_feed, cloud_inventory):
-        """A skip is a judgement worth keeping — it survives the round trip and
+        """A skip is a judgment worth keeping — it survives the round trip and
         explains the gap to the next person who opens this threat."""
         actor, _ = await _seed_threat(
             db_session, test_feed, techniques=[("T1078.004", "Cloud Accounts", CLOUD_CHANNELS)]

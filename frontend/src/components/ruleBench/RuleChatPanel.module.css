@@ -1,4 +1,4 @@
-/* AI assistant panel — moved out of RuleDetailPage with the chat itself. */
+/* AI assistant panel for a detection rule. */
 .chatPanel {
   display: flex;
   flex-direction: column;

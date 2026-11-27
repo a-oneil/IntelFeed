@@ -10,11 +10,11 @@ aliases with the entities it read out of the article:
   article_count/last_seen_at bumps).
 - **Rejected** — the analysis read the article and did not name it. A
   ``FalsePositiveRecord`` with ``extraction_source="ai_reconcile"`` records
-  the call.
+  the rejection.
 
 This runs when the analysis lands (``store_entry_analysis``) and, for matches
 held on an article whose analysis already ran (a re-scan after a new entity
-or alias), from ``settle_held_on_analysed_entries`` against the stored
+or alias), from ``settle_held_on_analyzed_entries`` against the stored
 payload. The adjudicator then checks both outcomes: a promoted match is an
 ordinary link it may propose removing; a rejected one is a ``held`` review
 item it may propose linking (``entry_adjudication``).
@@ -163,7 +163,7 @@ async def _system_user_id(db: AsyncSession) -> uuid.UUID | None:
 async def promote_held(db: AsyncSession, row, now: datetime | None = None) -> None:
     """Link a held match: create its junction row and mark it promoted. A
     reject recorded for it earlier (the analysis's false-positive marker on
-    this article) is removed, since the call it recorded no longer stands."""
+    this article) is removed, since that rejection no longer stands."""
     from sqlalchemy import delete
 
     from app.intelligence.autolinker import store_autolink_matches
@@ -199,12 +199,12 @@ async def promote_held(db: AsyncSession, row, now: datetime | None = None) -> No
     row.resolved_at = now or datetime.now(UTC)
 
 
-async def settle_held_on_analysed_entries(db: AsyncSession, limit: int = 200) -> dict:
+async def settle_held_on_analyzed_entries(db: AsyncSession, limit: int = 200) -> dict:
     """Settle matches held on articles that already have an analysis.
 
-    A match is usually held before the article is analysed, and the analysis
+    A match is usually held before the article is analyzed, and the analysis
     settles it when it lands. A re-scan (a new entity or alias, a backfill)
-    holds matches on articles analysed long ago, which nothing would settle,
+    holds matches on articles analyzed long ago, which nothing would settle,
     so this runs them against the stored payload instead. Each article it
     touches has its adjudication reopened, so the adjudicator checks the new
     links and rejects, and nothing else. Runs every 30 minutes from
@@ -215,7 +215,7 @@ async def settle_held_on_analysed_entries(db: AsyncSession, limit: int = 200) ->
     from app.models.pending_autolink import PendingAutolinkMatch
     from app.services.entry_adjudication import reopen_adjudication
 
-    analysed = select(AIResult.target_id).where(
+    analyzed = select(AIResult.target_id).where(
         AIResult.target_type == "entry",
         AIResult.is_current.is_(True),
         AIResult.task_id == select(AITask.id).where(AITask.name == "entry_analysis").scalar_subquery(),
@@ -224,7 +224,7 @@ async def settle_held_on_analysed_entries(db: AsyncSession, limit: int = 200) ->
         (
             await db.execute(
                 select(PendingAutolinkMatch.entry_id)
-                .where(PendingAutolinkMatch.resolved_at.is_(None), PendingAutolinkMatch.entry_id.in_(analysed))
+                .where(PendingAutolinkMatch.resolved_at.is_(None), PendingAutolinkMatch.entry_id.in_(analyzed))
                 .group_by(PendingAutolinkMatch.entry_id)
                 .order_by(func.min(PendingAutolinkMatch.created_at))
                 .limit(limit)

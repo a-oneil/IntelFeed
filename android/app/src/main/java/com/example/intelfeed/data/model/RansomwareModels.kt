@@ -3,8 +3,7 @@ package com.example.intelfeed.data.model
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-// The web Workbench's Ransomware tracker (RansomwareSection): leak-site victim postings and their
-// statistics. Field names as the web client reads them.
+// The web Workbench's Ransomware tracker (RansomwareSection): leak-site victim postings and their statistics. Field names as the web client reads them.
 
 /** GET /api/ransomware/disclosures (limit, offset, sort=recent|group|sector, group/sector/country repeated, watched_only, since=days, q). */
 @Serializable
@@ -23,7 +22,7 @@ data class RansomwareDisclosure(
     @SerialName("victim_name") val victimName: String = "",
     val domain: String? = null,
     @SerialName("is_new") val isNew: Boolean = false,
-    // The organisation is on your watchlist (entity type "ransomware_victim").
+    // The organization is on your watchlist (entity type "ransomware_victim").
     val watched: Boolean = false,
     // The group is a threat-actor row; its profile opens by this id.
     @SerialName("group_id") val groupId: String? = null,

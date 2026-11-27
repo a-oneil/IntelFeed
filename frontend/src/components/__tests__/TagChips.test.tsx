@@ -80,7 +80,7 @@ describe("TagChips", () => {
     expect(screen.queryByRole("button", { name: 'Remove "team-wide" from this entry' })).toBeNull();
   });
 
-  it("derives a readable foreground from the tag colour", () => {
+  it("derives a readable foreground from the tag color", () => {
     renderWithApp(<TagChips tags={[chip("pale", { color: "#FDE68A" })]} />);
     const button = screen.getByText("pale").closest("button")!;
     expect(button.style.getPropertyValue("--chip-fg")).toBe("#000000");

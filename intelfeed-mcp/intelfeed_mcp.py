@@ -2,14 +2,14 @@
 """IntelFeed MCP server, built for small local models (LM Studio, Ollama front-ends, ...).
 
 It exposes IntelFeed's tool registry (the one behind POST /api/tools/execute) over the
-Model Context Protocol on stdio, but shaped so a local model's context window survives:
+Model Context Protocol on stdio, but shaped to fit in a local model's context window:
 
-* **A small fixed tool list.** Nine tools (~1.3k tokens) instead of the registry's 170
-  (~27k tokens). The list never changes during a session, so the model server can keep
+* **A small fixed tool list.** Nine tools (~1.3k tokens) instead of the registry's ~200
+  (over 27k tokens). The list never changes during a session, so the model server can keep
   reusing its cached prompt prefix.
 * **Skills, loaded on demand.** `load_skill(name)` returns a short playbook plus the
   signatures of the extra tools for that task (skills/*.md); `call_tool(tool, args)`
-  then runs any of them. The model only pays for the tools it is actually using.
+  then runs any of them. The model only spends context on the tools it actually uses.
 * **Shaped results.** Every tool result is cut to a budget (~2k tokens by default):
   HTML stripped, empty/noise fields dropped, dates shortened, long text and long lists
   trimmed, uniform lists rendered as compact tables. The untrimmed result is kept and
@@ -125,9 +125,9 @@ def log(msg: str) -> None:
             pass
 
 
-# Registry tools not flagged mutating that still persist results: the skill CLI's
-# EXTRA_WRITE_TOOLS (scripts/dev/sync_skill_clis.py) plus generate_detection_rules,
-# which stores the rules it generates as drafts.
+# Registry tools that persist results (generate_detection_rules stores the rules it generates
+# as drafts), treated as writes here even if the registry stops flagging them mutating. The
+# registry flags all of them mutating today; see EXTRA_WRITE_TOOLS in scripts/dev/sync_skill_clis.py.
 PERSISTING_READ_TOOLS = frozenset(
     {
         "extract_ttps",
@@ -570,7 +570,7 @@ DROP_KEYS = frozenset(
         "next_cursor",
     }
 )
-# Suffixes dropped everywhere: links, UI colours. (A plain "url" on a single object stays.)
+# Suffixes dropped everywhere: links, UI colors. (A plain "url" on a single object stays.)
 DROP_SUFFIXES = ("_html", "_url", "_color")
 # Dropped inside list items only (kept on a single fetched object).
 LIST_DROP_KEYS = frozenset(
@@ -1575,7 +1575,7 @@ class Transport:
         if method is None:
             return  # a response to something we never send
         if not is_request:
-            return  # notifications: initialized, cancelled, ... — nothing to do
+            return  # notifications: initialized, canceled, ... — nothing to do
         if method == "initialize":
             requested = params.get("protocolVersion")
             version = requested if requested in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0]

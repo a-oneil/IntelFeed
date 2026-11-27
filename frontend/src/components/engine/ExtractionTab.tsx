@@ -67,7 +67,7 @@ export function ExtractionTab({
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // A new console window starts at the first page.
+  // Changing the console's time window goes back to the first page and clears the selection.
   useEffect(() => {
     setOffset(0);
     setSelected(new Set());
@@ -106,7 +106,7 @@ export function ExtractionTab({
   const bulkMut = useExtractionBulk();
   const invalidateExtraction = useInvalidateExtraction();
 
-  // Row whose "Merge into…" modal is open (search + fold into any same-type entity).
+  // Row whose "Merge into…" modal is open (search for any same-type entity and merge into it).
   const [mergeRow, setMergeRow] = useState<ExtractionEntity | null>(null);
   const [openEvidence, setOpenEvidence] = useState<string | null>(null);
 
@@ -151,9 +151,7 @@ export function ExtractionTab({
 
   async function doDelete(rows: ExtractionEntity[]) {
     if (!rows.length) return;
-    // Ledger rows have no name to deny — they tombstone in place (or hard-
-    // delete on request). Named entities delete + join the do-not-recreate
-    // list. A mixed selection gets both sentences, not the wrong one.
+    // Observable (ledger) rows have no name to deny: they are tombstoned in place, or hard-deleted on request. Named entities are deleted and their names go on the do-not-recreate list. A mixed selection's dialog explains both.
     const obsRows = rows.filter((r) => r.entity_type === "observable");
     const entityRows = rows.filter((r) => r.entity_type !== "observable");
     const one = rows.length === 1 ? rows[0] : null;
@@ -164,8 +162,7 @@ export function ExtractionTab({
           `with all links, and the name${entityRows.length === 1 ? " goes" : "s go"} on the do-not-recreate list. ` +
           `This cannot be undone.`,
       );
-    // Observables: tombstone by default; hard-delete (re-capturable) behind a
-    // second confirm so the choice actually reaches the wire.
+    // Observables: tombstone by default; a second dialog offers a hard delete (the value can be captured again), and the choice is sent to the API as `deny`.
     let denyObservables = true;
     if (obsRows.length) {
       parts.push(
@@ -185,8 +182,7 @@ export function ExtractionTab({
     )
       return;
     if (obsRows.length) {
-      // Two outcomes rather than yes/no, which the native confirm could only
-      // express by explaining what OK and Cancel meant. Labelled buttons say it.
+      // The dialog's buttons name the two outcomes, rather than asking yes/no and explaining what OK and Cancel mean.
       denyObservables = !(await confirmDialog({
         title: "Tombstone or hard-delete?",
         message:
@@ -197,7 +193,7 @@ export function ExtractionTab({
         destructive: true,
       }));
     }
-    // One call per type — the endpoint denies + deletes as a batch.
+    // One call per type: the endpoint denies and deletes as a batch.
     const byType = new Map<ExtractionType, string[]>();
     for (const r of rows) byType.set(r.entity_type, [...(byType.get(r.entity_type) ?? []), r.id]);
     let ok = 0;
@@ -560,8 +556,7 @@ export function ExtractionTab({
                       </div>
                       <div className={styles.aka}>
                         {e.entity_type === "observable"
-                          ? // Backend packs [kind, label] into aliases for ledger
-                            // rows — a qualifier, not an alias claim.
+                          ? // For ledger rows the backend puts [kind, label] in aliases: a qualifier, not an alias claim.
                             e.aliases.filter(Boolean).join(" · ")
                           : e.aliases.length
                             ? `aka ${e.aliases.slice(0, 3).join(", ")}`
@@ -592,7 +587,7 @@ export function ExtractionTab({
                       </td>
                     )}
                     <td>
-                      {/* a fixed grid — primary / secondary / ⋯ / ✕ — so the buttons line up down the table */}
+                      {/* a fixed grid (primary / secondary / ⋯ / ✕), so the buttons line up down the table */}
                       <div className={styles.rowacts}>
                         {e.status === "dupe" && e.duplicate_of_id ? (
                           <>
@@ -749,14 +744,7 @@ function errMsg(err: unknown, fallback: string): string {
   return data?.error?.message || data?.message || data?.detail || fallback;
 }
 
-/**
- * RowActionsMenu — per-row "⋯" overflow that folds the entity-management
- * actions (merge into an existing entity, rename, add alias, convert type)
- * into the table so an analyst never has to leave the Extraction tab to fix a
- * dupe. Rendered as a fixed-position popover so it escapes the table's scroll
- * clipping. Actions are gated by what each entity type supports (CVE/TTP are
- * id-keyed: no rename/alias/merge, convert only).
- */
+/** RowActionsMenu: the per-row "⋯" menu with the entity-management actions (merge into an existing entity, rename, add alias, convert type), so an analyst can fix a duplicate without leaving the Extraction tab. Rendered as a fixed-position popover so the table's scroll container does not clip it. Each action shows only for the entity types that support it (CVE/TTP are keyed by their ID: no rename/alias/merge, convert only). */
 function RowActionsMenu({
   entity,
   onMergeInto,
@@ -789,7 +777,7 @@ function RowActionsMenu({
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
-    // Any scroll shifts the anchor — close rather than track.
+    // Any scroll moves the button the menu is anchored to, so close the menu rather than reposition it.
     window.addEventListener("scroll", close, true);
     window.addEventListener("resize", close);
     return () => {
@@ -815,7 +803,7 @@ function RowActionsMenu({
   const canAlias = ALIAS_TYPES.has(t);
   const canConvert = CONVERTIBLE_TYPES.has(t);
   const convertTargets = CONVERT_TARGETS.filter((x) => x.key !== t);
-  // Observables support none of these — keep the slot so the row's buttons stay aligned.
+  // Observables support none of these; render an empty span to keep the grid cell so the row's buttons stay aligned.
   if (!canMerge && !canRename && !canAlias && !canConvert) return <span />;
 
   function run(fn: () => void) {

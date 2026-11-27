@@ -2,11 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import api from "@/api/client";
 import type { AttackDomain, AttackMatrixData } from "@/utils/attackMatrix";
 
-/**
- * Navigator-style matrix data for a domain: tactics in kill-chain order with
- * per-technique feed frequency and telemetry-aware detection coverage.
- * One call per domain + window; the backend caches the aggregate in Redis.
- */
+/** Navigator-style matrix data for a domain: tactics in kill-chain order with per-technique feed frequency and telemetry-aware detection coverage. One call per domain + window; the backend caches the aggregate in Redis. */
 export function useAttackMatrix(domain: AttackDomain, days: number | null) {
   return useQuery({
     queryKey: ["attack-matrix", domain, days],

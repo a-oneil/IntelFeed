@@ -5,16 +5,9 @@ import api from "@/api/client";
 import styles from "./RadarFeedbackButtons.module.css";
 
 /**
- * Thumbs on a ranked entry — the input the signal engine learns from, twice:
- * everyone's verdicts pool into the global nightly weight nudge, and your own
- * feed the per-analyst weights behind "Tuned for you". Deleted as an orphan
- * when the old Priority page was retired; restored onto the "Why it's ranked"
- * card, which is where the ranking explains itself.
+ * Up/down vote buttons on a ranked entry, shown on the "Why it's ranked" card. The signal engine uses the votes in two ways: everyone's verdicts pool into the global nightly weight nudge, and your own feed the per-analyst weights behind "Tuned for you".
  *
- * Verdict state is session-local: the API stores one verdict per user+entry
- * (voting again overwrites; a second click clears), but there is no read-back
- * endpoint yet, so a reload shows the buttons unlit even where a verdict is
- * on record.
+ * Verdict state is session-local: the API stores one verdict per user+entry (voting again overwrites; clicking the same button again clears it), but there is no read-back endpoint yet, so after a reload the buttons show unlit even where a verdict is on record.
  */
 export function RadarFeedbackButtons({ entryId }: { entryId: string }) {
   const [verdict, setVerdict] = useState<number>(0);

@@ -3,16 +3,13 @@ import type { Feed } from "@/api/types";
 import type { FeedForm } from "../useFeedForm";
 import styles from "../fields.module.css";
 
-/**
- * Who reads this feed: whether signed-out visitors may, then which analysts do.
- * Admin-only, like the pane itself.
- */
+/** Who reads this feed: whether signed-out visitors may, then which analysts do. Admin-only, like the pane itself. */
 export function ReadersPane({ feed, form }: { feed: Feed; form: FeedForm }) {
   const { values, set } = form;
 
   return (
     <div className={styles.stack}>
-      {/* Manual Uploads holds people's own documents and is never shown. */}
+      {/* Manual Uploads holds people's own documents and is never shown to visitors, so it has no visibility toggle. */}
       {feed.feed_type !== "manual" && (
         <label className={styles.checkRow}>
           <input

@@ -52,8 +52,7 @@
 
 .taskIcon {
   flex: none;
-  /* One step under the .taskRow container's --r-md so the inner tile never
-     out-rounds its row. */
+  /* One step under the .taskRow container's --r-md so the inner tile's corners are never rounder than its row's. */
   width: 22px;
   height: 22px;
   border-radius: var(--r-sm);
@@ -178,7 +177,7 @@
   color: var(--text-primary);
 }
 
-/* Whose provider a click runs on: coral = your key, grey = the instance. */
+/* Whose provider a click runs on: accent color = your key, muted gray = the instance. */
 .keyDot {
   display: inline-block;
   width: 7px;

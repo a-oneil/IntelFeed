@@ -129,7 +129,7 @@ export function VulnView({ data, onFollow }: { data: StackExposureResponse; onFo
 
   return (
     <>
-      {/* Following — the whole point, up top */}
+      {/* Followed vendors and products, shown first */}
       <div className={styles.stackRow}>
         <span className={styles.stackRowLabel}>Following</span>
         {assets.map((a) => (

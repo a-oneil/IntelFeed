@@ -35,7 +35,7 @@ def name_contradicts_catalog(claimed_name: str, canonical_name: str, technique_i
     """True when an extracted ``technique_name`` contradicts the catalog's name.
 
     Models reliably emit *syntactically valid* technique IDs while mispairing
-    them with the wrong technique — e.g. labelling T1562.004 ("Disable or
+    them with the wrong technique — e.g. labeling T1562.004 ("Disable or
     Modify System Firewall") as "Clear Windows Event Logs". The ID survives
     validation, so the bad mapping lands silently. Because the catalog already
     supplies the authoritative name, the model's own name is a free second
@@ -242,10 +242,10 @@ async def store_ttps(
         # Link to entry (atomic upsert — prevents duplicates under concurrency).
         # On conflict the AI pass's evidence must still land: the autolinker
         # usually creates the link first with an `auto_link:` marker, and
-        # do_nothing() silently dropped every real quote the analysis produced
-        # for an already-linked technique — the exact substance rules are
-        # written from. A real sentence overwrites a NULL or marker value and
-        # never the other way around.
+        # do_nothing() would drop every real quote the analysis produced for an
+        # already-linked technique — the text detection rules are written from.
+        # A real sentence overwrites a NULL or marker value and never the other
+        # way around.
         incoming_text = (ttp_data.get("source_text") or "").strip() or None
         incoming_is_real = bool(incoming_text and not incoming_text.startswith("auto_link:"))
         stmt = pg_insert(EntryTTP).values(

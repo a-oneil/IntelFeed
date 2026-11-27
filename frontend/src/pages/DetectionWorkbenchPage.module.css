@@ -343,11 +343,7 @@
 }
 
 /* Section Card
-   Most result sections render through <Panel>, which already supplies this
-   surface (--bg-secondary / --border / --r-md / overflow:hidden). The classes
-   below survive for the Indicators card only: its body is full-bleed (a tab
-   strip whose underline must span the card), and Panel ties the header inset
-   to the body inset, so padding="none" would zero the header inset too. */
+   Most result sections render through <Panel>, which already supplies this surface (--bg-secondary / --border / --r-md / overflow:hidden). The classes below are kept for the Indicators card only: its body is full-bleed (a tab strip whose underline must span the card), and Panel ties the header inset to the body inset, so padding="none" would zero the header inset too. */
 
 .sectionCard {
   background: var(--bg-secondary);
@@ -356,9 +352,7 @@
   overflow: hidden;
 }
 
-/* Panel has no header-surface option, so the tinted header band is reinstated
-   here. Targeting Panel's semantic <header> element gives (0,1,1) specificity,
-   which beats Panel's own .header (0,1,0) whichever chunk each lands in. */
+/* Panel has no header-surface option, so the tinted header band is added here. Targeting Panel's <header> element gives (0,1,1) specificity, which beats Panel's own .header (0,1,0) regardless of which CSS chunk loads first. */
 .sectionPanel > header {
   background: var(--bg-tertiary);
 }

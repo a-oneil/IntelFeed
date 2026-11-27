@@ -70,8 +70,7 @@ vi.mock("@/hooks/useAnalytics", () => ({
 
 vi.mock("react-router-dom", () => ({
   useNavigate: vi.fn(() => vi.fn()),
-  // The graph's entry nodes route through useOpenEntry, which reads the route
-  // to choose between the feed selection and the workbench's docked reader.
+  // The graph's entry nodes route through useOpenEntry, which reads the route to choose between the feed selection and the workbench's docked reader.
   useLocation: () => ({ pathname: "/" }),
 }));
 

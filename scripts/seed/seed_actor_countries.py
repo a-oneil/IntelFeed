@@ -28,8 +28,8 @@ from app.database import async_session
 from app.intelligence.enrichment import _resolve_country_id
 from app.models.threat_actor import ThreatActor
 
-# Matching is on the lowercased actor name, so keys here are display names and
-# values are lowercase.
+# Matching is on the lowercased actor name, so keys here are country display
+# names and values are lowercase actor names.
 ACTOR_COUNTRIES: dict[str, list[str]] = {
     "China": [
         "alloy taurus",

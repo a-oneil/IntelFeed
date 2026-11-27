@@ -30,7 +30,7 @@ mirror what the workflows run — see [CLAUDE.md](../CLAUDE.md#ci).
 **Anything user-facing**
 
 - [ ] No secrets, tokens or real hostnames in the diff (gitleaks runs on this PR)
-- [ ] Docs under `docs/` updated if behaviour changed
+- [ ] Docs under `docs/` updated if behavior changed
 - [ ] New settings are registered — `settings.get()` on an unregistered key is
       permanently inert
 

@@ -1,10 +1,4 @@
-/**
- * AdjudicatorMenu — the one control for the adjudicate stage on the Review
- * tab: its mode (Proposed files suggestions for the queue; Applied acts on
- * high-confidence verdicts at ingest) and a way to its settings panel, which
- * the console opens above the table. Sits at the right of the lens row, so
- * the stage's controls never mix with the queue's filters.
- */
+/** AdjudicatorMenu is the single control for the adjudicate stage on the Review tab. It sets the stage's mode (Proposed files verdicts as suggestions in the queue; Applied applies high-confidence verdicts at ingest) and toggles the stage's settings panel, which the console opens above the table. It sits at the right end of the lens row so the stage's controls stay separate from the queue's filters. */
 
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -36,9 +30,7 @@ export function AdjudicatorMenu({
   const setMode = async (next: "shadow" | "apply") => {
     if (next === mode || pending) return;
     setPending(true);
-    // Patch the cached stats and don't refetch them right away: the
-    // per-worker settings cache can return the old value for a moment,
-    // which would snap the menu back and read as "it did nothing".
+    // Patch the cached stats and don't refetch them right away: the per-worker settings cache can return the old value for a moment, which would flip the menu back and look like the change did nothing.
     const patch = (value: Mode) =>
       qc.setQueryData(["hygiene", "stats"], (prev: unknown) =>
         prev && typeof prev === "object" ? { ...(prev as Record<string, unknown>), [MODE_KEY]: value } : prev,

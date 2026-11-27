@@ -4,12 +4,7 @@ import { useUIStore } from "@/stores/uiStore";
 import { useIntelReports, useAttachToReport } from "@/hooks/useIntelReports";
 import styles from "./SendToReportModal.module.css";
 
-/**
- * The one send-to-report surface. Every report button in the app opens this:
- * add the current context (entries + entities) to an open draft, or start a
- * new report seeded from it. Replaces the seven bespoke "Report" buttons that
- * each opened a blank wizard.
- */
+/** The send-to-report modal that every report button in the app opens: add the current context (entries + entities) to an open draft, or start a new report seeded from it. */
 export function SendToReportModal() {
   const state = useUIStore((s) => s.sendToReportState);
   const close = useUIStore((s) => s.closeSendToReport);

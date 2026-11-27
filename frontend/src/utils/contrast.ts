@@ -1,10 +1,7 @@
 /**
  * WCAG contrast helpers.
  *
- * Extracted from `hooks/useThemes.ts`, which used them privately to derive
- * `--accent-text`. Anything that paints text on a colour chosen at runtime —
- * a user's tag colour, an entity tint, a severity fill — needs the same logic,
- * and hardcoding `#fff` there is how several filled chips ended up at 1.2–3.4:1.
+ * `hooks/useThemes.ts` uses these to derive `--accent-text`. Anything that paints text on a color chosen at runtime — a user's tag color, an entity tint, a severity fill — needs the same logic, and hardcoding `#fff` there is how several filled chips ended up at 1.2–3.4:1.
  */
 
 /** Parse #rgb or #rrggbb. Returns null for anything else. */
@@ -27,11 +24,7 @@ export function luminance(r: number, g: number, b: number): number {
   return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
 }
 
-/**
- * "#ffffff" or "#000000", whichever contrasts better with `hex`.
- * Crossover luminance is ~0.179. Falls back to white for unparseable input
- * (e.g. a `var(--token)` string), which is the pre-existing behaviour.
- */
+/** "#ffffff" or "#000000", whichever contrasts better with `hex`. Crossover luminance is ~0.179. Falls back to white for unparseable input (e.g. a `var(--token)` string), which is the pre-existing behavior. */
 export function contrastText(hex: string): string {
   const rgb = parseHex(hex);
   if (!rgb) return "#ffffff";

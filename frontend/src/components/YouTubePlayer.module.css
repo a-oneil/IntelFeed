@@ -1,5 +1,4 @@
-/* Same column as the article body, so the player follows the reader's
-   Content width setting (EntryReader sets --reader-col-width). */
+/* Same column as the article body, so the player follows the reader's Content width setting (EntryReader sets --reader-col-width). */
 .container {
   padding: 0 2rem;
   width: 100%;

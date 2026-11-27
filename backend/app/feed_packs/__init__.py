@@ -2,9 +2,9 @@
 
 A brand new instance has zero feeds, so nothing ingests, nothing extracts, and
 every entity page, the priority queue, the threats board and the whole engine
-sit empty until the user goes and sources URLs themselves. These packs are the
-cure: an audited list of real security sources, grouped so the user picks a
-firehose size rather than inheriting one.
+sit empty until the user finds feed URLs themselves. These packs fill that gap:
+an audited list of real security sources, grouped so the user chooses how many
+feeds to start with rather than inheriting one large list.
 
 The packs are the **OPML files** beside this module, so they stay reviewable in
 git and readable by any other feed reader. Plain OPML can only describe
@@ -21,7 +21,7 @@ They live inside the ``app`` package rather than under ``scripts/`` on purpose:
 image run without the repo beside it. Here they ship in the image, and
 ``scripts/seed/seed_feeds.py`` reads this same directory — one source of truth.
 
-Note the directory is ``app/feed_packs/`` and not ``app/data/feed_packs/``:
+The directory is ``app/feed_packs/`` and not ``app/data/feed_packs/`` because
 ``.gitignore`` excludes ``data/`` anywhere in the tree for runtime caches, which
 would have silently kept every pack file out of the repository.
 """
@@ -52,8 +52,8 @@ class FeedPack:
     title: str
     description: str
     file: str
-    # Core is what the onboarding wizard pre-selects: enough to make the
-    # platform demonstrate itself on day one without being a firehose.
+    # The onboarding wizard pre-selects recommended packs (the ``core`` pack):
+    # enough feeds to fill the platform on day one without flooding it.
     recommended: bool = False
     # Human-readable prerequisite, surfaced in the UI so a pack that cannot
     # work on this instance yet says so before it creates failing feeds.

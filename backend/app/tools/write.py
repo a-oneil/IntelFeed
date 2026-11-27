@@ -814,7 +814,7 @@ async def _add_tag(db: AsyncSession, user_id: uuid.UUID, entry_id: str, tag_name
     from app.automation.actions import _clean_tag_name
     from app.services.entry_tags import ensure_assignment, sync_entry_tags_to_search
 
-    tag_name = _clean_tag_name(tag_name)  # same normalisation as a rule's add_tags
+    tag_name = _clean_tag_name(tag_name)  # same normalization as a rule's add_tags
     if not tag_name:
         return {"error": "tag_name is required"}
     tag_q = await db.execute(select(Tag).where(Tag.name == tag_name))
@@ -1553,9 +1553,9 @@ async def _merge_vendors(
     extra_aliases: list[str] | None = None,
     reasoning: str | None = None,
 ) -> dict:
-    # Same-type vendor/product/tool merges piggyback on perform_reclassify with
-    # source_type == target_type — but ReclassifyRequest rejects same-type. So
-    # we use a small helper that mirrors the actor/malware merge primitives.
+    # perform_reclassify rejects source_type == target_type, so same-type
+    # vendor/product/tool merges go through perform_same_type_merge, which
+    # mirrors the actor/malware merge primitives.
     from app.api.entity_merge import perform_same_type_merge
 
     result = await perform_same_type_merge(
@@ -1843,7 +1843,7 @@ async def _update_entity_profile(
     await invalidate_entity_cache(entity_type, entity_id)
     await index_single_entity(entity_type, entity)
 
-    # Newly added aliases widen the match surface — retro-scan existing entries.
+    # Newly added aliases can match existing entries, so queue a retro scan.
     # Types with no autolinker vocabulary (campaign) are dropped by the dispatcher.
     if "aliases" in updated:
         dispatch_backlink_for_added_aliases(entity_type, entity.id, original_aliases, entity.aliases)
@@ -2185,7 +2185,7 @@ async def _generate_full_report(
         generate_full_report.delay(str(report.id), str(user_id))
         ai_status = "queued"
     except (SiteAllowanceExceeded, UserKeyRequired) as e:
-        # The report row stands; what is refused is today's generation.
+        # The draft report is kept; only the AI generation is refused.
         ai_status = f"refused: {e.message}"
     except Exception:
         ai_status = "not_available"
@@ -2291,7 +2291,7 @@ async def _generate_campaign_report(
         generate_full_report.delay(str(report.id), str(user_id))
         ai_status = "queued"
     except (SiteAllowanceExceeded, UserKeyRequired) as e:
-        # The report row stands; what is refused is today's generation.
+        # The draft report is kept; only the AI generation is refused.
         ai_status = f"refused: {e.message}"
     except Exception:
         ai_status = "not_available"

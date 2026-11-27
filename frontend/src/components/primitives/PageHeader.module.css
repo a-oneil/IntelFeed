@@ -1,12 +1,10 @@
-/* The one page-header treatment for every workbench/tool route.
-
-   Deliberately borderless and unpainted: the pages below it (entity tables,
-   rule library, matrix) already stack a table bar and a sticky column-header
-   row, so a rule under the title was the third hairline in 60px. Separation
-   comes from space instead. */
+/*
+ * The shared page header for every workbench/tool route.
+ *
+ * Deliberately borderless and unpainted: the pages below it (entity tables, rule library, matrix) already stack a table bar and a sticky column-header row, so a border under the title would be a third horizontal line within 60px. Spacing separates it instead.
+ */
 .head {
-  /* Positioning context for overflow menus a caller renders inside
-     `actions` (the entity tables' mobile ⋯ sheet anchors here). */
+  /* Positioning context for overflow menus a caller renders inside `actions` (the entity tables' mobile ⋯ sheet anchors here). */
   position: relative;
   display: flex;
   flex-direction: column;
@@ -15,8 +13,7 @@
   flex-shrink: 0;
 }
 
-/* Pages that manage their own page padding (Vendor Watch, Engine, Ransomware)
-   opt out of the inset so the title lines up with their body content. */
+/* Pages that manage their own page padding (Vendor Watch, Engine, Ransomware) opt out of the inset so the title lines up with their body content. */
 .flush {
   padding: 0;
 }
@@ -30,8 +27,7 @@
 }
 
 .title {
-  /* Body face at --fs-lg: `index.css` puts h1 on the mono display face, which
-     made adjacent workbench routes read as different apps. */
+  /* Body font at --fs-lg, overriding `index.css`, which puts h1 in the mono display font; mixing the two made neighboring workbench routes look like different apps. */
   font-family: var(--font-body);
   font-size: var(--fs-lg);
   font-weight: 600;
@@ -65,8 +61,7 @@
   color: var(--text-secondary);
 }
 
-/* Second row: search, filters, lenses — anything that reshapes the content
-   below rather than acting on it. */
+/* Second row: search, filters, lenses — anything that reshapes the content below rather than acting on it. */
 .controls {
   display: flex;
   align-items: center;
@@ -85,8 +80,7 @@
     padding: 0;
   }
 
-  /* Title and its count must stay one line with the actions beside them —
-     wrapping a 3-button row under the title cost a third of a phone screen. */
+  /* Title and its count must stay one line with the actions beside them — wrapping a 3-button row under the title cost a third of a phone screen. */
   .titleRow {
     flex-wrap: nowrap;
   }
@@ -96,9 +90,7 @@
     text-overflow: ellipsis;
   }
 
-  /* Keep the action buttons on the title's line too. Left wrapping, a pair of
-     wide labels stacks into two rows on a 320px screen and pushes the title
-     down to a three-character stub. */
+  /* Keep the action buttons on the title's line too. If allowed to wrap, a pair of wide labels stacks into two rows on a 320px screen and pushes the title down to a three-character stub. */
   .actions {
     flex-wrap: nowrap;
   }

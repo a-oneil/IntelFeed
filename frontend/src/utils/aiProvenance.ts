@@ -1,12 +1,7 @@
 /**
  * Who answered an AI call, in the words the cards show.
  *
- * Results carry `provider_name` and `key_owner_id` (the person whose key
- * paid), and `_fallback_reason` on the parsed result when a person's key
- * could not answer and the instance's provider took the call. Copilot gets
- * the same facts on its `done` frame and `/config`. The reason codes come
- * from the backend's FALLBACK_REASONS; the text here is the reader-facing
- * version, with a verb for what to do next.
+ * Results carry `provider_name` and `key_owner_id` (the person whose key paid), and `_fallback_reason` on the parsed result when a person's key could not answer and the instance's provider took the call. Copilot gets the same facts on its `done` frame and `/config`. The reason codes come from the backend's FALLBACK_REASONS; the text here is the reader-facing version, with a verb for what to do next.
  */
 
 export const FALLBACK_REASON_TEXT: Record<string, string> = {
@@ -25,10 +20,7 @@ export function fallbackMessage(reason: unknown): string | null {
   return FALLBACK_REASON_TEXT[reason] ?? `Your personal key could not answer (${reason}), so this ran on the instance's provider.`;
 }
 
-/**
- * What to offer next to a fallback or a refusal: a missing key is added, a
- * cap is raised, anything else is fixed on the My AI page.
- */
+/** What to offer next to a fallback or a refusal: a missing key is added, a cap is raised, anything else is fixed on the My AI page. */
 export function fallbackFixLabel(reason: unknown): string {
   if (reason === "no_key") return "Add a key";
   if (reason === "monthly_cap" || reason === "daily_cap") return "Raise my cap";

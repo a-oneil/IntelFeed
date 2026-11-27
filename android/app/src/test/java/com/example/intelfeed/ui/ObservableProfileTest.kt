@@ -20,7 +20,7 @@ class ObservableProfileTest {
     @Test
     fun kindIsShownInsteadOfAGenericLabel() {
         val item = ApiJson.json.decodeFromString(ObservableItem.serializer(), json)
-        // Before: the app read a `type` field the server doesn't send, so every row said "OBSERVABLE".
+        // The server sends no `type` field; reading one made every row say "OBSERVABLE".
         assertEquals("DOMAIN · role: exfil", item.toWorkbenchItem().subtitle)
         val profile = item.toProfile()
         assertEquals("Observable · DOMAIN", profile.subtitle)

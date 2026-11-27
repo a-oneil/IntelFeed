@@ -64,7 +64,7 @@ class EntryTTP(Base):
     source_text: Mapped[str | None] = mapped_column(Text)
     extracted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     paragraph_indices: Mapped[list[int] | None] = mapped_column(ARRAY(SmallInteger), nullable=True)
-    # The concrete artefact the source sentence documents, typed so a rule
+    # The concrete artifact the source sentence documents, typed so a rule
     # draft can compile it into a selection clause instead of re-deriving it
     # from prose: domain_pattern | path | cmdline | registry | client_id |
     # header | hash | other.

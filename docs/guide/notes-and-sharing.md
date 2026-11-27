@@ -101,4 +101,4 @@ The reader can turn an article into speech and play it in the audio player.
 Making a share link also prepares the audio in advance, so the person you send
 it to does not wait. Audio is stored for a limited time and then deleted.
 
-Next: [Settings and personalising](settings.md)
+Next: [Settings and personalizing](settings.md)

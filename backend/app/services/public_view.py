@@ -239,8 +239,8 @@ def _entity_shown_to_visitors(model, junction, fk_col):
 
     # track_closure_variables=True: SQLAlchemy caches a lambda criteria by
     # its code object, and all five entity types share this one. Without
-    # tracking, every type reused the first one's SQL (threat actors'
-    # junction), and the rule never applied to malware, tools, vendors or
+    # tracking, every type would reuse the first one's SQL (the threat actors'
+    # junction), and the rule would never apply to malware, tools, vendors or
     # products.
     return with_loader_criteria(model, criteria, include_aliases=True, track_closure_variables=True)
 
@@ -264,8 +264,8 @@ def _junction_shown_to_visitors(junction):
         .where(feeds.c.visible_to_visitors.is_(True), feeds.c.feed_type.not_in(tuple(HIDDEN_FEED_TYPES)))
     )
     # A lambda, so the criteria attach to the junction wherever the statement
-    # puts it (a join's ON clause included); a bare column expression made the
-    # table an extra FROM and broke select(TTP, EntryTTP.x).join(EntryTTP).
+    # puts it (a join's ON clause included); a bare column expression would make
+    # the table an extra FROM and break select(TTP, EntryTTP.x).join(EntryTTP).
     return with_loader_criteria(
         junction, lambda cls: cls.entry_id.in_(shown_entries), include_aliases=False, track_closure_variables=False
     )
@@ -402,7 +402,7 @@ def _repack(widgets: list[dict]) -> list[dict]:
     """Close the holes the hidden widgets leave.
 
     The grid compacts upward but never sideways, so a removed left-hand
-    widget leaves an empty column beside its neighbours. Each remaining
+    widget leaves an empty column beside its neighbors. Each remaining
     widget, in reading order, takes the first spot its size fits, then
     widens into any free columns to its right.
     """
@@ -564,9 +564,9 @@ def _scrub(value: Any, removed_ids: set[str]) -> Any:
         for key, item in value.items():
             if _hidden_key(key):
                 # Keep the shape the page expects: a hidden list reads as
-                # empty and a hidden count as zero, since dropping them made
-                # pages that read campaigns.length crash for visitors. A
-                # hidden object is dropped: pages test for its presence
+                # empty and a hidden count as zero, because pages that read
+                # campaigns.length crash for visitors when the key is missing.
+                # A hidden object is dropped: pages test for its presence
                 # (headline.detections && ...), which an empty one would pass.
                 if (empty := _EMPTY_LIKE.get(type(item))) is not None:
                     out[key] = empty()

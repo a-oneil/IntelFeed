@@ -11,19 +11,13 @@ function escapeRegExp(s: string): string {
 }
 
 /**
- * Remark plugin: substitute literal entity surface forms in text nodes
- * with link nodes pointing at the entity profile.
+ * Remark plugin: replace literal entity names in text nodes with link nodes pointing at the entity profile.
  *
- * Hand-rolled recursive walker (no unist-util-visit). Each `walk(parent)`
- * call reads `parent.children` into a fresh array and reassigns once at
- * the end of that call, so no third-party traversal state can desync.
+ * Hand-rolled recursive walker (no unist-util-visit). Each `walk(parent)` call reads `parent.children` into a fresh array and reassigns once at the end of that call, so there is no third-party traversal state to get out of sync.
  *
  * Skipped:
- *  - text inside an existing `link` ancestor (preserves the model's
- *    `[Article Title](URL)` references — and would produce invalid nested
- *    anchors otherwise)
- *  - text inside `code` / `inlineCode` (CVE-2024-1234 inside a fenced
- *    block shouldn't be re-styled)
+ * - text inside an existing `link` or `linkReference` ancestor (keeps the AI's `[Article Title](URL)` references intact, and linking inside them would produce invalid nested anchors)
+ * - text inside `code` / `inlineCode` (CVE-2024-1234 inside a fenced block shouldn't be re-styled)
  */
 export function remarkEntityLinks(entities: RemarkEntityLink[]) {
   return (tree: Root) => {

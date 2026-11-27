@@ -6,8 +6,7 @@
   vertical-align: baseline;
 }
 
-/* The marker carries the state in its glyph as well as its colour: a count
-   when sources agree, "!" when one of them doesn't, "?" when there are none. */
+/* The marker carries the state in its glyph as well as its color: a count when sources agree, "!" when one of them doesn't, "?" when there are none. */
 .marker {
   display: inline-flex;
   align-items: center;
@@ -248,8 +247,7 @@
   font-style: italic;
 }
 
-/* Right-aligned variant: the popover grows leftward when opening at the
-   viewport's right edge (rail markers). */
+/* Right-aligned variant: the popover grows leftward when opening at the viewport's right edge (rail markers). */
 .popRight {
   left: auto;
   right: 0;

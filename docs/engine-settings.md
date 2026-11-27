@@ -54,7 +54,7 @@ Settings → Engine → *autolink* stage panel. These control the dictionary sca
 | Setting | Type / default | What it does |
 |---|---|---|
 | `autolinker_min_name_length` | int, `3` | Names shorter than this are never matched. |
-| `autolinker_ambiguous_name_max_length` | int, `10` | A one-word, letters-only name up to this length must appear **capitalised** to match. So "Royal" the actor matches *Royal ransomware* but not *the royal family*. |
+| `autolinker_ambiguous_name_max_length` | int, `10` | A one-word, letters-only name up to this length must appear **capitalized** to match. So "Royal" the actor matches *Royal ransomware* but not *the royal family*. |
 | `autolinker_ambiguous_max_occurrences` | int, `3` | If such a name appears more than this many times in one article, it is skipped there. Heavy repetition usually means an ordinary word. |
 | `autolinker_false_positive_names` | csv, about 120 names | Names never matched: common words, malware category words, brand words, Windows built-ins and known bad aliases. Applies **only to actor, malware and country** matches, because vendor, product and tool names often are brand words. Edited as a table on the panel, or via `GET/POST/DELETE /api/engine/autolink/fp-names`. |
 | `autolinker_blocked_surface_forms` | csv, empty | Words an analyst blocked with the reader's *Wrong? → never match this word*. Applies to **every** entity type. Managed from the reader and the autolink panel. |
@@ -222,8 +222,8 @@ How close two entity mentions are, by paragraph. Formula: `1 / (1 + decay_rate �
 |---|---|---|
 | `proximity_default_score` | float, `0.3` | Score used when there is no paragraph data. |
 | `proximity_decay_rate` | float, `1.0` | How fast the score falls with distance. Higher is stricter. |
-| `proximity_strong_threshold` | float, `0.7` | Lowest score labelled **strong**. |
-| `proximity_moderate_threshold` | float, `0.3` | Lowest score labelled **moderate**. Below this is **weak**. |
+| `proximity_strong_threshold` | float, `0.7` | Lowest score labeled **strong**. |
+| `proximity_moderate_threshold` | float, `0.3` | Lowest score labeled **moderate**. Below this is **weak**. |
 
 ### Trust, specificity and display
 
@@ -234,7 +234,7 @@ How close two entity mentions are, by paragraph. Formula: `1 / (1 + decay_rate �
 | `relationship_min_tier_default` | `all` \| `moderate` \| `strong`, default `all` | Default lowest strength tier in "related" lists. Each view can narrow it. |
 | `relationship_specificity_weight` | float, `0.5` | How much a very common entity (one that appears everywhere, like a big vendor) is pushed down related lists. `0` off, `1` full. |
 | `relationship_reporting_source_specificity` | float, `0.45` | Vendors and products below this specificity are treated as *reporting sources* (the company that wrote the report) and grouped separately on profiles. |
-| `graph_max_neighbors_per_node` | int, `30` | Most neighbours shown per node in an entity graph. |
+| `graph_max_neighbors_per_node` | int, `30` | Most neighbors shown per node in an entity graph. |
 | `correlation_max_entries` | int, `2000` | Most recent linked articles a pivot or graph reads per entity. Co-occurrence counts on an entity linked to more articles than this cover only the most recent ones. |
 | `graph_max_claim_edges` | int, `300` | Most relationship edges in one graph, most trusted first. Relationships no shared article backs (MITRE, enrichment feeds, analysts) count too, including for an entity with no articles. |
 | `correlation_cache_ttl_seconds` | int, `3600` | Seconds correlation results stay cached (`correlation_cache.py`). The `refresh-correlation-cache` job refills it hourly at :10. |
@@ -296,7 +296,7 @@ Settings → Engine → **Feeds** view (groups `feeds`, `rate_limiting`, `image_
 
 ### Feed intel-value weights
 
-How much each behaviour counts toward a feed's intel-value score (`backend/app/intelligence/source_analytics.py`). The weights are scaled to add up to 1.0 when the score is computed, so you only need to set them relative to each other.
+How much each behavior counts toward a feed's intel-value score (`backend/app/intelligence/source_analytics.py`). The weights are scaled to add up to 1.0 when the score is computed, so you only need to set them relative to each other.
 
 | Setting | Default | Counts |
 |---|---|---|
@@ -338,11 +338,11 @@ Code: `backend/app/services/entry_adjudication.py` and `backend/app/workers/adju
 | Setting | Type / default | What it does |
 |---|---|---|
 | `adjudication_mode` | `off` \| `shadow` \| `apply`, default `apply` | Master switch. `shadow` files every verdict as a proposal on Review › Queue and changes nothing. `apply` acts on verdicts at or above the confidence floor; weaker ones become proposals. The Adjudicator menu on Review (Proposed / Applied) sets `shadow` or `apply`; `off` is set on the Adjudicate stage panel. Pipeline plans can only turn it off for some feeds. |
-| `adjudication_trigger` | `all` \| `created`, default `all` | `all` reviews every analysed article. `created` reviews only articles whose analysis created or claimed something (an entity, an AI link, a TTP, a relationship, a held match it linked or rejected, or an observable). Use `created` if reviews can't keep up. |
+| `adjudication_trigger` | `all` \| `created`, default `all` | `all` reviews every analyzed article. `created` reviews only articles whose analysis created or claimed something (an entity, an AI link, a TTP, a relationship, a held match it linked or rejected, or an observable). Use `created` if reviews can't keep up. |
 | `adjudication_max_per_hour` | int, `0` | Most reviews started per hour. `0` means no limit; the single AI worker is then the only pacing. Set a limit to cap spend on a paid provider, or to stop reviews delaying article analysis on the same worker. With a limit, the backfill gets at most half of each hour's budget. |
 | `adjudication_min_priority_score` | float, `0` | Skip articles below this priority score (0–10). Keep it at 0: low-scoring CVE articles are the main source of junk tool entities. |
 | `adjudication_apply_min_confidence` | `high` \| `medium` \| `low`, default `high` | In apply mode, verdicts below this wait for a second look instead of applying. Relationship verdicts count only at `high` whatever this says: a demote hides the claim from every profile. |
-| `adjudication_reclassify_consensus` | int, `2` | A type change affects the whole catalogue, so in apply mode a `reclassify` verdict is applied only once this many distinct articles' reviews agree on the same target type. Each earlier review's pending proposal is a vote; the review that reaches the count converts the entity and clears the proposals. `1` applies the first verdict at the confidence floor. A name an analyst or an earlier apply moved out of a type (a reclassify tombstone) is never proposed back into it, so a type cannot flip back and forth. |
+| `adjudication_reclassify_consensus` | int, `2` | A type change affects the whole catalog, so in apply mode a `reclassify` verdict is applied only once this many distinct articles' reviews agree on the same target type. Each earlier review's pending proposal is a vote; the review that reaches the count converts the entity and clears the proposals. `1` applies the first verdict at the confidence floor. A name an analyst or an earlier apply moved out of a type (a reclassify tombstone) is never proposed back into it, so a type cannot flip back and forth. |
 | `adjudication_circuit_breaker_pct` | float, `0.5` | If more than this share of one article's items get a destructive verdict, nothing in the run applies and its verdicts wait for a second look. If the average over the last 50 apply runs goes above it (with at least 10 runs), reviews pause for an hour and a warning chip shows in the Engine console. |
 | `adjudication_circuit_breaker_min_items` | int, `5` | The circuit breaker only judges an article whose review covered at least this many items. Below that, each verdict applies on its own confidence, because on a one-item recheck a single remove is already 100%. |
 | `adjudication_content_max_chars` | int, `8000` | Article characters in the review prompt. |
@@ -382,7 +382,7 @@ It takes `limit` and `since_days` kwargs, passes rows through the same checks, a
 
 ### Duplicate review
 
-Shows the model the catalogue's most likely duplicate pairs of threat actors, malware families and tools, and files a Merge proposal on the Review tab for each pair it calls the same thing. The next run asks about the pair again, and a second `same` applies the merge. Code: `backend/app/services/entity_merge_review.py` and `backend/app/workers/entity_maintenance_tasks.py`. Job `review-duplicate-entities`, daily 06:30 UTC, on the `ai` queue; the Review tab's **Review duplicates (AI)** button runs it now (`POST /api/admin/hygiene/scan-duplicates`). Its AI task is `entity_merge_review` (Settings → AI Configuration → Prompts).
+Shows the model the catalog's most likely duplicate pairs of threat actors, malware families and tools, and files a Merge proposal on the Review tab for each pair it calls the same thing. The next run asks about the pair again, and a second `same` applies the merge. Code: `backend/app/services/entity_merge_review.py` and `backend/app/workers/entity_maintenance_tasks.py`. Job `review-duplicate-entities`, daily 06:30 UTC, on the `ai` queue; the Review tab's **Review duplicates (AI)** button runs it now (`POST /api/admin/hygiene/scan-duplicates`). Its AI task is `entity_merge_review` (Settings → AI Configuration → Prompts).
 
 A pair is a candidate when the names are trigram-similar or when one side's name or alias equals the other's; the two signals run as two index-backed queries, and the pair's shared-article count is shown to the model and breaks ties, but never makes a pair on its own (two well-known entities reported together is normal, not a sign of a duplicate). Pairs an analyst marked not-duplicate, pairs with a pending Merge proposal from the adjudicator, pairs judged within the retry window and pairs with two different MITRE IDs are skipped. The model sees both profiles (name, aliases, description, article count, origin, MITRE ID) and the signals, including each shared name and where it came from: an alias from an enrichment source, a reference feed, seed data or an analyst names its source, and an alias with no recorded source is marked UNSOURCED. AI extraction records no source for the aliases it adds, so an unsourced alias is a hint the model must back with its own knowledge, never proof. The model answers `same` (with which side to keep), `different` or `unsure`. A `same` at or above the floor becomes an `adjudication_merge` row (`after.origin = merge_review`) that applies through the merge engine; `different` and `unsure` are logged as `merge_review_distinct` (visible in History as "Not duplicates") so the pair is not asked again for the retry window. Dismissing a filed merge records the pair as not-duplicate for good. Two merges that cannot both be right (one entity into two targets, or into an entity that is itself being merged away) are not filed: the review's own conflicting proposals are withdrawn and both pairs are logged as unsure. When the model names the shared alias that made a pair look alike as wrong, it files an alias trim (`alias_collision`, `after.origin = merge_review`) on the Review tab; applying it removes the alias and unlinks the articles it alone matched.
 
@@ -405,7 +405,7 @@ The review's own pending rows settle themselves. A pair holding one of its merge
 | `relationship_sweep_min_age_hours` | int, `24` | A claim is left to the per-article review for this long first. |
 | `relationship_sweep_retry_days` | int, `30` | A claim the sweep could not settle is not asked again for this long. |
 | `relationship_sweep_min_confidence` | `high` / `medium` / `low`, `high` | In apply mode, answers below this are recorded and change nothing. |
-| `relationship_sweep_actions` | comma list, empty | What apply mode may change: `keep` (settle a stated claim), `correct` (fix a wrong verb or direction), `hide` (a claim no article states). Empty applies nothing (every answer is recorded and the edge stays in Review). Add one only once the eval shows it is right often enough: on the production instance's local model (qwen3.5:9b, 790 labelled edges) keeps are right 80% of the time and hides 81%, so none is on. A keep of an actor or malware *targeting a country* is never applied, since origin is too often read as target. |
+| `relationship_sweep_actions` | comma list, empty | What apply mode may change: `keep` (settle a stated claim), `correct` (fix a wrong verb or direction), `hide` (a claim no article states). Empty applies nothing (every answer is recorded and the edge stays in Review). Add one only once the eval shows it is right often enough: on the production instance's local model (qwen3.5:9b, 790 labeled edges) keeps are right 80% of the time and hides 81%, so none is on. A keep of an actor or malware *targeting a country* is never applied, since origin is too often read as target. |
 
 ### Entity assessments
 

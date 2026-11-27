@@ -17,8 +17,9 @@ class EntityRelationship(Base):
     target_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     relationship_type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
-    # uses, exploits, targets, attributed_to, variant_of, communicates_with,
-    # delivers, drops, hosts, related_to
+    # A verb the semantic allowlist in app/intelligence/relationship_matrix.py permits for the type pair:
+    # uses, exploits, targets, attributed_to, variant_of, subgroup_of, successor_of, overlaps_with,
+    # communicates_with, delivers, drops, controls, exposes, operates_in, related_to
     confidence: Mapped[str] = mapped_column(String(20), default="possible")
     # confirmed, probable, possible
     source: Mapped[str] = mapped_column(String(20), default="analyst_created")
@@ -39,7 +40,7 @@ class EntityRelationship(Base):
     evidence_entry_ids: Mapped[list[uuid.UUID]] = mapped_column(ARRAY(UUID(as_uuid=True)), default=list)
     # Entries on which the adjudicate stage, in apply mode, kept this edge.
     # Distinct entries; at relationship_evidence_promote_count the edge is
-    # promoted to confirmed (replaces the nightly adjudicator's promotion).
+    # promoted to confirmed.
     reviewer_kept_entry_ids: Mapped[list[uuid.UUID]] = mapped_column(
         ARRAY(UUID(as_uuid=True)), default=list, server_default="{}"
     )

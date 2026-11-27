@@ -1,5 +1,4 @@
-/* Coverage Workspace — the Detection tab.
-   One verdict, one ladder, folded provenance, a persistent set tray. */
+/* Coverage Workspace: the Detection tab. One verdict, one ladder of behaviors, collapsed sections for supporting detail, and a set tray that sticks to the bottom. */
 
 .tab {
   display: flex;

@@ -1,6 +1,4 @@
-/* One facet group: title, optional filter box, checkbox rows, show-all fold.
-   Extracted from SearchFacetSidebar so the rule library rail renders the same
-   control instead of its own bar-chart variant. */
+/* One facet group: title, optional filter box, checkbox rows, show-all fold. Extracted from SearchFacetSidebar so the rule library rail renders the same control. */
 .group {
   display: flex;
   flex-direction: column;

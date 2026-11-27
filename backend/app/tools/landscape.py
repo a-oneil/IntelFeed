@@ -1,4 +1,4 @@
-"""Landscape tools — watchlist, ransomware tracker, stack exposure, glossary (13 tools).
+"""Landscape tools — watchlist, ransomware tracker, stack exposure, glossary (12 tools).
 
 Mirrors app/api/watchlist.py, app/api/ransomware.py, app/api/exposure.py and
 app/api/glossary.py. The read-heavy ransomware/exposure/detect endpoints are

@@ -1,6 +1,4 @@
-/* Leak-watch facet rail. Split out of LeakWatchFeed.module.css when the rail
-   became a full-height column of RansomwareSection rather than a card inside
-   the feed. */
+/* Leak-watch facet rail, a full-height column of RansomwareSection (split out of LeakWatchFeed.module.css, where the rail was a card inside the feed). */
 
 .grp {
   border-bottom: 1px solid var(--border);
@@ -75,9 +73,7 @@
   left: var(--sp-1);
   width: 17px;
   height: 17px;
-  /* Literal by design, same call as the AISettings knob: the puck rides both
-     the off (--border) and on (--entity-victim) track, so no single token
-     suits both states. */
+  /* A literal color on purpose, as with the AISettings knob: the knob sits on both the off (--border) and on (--entity-victim) track, so no single token suits both states. */
   background: #fff;
   border-radius: 50%;
   transition: 0.16s;
@@ -109,9 +105,7 @@
   flex: none;
   display: grid;
   place-items: center;
-  /* The tick only renders in the `.facetOn` state, where the box is filled
-     with --accent — so its foreground must be the accent's derived one.
-     Flat #fff measured 2.53:1 on the default accent. */
+  /* The tick only renders in the `.facetOn` state, where the box is filled with --accent — so its foreground must be the accent's derived one. Flat #fff measured 2.53:1 on the default accent. */
   color: var(--accent-text);
 }
 

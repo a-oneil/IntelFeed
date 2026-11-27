@@ -6,8 +6,8 @@ drops them — resolution synthesizes stage defaults from them at resolve time
 (no snapshot drift), then overlays global → category → feed PipelinePlan rows.
 
 Resolutions are cached in Redis per feed with a version key bumped on any plan
-write (autolinker vocab pattern); resolve happens once per feed fetch, not per
-entry.
+write (the same scheme as the autolinker vocabulary); resolve happens once per
+feed fetch, not per entry.
 """
 
 import json
@@ -26,7 +26,7 @@ PLAN_CACHE_TTL = 600
 
 
 def feed_analysis_off(feed) -> bool:
-    """True when the feed's "Analyse this feed" switch is off (mode ``none``).
+    """True when the feed's "Analyze this feed" switch is off (mode ``none``).
 
     Mode ``none`` outranks the per-feed extract switches: the CVE/NVD pass,
     rule extraction and the GitHub repo import all stay off, whatever
@@ -49,7 +49,7 @@ def feed_runs_extraction(feed) -> bool:
 
 
 def synthesize_from_feed(feed) -> dict[str, dict]:
-    """Stage plan equivalent to today's Feed-boolean behavior."""
+    """Stage plan derived from the Feed booleans, before any PipelinePlan overlay."""
     run_extraction = feed_runs_extraction(feed)
     plan: dict[str, dict] = {}
     for stage in PIPELINE_STAGES.values():

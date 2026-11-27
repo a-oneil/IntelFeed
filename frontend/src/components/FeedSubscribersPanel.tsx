@@ -8,13 +8,9 @@ import {
 import styles from "./FeedSubscribersPanel.module.css";
 
 /**
- * Admin control over who reads one feed: the roster, a push-to-everyone
- * shortcut, and per-analyst add/remove.
+ * Admin control over who reads one feed: the roster, a push-to-everyone shortcut, and per-analyst add/remove.
  *
- * Used in two places and deliberately identical in both — as the body of the
- * reach popover on the Engine's feed-health rows (triage: "this feed is broken,
- * who does it cost?") and as an inline block in the admin half of
- * EditFeedModal (curation: "this one should be on everyone's list").
+ * Used in two places and deliberately identical in both: as the body of the reach popover on the Engine's feed-health rows (triage: "this feed is broken, who does it cost?") and as an inline block in the admin half of EditFeedModal (curation: "this one should be on everyone's list").
  */
 export function FeedSubscribersPanel({
   feedId,
@@ -87,8 +83,7 @@ export function FeedSubscribersPanel({
       </div>
 
       {!per_user_active && (
-        // Without the flag the sidebar ignores this table entirely, so an admin
-        // staring at a roster that doesn't match what people see needs telling.
+        // Without the flag the sidebar ignores this table entirely, so an admin looking at a roster that doesn't match what people see needs to be told why.
         <p className={styles.flagNote}>
           Per-user subscriptions are off, so every user sees every feed. These
           rows are kept current and take effect when the setting is turned on.

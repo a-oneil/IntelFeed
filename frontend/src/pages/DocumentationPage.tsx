@@ -38,11 +38,7 @@ type HeadingProps = React.ComponentPropsWithoutRef<"h2"> & {
   node?: { position?: { start: { line: number } } };
 };
 
-/**
- * Root-relative paths the API serves itself, not the SPA router: handing these
- * to `navigate()` would land on the app's 404 instead of Swagger / ReDoc / an
- * API response.
- */
+/** Root-relative paths the API serves itself, not the SPA router: passing these to `navigate()` would show the app's 404 instead of Swagger / ReDoc / an API response. */
 const SERVER_PATHS = [/^\/docs\b/, /^\/redoc\b/, /^\/api\//, /^\/openapi\.json/, /^\/metrics\b/];
 
 function isAppRoute(href: string): boolean {
@@ -52,12 +48,7 @@ function isAppRoute(href: string): boolean {
 /**
  * Resolve a docs link to an in-app route, or null to leave it to the browser.
  *
- * Two kinds qualify. Repo-relative markdown paths (`[x](operations.md)`,
- * `[y](diagrams/engine.md#anchor)`) are rewritten onto documentation routes.
- * Root-relative app paths (`/workbench/threats`, `/documentation/guide/...`)
- * are already routes — they only need routing through the SPA so that following
- * one out of the docs doesn't reload the whole app. External URLs and bare
- * anchors are left alone.
+ * Two kinds qualify. Repo-relative markdown paths (`[x](operations.md)`, `[y](diagrams/engine.md#anchor)`) are rewritten onto documentation routes. Root-relative app paths (`/workbench/threats`, `/documentation/guide/...`) are already routes; they only need to go through the SPA router so following one doesn't reload the whole app. External URLs and bare anchors are left alone.
  */
 function resolveHref(href: string | undefined, currentSlug: string): string | null {
   if (!href) return null;
@@ -83,12 +74,7 @@ function resolveHref(href: string | undefined, currentSlug: string): string | nu
 /**
  * Map a relative image in the markdown to the API route that serves it.
  *
- * The docs render from raw markdown, so `../assets/screenshots/x.png` would
- * otherwise resolve against the SPA route and 404. Normalise it against the
- * current slug the way resolveHref does, keep it inside docs/assets/, and point
- * it at /api/documentation/assets/. That route is auth-gated and an <img> tag
- * cannot set a header, so the access token rides in the query string — the same
- * bargain EntryReader makes for /api/telegram-media.
+ * The docs render from raw markdown, so `../assets/screenshots/x.png` would otherwise resolve against the SPA route and 404. Normalize it against the current slug the way resolveHref does, keep it inside docs/assets/, and point it at /api/documentation/assets/. That route requires auth and an <img> tag cannot set a header, so the access token goes in the query string, as EntryReader does for /api/telegram-media.
  */
 function resolveAssetSrc(src: string | undefined, currentSlug: string): string | undefined {
   if (!src) return undefined;
@@ -120,17 +106,11 @@ function groupBySection(pages: DocumentationPageSummary[]) {
   return groups;
 }
 
-/**
- * The `/documentation` landing page: the two API references, the docs copilot,
- * and a jump-off into the user guide. The guide cards are read off the live
- * index rather than hand-listed, so adding a page under `docs/guide/` surfaces
- * it here the same way it surfaces in the rail.
- */
+/** The `/documentation` landing page: the two API references, the docs copilot, and links into the user guide. The guide cards come from the live index rather than a hand-written list, so a page added under `docs/guide/` appears here as it does in the rail. */
 function DocsLanding({ index }: { index: { pages: DocumentationPageSummary[] } | undefined }) {
   const guide = (index?.pages ?? []).filter((p) => p.section === GUIDE_SECTION);
   const lastDocSlug = useUIStore((s) => s.docsChat.lastDocSlug);
-  // Visitors (public read-only mode) get the pages, not the API references
-  // (login-only) or the docs copilot (AI).
+  // Visitors (public read-only mode) get the pages, not the API references (login-only) or the docs copilot (AI).
   const isVisitor = useIsVisitor();
 
   return (
@@ -197,8 +177,7 @@ function DocsLanding({ index }: { index: { pages: DocumentationPageSummary[] } |
 
 export default function DocumentationPage() {
   const { "*": splat } = useParams();
-  // "" is the landing page, not a missing slug: /documentation is its own
-  // surface (API references + the docs copilot), and the doc pages hang off it.
+  // "" is the landing page, not a missing slug: /documentation is its own page (API references + the docs copilot), and the doc pages sit under it.
   const slug = splat ?? LANDING;
   const isLanding = slug === LANDING;
   const navigate = useNavigate();
@@ -210,13 +189,11 @@ export default function DocumentationPage() {
   const navCollapsed = useUIStore((s) => s.docsNavCollapsed);
   const isVisitorPage = useIsVisitor();
   const toggleDocsNav = useUIStore((s) => s.toggleDocsNav);
-  // Docs carry their own contents rail; the app sidebar folds away beside it,
-  // the same bargain Settings makes.
+  // Docs have their own contents rail, so the app sidebar collapses beside it, as it does in Settings.
   useAppSidebarAutoCollapse();
   const isMobile = useIsMobile();
 
-  // Remember what was being read, so the landing page's chat still has the page
-  // as context once you navigate back to it to ask about it.
+  // Remember the page being read, so the landing page's chat can use it as context after navigating back.
   const setDocsChat = useUIStore((s) => s.setDocsChat);
   useEffect(() => {
     if (!isLanding && slug) setDocsChat((prev) => ({ ...prev, lastDocSlug: slug }));
@@ -236,9 +213,7 @@ export default function DocumentationPage() {
     );
   }, [index, filter]);
 
-  // Heading anchors worked out from the markdown source, so a repeated heading gets
-  // its `-1` suffix and every id is the one GitHub would give it. The renderers
-  // below look theirs up by line; the slug of the rendered text is the fallback.
+  // Heading anchors computed from the markdown source, so a repeated heading gets its `-1` suffix and every id matches the one GitHub would give it. The renderers below look theirs up by line; the slug of the rendered text is the fallback.
   const headingIds = useMemo(() => headingIdsByLine(page?.markdown ?? ""), [page?.markdown]);
 
   const components = useMemo(
@@ -295,13 +270,10 @@ export default function DocumentationPage() {
     [slug, navigate, headingIds],
   );
 
-  // Where you are, named on the mobile trigger the way Settings names its
-  // active section.
+  // The current page's title, shown on the mobile trigger the way Settings shows its active section.
   const activeTitle = isLanding ? "Documentation home" : page?.title ?? slug;
 
-  // One nav, two containers: a resizable column on desktop, a slide-over sheet
-  // behind a single row on mobile — the same bargain Settings makes, where
-  // stacking the rail inline ate the screen before any prose.
+  // One nav, two containers: a resizable column on desktop, a slide-over sheet behind a single row on mobile, as in Settings, where stacking the rail inline filled the screen before any prose.
   const navContent = (
     <>
       <input

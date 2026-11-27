@@ -33,7 +33,7 @@ const ResponsiveGridLayout = WidthProvider(Responsive);
 const ROW_HEIGHT = scalePx(80);
 const COLS = 12;
 const TRIAGE_PREFIX = "__triage__/";
-/** Which board tab is selected. Board ids are server-side; this is just a pointer. */
+/** localStorage key for the selected board tab. Boards are stored server-side; this only stores the selected board's id. */
 const ACTIVE_BOARD_KEY = "intelfeed-active-dashboard";
 
 /* ── Page ── */
@@ -43,8 +43,7 @@ export function DashboardPage() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [settingsWidgetId, setSettingsWidgetId] = useState<string | null>(null);
 
-  // Layout lock: keeps a stray touch on mobile from dragging or resizing
-  // widgets. Persisted per device via uiStore.
+  // Layout lock: keeps an accidental touch on mobile from dragging or resizing widgets. Persisted per device via uiStore.
   const dashboardLockedPref = useUIStore((s) => s.dashboardLocked);
   // Public read-only mode: a visitor gets the built-in boards, locked in place.
   const isVisitor = useIsVisitor();
@@ -71,8 +70,7 @@ export function DashboardPage() {
     () => localStorage.getItem(ACTIVE_BOARD_KEY),
   );
 
-  // Keep the selection valid: fall back to the first board whenever the stored
-  // id points at a board that no longer exists (deleted here or elsewhere).
+  // Keep the selection valid: fall back to the first board whenever the stored id points at a board that no longer exists (deleted here or elsewhere).
   const dashboardId = useMemo(() => {
     if (boards.length === 0) return null;
     const match = boards.find((b) => b.id === activeBoardId);
@@ -94,15 +92,12 @@ export function DashboardPage() {
   const updateLayout = useUpdateLayout();
   const { data: dashboard } = useDashboard(dashboardId);
 
-  // Widget time range — shares the view's global range so the dashboard grid
-  // stays in sync with the correlation browser.
+  // Widget time range: shares the view's global range so the dashboard grid stays in sync with the correlation browser.
   const widgetTimeRange = view.global_range;
   const customStart = view.global_custom_start ?? undefined;
   const customEnd = view.global_custom_end ?? undefined;
 
-  // Seed the instance's default boards once, the first time we see a user with
-  // none of their own. The ref guards against double-seeding across rerenders;
-  // the endpoint is idempotent regardless.
+  // Seed the instance's default boards once, the first time a signed-in user has no boards of their own (visitors are skipped). The ref prevents seeding twice across rerenders; the endpoint is idempotent regardless.
   const autoCreateRef = useRef(false);
   useEffect(() => {
     if (!dashboardsData) return;
@@ -147,10 +142,7 @@ export function DashboardPage() {
     }));
   }, [dashboard]);
 
-  // Grid config objects are memoized so an incidental re-render (background
-  // refetch, SSE tick, etc.) doesn't hand react-grid-layout a fresh `layouts`
-  // reference mid-drag — that reconciliation cancels an in-progress
-  // drag/resize, which manifests as "can't resize widgets".
+  // Grid config objects are memoized so an unrelated re-render (background refetch, SSE tick, etc.) doesn't pass react-grid-layout a new `layouts` reference mid-drag; that cancels an in-progress drag/resize, so widgets appear impossible to resize.
   const layouts = useMemo(() => ({ lg: layout, md: layout, sm: layout }), [layout]);
   const breakpoints = useMemo(() => ({ lg: 1200, md: 768, sm: 0 }), []);
   const cols = useMemo(() => ({ lg: COLS, md: COLS, sm: 1 }), []);
@@ -170,8 +162,7 @@ export function DashboardPage() {
     setShowPicker(false);
   };
 
-  // Templates seed a NEW board rather than wiping the current one — with tabs,
-  // there's no reason for applying a template to be destructive.
+  // A template creates a NEW board rather than replacing the current one, so applying a template never destroys an existing board.
   const handleApplyTemplate = async (templateIdx: number) => {
     const template = DASHBOARD_TEMPLATES[templateIdx];
     if (!template) return;
@@ -208,8 +199,7 @@ export function DashboardPage() {
     setSettingsWidgetId(null);
   };
 
-  // Persist layout only on intentional user drag/resize — NOT on responsive
-  // breakpoint reflows, which would overwrite stored widths with narrow values.
+  // Persist layout only on intentional user drag/resize, NOT on responsive breakpoint reflows, which would overwrite stored widths with narrow values.
   const handleUserLayoutChange = useCallback(
     (currentLayout: Layout) => {
       if (!dashboardId || !dashboard || currentLayout.length === 0) return;
@@ -227,9 +217,7 @@ export function DashboardPage() {
 
   return (
     <div className={styles.container}>
-      {/* Board tabs and the global range are the dashboard's header controls;
-          the widget actions are its header actions — same two slots as every
-          other workbench route. */}
+      {/* Board tabs and the global range go in the header's controls slot and the widget actions in its actions slot, the same two slots every other workbench route uses. */}
       <PageHeader
         title="Dashboard"
         flush
@@ -284,9 +272,7 @@ export function DashboardPage() {
             isDraggable={!dashboardLocked}
             compactType="vertical"
             margin={[12, 12]}
-            /* react-grid-layout defaults containerPadding to `margin`, which
-               inset the whole grid by 12px and left the widgets narrower than
-               the controls bar directly above them. Zero it so both align. */
+            /* react-grid-layout defaults containerPadding to `margin`, which insets the whole grid by 12px and makes the widgets narrower than the controls bar directly above them. Zero it so both align. */
             containerPadding={[0, 0]}
           >
             {dashboard.widgets.map((widget) => {
@@ -304,9 +290,7 @@ export function DashboardPage() {
                           {widget.title || widget.widget_type.replace(/_/g, " ")}
                         </span>
                       </div>
-                      {/* Settings + remove sit OUTSIDE the drag handle, or
-                          react-grid-layout swallows the click as a drag. A
-                          locked board hides both. */}
+                      {/* Settings + remove sit OUTSIDE the drag handle, or react-grid-layout treats the click as a drag. A locked board hides both. */}
                       {!isVisitor && !dashboardLocked && (
                         <div className={styles.widgetActions}>
                           {configFields && configFields.length > 0 && (

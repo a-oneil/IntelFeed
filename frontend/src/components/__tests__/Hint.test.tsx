@@ -8,8 +8,7 @@ const COPY = {
   aside: "Scored on source reliability, entity heat and what you've read before.",
 };
 
-/** Swap in a matchMedia that answers the given queries true, everything else
- *  false — the setup mock's default is a desktop with a mouse. */
+/** Swap in a matchMedia that answers the given queries true, everything else false — the setup mock's default is a desktop with a mouse. */
 function mockMedia(matching: RegExp) {
   const real = window.matchMedia;
   window.matchMedia = ((query: string) => ({ ...real(query), matches: matching.test(query) })) as typeof window.matchMedia;
@@ -111,9 +110,7 @@ describe("Hint", () => {
   });
 
   it("does not resurrect an open card after being disabled and re-enabled", () => {
-    // The matrix header disables the hint while its peek popover is open. The
-    // bare child it hands back has no leave handler, so without a reset the
-    // hover anchor would survive and the card would come back on re-enable.
+    // The matrix header disables the hint while its peek popover is open. The bare child it hands back has no leave handler, so without a reset the hover anchor would survive and the card would come back on re-enable.
     const { rerender } = render(
       <Hint {...COPY}>
         <button>Priority Queue</button>

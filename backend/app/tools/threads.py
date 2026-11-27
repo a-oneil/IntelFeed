@@ -1,8 +1,8 @@
-"""Story thread tools — an unfolding story as one object, not twenty-three rows.
+"""Story thread tools — an unfolding story as one object instead of one row per article.
 
-The same reads the Priority Queue and the reader use. A thread has no page of
-its own in the UI, so ``/priority-queue?thread=<slug>`` is the address to hand
-back to an analyst who wants to open one.
+These use the same reads as the Priority Queue and the reader. A thread has no page
+of its own in the UI, so ``/priority-queue?thread=<slug>`` is the link to give an
+analyst who wants to open one.
 """
 
 import uuid
@@ -115,7 +115,7 @@ async def _get_story_thread(
         "last_seen": row.get("last_seen"),
         "entry_count": row.get("entry_count") or 0,
         "source_count": row.get("source_count") or 0,
-        # Null means the spine is the day-grouped fallback, not a written one.
+        # Null means no model has written this timeline yet; the spine is the day-grouped fallback.
         "narrated_at": row.get("narrated_at"),
         "key_entities": [
             {"type": e.get("entity_type"), "label": e.get("label"), "articles": e.get("count")}

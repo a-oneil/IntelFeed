@@ -2,7 +2,7 @@
 
 The sweep (app/services/relationship_sweep.py) changes the graph only in
 apply mode. Before switching that on, run its prompt over edges someone has
-labelled against their articles and see how often it is right. Nothing is
+labeled against their articles and see how often it is right. Nothing is
 written to the graph: each edge is judged exactly as a sweep run would judge
 it (same passages, same quote rule), and the answer is compared with the
 label.
@@ -103,9 +103,9 @@ def report(rows: list[dict], floor: str) -> None:
         [r for r in acted if r["decision"] in _CORRECTIONS],
         same_fix,
     )
-    labelled_correct = [r for r in rows if r["label"] == "correct"]
+    labeled_correct = [r for r in rows if r["label"] == "correct"]
     kept = sum(1 for r in acted if r["decision"] == "asserted" and r["label"] == "correct")
-    print(f"\nrecall: true claims it would keep  {kept} / {len(labelled_correct)}")
+    print(f"\nrecall: true claims it would keep  {kept} / {len(labeled_correct)}")
     rejected = [r for r in rows if r.get("rejected")]
     if rejected:
         print(f"answers not accepted (quote rule): {len(rejected)}  {Counter(r['rejected'] for r in rejected)}")

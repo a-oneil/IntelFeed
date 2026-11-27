@@ -1,20 +1,9 @@
 /**
  * OverviewTab — the entity's dossier as one column.
  *
- * Always open at the top: the since-last-visit ribbon, then the brief, read
- * top to bottom like a finished intel product: the assessment; key facts (the
- * activity verdict, SnapshotCard's numbers, and KnownAssociates' claim rows,
- * one per verb); what changed (LatestDevelopments); and next steps
- * (NextActions). Below them, every other part of the profile is a section
- * row (OverviewSection) in the order the type's config gives: closed, each row
- * is one line whose digest answers the usual question; open, the same
- * components render beneath it. Which rows are open is remembered per entity
- * type (uiStore), and the tab bar's Brief / Everything switch opens them all.
+ * Always shown at the top: the since-last-visit ribbon, then the brief, which reads top to bottom like a finished intel report: the assessment; key facts (the activity verdict, SnapshotCard's numbers, and KnownAssociates' claim rows, one per verb); what changed (LatestDevelopments); and next steps (NextActions). Below them, every other part of the profile is a section row (OverviewSection) in the order the type's config gives. A closed row is one line whose digest summarizes the section; an open row renders the section's components beneath it. Which rows are open is remembered per entity type (uiStore), and the tab bar's Brief / Everything switch opens them all.
  *
- * Per-type signal panels (CVE affected products, TTP catalog, CWE family,
- * observable provenance, infrastructure…) render inside the section that
- * hosts them (OVERVIEW_SECTION_PANELS). Relational data lives in the
- * Relationships tab; scalar identity fields live in the header.
+ * Per-type signal panels (CVE affected products, TTP catalog, CWE family, observable provenance, infrastructure…) render inside the section that hosts them (OVERVIEW_SECTION_PANELS). Relational data lives in the Relationships tab; scalar identity fields live in the header.
  */
 import { useEffect, useRef, useState, useMemo, type ReactNode } from "react";
 import api from "@/api/client";
@@ -131,7 +120,7 @@ function Row({ k, v, mono }: { k: string; v: React.ReactNode; mono?: boolean }) 
 }
 
 
-/** First paragraph of the attached article, plain-ish, capped for the lede. */
+/** First paragraph of the attached article, with Markdown links and emphasis stripped, capped at 420 characters for the lede. */
 function wikiLede(content: string): string {
   const para = content.split(/\n\s*\n/)[0] ?? content;
   const plain = para
@@ -141,12 +130,11 @@ function wikiLede(content: string): string {
   return plain.length > 420 ? `${plain.slice(0, 420).trimEnd()}…` : plain;
 }
 
-/** "3 articles", "1 event" — digests count things constantly. A noun whose
- * plural is not noun + "s" passes it: plural(n, "entity", "entities"). */
+/** A count with its noun, for digests: "3 articles", "1 event". Pass the plural when it is not noun + "s": plural(n, "entity", "entities"). */
 const plural = (n: number, noun: string, irregular?: string) =>
   `${n.toLocaleString()} ${n === 1 ? noun : (irregular ?? `${noun}s`)}`;
 
-/** Joins the non-empty parts of a digest with the house separator. */
+/** Joins the non-empty parts of a digest with the standard " · " separator. */
 const digestOf = (...parts: Array<string | null | undefined | false>) => parts.filter(Boolean).join(" · ");
 
 const ATTACK_VECTOR: Record<string, string> = {
@@ -156,8 +144,7 @@ const ATTACK_VECTOR: Record<string, string> = {
   P: "with physical access",
 };
 
-/** "Attackable over the network without logging in", from a CVSS vector's
- * attack vector (AV) and privileges required (PR). */
+/** "attackable over the network without logging in", built from a CVSS vector's attack vector (AV) and privileges required (PR). */
 function attackPathOf(vector: string | null | undefined): string | null {
   if (!vector) return null;
   const part = (key: string) => vector.match(new RegExp(`(?:^|/)${key}:([A-Z])`))?.[1];
@@ -169,8 +156,7 @@ function attackPathOf(vector: string | null | undefined): string | null {
 
 /** Scroll a section's child into view once that section has rendered it. */
 function scrollOnceRendered(ref: React.RefObject<HTMLElement | null>) {
-  // The ref is attached by a render that follows the state change, so the
-  // scroll waits one frame rather than reading a not-yet-mounted node.
+  // The ref is attached by a render that follows the state change, so the scroll waits one frame rather than reading a node that is not mounted yet.
   requestAnimationFrame(() => ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
 }
 
@@ -245,8 +231,7 @@ export function OverviewTab({
     () => new Set<OverviewSectionKey>(resolveOpenSections(stored, sections, mode).filter((k) => k !== "hunts")),
     [mode, sections, stored],
   );
-  // Hunts start closed on every visit (only Everything opens them): the row
-  // is a working tool, not part of the brief the remembered rows build.
+  // Hunts start closed on every visit (only Everything opens them) and their open state is not remembered: the row is a working tool, not part of the brief.
   const [huntsOpen, setHuntsOpen] = useState(false);
   useEffect(() => setHuntsOpen(false), [entityId]);
   const isOpen = (key: OverviewSectionKey) =>
@@ -268,8 +253,7 @@ export function OverviewTab({
   }, [anchor]);
 
   const [wikiOpen, setWikiOpen] = useState(false);
-  // Where the Wikipedia search was opened from, so it renders beside that
-  // button: the Sources card (no article yet) or the article's "Wrong article?".
+  // Where the Wikipedia search was opened from, so it renders beside that button: the Sources card (no article yet) or the article's "Wrong article?".
   const [wikiSearchAt, setWikiSearchAt] = useState<"sources" | "article" | null>(null);
   const wikiSearchOpen = wikiSearchAt !== null;
   const toggleWikiSearch = (at: "sources" | "article") => {
@@ -290,11 +274,9 @@ export function OverviewTab({
     wikiSearchOpen ? debouncedWikiQuery : "",
   );
   const { data: cveDetail } = useCVE(entityType === "cve" ? entityId : undefined);
-  // A campaign's scope numbers: /stats knows its entity mix and rule coverage,
-  // and the story count comes from the threads on its own articles.
+  // A campaign's scope numbers: /stats returns its entity mix and rule coverage, and the story count comes from the threads on its own articles.
   const { data: campaignStatsData } = useCampaignStats(entityType === "campaign" ? entityId : undefined);
-  // The page already folds story threads into the event stream as STORY rows,
-  // so the count is there rather than needing its own request.
+  // The page already merges story threads into the event stream as story rows, so the count comes from there rather than its own request.
   const campaignStoryCount = useMemo(
     () => (events ?? []).filter((e) => e.event_type === "story").length,
     [events],
@@ -303,8 +285,7 @@ export function OverviewTab({
   const { data: ttpMitigations } = useTTPMitigations(entityType === "ttp" ? entityId : undefined);
   const { data: ttpFamily } = useTTPRelatedTechniques(entityType === "ttp" ? entityId : undefined);
   const { data: cweFamily } = useCWEFamily(entityType === "cwe" ? entityId : undefined);
-  // The pivot payload has no corpus counts — they need a join, so like useCVE
-  // for the CVE hero this fetches the detail record for the key facts.
+  // The pivot payload has no corpus counts (they need a join), so, as useCVE does for the CVE hero, this fetches the detail record for the key facts.
   const { data: cweDetail } = useCWE(entityType === "cwe" ? entityId : undefined);
   const { data: observableDetail } = useObservable(entityType === "observable" ? entityId : undefined);
   const { data: infrastructure } = useEntityInfrastructure(entityType, entityId);
@@ -315,19 +296,16 @@ export function OverviewTab({
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   const { data: cweVendors } = useCWEVendors(entityType === "cwe" ? entityId : undefined);
   const { data: cveWeaknesses } = useCVEWeaknesses(entityType === "cve" ? entityId : undefined);
-  // Same query keys as VictimsStrip / EntityProfilePage — TanStack dedupes.
+  // Same query keys as VictimsStrip / EntityProfilePage, so TanStack Query dedupes the requests.
   const { data: victims } = useActorVictims(entityId, entityType === "threat_actor");
   const { data: victimStats } = useActorVictimStats(entityId, entityType === "threat_actor");
   const { data: affectedForCounts } = useAffectedCveCount(
     entityType === "vendor" || entityType === "product" ? entityType : undefined,
     entityId,
   );
-  // Always the 90-day series, whatever window the header's pulse line shows:
-  // the verdict compares the last three weeks with the weeks before.
+  // Always the 90-day series, whatever window the header's pulse line shows: the verdict compares the last three weeks with the weeks before.
   const { data: series90, isPlaceholderData: series90Stale } = useEntityMentionsTimeseries(entityType, entityId, "90d");
-  // The hook keeps the previous series on screen while the next loads; that
-  // is the last profile's series right after navigating, so the verdict (a
-  // stated fact) waits for this entity's own.
+  // The hook keeps the previous series while the next loads, which right after navigating is the previous profile's series, so the verdict waits for this entity's own data rather than stating a wrong fact.
   const verdict = useMemo(
     () => (series90Stale ? null : activityVerdict(series90?.points)),
     [series90, series90Stale],
@@ -337,9 +315,7 @@ export function OverviewTab({
     entityType === "vendor" || entityType === "product" ? entityType : undefined,
     entityId,
   );
-  // Section digests read the same queries their bodies run (same keys, one
-  // request each): context sources, open stories, essential reading, AI
-  // results and notes.
+  // Section digests read the same queries their bodies run (same keys, one request each): context sources, open stories, essential reading, AI results and notes.
   const { data: contextData } = useEntityContext(entityType, entityId);
   const { data: openThreads } = useEntityStoryThreads(entityType, entityId, { limit: 2, status: "open" });
   const { data: topEntries } = useEntityTopEntries(entityType, entityId, 30);
@@ -347,8 +323,7 @@ export function OverviewTab({
   const { data: notes } = useEntityNotes(entityType, isVisitor ? undefined : entityId);
   const nvd =
     entityType === "cve" ? extractNvd(cveDetail?.nvd_data) : { vector: null, cwe: null, references: [], published: null };
-  // CVE reference set for the Sources card — structured references_ column
-  // preferred, NVD blob as fallback.
+  // CVE reference set for the Sources card: the structured references_ column when present, the NVD blob as fallback.
   const cveRefLinks: RefLink[] =
     entityType === "cve"
       ? Array.isArray(cveDetail?.references_) && cveDetail.references_.length > 0
@@ -362,7 +337,7 @@ export function OverviewTab({
         : nvd.references
       : [];
 
-  // The chips' "draft with AI" shares the same endpoint the assessment refresh runs.
+  // The chips' "draft with AI" action uses the same endpoint as the assessment refresh.
   const draftAI = useGenerateEntitySummary();
   const draftAssessment = () => {
     draftAI.mutate(
@@ -378,8 +353,7 @@ export function OverviewTab({
     switch (key) {
       case "cve_affected": {
         const products = dedupeProducts(entity.affected_products);
-        // Authoritative cve_affected rows grouped by CPE vendor — resolved
-        // vendors/products link to their entity profiles.
+        // Authoritative cve_affected rows grouped by CPE vendor; resolved vendors/products link to their entity profiles.
         const vendorGroups = new Map<string, { vendorId: string | null; vendorName: string | null; rows: CVEAffectedEntityRow[] }>();
         for (const row of affectedRows ?? []) {
           const group = vendorGroups.get(row.cpe_vendor) ?? { vendorId: row.vendor_id, vendorName: row.vendor_name, rows: [] };
@@ -519,8 +493,7 @@ export function OverviewTab({
             )}
             {lineage.length > 0 && (
               <div className={styles.tagRow}>
-                {/* Root-first, so the row reads pillar → … → parent. The counts
-                    are rolled up: a Pillar's own direct links are near zero. */}
+                {/* Root first, so the row reads pillar → … → parent. The counts are rolled up, because a Pillar's own direct links are near zero. */}
                 <span className={styles.metaLabel}>Lineage</span>
                 {lineage.map(cweLink)}
               </div>
@@ -885,8 +858,7 @@ export function OverviewTab({
         );
       }
       case "cwe_mitigations": {
-        // Same markup as ttp_mitigations — the catalog's phase plays the part
-        // the M-ID plays there, and the strategy the part the name plays.
+        // Same markup as ttp_mitigations: the catalog's phase takes the place of the M-ID there, and the strategy takes the place of the name.
         const mitigations = entity.mitigations ?? [];
         if (!mitigations.length) return null;
         return (
@@ -955,14 +927,12 @@ export function OverviewTab({
       .map(renderPanel)
       .filter(Boolean);
 
-  // scoped=true: the profile's Latest Developments list only carries events
-  // about THIS entity, not first-mentions of co-occurring ones.
+  // scoped=true: the profile's Latest Developments list only shows events about this entity, not first mentions of entities that co-occur with it.
   const { data: whatsNew } = useEntityWhatsNew(entityType, entityId, true, true);
   const { data: campaigns } = useEntityCampaigns(entityType, entityId);
 
   // ── Section digests ────────────────────────────────────────────────────
-  // Each answers the row's usual question in one line, from data the section's
-  // own components already fetch.
+  // Each summarizes its section in one line, from data the section's own components already fetch.
   const latestVictim = victims?.items[0];
   const victimWhere = latestVictim
     ? [latestVictim.country_code, latestVictim.sector_label ?? latestVictim.sector].filter(Boolean).join(", ")
@@ -1077,8 +1047,7 @@ export function OverviewTab({
     entity.wikipedia_content ? "Wikipedia attached" : null,
   ) || "no stories or ranked reading yet";
 
-  // Enrichment runs are bookkeeping, not news: the digest leads with the
-  // latest article or story, not "Enriched via nvd (success)".
+  // Enrichment runs are bookkeeping, not news: the digest shows the latest article or story, not "Enriched via nvd (success)".
   const latestActivity = [
     ...events.filter((e) => e.event_type !== "enrichment").map((e) => ({ title: e.title, date: e.date })),
     ...entries.map((e) => ({ title: e.title, date: e.published_at })),
@@ -1124,7 +1093,7 @@ export function OverviewTab({
                     onSuccess: () => {
                       setWikiSearchAt(null);
                       setWikiOpen(true);
-                      // The lede lives in Stories & reading: open it so the attach is seen.
+                      // The lede renders in Stories & reading: open that section so the user sees the attached article.
                       openAnd("reading", readingRef);
                     },
                   },
@@ -1158,8 +1127,7 @@ export function OverviewTab({
   const sectionSpec = (key: OverviewSectionKey): SectionSpec => {
     switch (key) {
       case "hunts": {
-        // On every profile that can draft hunts, drafted or not: the row is
-        // where they are offered as well as where they live.
+        // Shown on every profile that can draft hunts, whether or not any are drafted: the row is where hunts are offered as well as where they are listed.
         const pack = huntState?.pack ?? null;
         const dialect = queryLanguageShort(huntState?.language);
         const digest = hunts.drafting
@@ -1208,9 +1176,7 @@ export function OverviewTab({
                 entity={entity}
                 config={config}
                 cveReferences={entityType === "cve" ? cveRefLinks : undefined}
-                // Gated on the config's own declaration rather than "has no wiki
-                // content yet": a campaign is an internal object with nothing to
-                // look up, and offering the search returned an error on click.
+                // Gated on the config's own declaration rather than "has no wiki content yet": a campaign is an internal object with nothing to look up, and offering the search returned an error on click.
                 onFindWikipedia={
                   entity.wikipedia_content || !config.actions.includes("fetch_wikipedia")
                     ? undefined
@@ -1264,8 +1230,7 @@ export function OverviewTab({
               </div>
               <div>
                 <EssentialReading entityType={entityType} entityId={entityId} onOpenArticle={onOpenArticle} />
-                {/* Wikipedia renders only when an article is attached — collapsed to
-                    its lede; the attach flow starts from the Sources card. */}
+                {/* Wikipedia renders only when an article is attached, collapsed to its lede; the attach flow starts from the Sources card. */}
                 {entity.wikipedia_content && (
                   <div className={styles.wikiSection}>
                     <div className={styles.wikiHeader}>
@@ -1354,10 +1319,7 @@ export function OverviewTab({
         victimDates={entityType === "threat_actor" ? (victims?.items ?? []).map((v) => v.last_seen_at) : undefined}
         onCatchUp={() => openAnd("activity", activityRef)}
       />
-      {/* Catalog-keyed types retire entries, and CWE additionally publishes
-          categories that are never valid mapping targets — a Draft-status
-          category is not "deprecated" but carries the same warning, so the
-          CWE branch checks kind as well. */}
+      {/* Catalog-keyed types retire entries, and CWE also publishes categories that are never valid mapping targets. A Draft-status category is not "deprecated" but gets the same warning, so the CWE branch checks kind as well. */}
       {((entityType === "ttp" && entity.is_deprecated) ||
         (entityType === "cwe" && (entity.is_deprecated || entity.kind === "category"))) && (
         <div className={styles.deprecationNotice}>
@@ -1402,8 +1364,7 @@ export function OverviewTab({
         </div>
       )}
 
-      {/* The brief: the assessment, the facts behind it with who says so, what
-          changed, then what to do about it. */}
+      {/* The brief: the assessment, the facts behind it with their sources, what changed, then what to do about it. */}
       <div className={styles.brief}>
         {config.hasDescription && (
           <AssessmentBlock

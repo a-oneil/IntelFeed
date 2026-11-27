@@ -6,10 +6,7 @@ import type { SavedSearch } from "@/api/types";
 /**
  * Open a saved search on the search page.
  *
- * Every entry point — the app sidebar, the dashboard widgets, tag and glossary
- * pivots — routes through here so a saved search always lands on the one
- * surface that knows how to restore it. `loadSavedSearch` only parks it in the
- * store; SearchPage is what unpacks the query, the scope and the facet state.
+ * Every entry point (the app sidebar, the dashboard widgets, tag and glossary pivots) routes through here so a saved search always opens on the one page that knows how to restore it. `loadSavedSearch` only puts it in the store; SearchPage restores the query, the scope and the facet state from there.
  */
 export function useOpenSavedSearch() {
   const navigate = useNavigate();

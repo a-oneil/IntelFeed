@@ -529,7 +529,7 @@ class TestEnrichEntity:
         )
         assert resp.status_code == 404
 
-    async def test_enrich_any_modelled_type_and_write_its_columns(
+    async def test_enrich_any_modeled_type_and_write_its_columns(
         self, client: AsyncClient, auth_headers: dict, db_session: AsyncSession
     ):
         """The profile's Enrich now is on every entity type: a vendor is looked

@@ -6,8 +6,7 @@ interface PageHeaderProps {
   title: string;
   /** Quiet row/record count rendered right after the title. */
   count?: number | string;
-  /** One line of orientation under the title. Optional by design — most
-   *  pages are self-evident and a subtitle on every one is just noise. */
+  /** One line under the title explaining the page. Optional: most pages are self-explanatory, and a subtitle on every page adds clutter. */
   subtitle?: ReactNode;
   /** Buttons that act on the page: create, import, export. Right-aligned. */
   actions?: ReactNode;
@@ -18,12 +17,7 @@ interface PageHeaderProps {
   className?: string;
 }
 
-/**
- * The single page-header treatment. Before this every workbench route rolled
- * its own: h1/h2/span titles at three sizes and two font families, half of
- * them bordered, two on a tinted band, three with no title at all. This is
- * the whole vocabulary — title, count, subtitle, actions, controls.
- */
+/** The shared page header for workbench routes, so they don't each style their own title (which produced h1/h2/span titles at three sizes and two font families, some bordered, some on a tinted band, some with no title). Its parts are title, count, subtitle, actions and controls. */
 export function PageHeader({
   title,
   count,

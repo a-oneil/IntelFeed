@@ -1,15 +1,9 @@
 /**
- * DetectionTab — one question, one answer.
+ * DetectionTab — detection rule coverage for one entity.
  *
- * For anything the coverage workspace understands (actors, malware, CVEs,
- * techniques, campaigns) this tab is the workspace: a verdict sentence, a
- * ladder of behaviours ordered by what to do next, and folded provenance. The
- * old Build|Coverage segmented pair is gone — they were two designs answering
- * the same question, and the ladder answers it once.
+ * For the types the coverage workspace supports (actors, malware, CVEs, techniques, campaigns) this tab renders the workspace: a verdict sentence, a list of behaviors ordered by what to do next, and collapsed provenance. It replaces a separate Build/Coverage switch, which showed two views of the same question.
  *
- * A CWE has no extracted behaviours to build a workspace from, so it keeps the
- * plain list it always had: the rules that cover it, and the way into the
- * library to find more.
+ * A CWE has no extracted behaviors to build a workspace from, so it gets a plain list: the rules that cover it, and a link to search the library for more.
  */
 import { Link } from "react-router-dom";
 import { currentReadingPrefs } from "@/hooks/useReadingPrefs";
@@ -27,14 +21,10 @@ import styles from "../entityProfile.module.css";
 const GENERATABLE_TYPES = ["threat_actor", "malware", "cve", "ttp"] as const;
 type GeneratableType = (typeof GENERATABLE_TYPES)[number];
 
-/** A guard rather than a Set membership test, so the narrowing survives to the
- * call: the generation endpoint is typed to the extraction types, and a
- * campaign — which nothing extracts — is not one of them. */
+/** A type guard rather than a Set membership test, so the narrowed type reaches the call: the generation endpoint is typed to the extraction types, and a campaign (which nothing extracts) is not one of them. */
 function isGeneratable(type: EntityType): type is GeneratableType {
   return (GENERATABLE_TYPES as readonly string[]).includes(type);
 }
-
-/** Default formats — mirrors the entry intel panel's "Gen Rules" action. */
 
 function libraryPath(query: string): string {
   return `/workbench/explore?section=rules&rules_q=${encodeURIComponent(query)}`;
@@ -79,8 +69,7 @@ export function DetectionTab({
   );
 }
 
-/** The no-workspace face. A CWE has covering rules but no extracted behaviours,
-    so there is no coverage to judge — only a list and a way to add to it. */
+/** The view for types without a coverage workspace. A CWE has covering rules but no extracted behaviors, so there is no coverage to judge, only a list and a way to add to it. */
 function RuleListFallback({
   entityType,
   entityId,

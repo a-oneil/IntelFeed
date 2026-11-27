@@ -4,8 +4,7 @@ import { useUpdateAIProvider } from "@/hooks/useAI";
 import CopilotAuthCard from "./CopilotAuthCard";
 import styles from "./AISettings.module.css";
 
-// CLI knobs the Claude Code provider reads from config. Values are kept as
-// strings while editing; empty string = unset (provider default applies).
+// CLI options the Claude Code provider reads from config. Values are kept as strings while editing; an empty string means unset (the provider default applies).
 type CliKnobs = {
   cli_path: string;
   timeout_seconds: string;

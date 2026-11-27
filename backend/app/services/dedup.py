@@ -30,7 +30,7 @@ def _normalize_text(text: str) -> str:
 # then misses, and the cross-feed content hash misses too whenever the body
 # drifts, so each fetch added another copy. Within one feed, the link plus the
 # title identify an article; only the guid churns. These helpers build that
-# identity. Only the link is normalised; the guid is never parsed.
+# identity. Only the link is normalized; the guid is never parsed.
 
 # Query parameters that carry campaign/click tracking, never content. Matched
 # case-insensitively; a trailing "*" is a prefix match.
@@ -99,10 +99,10 @@ def normalize_url(url: str | None) -> str | None:
 
 
 def url_lookup_pattern(normalized: str) -> str:
-    """An ILIKE pattern that finds every stored spelling of a normalised URL.
+    """An ILIKE pattern that finds every stored spelling of a normalized URL.
 
     Matches on host + path (no scheme, query or trailing slash), so it is a
-    superset; callers re-normalise each hit and compare exactly.
+    superset; callers re-normalize each hit and compare exactly.
     """
     parts = urlsplit(normalized)
     stem = (parts.netloc + parts.path).rstrip("/")
@@ -122,7 +122,7 @@ def _enclosure_path(url: str | None) -> str | None:
 
 
 def item_key(url: str | None, title: str | None, enclosure_url: str | None = None) -> tuple | None:
-    """The same-feed identity of an item: (normalised link, normalised title, enclosure path).
+    """The same-feed identity of an item: (normalized link, normalized title, enclosure path).
 
     None when the item has no usable link, so it never matches anything. The
     title is part of the key because some feeds point several items at one

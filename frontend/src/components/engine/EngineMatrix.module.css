@@ -1,9 +1,6 @@
-/* Engine console additions layered over ProcessingTab.module.css: top bar,
-   needs-you filter strip, live stage headers, peek popover, output lens,
-   drawer output-manager. Colors resolve through the runtime theme variables. */
+/* Engine console styles applied on top of ProcessingTab.module.css: top bar, needs-you filter strip, live stage headers, peek popover, output lens, drawer output manager. Colors come from the runtime theme variables. */
 
-/* ---- top bar: pulse dot + ingest sparkline, browse views, window, finder.
-   One quiet row under the page title; the counts live on the card. ---- */
+/* ---- top bar: status dot + ingest sparkline, browse views, time window, setting finder. One low-key row under the page title; the counts are on the card. ---- */
 .topbar {
   display: flex;
   align-items: center;
@@ -39,8 +36,7 @@
   margin: 0 6px;
   flex: none;
 }
-/* Pushes the window picker, the setting finder and the engine switch to the
-   right, whether or not the picker shows on the tab. */
+/* Pushes the window picker, the setting finder and the engine switch to the right, whether or not the picker shows on the tab. */
 .topGrow {
   flex: 1;
 }
@@ -91,8 +87,7 @@
   min-width: 180px;
 }
 /* view tabs: every engine dataset in the same card */
-/* Track/button radii stay concentric: 8px track - 1px border - 2px padding
-   leaves exactly --r-sm for the active tab's fill. */
+/* The track uses --r-md and the buttons --r-sm so the corners stay close to concentric: the 6px track radius minus the 1px border and 2px padding is about the 4px button radius. */
 .viewSeg {
   display: inline-flex;
   background: var(--bg-tertiary);
@@ -189,12 +184,7 @@
 }
 
 /* ---- attention chips ---- */
-/* Two fluid rows: queues on the first, console tools on the second. Each row
- * spans the full width at every viewport — nothing hugs an edge or strands a
- * half-empty line. */
-/* ---- needs-you strip: inside the card, under the toolbar. Each chip is a
-   filter on the card (or a jump to the queue's own view); chips take their
-   natural width so the strip reads as a row of filters, not a dashboard. ---- */
+/* ---- needs-you strip: inside the card, under the toolbar. Each chip is a filter on the card (or a jump to the queue's own view); chips keep their natural width so the strip reads as a row of filters, not a dashboard. ---- */
 .needs {
   display: flex;
   align-items: center;
@@ -284,7 +274,7 @@
   box-shadow: 0 1px 3px color-mix(in srgb, #000 25%, transparent);
 }
 
-/* ---- live stage headers: the pipeline's controls, mock-E style ---- */
+/* ---- live stage headers: the pipeline's controls ---- */
 .sth {
   appearance: none;
   background: none;
@@ -324,11 +314,7 @@
 .sthOn .sthName {
   color: var(--text-primary);
 }
-/* Stage health dot, not a control. Filled = the stage ran in the window, tinted
-   by outcome; hollow = it never fired, so there is no health signal either way.
-   The plan toggle lives in the stage popover, which the surrounding header
-   button opens — this was previously drawn as a sliding pill switch, which read
-   as a toggle and invited clicks that could never do anything. */
+/* Stage health dot, not a control. Filled means the stage ran in the window, colored by outcome; hollow means it never ran, so there is no health signal either way. The plan toggle is in the stage popover, which the surrounding header button opens; the dot is deliberately not drawn as a switch, because a switch shape invites clicks that do nothing. */
 .sw {
   width: 7px;
   height: 7px;
@@ -457,8 +443,7 @@
 .popErrStat {
   color: var(--danger);
 }
-/* Rendered as an outlined Chip; the display face is the only thing Chip
-   never declares. */
+/* Rendered as an outlined Chip; the display font is the only style Chip does not set itself. */
 .scopePill {
   font-family: var(--font-display);
 }
@@ -710,8 +695,7 @@
   padding-top: var(--sp-2);
 }
 
-/* ---- browse views (Jobs / Plans / Enrichment / Publishing / Maintenance):
-   quiet text buttons on the top bar; the finder keeps a capped share. ---- */
+/* ---- browse views (Jobs / Plans / Enrichment / Publishing / Maintenance): plain text buttons on the top bar; the setting finder gets a capped width. ---- */
 .attnTools {
   display: flex;
   align-items: center;

@@ -11,19 +11,16 @@ const DEFAULT_TITLE: Record<DialogRequest["kind"], string> = {
 };
 
 /**
- * The app's own confirm / alert / prompt, standing in for the browser's.
+ * The app's own confirm / alert / prompt, used in place of the browser's.
  *
- * Focus starts on Cancel for a destructive action and on the accept control
- * otherwise, matching the native dialogs' bias toward the safe choice while
- * keeping a plain "yes?" one Enter away.
+ * Focus starts on Cancel for a destructive action and on the accept control otherwise, matching the native dialogs' bias toward the safe choice while keeping a plain confirmation one Enter away.
  */
 export function AppDialog({ request }: { request: DialogRequest }) {
   const trapRef = useFocusTrap<HTMLDivElement>();
   const initialFocusRef = useRef<HTMLButtonElement | HTMLInputElement>(null);
   const settle = useDialogStore((s) => s.settle);
   const [value, setValue] = useState(request.defaultValue ?? "");
-  // The capture-phase key handler below is registered once per dialog, so it
-  // would close over the first render's `value`. It reads the ref instead.
+  // The capture-phase key handler below is registered once per dialog, so it would close over the first render's `value`. It reads the ref instead.
   const valueRef = useRef(value);
   valueRef.current = value;
 
@@ -46,15 +43,9 @@ export function AppDialog({ request }: { request: DialogRequest }) {
     if (initialFocusRef.current instanceof HTMLInputElement) initialFocusRef.current.select();
   }, []);
 
-  // The entry list and reader bind j/k/o/Enter/Escape on window/document and
-  // only skip text inputs, so without this a focused dialog button would also
-  // open the selected article or close the reader behind us. Keys are swallowed
-  // in the capture phase, except Tab, which the focus trap needs.
+  // The entry list and reader bind j/k/o/Enter/Escape on window/document and only skip text inputs, so without this a focused dialog button would also open the selected article or close the reader behind the dialog. Keys are stopped in the capture phase, except Tab, which the focus trap needs.
   //
-  // Swallowing in capture also means the dialog's own elements never see the
-  // event, so Enter-to-submit is handled here rather than on the input. (Enter
-  // on a focused button still works: stopPropagation doesn't stop the browser's
-  // default activation, and settling twice is a no-op.)
+  // Stopping them in capture also means the dialog's own elements never see the event, so Enter-to-submit is handled here rather than on the input. (Enter on a focused button still works: stopPropagation doesn't stop the browser's default activation, and settling twice is a no-op.)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -92,8 +83,7 @@ export function AppDialog({ request }: { request: DialogRequest }) {
           {request.title ?? DEFAULT_TITLE[request.kind]}
         </h3>
 
-        {/* pre-wrap so messages carried over from the native dialogs keep the
-            line breaks they were written with. */}
+        {/* pre-wrap so messages carried over from the native dialogs keep the line breaks they were written with. */}
         <p className={styles.message} data-testid="app-dialog-message">
           {request.message}
         </p>

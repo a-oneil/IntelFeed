@@ -32,11 +32,7 @@ export async function exportNote(noteId: string): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-/**
- * Export any note as a downloaded markdown file, client-side. Works for every
- * note type (entry, sidebar, entity) since it only needs the title + markdown
- * the card already holds — no per-model backend endpoint required.
- */
+/** Export any note as a downloaded markdown file, client-side. Works for every note type (entry, sidebar, entity) since it only needs the title + markdown the card already holds, so no per-model backend endpoint is required. */
 export function exportMarkdownNote(title: string, markdown: string): void {
   const heading = (title || "Note").trim();
   const md = `# ${heading}\n\n${markdown.trim()}\n`;
@@ -68,10 +64,7 @@ export async function exportEntityProfile(entityType: string, entityId: string):
   triggerDownload(res.data, "text/markdown", filenameFromHeaders(res.headers, "profile.md"));
 }
 
-/**
- * Export many entity profiles of one type as a downloaded ZIP. Pass explicit
- * `entityIds`, or `all: true` to export every entity of the type.
- */
+/** Export many entity profiles of one type as a downloaded ZIP. Pass explicit `entityIds`, or `all: true` to export every entity of the type. */
 export async function bulkExportEntityProfiles(params: {
   entityType: string;
   entityIds?: string[];

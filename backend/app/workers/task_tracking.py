@@ -1,7 +1,7 @@
 """Celery signal handlers that persist job_runs rows for scheduled (registry) tasks.
 
 Filtered to JOB_REGISTRY tasks only — per-entry pipeline tasks would produce
-~100k rows/day and are covered by entry_pipeline_runs instead (phase 5). Every
+~100k rows/day and are covered by entry_pipeline_runs instead. Every
 handler swallows its own errors: run tracking must never break a task.
 
 Wired by importing this module in celery_app.py.

@@ -1,13 +1,7 @@
 /**
- * ActivityFeed — merged linked-entries + timeline events with an All / Articles /
- * Events filter and free-text search. Rendered at the bottom of the Overview tab
- * (replaces the old standalone Activity tab).
+ * ActivityFeed — merged linked-entries + timeline events with an All / Articles / Events filter and free-text search. Rendered at the bottom of the Overview tab.
  *
- * Rows group under day dividers, and each day's catch-all relationship events
- * collapse to a single expandable summary row ("14 relationship changes · 6
- * tools · 4 CVEs") — bulk extraction runs stop drowning the articles. Rendering
- * caps at a page of rows with Show more; the feed no longer makes the profile
- * tens of thousands of pixels tall.
+ * Rows group under day dividers, and each day's catch-all relationship events collapse to a single expandable summary row ("14 relationship changes · 6 tools · 4 CVEs"), so bulk extraction runs don't bury the articles. Rendering stops at a page of rows with Show more, so a long feed doesn't make the profile tens of thousands of pixels tall.
  */
 import { useState, type ReactNode } from "react";
 import { formatDate } from "@/utils/formatDate";
@@ -28,8 +22,7 @@ export const EVENT_COLORS: Record<string, string> = {
 };
 
 const PAGE_SIZE = 50;
-// A single day can carry thousands of articles (Chromium CVE dumps, Patch
-// Tuesday) — cap them per day so other days and event rows stay reachable.
+// A single day can carry thousands of articles (Chromium CVE dumps, Patch Tuesday) — cap them per day so other days and event rows stay reachable.
 const ARTICLES_PER_DAY = 12;
 
 type Filter = "all" | "articles" | "events";
@@ -135,13 +128,11 @@ export function ActivityFeed({
     .filter((r) => match(r.title));
   const nonArticleEvents = allEvents.filter((e) => e.event_type && e.event_type !== "article");
 
-  // Some entity types (e.g. CVEs) never accrue non-article events — hide the
-  // dead "Events (0)" filter instead of presenting an always-empty view.
+  // Some entity types (e.g. CVEs) never accrue non-article events — hide the "Events (0)" filter instead of showing a view that is always empty.
   const hasAnyEvents = events.some((e) => e.event_type && e.event_type !== "article");
   const filters: Filter[] = hasAnyEvents ? ["all", "articles", "events"] : ["all", "articles"];
   let filter: Filter = !hasAnyEvents && rawFilter === "events" ? "all" : rawFilter;
-  // A timeline with no events but linked articles still has an All view —
-  // render (and count) the articles rather than claiming "No activity".
+  // A timeline with no events but linked articles still has an All view — render (and count) the articles rather than claiming "No activity".
   if (filter === "all" && allEvents.length === 0 && articleRows.length > 0) filter = "articles";
 
   const counts = {
@@ -176,10 +167,7 @@ export function ActivityFeed({
       key={key}
       className={`${styles.articleItem} ${evt.event_type !== "article" ? styles.nonArticleItem : ""}`}
       onClick={() => {
-        // The article wins over the story it belongs to: a row with an entry
-        // opens that entry in the workbench's docked reader, so the profile
-        // stays on screen. Only an event with no article of its own (a story
-        // beat, a relationship assertion) hands off to the thread reader.
+        // The article wins over the story it belongs to: a row with an entry opens that entry in the workbench's docked reader, so the profile stays on screen. Only an event with no article of its own (a story beat, a relationship assertion) hands off to the thread reader.
         if (evt.entry_id) onOpenArticle(evt.entry_id);
         else if (evt.thread_slug && onOpenStory) onOpenStory(evt.thread_slug);
       }}
@@ -221,8 +209,7 @@ export function ActivityFeed({
         break;
       }
       const dayRows = byDay.get(key)!;
-      // Searching means the user wants the matching rows themselves — skip
-      // collapsing and per-day caps so results are directly visible.
+      // Searching means the user wants the matching rows themselves — skip collapsing and per-day caps so results are directly visible.
       const relRows = q ? [] : dayRows.filter((r) => r.event_type === "relationship");
       const collapse = relRows.length >= 3 && !expandedDays.has(key);
       const visible = collapse ? dayRows.filter((r) => r.event_type !== "relationship") : dayRows;
@@ -244,8 +231,7 @@ export function ActivityFeed({
         }
         if (isArticle(row)) {
           dayArticles += 1;
-          // Skip past the cap but keep walking — event rows later in the day
-          // must still render.
+          // Skip past the cap but keep walking — event rows later in the day must still render.
           if (dayArticles > articleCap) continue;
         }
         out.push(renderEventRow(row, `${key}:${idx}`));

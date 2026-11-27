@@ -1,9 +1,10 @@
-"""Attack-chain (kill-chain) ordering for extracted TTPs — plan item 3.9.4.
+"""Attack-chain (kill-chain) ordering for extracted TTPs.
 
-Renders an article's or entity's techniques as an *ordered* narrative
-(initial access → execution → …) instead of a bag of technique IDs. The
-order is derived from each technique's ATT&CK tactic(s), so no new
-extraction is needed once the TTP catalog is hydrated (see W2a).
+Returns an article's or entity's techniques grouped and ordered by tactic
+(initial access → execution → …) instead of as an unordered list of technique
+IDs. The order comes from each technique's ATT&CK tactic(s), so no extra
+extraction is needed once the TTP catalog has been loaded by
+`hydrate_attack_catalog` (app/intelligence/attack_catalog.py).
 """
 
 from __future__ import annotations

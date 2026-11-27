@@ -1,8 +1,7 @@
 /**
  * Client-side query parser for IntelFeed's unified search query language.
  *
- * TypeScript port of backend/app/search/query_parser.py
- * Used for real-time filter chip extraction and cursor-aware autocomplete.
+ * TypeScript port of backend/app/search/query_parser.py, used for real-time filter chip extraction and cursor-aware autocomplete.
  */
 
 // ── AST Node types ──────────────────────────────────────
@@ -235,10 +234,7 @@ function findFieldColon(word: string): number | null {
 
 // ── Public API ──────────────────────────────────────────
 
-/**
- * Parse a query string into an AST.
- * Returns a TextNode with empty value for empty queries.
- */
+/** Parse a query string into an AST. Returns a TextNode with empty value for empty queries. */
 export function parseQuery(query: string): ASTNode {
   query = query.trim();
   if (!query) return { type: "text", value: "" };
@@ -263,9 +259,7 @@ export interface ParsedFilter {
   raw: string;
 }
 
-/**
- * Extract all field:value filters from an AST for chip rendering.
- */
+/** Extract all field:value filters from an AST for chip rendering. */
 export function extractFilters(node: ASTNode): ParsedFilter[] {
   const results: ParsedFilter[] = [];
   walkFilters(node, results, false);
@@ -303,9 +297,7 @@ export interface CursorToken {
   endPos: number;
 }
 
-/**
- * Determine what token the cursor is in for autocomplete purposes.
- */
+/** Determine what token the cursor is in for autocomplete purposes. */
 export function getTokenAtCursor(query: string, cursorPos: number): CursorToken {
   // Find the token boundaries around the cursor
   let start = cursorPos;
@@ -358,10 +350,7 @@ export function getTokenAtCursor(query: string, cursorPos: number): CursorToken 
   };
 }
 
-/**
- * Remove a filter from a query string by its raw text.
- * Returns the updated query string.
- */
+/** Remove a filter from a query string by its raw text. Returns the updated query string. */
 export function removeFilterFromQuery(query: string, filterRaw: string): string {
   // Remove the filter text and clean up whitespace
   const idx = query.indexOf(filterRaw);

@@ -5,7 +5,7 @@
 - "Not a duplicate" drops a pair from the likely-duplicate count.
 - Held (pending) autolink matches can be listed and resolved by an analyst.
 - Remove-link proposals group per entity; applying removes the links and
-  clears the proposals, keeping clears them and leaves the links.
+  clears the proposals; Keep clears them and leaves the links.
 - Old proposals from the retired link validator expire.
 """
 

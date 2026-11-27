@@ -52,7 +52,7 @@ _CVE_ID = re.compile(r"^CVE-\d{4}-\d{4,}$")
 
 
 def _allowed(entity_type: str, relation: str, target_type: str) -> bool:
-    """The matrix allows the triple, either way round."""
+    """The matrix allows the triple, either way around."""
     return orient_relationship(entity_type, relation, target_type) is not None
 
 

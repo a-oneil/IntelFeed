@@ -18,9 +18,7 @@
   margin-bottom: 6px;
 }
 
-/* Entity-type badge. Chip's `solid` tone fills with the entity colour and
-   derives its own foreground — the old flat #fff failed contrast on the
-   lighter entity tints (tool #eab308 is 1.9:1 against white). */
+/* Entity-type badge. Chip's `solid` tone fills with the entity color and derives its own foreground, because a flat #fff fails contrast on the lighter entity tints (tool #eab308 is 1.9:1 against white). */
 .badge {
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -117,8 +115,7 @@
   color: var(--danger);
 }
 
-/* CVE severity badge. Colour comes from the chip's tint (the shared
-   --severity-* ramp via getSeverityColor); only the casing is local. */
+/* CVE severity badge. Color comes from the chip's tint (the shared --severity-* ramp via getSeverityColor); only the casing is local. */
 .severityBadge {
   font-weight: 700;
   text-transform: uppercase;
@@ -258,14 +255,12 @@
   cursor: not-allowed;
 }
 
-/* Positioning context for the Enrich / Wrong? dropdowns. */
+/* Positioning context for the Wrong? dropdowns. */
 .actionsWrap {
   position: relative;
 }
 
-/* Dropdowns overlay the card instead of growing it: a taller card gets
-   re-clamped, and near the bottom of the viewport that flips the whole popover
-   above the word — the card jumping up the page the moment you open a menu. */
+/* Dropdowns overlay the card instead of growing it. A taller card gets re-clamped, and near the bottom of the viewport that flips the whole popover above the word, so the card would jump up the page as soon as a menu opens. */
 .enrichMenu {
   position: absolute;
   top: calc(100% + 4px);
@@ -281,8 +276,7 @@
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
 }
 
-/* Too close to the bottom of the viewport for the menu to fit under the card —
-   open it upward instead. */
+/* Too close to the bottom of the viewport for the menu to fit under the card, so open it upward instead. */
 .menuUp {
   top: auto;
   bottom: calc(100% + 4px);
@@ -305,8 +299,7 @@
   color: var(--accent-text);
 }
 
-/* Enrichment's verdict chips beside the type chip (exploited, no patch,
-   benign scanner, EOL): the only colored part of the glance. */
+/* Enrichment verdict chips beside the type chip (exploited, no patch, benign scanner, EOL): the only colored part of the enrichment summary. */
 .verdict {
   text-transform: uppercase;
   letter-spacing: 0.3px;
@@ -328,7 +321,7 @@
   color: var(--warning);
 }
 
-/* What a Look up left to say: a source that waited, failed or needs a key. */
+/* Notes left by a Look up: a source that was deferred, failed or needs an API key. */
 .lookupNotes {
   margin-top: var(--sp-2);
   display: grid;
@@ -350,18 +343,14 @@
   cursor: pointer;
 }
 
-/* KEV: a filled red flag. Chip's `solid` tone derives the foreground from the
-   fill. The red stays a literal — KEV is a catalogue membership, not a
-   severity level, so it must not drift with the --severity-* ramp. */
+/* KEV: a filled red badge. Chip's `solid` tone derives the foreground from the fill. The red stays a literal because KEV is a catalog membership, not a severity level, so it must not change with the --severity-* ramp. */
 .kevBadge {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
 
-/* Wrong-match menu: the convert type list nests one level under its row, and a
-   hairline separates the narrow fixes from the ones that reach past this
-   article. */
+/* Wrong-match menu: the convert type list nests one level under its row, and a 1px divider separates the fixes that affect only this article from the ones that reach beyond it. */
 .submenu {
   border-left: 2px solid var(--border);
   margin: 2px 0 2px var(--sp-3);

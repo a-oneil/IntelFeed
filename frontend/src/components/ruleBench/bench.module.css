@@ -1,6 +1,4 @@
-/* Shared chrome for the rule bench rails: the section label and the small
-   bordered card both rails repeat. Kept in one module so the left and right
-   columns cannot drift apart. */
+/* Shared styles for the rule bench rails: the section label and the small bordered card both rails use. Kept in one module so the left and right columns stay consistent. */
 
 .railLabel {
   display: flex;

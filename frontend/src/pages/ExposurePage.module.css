@@ -1,6 +1,4 @@
-/* Full-bleed like every other workbench route. The old centred 1080px column
-   left Vendor Watch floating in the middle of the pane while its siblings ran
-   edge to edge, which is what made it read as a different app. */
+/* Full width like every other workbench route; a centered 1080px column made Vendor Watch look out of place next to pages that run edge to edge. */
 .page {
   padding: var(--sp-5) 20px 64px;
   display: flex;
@@ -248,9 +246,7 @@
 .sevDot {
   width: 8px;
   height: 8px;
-  /* Deliberate rounded SQUARE, not a dot: on an 8x8 box --r-sm (4px) is a
-     full circle, which collides with the circular status dots elsewhere.
-     Half of --r-sm is 2px — the same radius Chip gives its own marker. */
+  /* A rounded square on purpose, not a dot: on an 8x8 box --r-sm (4px) is a full circle, which would be confused with the circular status dots elsewhere. Half of --r-sm is 2px, the same radius Chip gives its own marker. */
   border-radius: calc(var(--r-sm) / 2);
   flex: none;
 }
@@ -291,9 +287,7 @@
   gap: 5px;
   flex-wrap: wrap;
 }
-/* Colour/shape/type now come from the Chip primitive (tone="toned" + pill).
-   Only the monospace face survives — this page sets every data label in mono
-   and Chip never declares font-family, so there is no specificity race. */
+/* Color, shape and type come from the Chip primitive (tone="toned" + pill). Only the monospace font is set here: this page sets every data label in mono, and Chip never declares font-family, so there is no specificity conflict. */
 .chipMono {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
@@ -378,7 +372,7 @@
   background: var(--entity-product);
 }
 
-/* matrix: labelled columns / rows / cells */
+/* matrix: labeled columns / rows / cells */
 .mCorner {
   min-height: 1px;
 }
@@ -782,7 +776,7 @@
 .ageNew { color: var(--accent-intel); }
 
 .draftBtn {
-  /* The board's own action idiom — this row lives on the Threats page now. */
+  /* Matches the Threats board's action buttons, since this row is shown on the Threats page. */
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 500;
@@ -818,7 +812,7 @@
   gap: 6px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  /* Concentric with .sortSegBtn — see the note on .seg. */
+  /* Outer radius is larger than the .sortSegBtn radius so the corners stay concentric with the buttons inside. */
   border-radius: calc(var(--r-md) + var(--sp-1));
   padding: 3px 3px 3px 9px;
 }

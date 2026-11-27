@@ -18,12 +18,9 @@ async function copy(text: string, label: string) {
 }
 
 /**
- * The interstitial itself: where the link goes (host first, since that is what
- * an analyst needs to read), the full URL in a copyable block, and a loud banner
- * when the visible text names a different host than the href.
+ * The confirmation dialog itself: where the link goes (host first, since that is what an analyst needs to read), the full URL in a copyable block, and a prominent banner when the visible text names a different host than the href.
  *
- * Focus starts on Cancel, not Open — the point of the dialog is a beat to look,
- * and a reflexive Enter after activating the link should not sail through it.
+ * Focus starts on Cancel, not Open: the dialog exists to make the analyst look, and a reflexive Enter after activating the link should not go straight through it.
  */
 export function ExternalLinkModal({ info }: { info: ExternalLinkInfo }) {
   const trapRef = useFocusTrap<HTMLDivElement>();
@@ -43,10 +40,7 @@ export function ExternalLinkModal({ info }: { info: ExternalLinkInfo }) {
     cancelRef.current?.focus();
   }, []);
 
-  // The entry list and reader bind j/k/o/Enter/Escape/... on window/document and
-  // only skip text inputs, so a focused dialog button would otherwise also open
-  // the selected article (Enter) or close the reader behind us (Escape). Keys
-  // are swallowed in the capture phase, except Tab, which the focus trap needs.
+  // The entry list and reader bind j/k/o/Enter/Escape/... on window/document and only skip text inputs, so a focused dialog button would otherwise also open the selected article (Enter) or close the reader behind the dialog (Escape). Keys are swallowed in the capture phase, except Tab, which the focus trap needs.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -86,8 +80,7 @@ export function ExternalLinkModal({ info }: { info: ExternalLinkInfo }) {
     }
 
     if (shouldRemember && canSave) {
-      // Article links navigate this tab. Finish the PATCH before unloading the
-      // page, otherwise the browser can abort it and forget the preference.
+      // Article links navigate this tab. Finish the PATCH before unloading the page, otherwise the browser can abort it and lose the preference.
       setOpening(true);
       try {
         await trustHost(info.host);

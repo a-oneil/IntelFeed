@@ -1,5 +1,4 @@
-// Is the tab showing a PDF? The browsers' PDF viewers don't let extensions
-// read the page, so a PDF is sent as the file itself. No browser APIs here.
+// Is the tab showing a PDF? The browsers' PDF viewers don't let extensions read the page, so a PDF is sent as the file itself. No browser APIs here.
 
 /** The address ends in .pdf (ignoring a query or #page=2). */
 export function isPdfUrl(url) {

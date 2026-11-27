@@ -3,7 +3,7 @@
 Mirrors frontend/src/utils/speechPreprocess.ts so Piper reads security articles
 sanely: URLs/emails/hashes are collapsed to a word, CVE IDs are spelled out,
 IPs/hostnames are dotted, and <pre> code blocks are stubbed instead of read
-character by character. Kept behaviourally in sync with the TS version so the
+character by character. Kept behaviorally in sync with the TS version so the
 browser (Web Speech) fallback and the Piper path pronounce content the same.
 """
 

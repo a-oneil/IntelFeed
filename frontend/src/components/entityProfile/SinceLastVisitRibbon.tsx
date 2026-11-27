@@ -1,16 +1,7 @@
 /**
- * SinceLastVisitRibbon — the Overview's opening beat: what changed on this
- * entity since you last opened its profile. Last-visit timestamps are tracked
- * client-side per entity in intelStore; counts come from the pivot data already
- * on the page. The visit is stamped by EntityProfilePage when the profile is
- * LEFT — stamping here on mount rebased the baseline on every tab flip back to
- * Overview and permanently suppressed the ribbon for the session.
+ * SinceLastVisitRibbon: the ribbon at the top of the Overview showing what changed on this entity since you last opened its profile. Last-visit timestamps are tracked client-side per entity in intelStore; counts come from the pivot data already on the page. EntityProfilePage stamps the visit when the profile is closed, not here on mount: stamping on mount reset the baseline every time you switched back to the Overview tab, so the ribbon never showed again for the session.
  *
- * Articles are counted by ingest time (created_at) when the payload carries it:
- * most of what arrives between visits was published earlier (feed lag,
- * roundups, autolinker rescans), so a published_at comparison undercounts.
- * Events break down by kind — relationship changes, stories, the rest — with
- * KEV addition and new leak-site victims called out when the caller knows them.
+ * Articles are counted by ingest time (created_at) when the payload has it: most of what arrives between visits was published earlier (feed lag, roundups, autolinker rescans), so comparing published_at undercounts. Events are counted by kind (relationship changes, stories, everything else), and a KEV addition and new leak-site victims are listed when the caller passes them.
  */
 import { useState } from "react";
 import { useIntelStore } from "@/stores/intelStore";
@@ -35,14 +26,13 @@ export function SinceLastVisitRibbon({
   victimDates?: Array<string | null>;
   onCatchUp: () => void;
 }) {
-  // Read once at mount — the stamp only moves when the profile is left, so
-  // this stays the true previous visit for the whole stay.
+  // Read once at mount. The stamp only changes when the profile is closed, so this stays the previous visit for as long as the profile is open.
   const [lastVisit] = useState<number | undefined>(
     () => useIntelStore.getState().entityLastVisit[entityId],
   );
   const [dismissed, setDismissed] = useState(false);
   const dismiss = () => {
-    // Dismissing acknowledges the catch-up: rebase now so it stays gone.
+    // Dismissing stamps the visit now, so the ribbon stays hidden until something new arrives.
     useIntelStore.getState().markEntityVisited(entityId);
     setDismissed(true);
   };

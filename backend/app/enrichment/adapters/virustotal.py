@@ -1,9 +1,9 @@
 """VirusTotal v3 adapter — free with API key (4 req/min, 500/day).
 
-Restored from the IOC-v1 era (removed in 22ae889) for the observables ledger:
-entity_type is "observable" and the kind is inferred from the value's shape
-(hash / IP / domain), since the enrich() contract carries only two strings.
-Values arrive refanged/canonical from the ledger.
+Enriches observables in the ledger (an earlier version was removed with IOC
+v1 in 22ae889): entity_type is "observable" and the kind is inferred from the
+value's shape (hash / IP / domain), since the enrich() contract carries only
+two strings. Values arrive refanged and normalized from the ledger.
 """
 
 import re
