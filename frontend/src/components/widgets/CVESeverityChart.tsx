@@ -29,8 +29,7 @@ export default function CVESeverityChart({ config }: Props) {
   );
   const total = ordered.reduce((sum, d) => sum + d.count, 0);
 
-  // Build pie slice paths. cx,cy = center; r = radius. Angles in radians,
-  // starting from 12 o'clock and sweeping clockwise.
+  // Build pie slice paths. cx,cy = center; r = radius. Angles in radians, starting from 12 o'clock and sweeping clockwise.
   const cx = 50;
   const cy = 50;
   const r = 48;
@@ -47,7 +46,7 @@ export default function CVESeverityChart({ config }: Props) {
       const endY = cy + r * Math.sin(endAngle);
       const largeArc = angle > Math.PI ? 1 : 0;
       cursor = endAngle;
-      // A single 100% slice would degenerate to startX==endX; render as a full circle path.
+      // A single 100% slice would have startX == endX and draw nothing, so render it as a full circle path.
       const path =
         pct >= 0.999
           ? `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx - 0.001} ${cy - r} Z`

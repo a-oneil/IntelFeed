@@ -15,7 +15,7 @@ Four regions, each a read over data already stored:
                 one), its ``paragraph_indices`` where present, and the ATT&CK
                 channels on ``ttps.data_sources`` (856 of 1,198 techniques)
                 classified against the enabled telemetry inventory.
-``prior rules`` ``rule_coverage`` candidates for one behaviour, carrying ``via``
+``prior rules`` ``rule_coverage`` candidates for one behavior, carrying ``via``
                 and ``matched_on`` so a body-text hit never reads like a rule
                 that names the threat.
 ``set``         what the user is assembling, persisted as a ``DetectionSummary``
@@ -23,9 +23,9 @@ Four regions, each a read over data already stored:
 
 Two rules this module exists to enforce:
 
-1. A behaviour whose channels match *nothing* in the inventory is **not** a
+1. A behavior whose channels match *nothing* in the inventory is **not** a
    detection gap. Writing a rule for it changes nothing, because the rule could
-   not fire. It sorts below a labelled divider carrying the category that is
+   not fire. It sorts below a labeled divider carrying the category that is
    missing, so it reads as a sourcing item.
 2. No AI call. ``GET /detection-rules/{id}`` measures ~5s on this box and the
    summary generator 503s under load, so the workspace is assembled from stored
@@ -68,19 +68,20 @@ NEW_HORIZON_HOURS = 336
 # predicate keeps one SQL body for every window.
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
-# One Detection tab, four faces. Actors and malware are the board's identities;
-# a CVE gets the same workspace with exploitation context where a threat would
-# have its fold; a technique gets an unranked coverage bench for itself — it is
-# deliberately NOT tracked on the Threats board (technique coverage is a
-# project, not an event), but the build verbs are identical.
+# One Detection tab for every entity type below. Actors and malware are the
+# entities the Threats board ranks; a CVE gets the same workspace with
+# exploitation context in place of a threat's expanded board row; a technique
+# gets an unranked coverage bench for itself. Techniques are deliberately NOT
+# tracked on the Threats board (technique coverage is a project, not an event),
+# but the build actions are identical.
 ENTITY_SOURCES: dict[str, tuple[str, str]] = {
     entity_types.THREAT_ACTOR: ("entry_threat_actors", "threat_actor_id"),
     entity_types.MALWARE: ("entry_malware", "malware_family_id"),
     entity_types.CVE: ("entry_cves", "cve_id"),
     entity_types.TTP: ("entry_ttps", "ttp_id"),
-    # A campaign's articles are chosen rather than matched, but the behaviours
-    # they carry are read the same way — so it gets the same build bench as an
-    # actor instead of the bare coverage list it had.
+    # A campaign's articles are chosen rather than matched, but the behaviors
+    # they carry are read the same way, so it gets the same build bench as an
+    # actor rather than a bare coverage list.
     "campaign": ("campaign_entries", "campaign_id"),
     # A tool (Cobalt Strike, Rclone, PsExec) is hunted by what it does on a
     # host, read from the articles that name it — the same bench as malware.
@@ -111,7 +112,7 @@ _TIER_RANK: dict[str | None, int] = {
 # as if it were.
 _CONFIDENCE_RANK: dict[str, int] = {"high": 0, "medium": 1, "low": 2}
 
-# Quotes per behaviour. The point is to show the sentence a rule would be written
+# Quotes per behavior. The point is to show the sentence a rule would be written
 # from, not to reprint the article.
 MAX_QUOTES = 3
 
@@ -132,7 +133,7 @@ class Quote:
     entry_title: str
     text: str
     paragraph_indices: list[int]
-    # The concrete artefact the sentence documents, when the extractor typed
+    # The concrete artifact the sentence documents, when the extractor typed
     # one: this is what "Draft new" compiles into a selection clause.
     observable_type: str | None = None
     observable_value: str | None = None
@@ -182,7 +183,7 @@ class PriorRule:
     repo: str
     license: str | None
     is_draft: bool
-    # "technique" when the rule resolved to this behaviour, "threat" when it
+    # "technique" when the rule resolved to this behavior, "threat" when it
     # resolved to the entity itself. Both are candidates; they are not the same
     # claim, so the UI can say which one it is.
     scope: str
@@ -193,7 +194,7 @@ class PriorRule:
     required: list[str]
     missing: list[str]
     # Upstream commit date where the importer recorded one, else our own row's.
-    # The only ranking signal that reliably varies: a behaviour's candidates are
+    # The only ranking signal that reliably varies: a behavior's candidates are
     # routinely all high-confidence, all technique-tagged and all satisfiable,
     # at which point every other key ties and the list falls back to alphabetical.
     maintained_at: str | None = None
@@ -204,7 +205,7 @@ class PriorRuleSet:
     """One page of candidates plus what the page does not show.
 
     The counts matter because the strongest 40 rows are nearly always
-    technique-tagged and high confidence: without them, a behaviour whose only
+    technique-tagged and high confidence: without them, a behavior whose only
     inventory is 21 body-text hits looks identical to one with 47 tagged rules.
     """
 
@@ -228,11 +229,11 @@ class Workspace:
     article_total: int = 0
     # Of those, the ones carrying at least one technique.
     article_contributed_total: int = 0
-    # Categories the below-line behaviours need and the inventory does not have.
+    # Categories the below-line behaviors need and the inventory does not have.
     missing_categories: list[str] = field(default_factory=list)
     # Rules resolving to the threat itself. They are candidates for every one of
-    # its behaviours, so a technique with no tagged rule is still not "nothing
-    # here" — the row said so and then opened onto 35 candidates.
+    # its behaviors, so a technique with no tagged rule can still have threat-scope
+    # candidates, and its row must not report "nothing here".
     threat_prior_rules: int = 0
     threat_prior_rules_strong: int = 0
     # Exploitation context for the CVE face: severity/CVSS/EPSS/KEV/PoC state
@@ -249,9 +250,9 @@ def _missing_categories(channels: list[str]) -> list[str]:
 
     ``_expand_rule_token`` is private to detection_coverage because it is an
     implementation detail of the three-tier match, but it is the only thing that
-    knows which category a channel comes from, and the divider is worthless
-    without a name on it. Imported rather than duplicated so the two surfaces
-    cannot drift apart.
+    knows which category a channel comes from, and the divider needs that
+    category name. Imported rather than duplicated so the two modules cannot
+    drift apart.
     """
     cats: set[str] = set()
     for channel in channels:
@@ -283,9 +284,9 @@ ORDER BY e.published_at DESC
 LIMIT :article_limit
 """
 
-# The article list is capped; the footnote that cites it is not allowed to be.
-# Under "all" a busy actor has hundreds of entries and "40 articles" would be a
-# lie told by a LIMIT.
+# The article list is capped; the totals in the footnote are not. Under "all" a
+# busy actor has hundreds of entries, and counting the capped page would report
+# "40 articles".
 _ARTICLE_TOTALS_SQL = """
 SELECT count(*)                                            AS total,
        count(*) FILTER (WHERE e.id IN (
@@ -299,7 +300,7 @@ WHERE j.{fk} = :entity_id AND e.published_at > :since
 # first_seen is computed over the entity's whole history, not the window: a
 # technique the threat has used for a year is not new tradecraft just because it
 # was re-reported this week. Same definition the board's `new` count uses.
-_BEHAVIOURS_SQL = """
+_BEHAVIORS_SQL = """
 WITH pairs AS (
     SELECT t.technique_id, t.technique_name, t.tactic, t.data_sources,
            e.id AS entry_id, e.published_at
@@ -334,7 +335,7 @@ WHERE j.{fk} = :entity_id
 ORDER BY e.published_at DESC
 """
 
-# Candidate counts for the whole behaviour list in one pass, so the centre column
+# Candidate counts for the whole behavior list in one pass, so the center column
 # does not issue a query per row.
 _TECHNIQUE_RULE_COUNTS_SQL = text("""
 SELECT entity_key,
@@ -345,9 +346,9 @@ WHERE entity_type = :ttp_type AND entity_key = ANY(:keys)
 GROUP BY entity_key
 """)
 
-# Both scopes in one read: rules that resolved to the behaviour, and rules that
+# Both scopes in one read: rules that resolved to the behavior, and rules that
 # resolved to the threat itself. A signature-base rule whose title names APT29 is
-# a candidate for any APT29 behaviour even though it carries no ATT&CK tag.
+# a candidate for any APT29 behavior even though it carries no ATT&CK tag.
 _PRIOR_RULES_SQL = text("""
 SELECT r.id, r.title, r.rule_type, r.is_draft, r.license, r.data_sources, r.log_sources,
        coalesce(r.metadata->>'repo', 'local')          AS repo,
@@ -453,8 +454,8 @@ async def entity_label(db: AsyncSession, entity_type: str, entity_key: str) -> s
     return resolved.label if resolved else None
 
 
-# Exploitation context for the CVE face — what a threat row's fold is to an
-# actor, the exploitation state is to a vulnerability.
+# Exploitation context for the CVE workspace. It takes the place the expanded
+# board row has for an actor.
 _CVE_CONTEXT_SQL = text("""
 SELECT c.severity, c.cvss_score, c.epss_score, c.epss_percentile, c.is_kev,
        c.kev_date_added, c.kev_due_date, c.exploit_status, c.exploit_availability,
@@ -489,7 +490,7 @@ async def _cve_context(db: AsyncSession, row_id: str) -> dict | None:
     }
 
 
-def _behaviour_sort_key(b: Behaviour) -> tuple:
+def _behavior_sort_key(b: Behaviour) -> tuple:
     # Below-line rows last; inside each half, new tradecraft first, then the
     # techniques the window reported most.
     return (b.below_line, not b.is_new, -b.entry_count, b.technique_id)
@@ -514,16 +515,16 @@ async def build_workspace(
     now = datetime.now(UTC)
     hours = WORKSPACE_WINDOW_HOURS.get(window, WORKSPACE_WINDOW_HOURS["14d"])
     since = EPOCH if hours is None else now - timedelta(hours=hours)
-    # Under a bounded window the two floors are the same date, so `is_new` keeps
-    # exactly the meaning it had before "all" existed.
+    # Under a bounded window the two floors are the same date; only "all" uses
+    # the separate NEW_HORIZON_HOURS floor for `is_new`.
     new_since = since if hours else now - timedelta(hours=NEW_HORIZON_HOURS)
     params = {"entity_id": resolved.row_id, "since": since}
     fmt = {"junction": junction, "fk": fk}
 
     profile = await get_available_telemetry(db)
 
-    behaviour_rows = (
-        await db.execute(text(_BEHAVIOURS_SQL.format(**fmt)), params)  # noqa: S608 — table names are literals above
+    behavior_rows = (
+        await db.execute(text(_BEHAVIORS_SQL.format(**fmt)), params)  # noqa: S608 — table names are literals above
     ).all()
 
     quotes: dict[str, list[Quote]] = {}
@@ -554,10 +555,10 @@ async def build_workspace(
                 )
             )
 
-    # The prior-rules panel reads technique scope OR threat scope; the row only
-    # read technique scope, so a behaviour whose only inventory was threat-scope
-    # rendered as "nothing here" and then opened onto 35 candidates. Carry the
-    # threat-scope count on the workspace so the row can say so.
+    # The prior-rules panel reads technique scope OR threat scope, but the
+    # per-row counts below cover technique scope only. Carry the threat-scope
+    # count on the workspace so a behavior whose only candidates are threat-scope
+    # rules does not show as having none.
     threat_total, threat_strong = (
         await db.execute(
             text(
@@ -568,7 +569,7 @@ async def build_workspace(
         )
     ).one()
 
-    technique_ids = [r[0] for r in behaviour_rows]
+    technique_ids = [r[0] for r in behavior_rows]
     counts: dict[str, tuple[int, int]] = {}
     if technique_ids:
         counts = {
@@ -582,7 +583,7 @@ async def build_workspace(
         }
 
     behaviours: list[Behaviour] = []
-    for tid, name, tactic, data_sources, first_seen, entry_count in behaviour_rows:
+    for tid, name, tactic, data_sources, first_seen, entry_count in behavior_rows:
         channels = classify_data_sources(list(data_sources or []), profile)
         tier = _best_tier([t for _, t in channels])
         missing = [ds for ds, t in channels if t is None]
@@ -608,11 +609,11 @@ async def build_workspace(
                 prior_rules_strong=strong,
             )
         )
-    behaviours.sort(key=_behaviour_sort_key)
+    behaviours.sort(key=_behavior_sort_key)
 
     # The technique face is a bench for ONE technique. The junction join above
     # returns everything co-extracted alongside it; keep only the technique
-    # itself so the centre column is its coverage, not its neighbourhood.
+    # itself so the center column is its coverage, not its neighborhood.
     if entity_type == entity_types.TTP:
         behaviours = [b for b in behaviours if b.technique_id == resolved.coverage_key]
 
@@ -691,7 +692,7 @@ async def get_prior_rules(
     limit: int = 40,
     profile: TelemetryProfile | None = None,
 ) -> PriorRuleSet:
-    """Candidate rules for one behaviour, strongest telemetry tier first."""
+    """Candidate rules for one behavior, strongest telemetry tier first."""
     if entity_type not in ENTITY_SOURCES:
         return PriorRuleSet([], 0, 0, 0, 0, 0)
     resolved = await resolve_entity(db, entity_type, entity_key)
@@ -756,9 +757,10 @@ def _rule_sort_key(rule: PriorRule) -> tuple:
     #
     # The last two keys exist because the first four tie constantly: T1486's 27
     # candidates are all source-tier, all high confidence and all technique-
-    # tagged, so without them the "best" rule was whichever one started with an
-    # A. Unmet channels split a clean fire from a partial one, and maintenance
-    # date splits a rule the community still touches from one abandoned in 2022.
+    # tagged, so without them the "best" rule would be whichever one sorts first
+    # alphabetically. The unmet-channel count separates a rule whose telemetry is
+    # fully available from a partial one, and the maintenance date separates a
+    # rule still being updated upstream from one abandoned years ago.
     return (
         _TIER_RANK[rule.tier],
         len(rule.missing),
@@ -785,7 +787,7 @@ def _staleness(iso: str | None) -> float:
 
 
 async def resolve_set_items(db: AsyncSession, items: list[dict]) -> list[dict]:
-    """Carry repo, licence and format onto every adopted/extended rule.
+    """Carry repo, license and format onto every adopted/extended rule.
 
     Provenance is read from the library at save time rather than trusted from
     the client, so an adopted rule keeps its attribution wherever the set is
@@ -825,7 +827,7 @@ async def resolve_set_items(db: AsyncSession, items: list[dict]) -> list[dict]:
             "title": item.get("title") or "",
             "note": item.get("note"),
             # skip only: why the rule was passed over — exports render it as a
-            # known gap, which is the whole point of persisting the judgement.
+            # known gap, which is the whole point of persisting the judgment.
             "reason": item.get("reason"),
             "rule_type": item.get("rule_type"),
             "repo": None,
@@ -835,10 +837,10 @@ async def resolve_set_items(db: AsyncSession, items: list[dict]) -> list[dict]:
             entry.update(
                 {
                     "title": item.get("title") or fact["title"],
-                    # The library wins for a rule that exists. Taking the
-                    # client's value first let an adopted splunk_spl rule be
-                    # persisted as "kql", which is a lie about somebody else's
-                    # work that then rides the export.
+                    # The library wins for a rule that exists. Preferring the
+                    # client's value would let an adopted splunk_spl rule be
+                    # saved as "kql", misstating someone else's rule in every
+                    # export of the set.
                     "rule_type": fact["rule_type"],
                     "license": fact["license"],
                     "repo": fact["repo"],
@@ -961,7 +963,7 @@ async def list_sets(
 # The deliverable a detection engineer hands over is a write-up plus a ruleset.
 # Both fall out of a saved set: the markdown report cites its evidence and
 # renders skips as known gaps; the bundle carries every rule body with its
-# attribution header. No AI, no new serialisation formats — the set content and
+# attribution header. No AI, no new serialization formats — the set content and
 # the library rows are the only inputs.
 
 _RULE_EXT: dict[str, str] = {
@@ -1050,7 +1052,7 @@ async def render_set_markdown(db: AsyncSession, summary: DetectionSummary) -> st
         lines.append("")
 
     if ws and ws.behaviours:
-        lines += ["## Behaviours", ""]
+        lines += ["## Behaviors", ""]
         for b in ws.behaviours:
             flag = " *(new this window)*" if b.is_new else ""
             gap = " **(no matching telemetry source in the inventory)**" if b.below_line else ""
@@ -1059,7 +1061,7 @@ async def render_set_markdown(db: AsyncSession, summary: DetectionSummary) -> st
                 cite = f"{q.entry_title}" + (f" ¶{q.paragraph_indices[0]}" if q.paragraph_indices else "")
                 lines.append(f'> "{q.text}" — {cite}')
                 if q.observable_value:
-                    lines.append(f"> observable ({q.observable_type or 'artefact'}): `{q.observable_value}`")
+                    lines.append(f"> observable ({q.observable_type or 'artifact'}): `{q.observable_value}`")
             lines.append("")
 
     active = [i for i in items if i.get("op") != "skip"]
@@ -1069,7 +1071,7 @@ async def render_set_markdown(db: AsyncSession, summary: DetectionSummary) -> st
         lines += [
             "## Ruleset",
             "",
-            "| Action | Rule | Format | Source | Licence |",
+            "| Action | Rule | Format | Source | License |",
             "|---|---|---|---|---|",
         ]
         for i in active:
@@ -1097,7 +1099,7 @@ async def render_set_markdown(db: AsyncSession, summary: DetectionSummary) -> st
         lines += [
             "## Collection gaps",
             "",
-            "Behaviours below the line need telemetry the inventory does not have: "
+            "Behaviors below the line need telemetry the inventory does not have: "
             + ", ".join(c.replace("_", " ") for c in ws.missing_categories)
             + ". That is a sourcing job, not a detection gap.",
             "",

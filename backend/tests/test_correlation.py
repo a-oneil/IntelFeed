@@ -437,9 +437,9 @@ async def test_graph_edge_has_proximity_score(
     prox_edges = [e for e in data["edges"] if e.get("proximity_score") is not None]
     assert len(prox_edges) > 0
 
-    # Find the edge to Cobalt Strike — proximity_score now carries the bounded
-    # composite strength (corroboration/closeness/recency), so a same-paragraph
-    # co-mention scores meaningfully high but no longer a raw 1.0.
+    # Find the edge to Cobalt Strike. proximity_score carries the bounded 0-1
+    # composite strength (corroboration/closeness/recency) rather than the raw
+    # paragraph-distance score, so a same-paragraph co-mention scores at least 0.4.
     for edge in data["edges"]:
         node_ids = {edge["source"], edge["target"]}
         cs_node_ids = [n["id"] for n in data["nodes"] if "CobaltStrike" in n.get("label", "")]

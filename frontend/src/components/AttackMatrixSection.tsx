@@ -18,8 +18,7 @@ const DOMAINS: Array<{ value: AttackDomain; label: string }> = [
   { value: "ics", label: "ICS" },
 ];
 
-/* Keyed by string so the shared Segmented control can drive them; `days`
-   itself stays `number | null` for the query. */
+/* Keyed by string so the shared Segmented control can drive them; `days` itself stays `number | null` for the query. */
 const WINDOWS: Array<{ value: string; label: string; days: number | null }> = [
   { value: "7", label: "7d", days: 7 },
   { value: "30", label: "30d", days: 30 },
@@ -57,8 +56,7 @@ export function AttackMatrixSection() {
   const [domain, setDomain] = useState<AttackDomain>("enterprise");
   const [days, setDays] = useState<number | null>(30);
   const [chosenMode, setMode] = useState<MatrixLayerMode>("combined");
-  // Detection coverage is signed-in only (the server leaves it out of a
-  // visitor's response), so a visitor sees article heat alone.
+  // Detection coverage is signed-in only (the server leaves it out of a visitor's response), so a visitor sees only the article heat layer.
   const isVisitor = useIsVisitor();
   const mode: MatrixLayerMode = isVisitor ? "heat" : chosenMode;
   const [expanded, setExpanded] = useState<Set<string>>(new Set());

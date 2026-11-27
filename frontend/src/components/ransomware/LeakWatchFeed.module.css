@@ -17,9 +17,7 @@
   padding: 12px 14px;
 }
 
-/* Filled badge — the foreground is DERIVED from the fill by Chip, never
-   hardcoded. `color: #fff` on --entity-victim (#e0555b) measured ~3.6:1, under
-   AA for 10px bold text, and every theme that retunes the token moved it. */
+/* Filled badge: Chip derives the foreground from the fill; it is never hardcoded. `color: #fff` on --entity-victim (#e0555b) measured ~3.6:1, under AA for 10px bold text, and the ratio changes with every theme that retunes the token. */
 
 .alertBadge {
   font-family: var(--font-mono, ui-monospace, monospace);
@@ -248,7 +246,7 @@
   color: var(--text-muted);
 }
 
-/* Same story: `color: #fff` over --accent (#f78166) measured 2.4:1. */
+/* Same reason for these tags: `color: #fff` over --accent (#f78166) measured 2.4:1. */
 
 .newtag,
 .watchedtag {
@@ -299,8 +297,7 @@
   flex: none;
 }
 
-/* Sector names run long ("Professional, Scientific and Technical Services"),
-   so the Chip is truncated and capped rather than allowed to own the row. */
+/* Sector names run long ("Professional, Scientific and Technical Services"), so the Chip is truncated and capped rather than allowed to take over the row. */
 
 .chipSector {
   max-width: 18ch;

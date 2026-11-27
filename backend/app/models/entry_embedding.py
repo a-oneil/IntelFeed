@@ -14,7 +14,7 @@ EMBEDDING_DIM = 768
 
 
 class EntryEmbedding(Base):
-    """One dense vector per entry — the substrate under Story Threads.
+    """One dense vector per entry — the input Story Threads clusters on.
 
     Written only by the embedding sweeper, keyed by ``content_hash`` so an entry
     whose text has not changed is never re-embedded. Rows cascade with their

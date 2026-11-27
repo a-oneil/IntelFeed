@@ -9,8 +9,7 @@ import {
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import styles from "./DayIntelChips.module.css";
 
-/** Entry-list filter a chip asks for. Mirrors the `/entries` query params it
- *  becomes; `entity_type`/`entity_id` travel together. */
+/** Entry-list filter a chip asks for. Mirrors the `/entries` query params it becomes; `entity_type`/`entity_id` travel together. */
 export interface DayFocusFilter {
   exploited_cves?: boolean;
   entity_type?: string;
@@ -29,20 +28,12 @@ export interface DayFocus {
   filter: DayFocusFilter;
 }
 
-/** Max chips shown on a single day divider. Signal / new-today take priority, so
- *  busy days lead with urgency and quiet days fall back to the top entities.
- *  The strip scrolls sideways rather than wrapping, so a narrow divider carries
- *  the same count as a wide one — the two constants stay separate only so the
- *  mobile cap can be tuned without touching the desktop one. */
+/** Max chips shown on a single day divider. Signal / new-today take priority, so busy days lead with urgency and quiet days fall back to the top entities. The strip scrolls sideways rather than wrapping, so a narrow divider carries the same count as a wide one — the two constants stay separate only so the mobile cap can be tuned without touching the desktop one. */
 const MAX_CHIPS = 5;
 const MAX_CHIPS_MOBILE = 5;
 
-/** Compact "what was this day about" chips on the day divider. Shows urgency
- *  signals first (actively-exploited CVEs, newly-tracked actors), then the
- *  top-mentioned technique / sector / CVE / actor for a 3-second read without
- *  opening every entry. */
-// Chip labels stay human — the canonical slug (threat_actor) would read oddly
-// in "new threat_actor".
+/** Compact "what was this day about" chips on the day divider. Shows urgency signals first (actively-exploited CVEs, newly-tracked actors), then the top-mentioned technique / sector / CVE / actor for a 3-second read without opening every entry. */
+// Chip labels stay human — the canonical slug (threat_actor) would read oddly in "new threat_actor".
 const NEW_ENTITY_LABEL: Record<string, string> = {
   threat_actor: "actor",
   malware: "malware",
@@ -65,9 +56,7 @@ const FILL_BLURBS: Record<string, string> = {
   country: "The country this day's articles name most often.",
 };
 
-/** One chip plus the plain-English line the legend shows for it. The strip is
- *  dense and unlabelled by design, so every chip carries its own explanation
- *  rather than relying on a static legend that drifts from what's rendered. */
+/** One chip plus the plain-English line the legend shows for it. The strip is dense and unlabeled by design, so every chip carries its own explanation rather than relying on a static legend that drifts from what's rendered. */
 interface ChipSpec {
   key: string;
   node: ReactNode;
@@ -85,10 +74,7 @@ export function DayIntelChips({ dayKey, filters, focus, onFocus }: Props) {
 
   const plural = (n: number) => (n === 1 ? "entry" : "entries");
 
-  /** Every chip is a filter toggle: it narrows the list below to this day's
-   *  articles carrying what the chip names, and clicking it again clears that.
-   *  Where no `onFocus` is supplied the chip still describes the day, it just
-   *  renders as a label rather than pretending to be interactive. */
+  /* Every chip is a filter toggle: it narrows the list below to this day's articles carrying what the chip names, and clicking it again clears that. Where no `onFocus` is supplied the chip still describes the day, but renders as a plain label instead of a button. */
   const chipButton = (
     chipKey: string,
     tone: string,
@@ -131,10 +117,7 @@ export function DayIntelChips({ dayKey, filters, focus, onFocus }: Props) {
   // Priority order — highest analyst value first, sliced to MAX_CHIPS.
   const chips: ChipSpec[] = [];
 
-  // 1. Signal: actively-exploited CVEs in the window. Unlike the rest this one
-  // names a set rather than a single entity — its number is a count of
-  // vulnerabilities — so its filter is the same KEV / active-exploitation
-  // predicate the badge itself is counted with.
+  // 1. Signal: actively-exploited CVEs in the window. Unlike the rest this one names a set rather than a single entity — its number is a count of vulnerabilities — so its filter is the same KEV / active-exploitation predicate the badge itself is counted with.
   if (signals.actively_exploited > 0) {
     chips.push({
       key: "signal",
@@ -289,26 +272,21 @@ export function DayIntelChips({ dayKey, filters, focus, onFocus }: Props) {
 
   return (
     <div className={styles.chips}>
-      {/* Leads the strip so the explanation is the first thing in reading order —
-          the chips themselves are deliberately terse, and nothing else on the
-          divider says where they come from. */}
+      {/* Leads the strip so the explanation is the first thing in reading order — the chips themselves are deliberately terse, and nothing else on the divider says where they come from. */}
       <ChipLegend items={shown} />
       {shown.map((c) => c.node)}
     </div>
   );
 }
 
-/** "?" chip that opens a legend for the chips actually on screen. Portalled and
- *  fixed-positioned: the strip is an overflow scroller, so an in-flow popover
- *  would be clipped by it. */
+/** "?" chip that opens a legend for the chips actually on screen. Portalled and fixed-positioned: the strip is an overflow scroller, so an in-flow popover would be clipped by it. */
 function ChipLegend({ items }: { items: ChipSpec[] }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
-  // Measure after the popover mounts, then clamp into the viewport — a divider
-  // near the bottom of the list flips the panel above the button.
+  // Measure after the popover mounts, then clamp into the viewport — a divider near the bottom of the list flips the panel above the button.
   useLayoutEffect(() => {
     if (!open) {
       setPos(null);
@@ -332,8 +310,7 @@ function ChipLegend({ items }: { items: ChipSpec[] }) {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      // Capture-phase stop: the entry list's Escape handler would otherwise
-      // clear the reader selection out from under a simple "close the popover".
+      // Capture-phase stop: the entry list's Escape handler would otherwise clear the reader selection out from under a simple "close the popover".
       e.stopPropagation();
       setOpen(false);
     };
@@ -373,8 +350,7 @@ function ChipLegend({ items }: { items: ChipSpec[] }) {
             role="dialog"
             aria-label="About these chips"
             className={styles.legend}
-            // Rendered offscreen for the first paint so the measure-then-clamp
-            // pass doesn't flash the panel in the wrong place.
+            // Rendered offscreen for the first paint so the measure-then-clamp pass doesn't flash the panel in the wrong place.
             style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: 0 }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -405,8 +381,7 @@ function ChipLegend({ items }: { items: ChipSpec[] }) {
   );
 }
 
-/** Legend terms reuse the chip's own colour so the row and the chip read as the
- *  same object. Two chip keys differ from their CSS class name; the rest match. */
+/** Legend terms reuse the chip's own color so the row and the chip read as the same object. Two chip keys differ from their CSS class name; the rest match. */
 const LEGEND_TONE_CLASS: Record<string, string> = {
   new: "newflag",
   threat_actor: "actor",

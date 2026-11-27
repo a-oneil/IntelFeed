@@ -2,7 +2,7 @@
 
 The IOC ledger, second attempt (v1 was dropped in 060_remove_ioc_tables).
 Nothing is backfilled inline: rows come from the capture doors in
-app/intelligence/observables.py as entries are analysed.
+app/intelligence/observables.py as entries are analyzed.
 
 Revision ID: h1j3l5n7p9r1
 Revises: g8i0k2m4o6q8

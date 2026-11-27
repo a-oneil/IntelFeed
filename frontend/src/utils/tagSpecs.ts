@@ -1,10 +1,7 @@
 /**
  * The `tags` list of an automation `add_tags` action.
  *
- * Each item is a bare tag name, or a name plus what to give the tag if the rule
- * has to create it: colour, chip promotion, tooltip, and scope (`global`: one
- * shared assignment everyone sees, instead of the rule owner's own). The backend
- * applies these on create only — an existing tag keeps its own look and scope.
+ * Each item is a bare tag name, or a name plus what to give the tag if the rule has to create it: color, chip promotion, tooltip, and scope (`global`: one shared assignment everyone sees, instead of the rule owner's own). The backend applies these on create only — an existing tag keeps its own look and scope.
  */
 export interface NewTagSpec {
   name: string;
@@ -33,17 +30,13 @@ export function toTagSpecs(value: unknown): TagSpec[] {
   );
 }
 
-/**
- * A spec with nothing beyond its name collapses back to a bare string, so a
- * rule that never set a colour or chip saves exactly the shape it always did.
- */
+/** A spec with nothing beyond its name collapses back to a bare string, so a rule that never set a color or chip saves exactly the shape it always did. */
 export function normalizeTagSpec(spec: TagSpec): TagSpec {
   if (typeof spec === "string") return spec;
   const { name, color, description, chip, global: isGlobal } = spec;
   const out: NewTagSpec = { name };
   if (color && color.toLowerCase() !== DEFAULT_TAG_COLOR.toLowerCase()) out.color = color;
-  // Kept untrimmed: this runs on every keystroke, and trimming would eat the
-  // space between words as it's typed. The server trims on create.
+  // Kept untrimmed: this runs on every keystroke, and trimming would remove the space between words as it's typed. The server trims on create.
   if (description?.trim()) out.description = description;
   if (chip) out.chip = true;
   if (isGlobal) out.global = true;

@@ -24,7 +24,7 @@ export function useIsTablet(): boolean {
   return useMediaQuery("(max-width: 1199px)");
 }
 
-/** True only where the pointer can genuinely hover. */
+/** True only where the pointer can actually hover. */
 export function useHasHover(): boolean {
   return useMediaQuery("(hover: hover) and (pointer: fine)");
 }
@@ -32,11 +32,7 @@ export function useHasHover(): boolean {
 /**
  * Whether floating hover cards (Hint, Tooltip) should render at all.
  *
- * Two reasons they shouldn't. Touch synthesizes a `mouseenter` on tap, so the
- * card opens on the tap that activates the control and then needs a second tap
- * on nothing to dismiss it. And at mobile width the app is already in its
- * mobile layout, where a 240px card over a 390px screen covers the thing it
- * was explaining — including in a desktop browser narrowed to that width.
+ * They are turned off in two cases. Touch synthesizes a `mouseenter` on tap, so the card opens on the tap that activates the control and then needs a second tap on empty space to dismiss it. And at mobile width the app is in its mobile layout, where a 240px card on a 390px screen covers the control it explains; this also applies to a desktop browser narrowed to that width.
  */
 export function useHoverCards(): boolean {
   const hasHover = useHasHover();

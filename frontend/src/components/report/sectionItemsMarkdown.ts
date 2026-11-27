@@ -1,9 +1,4 @@
-/**
- * A data section's rows as Markdown — the same shapes the backend exporter
- * writes (`render_markdown` in app/intelligence/reporting.py), so what the
- * analyst sees in the editor is what the export would have said. Editing it
- * turns the rows into hand-written text: the saved body replaces the rows.
- */
+/** A data section's rows as Markdown, in the same shapes the backend exporter writes (`render_markdown` in app/intelligence/reporting.py), so what the analyst sees in the editor matches the export. Editing it turns the rows into hand-written text: the saved body replaces the rows. */
 
 const cell = (v: unknown): string => (Array.isArray(v) ? v.join(", ") : v == null ? "" : String(v));
 
@@ -43,7 +38,7 @@ export function itemsToMarkdown(items: Record<string, unknown>[]): string {
   }
   if ("rule_title" in first) {
     return table(
-      ["Rule", "Format", "Source", "Licence", "ATT&CK"],
+      ["Rule", "Format", "Source", "License", "ATT&CK"],
       items.map((it) => [
         `${cell(it.rule_title)}${it.is_draft ? " *(draft)*" : ""}`,
         cell(it.rule_type),

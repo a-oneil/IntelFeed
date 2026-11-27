@@ -24,15 +24,9 @@ function niceMax(value: number): number {
 }
 
 /**
- * Tallest value in one arm that isn't a bulk action. A single "mark all as read"
- * runs to tens of thousands against a normal day of a few hundred; scaling to it
- * flattens every real day into a hairline. Peel order-of-magnitude outliers (≥15×
- * the median of what remains, never more than a quarter of the points) so they can
- * be clipped instead.
+ * Tallest value in one arm that isn't a bulk action. A single "mark all as read" can reach tens of thousands against a normal day of a few hundred; scaling to it flattens every normal day into a hairline. Drop order-of-magnitude outliers (≥15× the median of what remains, never more than a quarter of the points) so they can be clipped instead.
  *
- * Per arm, deliberately: intake and reads sit on different orders of magnitude, so
- * pooling them puts the median down among the quiet read days and makes every
- * ordinary arrival look like an outlier.
+ * Computed per arm on purpose: intake and reads are on different orders of magnitude, so pooling them puts the median among the quiet read days and makes every ordinary arrival look like an outlier.
  */
 function robustPeak(values: number[]): number {
   const sorted = values.filter((v) => v > 0).sort((a, b) => a - b);
@@ -70,8 +64,7 @@ export default function TriageFlowWidget({ config }: Props) {
   const plotH = viewH - PAD.top - PAD.bottom;
   const mid = PAD.top + plotH / 2;
   const half = plotH / 2;
-  // One shared scale for both arms. A per-arm scale would be a dual axis —
-  // it would invent a visual parity between intake and reads that isn't real.
+  // One shared scale for both arms. A per-arm scale would be a dual axis, which would make intake and reads look comparable in size when they are not.
   const max = niceMax(
     Math.max(robustPeak(data.days.map((d) => d.arrived)), robustPeak(data.days.map((d) => d.read)), 1)
   );
@@ -81,9 +74,7 @@ export default function TriageFlowWidget({ config }: Props) {
 
   const ticks = [max / 2, max];
 
-  // Bulk actions the axis can't hold. The bar gets a break mark and the legend
-  // carries the count — per-bar numerals collide as soon as two clipped days land
-  // near each other, and the exact figure is a hover away in the tooltip.
+  // Values (bulk actions) above the axis maximum. The bar gets a break mark and the legend shows the count; per-bar numbers would overlap as soon as two clipped days are near each other, and the exact figure is in the tooltip.
   const clipped = data.days.flatMap((d) => [d.arrived, d.read]).filter((v) => v > max);
 
   /** Axis-break mark across the outer end of a bar that runs off-scale. */
@@ -197,8 +188,7 @@ export default function TriageFlowWidget({ config }: Props) {
           <span className={styles.chartLegendSwatch} style={{ background: ARRIVED_COLOR }} />
           arrived
         </span>
-        {/* A visitor has no reads, so the lower arm is empty and the backlog
-            would count every article. */}
+        {/* A visitor has no reads, so the lower arm is empty and the backlog would count every article. */}
         {!isVisitor && (
           <span className={styles.chartLegendItem}>
             <span className={styles.chartLegendSwatch} style={{ background: READ_COLOR }} />

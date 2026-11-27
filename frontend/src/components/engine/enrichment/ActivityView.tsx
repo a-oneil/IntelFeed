@@ -1,7 +1,4 @@
-/**
- * Activity: the queue by lane, the lookups that gave up (with retry), and
- * requests by source over the last 24 hours.
- */
+/** Activity: the queue by lane, the lookups that gave up (with retry), and requests by source over the last 24 hours. */
 import { toast } from "sonner";
 
 import { useEnrichmentActivity, useRetryFailedLookups, type EnrichmentLane } from "@/hooks/useEnrichment";

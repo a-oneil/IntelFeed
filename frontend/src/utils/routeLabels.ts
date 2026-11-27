@@ -1,10 +1,7 @@
 /**
  * Human labels for routes, keyed by pathname (query string allowed).
  *
- * Two consumers share this: the command palette's "recently visited" list and
- * the route-loading fallback, which names the page it is fetching a chunk for.
- * Keep it in sync with the routes in `App.tsx` — an unmapped route degrades to
- * a plain "Loading…" rather than breaking.
+ * Two consumers share this: the command palette's "recently visited" list and the route-loading fallback, which names the page it is fetching a chunk for. Keep it in sync with the routes in `App.tsx` — an unmapped route degrades to a plain "Loading…" rather than breaking.
  */
 
 const EXACT: Record<string, string> = {
@@ -50,8 +47,7 @@ const PREFIXES: Array<[string, string]> = [
   ["/shared/", "shared article"],
 ];
 
-// Mirrors WorkbenchPage.SECTION_CONFIG — the workbench rail is one route whose
-// section rides in ?section= (older links used ?tab=).
+// Mirrors SECTION_CONFIG in components/WorkbenchNav.tsx: the workbench rail is one route whose section is carried in ?section= (older links used ?tab=).
 const WORKBENCH_SECTIONS: Record<string, string> = {
   attack_matrix: "ATT&CK Matrix",
   rules: "Rules Library",
@@ -110,8 +106,7 @@ export function getRouteLabel(path: string): string | null {
   const basePath = path.split("?")[0];
   if (EXACT[basePath]) return EXACT[basePath];
 
-  // Tab-based routes are more specific than the bare path, so resolve them
-  // before falling back to the prefix table.
+  // Tab-based routes are more specific than the bare path, so resolve them before falling back to the prefix table.
   const tabMatch = path.match(/[?&]tab=(\w+)/);
   if (tabMatch && (basePath === "/workbench" || basePath === "/workbench/explore")) {
     return WORKBENCH_SECTIONS[tabMatch[1]] || "Intelligence Workbench";

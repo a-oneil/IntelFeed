@@ -13,40 +13,22 @@ interface PanelProps {
   /** Buttons pinned to the right of the header. */
   actions?: ReactNode;
   children: ReactNode;
-  /**
-   * Hairline under the header. Many cards group the header with the body
-   * visually and want no rule — the first adoption pass found that a forced
-   * divider was the single most common blocker.
-   */
+  /** Hairline under the header (on by default). Many cards group the header with the body visually and want no rule; in the first adoption pass a forced divider was the most common blocker. */
   divider?: boolean;
   /** Body inset. "none" is for tables and lists that manage their own. */
   padding?: PanelPadding;
-  /**
-   * Which surface pair to sit on. "default" is --bg-secondary/--border, which
-   * the codebase uses far more than the card pair; "card" opts into
-   * --card-bg/--card-border.
-   */
+  /** Which surface pair to sit on. "default" is --bg-secondary/--border, which the codebase uses far more than the card pair; "card" opts into --card-bg/--card-border. */
   surface?: PanelSurface;
-  /**
-   * "display" (default) is the app's house style — note `index.css` sets
-   * `h1,h2,h3 { font-family: var(--font-display) }` globally, so the monospace
-   * face is what an existing card heading already renders. "heading" switches
-   * to the BODY face at --fs-lg, which is the deviation, not the norm.
-   */
+  /** "display" (default) is the app's house style: `index.css` sets `h1,h2,h3 { font-family: var(--font-display) }` globally, so existing card headings already render in the monospace face. "heading" switches to the BODY face at --fs-lg, which is the exception, not the norm. */
   titleVariant?: "display" | "heading";
-  /**
-   * Panels hosting a tooltip, popover or dropdown that overflows the card must
-   * set "visible". Previously this was only reachable by a consumer className
-   * whose win depended on bundler chunk order — a silent clipping bug waiting
-   * for a chunking change.
-   */
+  /** Panels hosting a tooltip, popover or dropdown that overflows the card must set "visible". Doing this with a consumer className instead relies on bundler chunk order to win the cascade, so a chunking change could silently clip the content. */
   overflow?: "hidden" | "visible";
   /** Raise the card off the page. 0 = flat (default). */
   elevation?: 0 | 1 | 2;
   /** Drop the border/background — for panels that host their own chrome. */
   flush?: boolean;
   className?: string;
-  /** ARIA pass-through: some panels are groups or labelled regions. */
+  /** ARIA pass-through: some panels are groups or labeled regions. */
   role?: string;
   "aria-label"?: string;
   id?: string;

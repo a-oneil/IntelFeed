@@ -99,14 +99,14 @@ _CHALLENGE_MARKERS = (
 FEED_FETCH_TIMEOUT = 30.0
 
 # "HTTP 4xx" as written by the fetchers below. Only client errors count as a
-# dead feed: a 5xx or a timeout is the publisher's bad day, not a moved feed.
+# dead feed: a 5xx or a timeout is usually a temporary server problem, not a moved feed.
 _HTTP_4XX = re.compile(r"^HTTP 4\d\d\b")
 
 
 def _note_fetch_error(feed: Feed, message: str) -> None:
     """Count a failed fetch. `error_since` marks the start of the streak so
-    the health check can tell a feed dead for a month from one that hiccupped
-    this morning; a successful fetch clears it."""
+    the health check can tell a feed dead for a month from one that failed
+    once this morning; a successful fetch clears it."""
     now = datetime.now(UTC)
     feed.error_count += 1
     feed.last_error = message
@@ -901,7 +901,7 @@ async def _existing_entries_by_item_key(db: AsyncSession, feed_id, parsed_items:
     One query per fetch, and only when the fetch has guid misses. There is no
     index on entries.url; the planner uses ix_entries_feed_id, so the ILIKE
     filter runs over this feed's rows only (a few thousand at most), never the
-    whole table. Each hit is re-normalised in Python and compared exactly.
+    whole table. Each hit is re-normalized in Python and compared exactly.
     """
     patterns = sorted({url_lookup_pattern(key[0]) for p in parsed_items if (key := _parsed_item_key(p))})
     if not patterns:
@@ -947,7 +947,7 @@ async def _refresh_github_entry(db: AsyncSession, feed: Feed, entry: Entry, pars
     """Bring a github_repo entry up to the commit the feed now lists, then run
     the rule importer again so the mirrored rule follows the file: the new
     body, the commit appended to its history, the body it replaced kept as a
-    version. Without this a repo rule froze at the commit it was imported at."""
+    version. Without this a repo rule would stay at the commit it was imported at."""
     content_html = parsed.content_html or ""
     content_text = html_to_text(content_html) if content_html else ""
     entry.url = parsed.url or entry.url
@@ -1134,10 +1134,11 @@ async def _apply_post_ingest_links(
 ) -> None:
     """Apply operator-asserted post-ingest links from adapter_config.
 
-    Currently used by the Telegram adapter where many channels ARE the threat actor
-    (ransomware leak sites, hacktivist channels, broker channels). When the operator
-    sets `threat_actor_id` and/or `campaign_id` in adapter_config, every entry from
-    that feed is auto-attributed with high confidence — no autolinker guessing required.
+    Used by Telegram feeds, where many channels ARE the threat actor (ransomware
+    leak sites, hacktivist channels, broker channels), and by Bluesky feeds through
+    `author_entity`. When the operator sets `threat_actor_id`, `campaign_id` or
+    `author_entity` in adapter_config, every entry from that feed is attributed with
+    high confidence, without relying on the autolinker.
 
     Idempotent: uses ON CONFLICT DO NOTHING so re-ingest or autolinker passes don't error.
     Failures here MUST NOT abort the ingest — log and continue.
@@ -1278,7 +1279,7 @@ async def _apply_post_ingest_links(
 
 
 async def _fetch_extended_feed(db: AsyncSession, feed: Feed) -> None:
-    """Fetch entries from an API-based extended adapter (Reddit, GitHub, NVD, Mastodon)."""
+    """Fetch entries from an API-based extended adapter (e.g. Reddit, GitHub, NVD, Mastodon, Telegram)."""
     from app.adapters import get_extended_adapter
 
     # Ensure system settings cache is loaded so adapters can read API keys
@@ -1392,7 +1393,7 @@ async def _fetch_extended_feed(db: AsyncSession, feed: Feed) -> None:
         # Create media record from parsed.media (shared helper)
         await _create_entry_media(db, feed, entry, parsed)
 
-        # Apply per-feed auto-attribution (Telegram channels operated by named threat actors / campaigns)
+        # Apply per-feed auto-attribution (Telegram channels run by a named actor or campaign, Bluesky author_entity)
         await _apply_post_ingest_links(db, feed, entry, parsed, config)
 
         # Index in Meilisearch
@@ -1461,8 +1462,9 @@ async def _fetch_extended_feed(db: AsyncSession, feed: Feed) -> None:
         if isinstance(maybe_state, dict):
             adapter_state.update(maybe_state)
 
-    # Backward-compat: GitHub repo adapter still emits _head_sha at the top level
-    # of feed_meta.extra and via entry metadata. Promote it into adapter_state.
+    # The GitHub repo adapter reports its head commit as _head_sha (top level of
+    # feed_meta.extra, or in entry metadata) instead of through _adapter_state.
+    # Promote it into adapter_state.
     if feed.feed_type == "github_repo":
         head_sha = None
         if hasattr(feed_meta, "extra") and feed_meta.extra.get("_head_sha"):
@@ -1525,7 +1527,7 @@ async def _fetch_extended_feed(db: AsyncSession, feed: Feed) -> None:
             logger.warning("Failed to dispatch entry pipeline for extended feed %s", feed.id, exc_info=True)
 
     # Telegram-specific: probe the most recent K previously-ingested messages for
-    # edits and deletes (the Telegram source itself can mutate post-publish).
+    # edits and deletes (Telegram messages can be edited or deleted after posting).
     if feed.feed_type == "telegram" and hasattr(adapter, "probe_messages"):
         try:
             await _probe_telegram_edits_and_deletes(db, feed, adapter, config)
@@ -1536,9 +1538,10 @@ async def _fetch_extended_feed(db: AsyncSession, feed: Feed) -> None:
 async def _probe_telegram_edits_and_deletes(db: AsyncSession, feed: Feed, adapter, config: dict) -> None:
     """Re-fetch the last N ingested telegram messages and reconcile edits / deletes.
 
-    Edits: when message.edit_date > entry.metadata_["edited_at"] (or the latter is missing
-    and edit_date is now set), update content_html / content_text / word_count and re-dispatch
-    the autolink / extraction pipeline so derived intel reflects the new text.
+    Edits: when the probed message's edited_at is set and differs from
+    entry.metadata_["edited_at"] (or the latter is missing), update content_html /
+    content_text / word_count, clear the stored translation, and re-dispatch the
+    autolink / extraction pipeline so derived intel reflects the new text.
 
     Deletes: when get_messages returns None for an id we have on file, soft-delete the entry
     by setting `metadata_["telegram_deleted_at"]`. We don't hard-delete because a transient
@@ -2079,7 +2082,7 @@ def check_feed_health():
 
 
 async def _check_feed_health():
-    """Check for feeds that haven't produced entries in a long time."""
+    """Flag feeds that haven't produced entries in a long time or keep failing, and auto-pause dead feeds."""
     from sqlalchemy import func as sqlfunc
 
     from app.intelligence.correlation_events import create_feed_stale_event
@@ -2334,7 +2337,7 @@ async def _full_sync_github_feed(feed_id: str, user_id: str | None = None) -> di
         )
 
         # Known files and the blob id of the text we hold for each, so the
-        # adapter lists only new files and known files whose blob moved on.
+        # adapter lists only new files and known files whose blob changed.
         from app.adapters.github_repo import blob_sha_of
 
         guid_result = await db.execute(

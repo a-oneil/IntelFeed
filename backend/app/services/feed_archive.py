@@ -1,6 +1,6 @@
-"""Archived feeds: deleted as far as anyone can see, kept underneath.
+"""Archived feeds: hidden everywhere as if deleted, but kept in the database.
 
-Deleting a feed used to cascade to its articles, and with them every entity
+Deleting a feed row would cascade to its articles, and with them every entity
 link, campaign and thread membership and link-history row: intelligence the
 analysis had already extracted and the adjudicator had already judged. A feed
 is archived instead, when it is deleted or loses its last subscriber:
@@ -12,8 +12,7 @@ is archived instead, when it is deleted or loses its last subscriber:
 - search reaches it only with ``is:archived``.
 
 Nothing in the UI names the state. Adding or subscribing to the feed again
-brings it back (``unarchive_feed``), the same way a feed whose last reader left
-used to come back.
+brings it back (``unarchive_feed``).
 """
 
 import uuid

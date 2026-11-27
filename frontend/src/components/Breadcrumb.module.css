@@ -1,9 +1,7 @@
 .breadcrumb {
   font-size: var(--fs-md);
   line-height: 1;
-  /* The trail has to be able to give width back to whatever it shares a row
-     with — otherwise the fixed cap on `.current` below pushes a long rule or
-     entity name straight off a phone screen. */
+  /* The trail must be able to shrink to fit whatever it shares a row with, otherwise the fixed cap on `.current` below pushes a long rule or entity name off a phone screen. */
   min-width: 0;
 }
 
@@ -63,9 +61,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 300px;
-  /* 300px is the desktop cap. `flex: 0 1 auto` + `min-width: 0` lets the crumb
-     fall below it when the row is narrower than that, so on a phone the
-     ellipsis lands on-screen instead of 90px past the right edge. */
+  /* 300px is the desktop cap. `flex: 0 1 auto` + `min-width: 0` lets the crumb shrink below it when the row is narrower, so on a phone the ellipsis lands on-screen instead of past the right edge. */
   flex: 0 1 auto;
   min-width: 0;
 }

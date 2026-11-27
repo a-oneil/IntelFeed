@@ -260,7 +260,7 @@ async def _eval_has_note(db: AsyncSession, entry: Entry, user_id) -> bool:
 def _eval_priority_score_above(entry: Entry, config: dict) -> bool:
     """Entry's signal-engine priority score (0–10) meets a minimum.
 
-    Note: scoring runs after post-processing, so on_new_entry rules see the
+    Scoring runs after post-processing, so on_new_entry rules see the
     score only if the entry was already scored (e.g. scheduled rules). For
     score reactions use the on_entry_scored trigger, which fires after the
     score is persisted; has_signal/entity_watchlisted remain the ingest-time
@@ -290,9 +290,10 @@ async def _eval_has_observable(db: AsyncSession, entry: Entry, config: dict) -> 
 
     Config: ``kinds`` / ``roles`` (lists or comma strings, blank = any),
     ``min_confidence`` (current, post-decay), ``exclude_infra_tagged``
-    (default true — a VPN exit is context, not an alert), ``sources``
-    (sighting doors; default excludes the indicator-feed door so a rule
-    on "C2 captured" fires on reporting, not on a blocklist mirror).
+    (default true — a VPN exit node is context, not an alert), ``sources``
+    (sighting sources; the default leaves out "feed", the indicator-feed
+    source, so a "C2 captured" rule fires on articles reporting the value,
+    not on a value copied from a blocklist).
     """
     from app.models.observable import EntryObservable, Observable
 

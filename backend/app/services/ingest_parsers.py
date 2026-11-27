@@ -1,10 +1,9 @@
 """Format parsers for bulk ingest.
 
-One function per file type, all returning the same ``ParsedDocument`` shape the
-PDF extractor always returned (text + HTML), behind one registry keyed on a
-normalized kind. Detection is extension first, then the client's content
+One function per file type, all returning a ``ParsedDocument`` (text + HTML),
+behind one registry keyed on a normalized kind. Detection is extension first, then the client's content
 type, then magic bytes — a browser frequently sends ``application/octet-stream``
-for anything it does not recognise.
+for anything it does not recognize.
 
 No new dependencies: PDF is PyMuPDF (already here), Markdown is the ``markdown``
 package (already here), HTML goes through the entry sanitizer, CSV and e-mail
@@ -135,7 +134,7 @@ def detect_kind(filename: str | None, content_type: str | None, head: bytes) -> 
 
 
 def _refine_zip(kind: str, head: bytes) -> str:
-    """A .docx is a zip; a renamed zip may be a docx. The member list decides."""
+    """Hook for telling a .docx from a plain zip; it currently returns ``kind`` unchanged."""
     if kind not in (KIND_ZIP, KIND_DOCX):
         return kind
     if not head.startswith(b"PK\x03\x04"):
@@ -227,7 +226,7 @@ def sanitize_pdf_html(raw_html: str) -> str:
     """Sanitize PDF-extracted HTML, allowing data: URIs for embedded images.
 
     PyMuPDF puts the PDF's page layout and fonts in inline styles: a fixed page
-    size, absolute positions, and a font family, size and colour on every
+    size, absolute positions, and a font family, size and color on every
     span. Those override the reader's theme (black text on a dark background),
     so text elements keep no styles. Images keep only their width and height.
     """

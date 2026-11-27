@@ -1,9 +1,4 @@
-/**
- * AssessmentBlock — the profile's voice: the entity description promoted to a
- * prominent, analyst-editable narrative with an AI refresh. The Overview's
- * opening module; the key facts follow it, then LatestDevelopments (dated
- * items from the What's-New engine, exported below).
- */
+/** AssessmentBlock — the entity description shown as a prominent, analyst-editable narrative with an AI refresh. The Overview's opening module; the key facts follow it, then LatestDevelopments (dated items from the What's-New engine, exported below). */
 import { useState } from "react";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
@@ -21,9 +16,7 @@ import styles from "./entityProfile.module.css";
 import { useIsVisitor } from "@/stores/authStore";
 
 const DEVELOPMENTS_LIMIT = 4;
-/** Past this, the prose starts folded to its opening lines with a toggle:
- * the first few sentences are the bottom line, and the history behind them
- * should not push the facts and lenses off the first screen. */
+/** Past this, the prose starts folded to its opening lines with a toggle: the first few sentences are the bottom line, and the history behind them should not push the facts and lenses off the first screen. */
 const FOLD_AT_CHARS = 480;
 
 const SIGNAL_LABELS: Record<string, string> = {
@@ -122,9 +115,7 @@ export function AssessmentBlock({
         )}
       </div>
 
-      {/* The fold clips the body, so it opens when focus lands inside: the
-          textarea InlineEditField focuses when editing begins, or a link an
-          analyst tabs to — nothing stays hidden under the mask. */}
+      {/* The fold clips the body, so it opens when focus lands inside: the textarea InlineEditField focuses when editing begins, or a link an analyst tabs to — nothing stays hidden under the mask. */}
       <div
         className={`${styles.assessmentBody} ${folded ? styles.assessmentFolded : ""}`}
         onFocusCapture={() => {
@@ -154,8 +145,7 @@ export function AssessmentBlock({
       )}
 
       {(() => {
-        // Plain-language provenance under the prose: when the assessment was
-        // drafted and from how many sources — the popover has the receipts.
+        // Plain-language provenance under the prose: when the assessment was drafted and from how many sources — the popover lists the sources.
         const bucket = provenance?.fields?.description;
         if (!entity.description || !bucket?.claims?.length) return null;
         const ai = bucket.claims.filter((c) => c.source_kind === "ai_assessment" || c.source_kind === "ai_extraction");
@@ -176,8 +166,7 @@ export function AssessmentBlock({
   );
 }
 
-/** A dated line under What changed that is not a What's-New signal (an
- * actor's latest leak-site victim). */
+/** A dated line under What changed that is not a What's-New signal (an actor's latest leak-site victim). */
 export interface DevelopmentNote {
   key: string;
   date: string | null;
@@ -185,8 +174,7 @@ export interface DevelopmentNote {
   tag: string;
 }
 
-/** What changed: dated What's-New items, each opening its article, merged with
- * any `notes` by date, newest first. */
+/** What changed: dated What's-New items, each opening its article, merged with any `notes` by date, newest first. */
 export function LatestDevelopments({
   whatsNew,
   notes = [],

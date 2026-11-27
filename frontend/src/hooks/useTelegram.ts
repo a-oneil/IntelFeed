@@ -77,17 +77,6 @@ export function useDiscoverTelegramChannels(enabled: boolean, sessionName: strin
   });
 }
 
-export function useDiscoverTelegramChannelsLazy() {
-  return useMutation({
-    mutationFn: async (sessionName: string = "") => {
-      const res = await api.get<TelegramDiscoveryResponse>("/telegram/discover", {
-        params: sessionName ? { session_name: sessionName } : undefined,
-      });
-      return res.data;
-    },
-  });
-}
-
 export function useTelegramFeedHealth(feedId: string | null) {
   return useQuery({
     queryKey: ["telegram-health", feedId],

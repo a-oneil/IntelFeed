@@ -17,10 +17,7 @@ interface Pill {
   color?: string;
 }
 
-/**
- * Renders the current ambient context as dismissible pills so the user can see
- * (and drop) what the copilot is grounded on.
- */
+/** Renders the current ambient context as dismissible pills so the user can see (and drop) what the copilot is grounded on. */
 export function ContextPill({ context, labels, onDismiss }: ContextPillProps) {
   const pills: Pill[] = [];
 

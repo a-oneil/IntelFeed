@@ -54,7 +54,7 @@ async def populated_admin(db_session: AsyncSession, admin_user: User) -> User:
     db_session.add(child_cat)
     await db_session.flush()
 
-    # Feed (subscription fields now live on Feed directly)
+    # Feed (subscription fields live on Feed directly)
     feed = Feed(
         title="Krebs on Security",
         url="https://krebsonsecurity.com/feed/",
@@ -320,7 +320,7 @@ async def test_export_categories_with_hierarchy(client: AsyncClient, admin_heade
 
 @pytest.mark.asyncio
 async def test_export_feeds(client: AsyncClient, admin_headers: dict, populated_admin: User):
-    """Feeds export directly. They used to be exported as per-user subscriptions."""
+    """Feeds export directly, not as per-user subscriptions."""
     resp = await client.get("/api/backup/export", headers=admin_headers)
     data = resp.json()
     feeds = data["feeds"]
@@ -440,7 +440,7 @@ async def test_export_is_instance_wide(
 ):
     """The export is a snapshot of the whole instance, not of one user's data.
 
-    Feeds, tags, rules and themes are all shared config now, so any admin's
+    Feeds, tags, rules and themes are all shared config, so any admin's
     export contains everything. Only the ``user`` block is caller-specific.
     """
     resp = await client.get("/api/backup/export", headers=second_admin_headers)
@@ -965,7 +965,7 @@ async def test_round_trip_tags(
     """Re-importing an instance's own tag export changes nothing.
 
     Export is instance-wide, so importing it back finds every tag already
-    present and skips them all. The re-export must be byte-identical.
+    present and skips them all. The re-export has the same tag names and colors.
     """
     export_resp = await client.get("/api/backup/export", headers=admin_headers)
     assert export_resp.status_code == 200

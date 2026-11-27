@@ -20,28 +20,23 @@ export function RansomwareSection() {
   const selectEntity = useIntelStore((s) => s.selectEntity);
   const pivotToGroup = (groupId: string, groupName?: string) => selectEntity("threat_actor", groupId, groupName);
 
-  // The rail and the feed are two columns of one surface, so the filter set
-  // they share is owned here rather than inside either of them.
+  // The rail and the feed are two columns of one page, so the filter set they share is owned here rather than inside either of them.
   const [filters, setFilters] = useState<LeakFilters>(DEFAULT_LEAK_FILTERS);
   const patch = useCallback((p: Partial<LeakFilters>) => setFilters((s) => ({ ...s, ...p })), []);
-  // "All" is an unbounded window for the disclosure list, but the stat tiles and
-  // facet counts still need a finite one — a year, as before the state lift.
+  // "All" means no time window for the disclosure list, but the stat tiles and facet counts still need a finite one, so they use a year.
   const { data: stats } = useRansomwareStats(filters.days >= ALL_TIME_DAYS ? 365 : filters.days);
 
   const railCollapsed = useUIStore((s) => s.ransomwareFacetsCollapsed);
   const setRailCollapsed = useUIStore((s) => s.setRansomwareFacetsCollapsed);
   const railWidth = useRailWidth("ransomware-facets", { default: 248, min: 190, max: 460 });
 
-  // Landscape's window switch lives in the page header alongside the tab
-  // switch, so `days` is owned here rather than inside the chart column.
+  // The Landscape time-range switch sits in the page header next to the tab switch, so `days` is owned here rather than inside the chart column.
   const [landscapeDays, setLandscapeDays] = useState(90);
 
   const onFeed = tab === "feed";
 
   return (
-    /* Two-column shell: the facet rail runs the full height of the content area
-       and the page header sits to its right, the same seating the search page
-       and the rule library use. */
+    /* Two-column shell: the facet rail runs the full height of the content area and the page header sits to its right, the same layout the search page and the rule library use. */
     <div className={styles.shell}>
       {onFeed && (
         <>
@@ -86,9 +81,7 @@ export function RansomwareSection() {
               ]}
             />
           }
-          /* Each tab's own filter belongs in the header's controls row like
-             every other workbench page — both used to sit in an orphan band
-             between the title and the content. */
+          /* Each tab's own filter goes in the header's controls row, as on every other workbench page. */
           controls={
             onFeed ? (
               <input

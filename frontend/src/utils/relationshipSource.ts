@@ -1,8 +1,4 @@
-/**
- * Plain-English source, status and reason for one relationship row — what
- * the Relationships tab's list and evidence panel say about where a
- * relationship came from and how sure we are of it.
- */
+/** Plain-English source, status and reason for one relationship row — what the Relationships tab's list and evidence panel say about where a relationship came from and how certain it is. */
 import type { EntitySearchResult } from "@/api/types";
 import type { RelRow } from "./relationshipBrowser";
 
@@ -28,10 +24,7 @@ const feed = (label: string): SourcePart => ({ key: `feed:${label}`, label, tone
 /** A description short enough to be a source's name rather than a note. */
 const asName = (s: string | null | undefined) => (s && s.trim().length <= 40 ? s.trim() : null);
 
-/**
- * Every source behind a row, primary first. `via` is the enrichment sources
- * that also claim the pair (labels, from the claims endpoint).
- */
+/** Every source behind a row, primary first. `via` is the enrichment sources that also claim the pair (labels, from the claims endpoint). */
 export function sourcesOf(row: RelRow, via: string[] = []): SourcePart[] {
   const item = row.item;
   let primary: SourcePart;
@@ -95,10 +88,7 @@ export function statusOf(item: EntitySearchResult): string | null {
   }
 }
 
-/**
- * Why the relationship is listed: the reviewer's or source's own words when
- * there are any (`quote`), and a sentence naming who says so (`text`).
- */
+/** Why the relationship is listed: the reviewer's or source's own words when there are any (`quote`), and a sentence naming who says so (`text`). */
 export function reasonOf(row: RelRow, parts: SourcePart[]): { quote: string | null; text: string } {
   const item = row.item;
   const desc = item.relationship_description?.trim() || null;

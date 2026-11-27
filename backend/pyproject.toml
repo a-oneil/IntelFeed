@@ -128,7 +128,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
-# No test should ever hang the suite. Raise per-test with @pytest.mark.timeout.
+# No test should ever hang the suite. Raise the limit per test with @pytest.mark.timeout.
 timeout = 60
 timeout_method = "thread"
 markers = [

@@ -1,7 +1,4 @@
-// The user's IntelFeed theme, applied to the popup, settings page and rule
-// window. The background worker fetches it (loadTheme in background.js) and
-// keeps it in storage; a page applies the stored copy before it renders
-// anything else.
+// The user's IntelFeed theme, applied to the popup, settings page and rule window. The background worker fetches it (loadTheme in background.js) and keeps it in storage; a page applies the stored copy before it renders anything else.
 
 import * as store from "./store.js";
 
@@ -51,8 +48,7 @@ export function applyTheme(theme, root = document.documentElement) {
     const value = theme.vars[name];
     if (value) root.style.setProperty(token, value);
   }
-  // Text on the accent is worked out from the accent, as the app does, never
-  // taken from the theme: an orange accent needs black text, not white.
+  // Text on the accent is worked out from the accent, as the app does, never taken from the theme: an orange accent needs black text, not white.
   if (theme.vars.accent) root.style.setProperty("--accent-text", contrastText(theme.vars.accent));
   for (const [type, color] of Object.entries(theme.entityColors || {})) {
     if (color) root.style.setProperty(`--entity-${type}`, color);

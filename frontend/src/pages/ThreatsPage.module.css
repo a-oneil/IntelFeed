@@ -1,7 +1,4 @@
-/* Full-bleed padded column like every other workbench route — the LAYOUT owns
-   the scroll container. Making this its own scroll region (flex:1 + overflow)
-   inside a layout that never constrains its height meant nothing scrolled and
-   the padding vanished. */
+/* Full-bleed padded column like every other workbench route; the layout owns the scroll container. Making this its own scroll region (flex:1 + overflow) inside a layout that never constrains its height means nothing scrolls and the padding disappears. */
 .page {
   padding: var(--sp-5) 20px 64px;
   display: flex;
@@ -39,8 +36,7 @@
   font-size: 13px;
 }
 
-/* Manage-stack slide-over: stack membership is a setting of the view, not a
-   destination of its own. */
+/* Manage-stack slide-over: stack membership is a setting of this view, not a page of its own. */
 .backdrop {
   position: fixed;
   inset: 0;

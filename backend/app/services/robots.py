@@ -53,9 +53,9 @@ def _rule_allows(parser: RobotFileParser, useragent: str, url: str) -> bool:
     """Evaluate robots.txt rules with most-specific-match precedence.
 
     ``RobotFileParser.can_fetch`` returns the *first* matching rule, so a file
-    written as ``Allow: /`` followed by ``Disallow: /admin/`` — an extremely
-    common shape — reads as "everything is permitted" and we would happily
-    crawl the disallowed paths. RFC 9309 §2.2.2 says the longest matching path
+    written as ``Allow: /`` followed by ``Disallow: /admin/`` — a very
+    common shape — reads as "everything is permitted" and the crawler would
+    fetch the disallowed paths. RFC 9309 §2.2.2 says the longest matching path
     wins, with ties going to Allow, which is what this implements.
     """
     if parser.disallow_all:

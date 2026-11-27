@@ -22,9 +22,7 @@ export function useSidebarCustomization() {
     for (const builtin of DEFAULT_SECTION_ORDER) {
       if (!result.includes(builtin)) result.push(builtin);
     }
-    // Drop anything that isn't a built-in section. Orders persisted before
-    // custom link groups were removed still carry their ids; filtering here
-    // means those stale entries simply stop resolving instead of leaving gaps.
+    // Drop anything that isn't a built-in section. Orders saved before custom link groups were removed still carry their ids; filtering here drops those stale entries instead of leaving gaps.
     const builtinIds = new Set(DEFAULT_SECTION_ORDER);
     return result.filter((id) => builtinIds.has(id));
   }, [settings.sidebar_section_order]);

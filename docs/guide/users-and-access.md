@@ -79,7 +79,7 @@ Full details: [Public read-only mode](../public-read-only-mode.md).
   ([Notes and sharing](notes-and-sharing.md)).
 - **Tags:** tag names are shared. A *global* tag has one set of assignments
   everyone sees; a *personal* tag's assignments are yours alone
-  ([Settings and personalising](settings.md#tags)).
+  ([Settings and personalizing](settings.md#tags)).
 
 ## One feed list, or one per person
 

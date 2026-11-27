@@ -1,4 +1,4 @@
-"""Campaign sources — standing intake owned by the campaign itself.
+"""Campaign sources: rules, owned by the campaign itself, that keep adding matching articles to it.
 
 A linked saved search belongs to one analyst and can only be linked if it
 already exists. These tests pin the three alternatives that belong to the
@@ -66,8 +66,8 @@ async def _entry(db_session: AsyncSession, feed: Feed, guid: str, day: int = 1) 
 async def test_following_a_story_pulls_in_the_waves_you_have_not_accepted(
     client: AsyncClient, headers: dict, db_session: AsyncSession, feed: Feed, campaign: Campaign, user: User
 ):
-    """The case a saved search cannot express: you accepted this story, so its
-    later waves belong too — without re-accepting a suggestion every time."""
+    """A saved search cannot express this: once a story is followed, its later
+    articles are added too, without accepting a suggestion each time."""
     thread = StoryThread(slug="a-running-story", title="A running story", status="open", entry_count=4, source_count=3)
     db_session.add(thread)
     await db_session.flush()
@@ -153,7 +153,7 @@ async def test_an_entity_source_needs_a_type(client: AsyncClient, headers: dict,
 async def test_following_the_same_thing_twice_is_a_conflict(
     client: AsyncClient, headers: dict, db_session: AsyncSession, campaign: Campaign
 ):
-    """Two sources racing to add the same articles is never what was meant."""
+    """Two sources adding the same articles is never intended, so the second one is a 409."""
     actor = ThreatActor(name="Twice", aliases=[], country="Unknown")
     db_session.add(actor)
     await db_session.flush()
@@ -169,7 +169,7 @@ async def test_following_the_same_thing_twice_is_a_conflict(
 async def test_a_closed_campaign_stops_collecting(
     client: AsyncClient, headers: dict, db_session: AsyncSession, feed: Feed, campaign: Campaign
 ):
-    """Closing a campaign that kept growing would quietly undo the act of closing it."""
+    """A closed campaign's sources stop syncing; if it kept growing, closing it would mean nothing."""
     from app.services.campaign_sources import sync_campaign_sources
 
     actor = ThreatActor(name="Still Active", aliases=[], country="Unknown")
@@ -198,7 +198,7 @@ async def test_a_closed_campaign_stops_collecting(
 async def test_unfollowing_keeps_the_articles_it_already_added(
     client: AsyncClient, headers: dict, db_session: AsyncSession, feed: Feed, campaign: Campaign
 ):
-    """They were added to the campaign, not borrowed by the source."""
+    """The articles belong to the campaign, not to the source, so deleting the source keeps them."""
     actor = ThreatActor(name="Unfollowed", aliases=[], country="Unknown")
     db_session.add(actor)
     await db_session.flush()
@@ -252,8 +252,8 @@ async def test_pausing_a_source_keeps_the_row_and_its_history(
 async def test_suggestions_come_from_what_the_campaign_already_declared(
     client: AsyncClient, headers: dict, db_session: AsyncSession, feed: Feed, campaign: Campaign, user: User
 ):
-    """Entities it named, and stories it already holds part of — each with the
-    number of articles following it would add, so the click is informed."""
+    """Suggestions are the entities the campaign names and the stories it already
+    holds part of, each with the number of articles following it would add."""
     actor = ThreatActor(name="Named Subject", aliases=[], country="Unknown")
     db_session.add(actor)
     await db_session.flush()
@@ -320,8 +320,8 @@ def _meili(*entries) -> dict:
 async def test_a_typed_query_is_campaign_owned_intake(
     client: AsyncClient, headers: dict, db_session: AsyncSession, feed: Feed, campaign: Campaign
 ):
-    """The reach of a saved search without the ownership: no SavedSearch row is
-    created, the text lives on the campaign, and the row is readable as itself."""
+    """A query source matches like a saved search but belongs to the campaign: no
+    SavedSearch row is created, the text is stored on the source, and the label is the query."""
     from app.models.saved_search import SavedSearch
 
     hits = [await _entry(db_session, feed, f"query-{i}") for i in range(3)]
@@ -339,14 +339,14 @@ async def test_a_typed_query_is_campaign_owned_intake(
     assert body["ref_id"] is None
     assert body["entries_added"] == 3
 
-    # Nobody's personal saved-search list grew to make this work.
+    # No SavedSearch row was created for any user.
     assert (await db_session.execute(select(SavedSearch))).scalars().all() == []
 
 
 async def test_a_query_source_recomputes_rather_than_diffing(
     client: AsyncClient, headers: dict, db_session: AsyncSession, feed: Feed, campaign: Campaign
 ):
-    """An article that starts matching later still arrives.
+    """An article that starts matching later is still added.
 
     The saved-search sweep diffs against what the campaign holds at the moment
     it runs, so an article it missed once it misses forever. A query source
@@ -369,7 +369,7 @@ async def test_a_query_source_recomputes_rather_than_diffing(
 
 
 async def test_a_query_that_does_not_parse_is_refused(client: AsyncClient, headers: dict, campaign: Campaign):
-    """It would resolve to the empty set forever, and the row would not say why."""
+    """An unparseable query would match nothing forever, and the row would not say why."""
     resp = await client.post(
         f"/api/campaigns/{campaign.id}/sources",
         json={"kind": "query", "query": "akira AND"},
@@ -497,7 +497,8 @@ async def test_source_options_names_what_the_pickers_may_offer(client: AsyncClie
 async def test_preview_names_the_articles_a_query_would_add(
     client: AsyncClient, headers: dict, db_session: AsyncSession, feed: Feed, campaign: Campaign, user: User
 ):
-    """ "adds 700" tells you the size of a decision but not whether to make it."""
+    """The preview lists the articles, not just a count: a count gives the size of a
+    decision but not whether to make it."""
     held = await _entry(db_session, feed, "preview-held", day=1)
     fresh = await _entry(db_session, feed, "preview-new", day=5)
     db_session.add(CampaignEntry(campaign_id=campaign.id, entry_id=held.id, added_by=user.id))
@@ -523,7 +524,7 @@ async def test_preview_names_the_articles_a_query_would_add(
 
 
 async def test_preview_reports_a_parse_error_instead_of_failing(client: AsyncClient, headers: dict, campaign: Campaign):
-    """The UI previews as you type, and a half-typed query is not a failed request."""
+    """The UI previews as you type, so a half-typed query returns 200 with an error, not a failed request."""
     resp = await client.post(
         f"/api/campaigns/{campaign.id}/sources/preview",
         json={"kind": "query", "query": "half AND"},
@@ -560,8 +561,8 @@ async def test_preview_names_a_field_the_query_language_does_not_have(
 ):
     """`actor:` is not a field — the real one is `threat_actor:`. The planner
     folds the unknown one into a text term, so the query keeps answering with a
-    plausible number instead of failing. On a standing source that is the worst
-    kind of wrong, so the dry run says it out loud."""
+    plausible number instead of failing. On a source that keeps syncing that
+    mistake is easy to miss, so the dry run lists the unknown fields."""
     with patch("app.search.meili_builder.execute_entry_search", return_value=_meili()):
         resp = await client.post(
             f"/api/campaigns/{campaign.id}/sources/preview",
@@ -592,7 +593,7 @@ async def test_preview_of_a_sound_query_names_no_unknown_fields(
 async def test_preview_works_for_an_entity_the_campaign_never_named(
     client: AsyncClient, headers: dict, db_session: AsyncSession, feed: Feed, campaign: Campaign
 ):
-    """The thing the suggestions could never offer: an entity it does not hold."""
+    """Preview works for an entity the campaign does not hold, which the suggestions never offer."""
     actor = ThreatActor(name="Unrelated Actor", aliases=[], country="Unknown")
     db_session.add(actor)
     await db_session.flush()

@@ -30,10 +30,7 @@ function keysOf(items: (MagazineItem | DayDividerItem)[]): string[] {
   return items.map((i) => (i.type === "divider" ? `divider:${i.dayKey}` : i.type));
 }
 
-/**
- * Threads have to sit under a day like anything else, or the magazine grid's
- * dividers start lying about what is under them.
- */
+/** Threads have to sit under a day like anything else, or the magazine grid's dividers misreport what is under them. */
 describe("injectDayDividers with a thread row", () => {
   it("files a thread under its last beat, not its first", () => {
     const out = injectDayDividers(

@@ -68,11 +68,7 @@
   table-layout: fixed;
 }
 
-/* Desktop only — floor the table at the width its columns actually need
-   (computed per-table by EntityTableSection from column widths) so
-   table-layout:fixed doesn't crush the unspecified Name column. Below
-   1024px the stacked-card layout further down takes over and this must
-   NOT apply there, or it'd force horizontal scroll on mobile cards. */
+/* Desktop only: floor the table at --min-table-width so table-layout:fixed doesn't crush the unspecified Name column. Nothing in src sets that property, so the 700px fallback applies. At 1024px and below the stacked-card layout further down takes over, and this must not apply there or it would force horizontal scroll on mobile cards. */
 @media (min-width: 1025px) {
   .entityTable {
     min-width: var(--min-table-width, 700px);
@@ -165,8 +161,7 @@
   font-size: var(--fs-base);
 }
 
-/* External-reference cell inside the entity tables (Wikipedia, Malpedia, repo,
-   vendor site). Clicks are stopped in JS so they don't also open the profile. */
+/* External-reference cell inside the entity tables (Wikipedia, Malpedia, repo, vendor site). Clicks are stopped in JS so they don't also open the profile. */
 .entityLink {
   color: var(--accent);
   font-size: var(--fs-base);
@@ -186,12 +181,7 @@
   white-space: nowrap;
 }
 
-/* .badgeCritical/High/Medium/Low/Info deleted — severity now comes from
-   getSeverityTint() + <Chip tone="toned">, on the --severity-* ramp. Verified
-   dead: no reference outside this file, and no dynamic `styles[...]` lookup in
-   WorkbenchPage.tsx, EntityTableSection.tsx or WatchlistPanel.module.css
-   (which composes only `badge` and `badgeType`).
-   `.badge` and `.badgeType` are KEPT for that composes: chain. */
+/* There are no .badgeCritical/High/Medium/Low/Info classes: severity comes from getSeverityTint() + <Chip tone="toned">, on the --severity-* ramp. `.badge` is kept because WorkbenchPage.tsx uses it. */
 
 .badgeType {
   background: var(--bg-tertiary);
@@ -206,9 +196,7 @@
   max-width: 100%;
 }
 
-/* Now a <Chip truncate> — the shrink/ellipsis recipe (flex 0 1 auto,
-   min-width 0, overflow, text-overflow) is the primitive's `truncate`. Only
-   the cap on how wide one alias may get is local. */
+/* Rendered as a <Chip truncate>: the shrink/ellipsis rules (flex 0 1 auto, min-width 0, overflow, text-overflow) come from the primitive's `truncate`. Only the cap on how wide one alias may get is local. */
 .aliasTag {
   max-width: 130px;
 }
@@ -243,9 +231,7 @@
   border: 1px solid var(--text-muted);
 }
 
-/* Now a <Chip> modifier. Doubled selector on purpose: `color` is a property
-   Chip's base class also sets, so a single class would win only by bundle
-   order. The fill is Chip's own bg-tertiary, so only muted text is left. */
+/* A <Chip> modifier. The selector is doubled on purpose: Chip's base class also sets `color`, so a single class would win only by bundle order. The fill is Chip's own bg-tertiary, so only the muted text color is set here. */
 .badgeMuted.badgeMuted {
   color: var(--text-muted);
 }
@@ -426,8 +412,7 @@
   opacity: 0.9;
 }
 
-/* AI-driven actions: accent outline + sparkle, matching the copilot chrome —
-   solid accent stays reserved for the page's one primary create action. */
+/* AI-driven actions: accent outline + sparkle icon, matching the copilot's styling. Solid accent is reserved for the page's one primary create action. */
 .btnAI {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
@@ -479,8 +464,7 @@
   }
 }
 
-/* .badgeDraft / .badgePublished deleted — no consumer anywhere in src, static
-   or dynamic. */
+/* There are no .badgeDraft / .badgePublished classes: nothing in src referenced them, statically or dynamically. */
 
 /* Bulk action bar */
 .bulkBar {
@@ -761,7 +745,7 @@
   gap: var(--sp-2);
 }
 
-/* .keywordTag is a bare <Chip truncate> now — nothing local was left. */
+/* .keywordTag is a bare <Chip truncate>, so it has no local styles. */
 
 .expandedActions {
   display: flex;
@@ -849,9 +833,7 @@
   overflow: hidden;
 }
 
-/* Hosts a DataTable, which owns its own scroller — the pane must be a flex
-   column that can shrink, not a scroller of its own, or the sticky header
-   row scrolls away with the body. */
+/* Hosts a DataTable, which owns its own scroller. The pane must be a flex column that can shrink, not a scroller of its own, or the sticky header row scrolls away with the body. */
 .reqTablePane {
   flex: 1;
   min-width: 0;
@@ -862,8 +844,7 @@
 }
 
 .reqDetailPane {
-  /* Width rides a custom property so the narrow-screen rules below can still
-     cap it and, at phone width, hand the column back to the stacked layout. */
+  /* Width comes from a custom property so the narrow-screen rules below can still cap it and, at phone width, hand the column back to the stacked layout. */
   width: var(--req-detail-w, 420px);
   min-width: var(--req-detail-w, 420px);
   border-left: 1px solid var(--border);
@@ -1080,7 +1061,7 @@
 
 @media (max-width: 1199px) {
   .reqDetailPane {
-    /* A dragged width still applies, but never past what this layout spares. */
+    /* A dragged width still applies, but is capped at 340px in this layout. */
     width: min(var(--req-detail-w, 420px), 340px);
     min-width: min(var(--req-detail-w, 420px), 340px);
   }
@@ -1149,19 +1130,12 @@
 }
 
 /* MITRE ID badge */
-/* Now a <Chip tone="toned" tint="var(--entity-ttp)">. The toned fill is
-   color-mix(tint 12%) — the same 12% the hardcoded rgba() carried, but it now
-   follows the token instead of a frozen copy of it. Only the mono face is
-   local. */
+/* Rendered as a <Chip tone="toned" tint="var(--entity-ttp)">. The toned fill is color-mix(tint 12%), so it follows the token instead of a hardcoded rgba() copy of it. Only the monospace font is local. */
 .mitreId {
   font-family: monospace;
 }
 
-/* Exploit availability badges. The three coloured states are <Chip
-   tone="toned"> tints now (the same literals they always carried — exploit
-   availability is its own axis, not the --severity-* ramp). Only the neutral
-   state keeps a class, for its muted text; doubled selector because Chip's
-   base sets `color` too. */
+/* Exploit availability badges. The three colored states are <Chip tone="toned"> tints with literal colors, because exploit availability is its own axis, not the --severity-* ramp. Only the neutral state keeps a class, for its muted text; the selector is doubled because Chip's base class sets `color` too. */
 .exploitNone.exploitNone {
   color: var(--text-muted);
 }
@@ -1196,8 +1170,7 @@
 }
 
 /* Telemetry Catalog */
-/* No inset of its own — `.contentBody` already supplies the page's 20px, and
-   stacking both started the cards 36px in while the page title sat at 20. */
+/* No padding of its own: `.contentBody` already supplies the page's 20px, and adding more would start the cards further in than the page title. */
 .telemetryCatalog {
   display: flex;
   flex-direction: column;
@@ -1282,8 +1255,7 @@
   min-width: 0;
 }
 
-/* Opens the source's notes drawer. Quiet until the row is hovered, unless the
-   source already has notes. */
+/* Opens the source's notes drawer. Muted until the row is hovered, unless the source already has notes. */
 .telemetryNotesBtn {
   margin-left: auto;
   flex-shrink: 0;
@@ -1372,8 +1344,7 @@
   width: 32px;
 }
 
-/* Stacked-card layout for entity tables — applied to phones AND iPad-portrait
-   sizes where 6-7 column tables get visually cramped. */
+/* Stacked-card layout for entity tables, applied to phones and iPad-portrait sizes where 6-7 column tables get cramped. */
 @media (max-width: 1024px) {
   .entityTable {
     display: block;
@@ -1427,8 +1398,7 @@
     font-size: var(--fs-sm);
   }
 
-  /* CVE description / affected-products cells force inline ellipsis via inline
-     style; let them wrap and breathe inside the card */
+  /* CVE description / affected-products cells set an ellipsis via inline style; let them wrap inside the card. */
   .entityTable td > span[style*="ellipsis"] {
     white-space: normal !important;
     max-width: none !important;
@@ -1455,11 +1425,9 @@
     overflow-x: hidden;
   }
 
-  /* The workbench sidebar is not rendered at all under 767px — MobileNavSheet
-     hosts the same nav instead, and owns the off-canvas slide. The rules that
-     used to turn this column into a drawer went with it. */
+  /* The workbench sidebar is not rendered at 767px and below: MobileNavSheet hosts the same nav and owns the off-canvas slide, so there are no drawer rules for this column here. */
 
-  /* Restore labels hidden by the 768px query */
+  /* Restore labels hidden by the earlier 767px query */
   .sectionHeader {
     display: flex;
   }
@@ -1684,8 +1652,7 @@
 }
 
 
-/* Slim mobile section header (EntityTableSection) — single row; actions fold
-   behind a ⋯ menu. Rendered only under useIsMobile(). */
+/* Slim mobile section header (EntityTableSection): a single row, with actions behind a ⋯ menu. Rendered only when useIsMobile() is true. */
 
 
 .headerActionsBtn {
@@ -1738,10 +1705,8 @@
 
 
 /* ── The workbench's docked reader ─────────────────────────────────────────
-   The page on the left acts as the entry list; the reader rides the right,
-   the same pairing the rest of the app uses. */
-/* Fullscreen reading: the reader claims the row and its rail is the only
-   thing left beside it — the page it came from is hidden, not unmounted. */
+   The page on the left acts as the entry list and the reader sits on the right, the same pairing the rest of the app uses. */
+/* Fullscreen reading: the reader takes the whole row and its rail is the only thing beside it. The page it came from is hidden, not unmounted. */
 .mainContentHidden {
   display: none;
 }
@@ -1752,16 +1717,13 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  /* Hidden, not auto: the reader scrolls its own article pane and keeps its
-     toolbar pinned — same deal as the three-panel reader in MainLayout. A
-     scroller here would nest a second one and take the toolbar with it. */
+  /* Hidden, not auto: the reader scrolls its own article pane and keeps its toolbar pinned, like the three-panel reader in MainLayout. A scroller here would nest a second one and scroll the toolbar away with it. */
   overflow: hidden;
   border-left: 1px solid var(--border);
   background: var(--bg-primary);
 }
 
-/* Must follow .dockedReader — same specificity, so source order decides
-   whether the pane fills the row or shrink-wraps its content. */
+/* Must follow .dockedReader: same specificity, so source order decides whether the pane fills the row or shrink-wraps its content. */
 .dockedReaderExpanded {
   flex: 1 1 auto;
   width: auto;
@@ -1835,9 +1797,7 @@
 }
 
 @media (max-width: 767px) {
-  /* Stacked, five of these eat ~400px — more than half a phone screen — and
-     leave the table below with almost no room to scroll. Pan them sideways
-     as one snapping strip instead, the same shape the entry toolbar uses. */
+  /* Stacked, five of these take ~400px, more than half a phone screen, and leave the table below with almost no room to scroll. Instead they scroll sideways as one snapping strip, the same layout the entry toolbar uses. */
   .recipeRow {
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -1853,8 +1813,7 @@
   }
 
   .recipeCard {
-    /* Slightly under the pane so the next card peeks and the strip reads as
-       scrollable without a visible scrollbar. */
+    /* Slightly narrower than the pane so the next card shows at the edge, which signals the strip scrolls without a visible scrollbar. */
     flex: 0 0 76%;
     max-width: none;
     scroll-snap-align: start;

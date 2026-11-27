@@ -176,8 +176,7 @@
   font-size: var(--fs-md);
 }
 .namelink:hover { color: var(--accent); text-decoration: underline; }
-/* Ledger values (cmdlines, URLs, scripts) are attacker-length strings: mono,
-   clipped in the cell, full value on the title tooltip. */
+/* Ledger values (command lines, URLs, scripts) can be very long: monospace, clipped in the cell, full value in the title tooltip. */
 .nameMono {
   font-family: var(--font-mono);
   font-size: var(--fs-base);

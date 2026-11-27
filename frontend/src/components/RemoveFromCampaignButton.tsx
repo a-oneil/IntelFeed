@@ -4,12 +4,9 @@ import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import styles from "./UnlinkArticleButton.module.css";
 
 /**
- * The campaign profile's row action.
+ * The row action on the campaign profile's article list.
  *
- * Its sibling, UnlinkArticleButton, severs an extraction link — it says "this
- * article does not mention that entity". A campaign article was never matched;
- * an analyst put it there, so the only thing this can mean is taking it back
- * out. Different verb, different endpoint, same affordance on the row.
+ * Its sibling, UnlinkArticleButton, removes an extraction link, meaning "this article does not mention that entity". A campaign article was never matched automatically; an analyst added it, so the only meaning here is removing it from the campaign again. It uses a different label and endpoint, in the same place on the row.
  */
 export function RemoveFromCampaignButton({ campaignId, entryId }: { campaignId: string; entryId: string }) {
   const qc = useQueryClient();

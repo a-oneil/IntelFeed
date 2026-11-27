@@ -72,13 +72,13 @@ async def store_tools(
     """
     stored: list[tuple[Tool, bool]] = []
 
-    # Evidence door (2026-09): a tool is software WIELDED during an intrusion,
-    # so the payload has to name an operator and quote the sentence showing
-    # them using it. Small models comply with a field they must fill far
-    # better than with a list of things not to do — this is what drains the
-    # advisory-driven flood of dependency and vulnerable-package names. The
-    # setting is the escape hatch if a provider stops filling the fields at
-    # all.
+    # Evidence requirement (2026-09): a tool is software USED during an
+    # intrusion, so the payload has to name an operator and quote the sentence
+    # showing them using it. Small models comply with a field they must fill far
+    # better than with a list of things not to do; this is what keeps the
+    # dependency and vulnerable-package names from advisories out of the tool
+    # list. The setting turns the requirement off if a provider stops filling
+    # the fields at all.
     evidence_required = bool(await get_setting("ai_tool_evidence_required", db))
     dropped_no_evidence = 0
 

@@ -11,8 +11,9 @@ Config keys (``ai_providers.config`` / assignment config):
 * ``structured_output`` — one of ``json_schema`` (default), ``json_schema_strict``,
   ``json_object``, ``prompt``. See module-level ``_STRUCTURED_OUTPUT_MODES``.
   On a 400 that looks like a ``response_format`` rejection, ``complete()``
-  retries once, stepping down the chain strict → json_schema → json_object →
-  prompt, and logs a warning naming the mode that worked.
+  retries with the next mode down the chain strict → json_schema → json_object →
+  prompt, logging a warning for each rejected mode and an info line naming
+  the mode that worked.
 * ``schema_name`` — ``json_schema.name`` sent to the server (must match
   ``^[A-Za-z0-9_-]{1,64}$``); default ``"intelfeed_output"``.
 * ``strict_strip_keywords`` — keywords stripped from the schema before strict
@@ -589,9 +590,9 @@ class OpenAICompatibleProvider(AIProvider):
     async def embed(self, texts: list[str], model: str) -> list[list[float]]:
         """``POST /embeddings`` — one vector per input, in input order.
 
-        A partial or reordered response is an error rather than something to
-        paper over (same rule as ``OllamaProvider.embed``): a vector silently
-        attached to the wrong entry would poison every thread it lands in.
+        A partial or reordered response raises rather than being patched up
+        (same rule as ``OllamaProvider.embed``): a vector silently attached to
+        the wrong entry would corrupt every story thread it is clustered into.
         """
         if not texts:
             return []

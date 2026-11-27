@@ -1,8 +1,4 @@
-/**
- * EntityMergeIntoModal — search for another profile of the same type and merge
- * it with the one currently being viewed. The user chooses which profile is
- * kept; the other is absorbed (entry links, aliases, relationships) and deleted.
- */
+/** EntityMergeIntoModal — search for another profile of the same type and merge it with the one currently being viewed. The user chooses which profile is kept; the other's entry links, aliases and relationships move to it and the other is deleted. */
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {

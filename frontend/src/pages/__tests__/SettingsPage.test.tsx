@@ -9,8 +9,7 @@ vi.mock("@/stores/authStore", () => ({
     selector({ user: { role: "admin" }, isAuthenticated: () => true }),
 }));
 
-// The console itself is exercised in EngineSection.test.tsx — here we only
-// care that the Settings section resolves and mounts it.
+// The console itself is tested in EngineSection.test.tsx; this file only checks that the Settings section resolves and mounts it.
 vi.mock("@/components/engine/EngineSection", () => ({
   EngineSection: () => <div data-testid="engine-section" />,
 }));

@@ -94,15 +94,12 @@ export function EntryReader({ entryId }: EntryReaderProps) {
   const translateEntry = useTranslateEntry();
   const [showTranslated, setShowTranslated] = useState(false);
   const setSelectedEntry = useUIStore((s) => s.setSelectedEntry);
-  // Every "open that other article" link in the reader routes through this:
-  // docked in the workbench it swaps the dock, in the feed it moves the
-  // list selection. Writing the feed selection while docked was a dead click.
+  // Every "open that other article" link in the reader routes through this: docked in the workbench it swaps the dock's entry, in the feed it moves the list selection. Writing the feed selection while docked would have no visible effect.
   const openEntry = useOpenEntry();
   const openThread = useOpenThread();
   const openCopilotWith = useUIStore((s) => s.openCopilotWith);
   const playTrack = usePlayerStore((s) => s.play);
-  // Settings → Reading → "Open links in new tab" (article-body links are
-  // handled inside SafeHTML).
+  // Settings → Reading → "Open links in new tab" (article-body links are handled inside SafeHTML).
   const openLinksNewTab = useReadingPrefs().open_links_new_tab;
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const activeReaderPanel = useUIStore((s) => s.activeReaderPanel);
@@ -119,8 +116,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
   const navTrail = useUIStore((s) => s.entryNavTrail);
   const navTrailIndex = useUIStore((s) => s.entryNavTrailIndex);
   const currentNavIndex = navIds.indexOf(entryId);
-  // Prev/Next follow the same list-then-trail rule as j/k, so they stay live on
-  // an article auto-read out of the list rather than greying out under you.
+  // Prev/Next follow the same list-then-trail rule as j/k, so they stay enabled on an article that dropped out of the list after being auto-marked read, instead of becoming disabled.
   const hasPrev = !!adjacentEntryId("prev", entryId, navIds, navTrail, navTrailIndex);
   const hasNext = !!adjacentEntryId("next", entryId, navIds, navTrail, navTrailIndex);
   const { data: feedsData } = useFeeds();
@@ -152,13 +148,10 @@ export function EntryReader({ entryId }: EntryReaderProps) {
   const stopAudio = usePlayerStore((s) => s.stop);
   const readAloudEngine = useUIStore((s) => s.readAloudEngine);
   const tts = useTts();
-  // Public read-only mode: a visitor reads, nothing more. No personal state,
-  // no AI, nothing that writes or makes the server do work.
+  // Public read-only mode: a visitor can only read. No personal state, no AI, nothing that writes or makes the server do work.
   const isVisitor = useIsVisitor();
   const existingAudio = useExistingTts(entryId, isVisitor);
-  // The Intel panel is the only one a visitor gets (AI, notes, tags and the
-  // entity tools all write or show private work); a shortcut or a persisted
-  // choice from a signed-in session must not open another.
+  // The Intel panel is the only one a visitor gets (AI, notes, tags and the entity tools all write or show private work); a shortcut or a persisted choice from a signed-in session must not open another.
   useEffect(() => {
     if (isVisitor && activeReaderPanel && activeReaderPanel !== "intel") setActiveReaderPanel(null);
   }, [isVisitor, activeReaderPanel, setActiveReaderPanel]);
@@ -297,9 +290,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
         }
       }
     }
-    // Prefer matched_names (the exact surface forms the backend detected with
-    // word-boundary checks). Fall back to name + aliases only when no matched_names
-    // are recorded — e.g. AI-extracted entities or pre-migration rows.
+    // Prefer matched_names (the exact surface forms the backend detected with word-boundary checks). Fall back to name + aliases only when no matched_names are recorded, e.g. AI-extracted entities or pre-migration rows.
     const pushFor = <T extends { id: string; name: string; aliases?: string[] | null; matched_names?: string[] | null }>(
       type: HighlightEntity["type"],
       item: T,
@@ -324,9 +315,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
     if (entryTools) for (const tool of entryTools) pushFor("tool", tool, toolMeta(tool));
     if (entryCWEs) {
       for (const c of entryCWEs) {
-        // Id only. Highlighting the catalog's alternate terms ("Use After Free",
-        // "SQL Injection") in article prose is the same dictionary-word problem
-        // the autolinker refuses for the same reason.
+        // Id only. Highlighting the catalog's alternate terms ("Use After Free", "SQL Injection") in article prose would match ordinary words, the same dictionary-word problem the autolinker avoids by refusing those matches.
         entities.push({ id: c.id, type: "cwe", value: c.cwe_id, meta: cweMeta(c) });
       }
     }
@@ -337,11 +326,8 @@ export function EntryReader({ entryId }: EntryReaderProps) {
         if (m.mitre_id) entities.push({ id: m.id, type: "mitigation", value: m.mitre_id, meta });
       }
     }
-    // Confirmed observables only — candidates never highlight. The article
-    // usually prints the defanged surface form, so match on that AND the
-    // canonical value; both map to the same ledger row.
-    // An ioc_list entry carries hundreds of sightings; a 10,000-branch
-    // alternation regex freezes the tab. The panel still lists them all.
+    // Confirmed observables only; candidates never highlight. The article usually prints the defanged surface form, so match on that AND the canonical value; both map to the same ledger row.
+    // An ioc_list entry carries hundreds of sightings, and a 10,000-branch alternation regex freezes the tab, so observables highlight only when the entry has 200 or fewer. The panel still lists them all.
     const observableItems = (entryObservables?.items?.length ?? 0) <= 200 ? (entryObservables?.items ?? []) : [];
     for (const o of observableItems) {
       const meta = observableMeta(o);
@@ -486,8 +472,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
           <button
             className={styles.closeBtn}
             onClick={() => {
-              // The reader also lives docked in the workbench, where Close must
-              // clear that dock's entry rather than the main list selection.
+              // The reader also lives docked in the workbench, where Close must clear that dock's entry rather than the main list selection.
               setSelectedEntry(null);
               useIntelStore.getState().closeWorkbenchReader();
             }}
@@ -592,8 +577,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
               title="Ask the copilot about this article"
               onClick={() =>
                 openCopilotWith({
-                  // Context-only seed: pin the article and let the analyst ask
-                  // their own question — no auto-submitted canned prompt.
+                  // Context-only seed: pin the article and let the analyst ask their own question, with no auto-submitted canned prompt.
                   context: { entry_id: entryId, label: entry?.title },
                   lockContext: true,
                 })
@@ -766,8 +750,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
               })()}
               {entry.feed_title}
             </FeedNameMenuButton>
-            {/* The feed's reliability letter lives in the grade (B2), so the
-                feed name carries no separate badge. */}
+            {/* The feed's reliability letter is part of the grade (B2), so the feed name carries no separate badge. */}
             <InfoGradeChip
               entryId={entry.id}
               reliability={feedsData?.items.find((s) => s.id === entry.feed_id)?.reliability_rating}
@@ -778,8 +761,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
               note={entry.info_rating_note}
               readOnly={isVisitor}
             />
-            {/* The timestamp doubles as the way into the pipeline status popover
-                (signed-in only: a visitor gets the date). */}
+            {/* The timestamp also opens the pipeline status popover (signed-in only: a visitor gets the date). */}
             {isVisitor ? (
               entry.published_at && <span className={styles.date}>{formatDateTime(entry.published_at)}</span>
             ) : (
@@ -831,16 +813,14 @@ export function EntryReader({ entryId }: EntryReaderProps) {
           {((entry.priority_score != null && (entry.priority_signals?.length ?? 0) > 0) ||
             entry.exposure) && (
             <WhyRankedCard
-              // Remount per entry so the card returns to its collapsed summary
-              // when the reader moves on.
+              // Remount per entry so the card returns to its collapsed summary when the reader moves on.
               key={entryId}
               score={entry.priority_score ?? 0}
               raw={entry.priority_raw}
               signals={entry.priority_signals ?? []}
               exposure={entry.exposure}
               personal={entry.personal}
-              // Without it the card has no votes: a visitor's ranking is the
-              // system score alone.
+              // Without an entryId the card has no votes: a visitor's ranking is the system score alone.
               entryId={isVisitor ? undefined : entryId}
             />
           )}
@@ -867,18 +847,14 @@ export function EntryReader({ entryId }: EntryReaderProps) {
         {(() => {
           const visualMedia = entry.media?.filter((m) => {
             if (m.media_type === "photo" || m.media_type === "image") return true;
-            // A "video" record pointing at a watch/embed page (e.g. a YouTube
-            // watch URL) can't be played by a <video> tag — it renders a "No
-            // video with supported format and MIME type found" error. These
-            // already play via the iframe above, so drop them from the gallery.
+            // A "video" record pointing at a watch/embed page (e.g. a YouTube watch URL) can't be played by a <video> tag; it renders a "No video with supported format and MIME type found" error. These already play via the iframe above, so drop them from the gallery.
             if (m.media_type === "video") return !/(?:youtube\.com|youtu\.be)/i.test(m.url);
             return false;
           })
             // Telegram media is login-only: a visitor gets the post text, not a broken image.
             .filter((m) => !isVisitor || !m.url.startsWith("/api/telegram-media/")) ?? [];
           if (visualMedia.length === 0) return null;
-          // /api/telegram-media is auth-gated; img/video tags can't pass the bearer
-          // header, so encode the access token in the query string for media URLs.
+          // /api/telegram-media is auth-gated; img/video tags can't send the bearer header, so encode the access token in the query string for media URLs.
           const accessToken = useAuthStore.getState().accessToken;
           const sign = (u: string): string => {
             if (!accessToken || !u.startsWith("/api/telegram-media/")) return u;
@@ -1063,9 +1039,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                         {item.published_at ? ` · ${formatDateTime(new Date(item.published_at * 1000))}` : ""}
                       </span>
                     </button>
-                    {/* A neighbour that already belongs to a story is a way into
-                        that story, not just a label. Its own element because a
-                        button cannot be nested inside one. */}
+                    {/* A neighbor that already belongs to a story links into that story, not just a label. It is a separate element because a button cannot be nested inside another button. */}
                     {item.thread_slug && (
                       <button
                         className={styles.similarThread}
@@ -1086,10 +1060,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
       </article>
 
       {activeReaderPanel && (() => {
-        /* Rail on the panel’s left edge, same shared control the sidebar and
-           copilot rails use — here it swings the panel between full width and
-           its resizable half. Maximized, the panel covers the reader, so the
-           rail rides along inside it. The × in the header still closes. */
+        /* Rail on the panel's left edge, the same shared control the sidebar and copilot rails use. Here it toggles the panel between full width and its resizable half. When maximized, the panel covers the reader, so the rail moves inside it. The × in the header still closes the panel. */
         const rail = !isMobile && (
           <RailToggle
             side="right"

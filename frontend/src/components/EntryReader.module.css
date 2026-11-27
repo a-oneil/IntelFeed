@@ -23,10 +23,7 @@
   position: sticky;
   top: 0;
   z-index: 10;
-  /* One scroll strip for the whole bar — Close and prev/next scroll along
-     with the actions instead of pinning while only the right side pans.
-     The scrollbar is hidden so it can't eat into the bar's height; the strip
-     still pans with trackpad/wheel/touch. */
+  /* One scroll strip for the whole bar: Close and prev/next scroll along with the actions instead of staying pinned while only the right side scrolls. The scrollbar is hidden so it can't eat into the bar's height; the strip still scrolls with trackpad, wheel and touch. */
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -137,8 +134,7 @@
   flex-shrink: 0;
 }
 
-/* Maximized, the panel covers the reader — the collapse rail comes with it,
-   pinned to the edge it would otherwise sit on. */
+/* When maximized, the panel covers the reader, so the collapse rail moves inside it, pinned to the edge it would otherwise sit on. */
 .sidePanelRailMaximized {
   position: absolute;
   left: 0;
@@ -678,8 +674,7 @@
   gap: var(--sp-1);
 }
 
-/* The neighbour and the story it belongs to are two destinations, so they are
-   two controls — stacked, sharing one hover surface. */
+/* The neighbor and the story it belongs to are two destinations, so they are two controls, stacked and sharing one hover surface. */
 .similarRow {
   display: flex;
   flex-direction: column;
@@ -717,8 +712,7 @@
   color: var(--text-muted);
 }
 
-/* Cosine match on embedding-backed results — quiet, but the number is the
-   reason the row is here. */
+/* Cosine similarity on embedding-backed results: muted, but the number is the reason the row is listed. */
 .similarMatch {
   color: var(--accent-intel);
   font-variant-numeric: tabular-nums;

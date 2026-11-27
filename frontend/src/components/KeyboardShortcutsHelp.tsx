@@ -37,9 +37,7 @@ const SHORTCUTS = [
   ]},
 ];
 
-/** What a visitor's keys do: moving through articles and the intel panel.
- *  Read state, stars, tags, export, AI, notes, search and the palette are
- *  signed-in only. */
+/** The keys a visitor can use: moving through articles and the intel panel. Read state, stars, tags, export, AI, notes, search and the palette are signed-in only. */
 const VISITOR_KEYS = new Set(["j / \u2193", "k / \u2191", "o / Enter", "w", "Escape", "?"]);
 const VISITOR_SHORTCUTS = SHORTCUTS.map((section) => ({
   ...section,

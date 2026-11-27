@@ -11,11 +11,7 @@ interface CampaignMenuButtonProps {
   title?: string;
 }
 
-/**
- * "+ Campaign" button with its add-to-campaign dropdown (existing campaigns,
- * inline create). Shared between the Intel panel action bar and the AI panel's
- * suggested actions.
- */
+/** "+ Campaign" button with its add-to-campaign dropdown (existing campaigns, inline create). Shared between the Intel panel action bar and the AI panel's suggested actions. */
 export function CampaignMenuButton({ entryId, buttonClassName, children, title }: CampaignMenuButtonProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);

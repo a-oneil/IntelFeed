@@ -62,8 +62,7 @@ describe("useStaleBundle", () => {
   });
 
   it("does not even ask under the dev server", async () => {
-    // The stamp is frozen at dev-server start while HMR keeps the code
-    // current, so a mismatch there is routine and means nothing.
+    // The stamp is frozen at dev-server start while HMR keeps the code current, so a mismatch there is routine and means nothing.
     vi.stubGlobal("__STAMP_SOURCE__", "git");
     vi.stubGlobal("__GIT_SHA__", "aaaaaaaa");
 

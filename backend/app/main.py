@@ -422,7 +422,7 @@ _OPENAPI_TAG_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
             ("analytics", "Usage and content analytics."),
             ("telemetry-sources", "Telemetry source catalog for detection-rule requirements."),
             ("threat-board", "Intel → Rules: threats ranked by attention and new tradecraft."),
-            ("coverage-workspace", "Per-threat detection coverage: intel, behaviours, prior rules, sets."),
+            ("coverage-workspace", "Per-threat detection coverage: intel, behaviors, prior rules, sets."),
             ("ransomware", "Ransomware victim tracker: leak-site victims, landscape stats, and sync."),
             ("hygiene", "Data hygiene: quality reports and cleanup candidates."),
         ],
@@ -525,8 +525,8 @@ app.openapi = _openapi_with_tag_groups  # type: ignore[method-assign]
 # gets the shell plus a 401 on the spec fetch, and sees the sign-in notice.
 #
 # To restrict this to operators, swap get_current_user for get_admin_user below.
-# Note: do NOT reach for get_current_user_from_query here — it skips the token
-# blacklist check, so revoked tokens would still authenticate.
+# Do NOT use get_current_user_from_query here — it skips the token blacklist
+# check, so revoked tokens would still authenticate.
 _DOCS_TOKEN_JS = """
     function intelfeedToken() {
       try {
@@ -714,7 +714,7 @@ async def custom_redoc() -> HTMLResponse:
     return HTMLResponse(_REDOC_HTML)
 
 
-# Middleware (outermost first — Starlette applies bottom-up)
+# Middleware (listed innermost first — Starlette runs the last-added one outermost)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(AuditLoggingMiddleware)
 app.add_middleware(PrometheusMiddleware)

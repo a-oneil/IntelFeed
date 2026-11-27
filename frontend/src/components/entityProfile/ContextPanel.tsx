@@ -1,20 +1,9 @@
 /**
- * ContextPanel — what the enabled enrichment sources say about this entity,
- * one block per source, each item drawn by the display type its manifest
- * declares (fact / chips / table / timeline / link). No per-source code lives
- * here: a new source shows up by declaring outputs. Badge items go to the
- * header instead (ProfileHeader).
+ * ContextPanel — what the enabled enrichment sources say about this entity, one block per source, each item drawn by the display type its manifest declares (fact / chips / table / timeline / link). No per-source code lives here: a new source shows up by declaring outputs. Badge items go to the header instead (ProfileHeader).
  *
- * It is the Overview's Context section. Each source is a row that opens in
- * place: closed, it shows a digest of its first facts; the first source with
- * data starts open. The enrichment controls live in the header: Refresh
- * re-runs every source that applies, ↻ on a row re-runs that one. Each row
- * says when the source last answered and whether that answer is still fresh.
- * A source that is rate-limited queues the lookup (manual lane); the panel
- * says so in one quiet line. Visitors read it with no enrichment buttons.
+ * It is the Overview's Context section. Each source is a row that opens in place: closed, it shows a digest of its first facts; the first source with data starts open. The enrichment controls live in the header: Refresh re-runs every source that applies, ↻ on a row re-runs that one. Each row says when the source last answered and whether that answer is still fresh. A source that is rate-limited queues the lookup (manual lane); the panel says so in one line. Visitors see the panel without enrichment buttons.
  *
- * A CVE also gets "CVSS by source": every source's score from the field
- * claims, its vector from that source's context, and which one is shown.
+ * A CVE also gets "CVSS by source": every source's score from the field claims, its vector from that source's context, and which one is shown.
  */
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -34,8 +23,7 @@ import { useIsAdmin, useIsVisitor } from "@/stores/authStore";
 import { formatDateTime } from "@/utils/formatDate";
 import styles from "./ContextPanel.module.css";
 
-/** Where an admin adds a missing key: the console's Keys view, at that source's
- * key. The entity popover's "Add key" goes to the same place. */
+/** Where an admin adds a missing key: the console's Keys view, at that source's key. The entity popover's "Add key" goes to the same place. */
 export const keyLink = (sourceType: string) =>
   `/settings?section=enrichment&key_for=${encodeURIComponent(sourceType)}`;
 
@@ -115,12 +103,7 @@ export function contextSourcesWithData(data: EntityContext | undefined): EntityC
   return (data?.sources ?? []).filter((s) => s.items.some(hasValue));
 }
 
-/**
- * The Overview section row's digest for Context: which sources answered and
- * how fresh they are, or that nothing has been looked up yet and how many
- * sources would answer. Null when no source applies to the entity at all
- * (the section then hides).
- */
+/** The Overview section row's digest for Context: which sources answered and how fresh they are, or that nothing has been looked up yet and how many sources would answer. Null when no source applies to the entity at all (the section then hides). */
 export function contextDigest(data: EntityContext | undefined): string | null {
   if (!data) return null;
   const sources = data.sources ?? [];
@@ -137,7 +120,7 @@ export function contextDigest(data: EntityContext | undefined): string | null {
   } else if (sources.length > 0) {
     parts.push(`Not looked up yet · ${sources.length} source${sources.length === 1 ? "" : "s"} appl${sources.length === 1 ? "ies" : "y"}`);
   }
-  // A source with data reads as answered, whatever it lacks now.
+  // A source with data counts as answered even if its key is now missing.
   const answered = new Set(withData.map((s) => s.source_type));
   const missing = unavailable.filter((u) => !answered.has(u.source_type)).length;
   if (missing > 0) parts.push(`${missing} need${missing === 1 ? "s" : ""} a key`);
@@ -156,8 +139,7 @@ function factText(value: string | number): string {
   const spaced = SPACED_UTC.exec(text);
   const iso = spaced ? `${spaced[1]}T${spaced[2]}Z` : text;
   if (!ISO_DATETIME.test(iso)) return text;
-  // A timestamp with no zone is UTC (NVD's "2024-04-12T08:15:06.230");
-  // new Date() would read it as local time.
+  // A timestamp with no zone is UTC (NVD's "2024-04-12T08:15:06.230"); new Date() would read it as local time.
   return formatDateTime(HAS_ZONE.test(iso) ? iso : `${iso}Z`, text);
 }
 
@@ -374,8 +356,7 @@ function cvssRows(claims: FieldClaim[], sources: EntityContextSource[]): CvssRow
     const name = sources.find((s) => s.source_type === base)?.label ?? CVSS_SOURCE[base] ?? base;
     return part ? `${name} · ${CVSS_SOURCE[part] ?? part.toUpperCase()}` : name;
   };
-  // One source's latest run only: a value it has since replaced drops out,
-  // while two values from that run (a CNA and an ADP score) both stay.
+  // One source's latest run only: a value it has since replaced drops out, while two values from that run (a CNA and an ADP score) both stay.
   const latest = new Map<string, string>();
   for (const c of claims) {
     const key = c.source_kind === "enrichment" ? (c.source_ref ?? "enrichment") : c.source_kind;
@@ -454,17 +435,14 @@ export function ContextPanel({ entityType, entityId }: { entityType: string; ent
   const enrich = useEnrichEntity();
   const qc = useQueryClient();
   const [queued, setQueued] = useState<string[]>([]);
-  // Lookups that failed on the last press: they stay listed with a retry
-  // instead of vanishing.
+  // Lookups that failed on the last press: they stay listed with a retry instead of vanishing.
   const [failed, setFailed] = useState<Array<{ source_type: string; error?: string }>>([]);
-  // Rows the analyst opened or closed here; anything else follows the default
-  // (first source with data open, the rest closed).
+  // Rows the analyst opened or closed here; anything else follows the default (first source with data open, the rest closed).
   const [openSources, setOpenSources] = useState<Record<string, boolean>>({});
 
   if (!data) return null;
   const sources = data.sources ?? [];
-  // A source that answered before its key went missing shows its block, not
-  // a "needs key" row as well.
+  // A source that answered before its key went missing shows its block, not a "needs key" row as well.
   const answered = new Set(contextSourcesWithData(data).map((s) => s.source_type));
   const unavailable = (data.unavailable ?? []).filter((u) => !answered.has(u.source_type));
   const cvss = cvssRows(provenance?.fields?.cvss_score?.claims ?? [], sources);

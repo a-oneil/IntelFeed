@@ -1,7 +1,4 @@
-/**
- * cveRefs — shared helpers for reading a CVE's NVD blob and reference set.
- * Used by the Overview's key facts, Sources card and the affected panel.
- */
+/** cveRefs: shared helpers for reading a CVE's NVD blob and reference set. Used by the Overview tab (key facts and affected products), the Sources card and the CVE lifecycle strip. */
 
 export interface RefLink {
   url: string;
@@ -50,8 +47,7 @@ export function extractNvd(nvd: Record<string, unknown> | undefined | null): {
   return { vector, cwe, references, published };
 }
 
-// Group references into advisory / patch / analysis / other buckets based on
-// NVD reference tags, labeled by source domain instead of "ref 1..N".
+// Group references into advisory / patch / analysis / other buckets based on NVD reference tags; the Sources card labels each link by its source domain (refDomain) instead of "ref 1..N".
 const REF_GROUP_ORDER = ["Advisories", "Patches", "Analysis", "Other"] as const;
 
 export function refDomain(url: string): string {
@@ -71,8 +67,7 @@ function refGroup(tags: string[]): (typeof REF_GROUP_ORDER)[number] {
 }
 
 export function groupReferences(refs: RefLink[]): Array<{ group: string; links: RefLink[] }> {
-  // Dedupe by URL. No cap here — the Sources card caps its render and offers
-  // an "all N references" expansion, so nothing is silently dropped.
+  // Dedupe by URL. No cap here: the Sources card caps what it renders and offers an "all N references" expansion, so nothing is silently dropped.
   const seen = new Set<string>();
   const buckets = new Map<string, RefLink[]>();
   for (const r of refs) {

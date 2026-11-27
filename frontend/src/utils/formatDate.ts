@@ -38,10 +38,7 @@ function withRelative(absolute: string, date: Date): string {
   return relative === toAbsolute(date) ? absolute : `${absolute} (${relative})`;
 }
 
-/**
- * Format a date according to the user's date_format setting.
- * Returns empty string for null/undefined/invalid input.
- */
+/** Format a date according to the user's date_format setting. Returns `fallback` (default "") for null/undefined, and an unparseable string as-is. */
 export function formatDate(input: DateInput, fallback = ""): string {
   if (!input) return fallback;
   const date = input instanceof Date ? input : new Date(input);
@@ -59,9 +56,7 @@ export function formatDate(input: DateInput, fallback = ""): string {
   }
 }
 
-/**
- * Format a date with time (for timestamps that need more precision).
- */
+/** Format a date with time (for timestamps that need more precision). */
 export function formatDateTime(input: DateInput, fallback = ""): string {
   if (!input) return fallback;
   const date = input instanceof Date ? input : new Date(input);
@@ -87,11 +82,7 @@ export function formatDateTime(input: DateInput, fallback = ""): string {
   }
 }
 
-/**
- * A compact timestamp for dense tables ("Nov 21, 1:26 PM"): the date and
- * time without the year or the relative tail. Put the full formatDateTime()
- * on the cell's title.
- */
+/** A compact timestamp for dense tables ("Nov 21, 1:26 PM"): the date and time without the year or the relative part. Put the full formatDateTime() on the cell's title. */
 export function formatShortDateTime(input: DateInput, fallback = ""): string {
   if (!input) return fallback;
   const date = input instanceof Date ? input : new Date(input);

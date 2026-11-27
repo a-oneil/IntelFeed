@@ -25,7 +25,7 @@ class AITask(Base):
     output_schema: Mapped[dict | None] = mapped_column(JSONB)
     # UI-edited replacement for `output_schema`. Kept in a separate column
     # because the startup seeder re-syncs `output_schema` from defaults.py on
-    # every deploy — an in-place edit would be silently clobbered.
+    # every deploy — an in-place edit would be lost.
     output_schema_override: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     variables: Mapped[list] = mapped_column(JSONB, default=list)
     is_system: Mapped[bool] = mapped_column(Boolean, default=True)

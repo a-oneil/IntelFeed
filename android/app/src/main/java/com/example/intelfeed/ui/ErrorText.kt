@@ -18,8 +18,7 @@ object ErrorText {
             "Secure connection failed. Check your server's SSL certificate."
         error is ConnectException ->
             "Could not connect to the server. Check the address and port."
-        // The server sent a shape the app doesn't understand (usually a newer server). The raw
-        // parser message is useless to a reader; it's still in logcat via the exception.
+        // The server sent a shape the app doesn't understand (usually a newer server). The raw parser message is useless to a reader; it's still in logcat via the exception.
         error is kotlinx.serialization.SerializationException ->
             "The server sent data this version of the app can't read. Try again, or update the app."
         error is UnknownHostException ->

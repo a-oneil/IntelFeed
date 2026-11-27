@@ -10,12 +10,7 @@ interface TriageControlsProps {
   tabs?: ReactNode;
 }
 
-/**
- * The dashboard's header controls — global range + board tabs. Lives in
- * PageHeader's `controls` slot; the widget actions are `TriageActions`, in the
- * `actions` slot. Split so the dashboard header has the same two-slot shape as
- * every other workbench route.
- */
+/** The dashboard's header controls: global range and board tabs. Rendered in PageHeader's `controls` slot; the widget actions are `TriageActions`, in the `actions` slot. Split this way so the dashboard header has the same two-slot shape as every other workbench route. */
 export function TriageControls({ view, onGlobalRangeChange, tabs }: TriageControlsProps) {
   return (
     <div className={styles.bar}>
@@ -44,7 +39,7 @@ export function TriageControls({ view, onGlobalRangeChange, tabs }: TriageContro
 interface TriageActionsProps {
   onAddWidget: () => void;
   onShowTemplates: () => void;
-  /** Layout lock — when on, widgets can't be dragged or resized. */
+  /** Layout lock: when on, widgets can't be dragged or resized. */
   locked: boolean;
   onToggleLocked: () => void;
 }

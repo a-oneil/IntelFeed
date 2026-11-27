@@ -6,7 +6,7 @@
 - The nightly NVD backfill spends a bounded retry budget on ids NVD has no
   record of, instead of looking every junk id up again every night.
 - The backlink run when an entity or alias is added skips manual/none feeds,
-  honours the FP list and the capital-letter check, and scales confidence by
+  honors the FP list and the capital-letter check, and scales confidence by
   the feed's reliability.
 """
 

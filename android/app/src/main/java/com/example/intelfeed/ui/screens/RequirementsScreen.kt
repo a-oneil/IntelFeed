@@ -85,10 +85,7 @@ data class RequirementsState(
     val matchesError: Map<String, String> = emptyMap()
 )
 
-/**
- * The server's intelligence requirements (GET /api/requirements): the web's keyword matching.
- * Read-only here; requirements are created on the website.
- */
+/** The server's intelligence requirements (GET /api/requirements): the web's keyword matching. Read-only here; requirements are created on the website. */
 class RequirementsViewModel(private val repository: IntelFeedRepository) : ViewModel() {
     private val _state = MutableStateFlow(RequirementsState())
     val state: StateFlow<RequirementsState> = _state.asStateFlow()

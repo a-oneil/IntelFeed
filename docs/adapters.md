@@ -347,7 +347,7 @@ scripts, event handlers and iframes. Links get
 `rel="noopener noreferrer nofollow"`.
 
 `html_to_text()` builds the entry's `content_text` from the HTML. Text from
-neighbouring elements never runs together: paragraphs, headings and other
+neighboring elements never runs together: paragraphs, headings and other
 blocks are separated by a blank line; list items, table rows, captions and
 `<br>` by a newline; table cells by a tab. Where the source already has a
 newline there, it is kept as is. This keeps the regex scans accurate: two list
@@ -608,7 +608,7 @@ Database API 2.0.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `api_key` | none | NVD API key for a higher rate limit. |
-| `keywords` | none | List of words; CVEs must match them. |
+| `keywords` | none | List of words or phrases. Each is its own exact-phrase search, and a CVE matching any of them is kept. |
 | `min_cvss` | 0.0 | Skip CVEs scored below this. |
 
 - One request per fetch, up to 50 CVEs changed since the last fetch. The first
@@ -988,6 +988,9 @@ setup or credentials.
 
 - The onboarding wizard reads them from `GET /api/opml/starter-packs` and
   imports with `POST /api/opml/starter-packs/import`.
+- The Add Feed window's **Browse starter packs** lists one pack's feeds with
+  `GET /api/opml/starter-packs/{pack_id}/feeds` and adds the chosen ones with
+  `POST /api/opml/starter-packs/{pack_id}/import`.
 - `scripts/seed/seed_feeds.py` imports them without the UI.
 - `scripts/maintenance/audit_feed_packs.py` checks the packs for dead
   sources. Run it before a release.
@@ -1200,5 +1203,5 @@ and the `ingest_url` tool:
 - [architecture.md](architecture.md): system design, entity extraction,
   correlation events.
 - [entries.md](entries.md): the entry lifecycle, fields and cleaning.
-- [entity-profiles.md](entity-profiles.md): how entities are modelled.
+- [entity-profiles.md](entity-profiles.md): how entities are modeled.
 - [engine-settings.md](engine-settings.md): the settings mentioned here.

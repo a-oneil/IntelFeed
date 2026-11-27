@@ -130,8 +130,7 @@ vi.mock("@/hooks/useAI", () => ({
   useAgentTools: vi.fn(() => ({ data: [], isLoading: false })),
 }));
 
-// AgentToolsRow reads the copilot config; without this the real hook runs and
-// blows up on the missing QueryClientProvider.
+// AgentToolsRow reads the copilot config; without this mock the real hook runs and throws because there is no QueryClientProvider.
 vi.mock("@/hooks/useCopilotAuth", () => ({
   useCopilotConfig: vi.fn(() => ({ data: undefined, isLoading: false })),
 }));
@@ -212,8 +211,7 @@ describe("PromptWorkspace", () => {
   it("disables the task-enabled toggle when unassigned", async () => {
     const user = userEvent.setup();
     renderWorkspace();
-    // Select the unassigned generation task (rail row, not the narrow-mode
-    // select option), then open Routing
+    // Select the unassigned generation task (rail row, not the narrow-mode select option), then open Routing
     await user.click(screen.getByRole("button", { name: /Detection Rules/ }));
     await user.click(screen.getByRole("tab", { name: /Routing & Visibility/ }));
     expect(screen.getByLabelText("Task enabled")).toHaveProperty("disabled", true);

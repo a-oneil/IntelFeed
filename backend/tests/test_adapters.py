@@ -182,6 +182,33 @@ async def test_nvd_adapter(monkeypatch):
         assert entries[0].metadata["severity"] == "CRITICAL"
 
 
+@pytest.mark.asyncio
+async def test_nvd_keywords_match_any_keyword():
+    """Each keyword is its own search; a CVE found by two of them appears once."""
+    from app.adapters.nvd import NVDAdapter
+
+    def cve(cve_id: str) -> dict:
+        return {"cve": {"id": cve_id, "descriptions": [{"lang": "en", "value": cve_id}], "metrics": {}}}
+
+    by_keyword = {"fortinet": [cve("CVE-1"), cve("CVE-2")], "ivanti": [cve("CVE-2"), cve("CVE-3")]}
+    searched: list[str] = []
+
+    async def mock_get(self, url, params=None, **kwargs):
+        searched.append(params["keywordSearch"])
+        response = AsyncMock()
+        response.status_code = 200
+        response.json = lambda: {"vulnerabilities": by_keyword[params["keywordSearch"]]}
+        return response
+
+    import httpx
+
+    with patch.object(httpx.AsyncClient, "get", mock_get):
+        _, entries = await NVDAdapter().fetch_entries({"keywords": ["fortinet", "ivanti"]}, since=None)
+
+    assert searched == ["fortinet", "ivanti"]
+    assert sorted(e.metadata["cve_id"] for e in entries) == ["CVE-1", "CVE-2", "CVE-3"]
+
+
 def test_nvd_adapter_meta():
     from app.adapters.nvd import NVDAdapter
 

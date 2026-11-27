@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     signal_engine_surface: bool = True
     per_user_subscriptions_enabled: bool = True
     signal_feedback_min_samples: int = 20
-    # Per-user Radar personalisation — read-time lift from each analyst's own
+    # Per-user Radar personalization — read-time lift from each analyst's own
     # thumbs (see services/radar_personalization.py). Off until enabled here.
     radar_personalization_enabled: bool = False
     radar_personalization_min_samples: int = 5
@@ -88,8 +88,8 @@ class Settings(BaseSettings):
     site_ai_user_daily_requests: int = 0
     # AI questions + tasks one share link may run per UTC day. 0 = unlimited.
     share_ai_daily_requests: int = 20
-    # Personal AI keys. Off = every call runs on the instance's providers, as
-    # before. Optional = a person's key answers the tasks they start, falling
+    # Personal AI keys. Off = every call runs on the instance's providers.
+    # Optional = a person's key answers the tasks they start, falling
     # back to the instance's provider when it can't. Required = no fallback:
     # an interactive task without a working personal key is refused.
     allow_user_ai_providers: bool = False
@@ -101,12 +101,12 @@ class Settings(BaseSettings):
     user_ai_allow_private_endpoints: bool = False
     # Comma-separated write tools the copilot may run without the user's click
     # (e.g. create_note,add_tag,star_entry,watch_entity). Admin tools are never
-    # honoured here. Empty: every write waits for Confirm.
+    # honored here. Empty: every write waits for Confirm.
     copilot_auto_approve_tools: str = ""
-    # Cap on one person's own keys, counted on ai_results.key_owner_id as
-    # calls, not dollars: their key is their money, so the only limit the
-    # operator sets is on how hard this server will drive it. 0 = unlimited.
-    # A dollar cap exists too, but it is the person's own to set.
+    # Cap on calls made with one person's own keys, counted on
+    # ai_results.key_owner_id as calls, not dollars: the person pays for their
+    # own key, so the operator only limits how hard this server will use it.
+    # 0 = unlimited. A dollar cap exists too, but the person sets it themselves.
     user_ai_daily_request_cap: int = 300
 
     # Per-entry pipeline run logging (engine phase 5) — kill switch
@@ -297,11 +297,12 @@ class Settings(BaseSettings):
     entity_creation_gates: str = "on"
     # Adjudicate stage (post-analysis AI review; docs/engine-settings.md).
     # 'off' | 'shadow' (file verdicts as proposals) | 'apply' (high-confidence
-    # verdicts applied inline, the rest filed). Master switch — plans only subtract.
+    # verdicts applied inline, the rest filed). Master switch: pipeline plans can
+    # only turn the stage off, never on.
     adjudication_mode: str = "apply"
     adjudication_trigger: str = "all"  # all | created
     adjudication_max_per_hour: int = 0  # 0 = no ceiling; set one to cap spend or protect the ai queue
-    adjudication_min_priority_score: float = 0.0  # 0 = no floor (keep it: junk comes from low-score CVE entries)
+    adjudication_min_priority_score: float = 0.0  # 0 = no floor; keep it, most junk comes from low-score CVE entries
     adjudication_apply_min_confidence: str = "high"  # high | medium | low
     # Distinct articles whose reviews must agree before a type change is applied
     # in apply mode (1 = the first high-confidence verdict converts the entity).
@@ -346,13 +347,11 @@ class Settings(BaseSettings):
     assessment_refresh_enabled: bool = True  # also re-write assessments that have gone stale
     assessment_refresh_min_new_articles: int = 10  # half the writer's 20-article window turned over
     assessment_refresh_batch_size: int = 10  # own budget, never competes with the empty-description backfill
-    # Weekly AI refresh of the most-active threat actor profiles. Defaults match
-    # the values these knobs were hardcoded to before they became settings.
+    # Weekly AI refresh of the most-active threat actor profiles.
     actor_refresh_top_n_per_run: int = 20  # actors refreshed per weekly run
     actor_refresh_min_age_days: int = 60  # skip actors refreshed more recently than this
     actor_refresh_activity_window_days: int = 90  # window used to rank "most active"
     actor_refresh_sample_n: int = 20  # headlines sampled into the refresh prompt
-    # Low-signal entity review sweep (flags for analyst review, never deletes).
 
     correlation_cache_ttl_seconds: int = 3600
     # Proximity correlation tuning
@@ -373,7 +372,7 @@ class Settings(BaseSettings):
     # always show everything.
     relationship_min_confidence: str = "possible"
     # Specificity (IDF) damping: 0 = off, 1 = strength fully scaled by how
-    # special the counterpart is (ubiquitous entities sink to ~0).
+    # specific the counterpart is (ubiquitous entities sink to ~0).
     relationship_specificity_weight: float = 0.5
     # Vendors/products below this specificity are folded as reporting sources.
     relationship_reporting_source_specificity: float = 0.45
@@ -381,7 +380,9 @@ class Settings(BaseSettings):
     relationship_min_tier_default: str = "all"
     # Evidence structure: cluster each edge's evidence entries into stories
     # via the entry embeddings, so relationship views can say "recurring
-    # across N incidents" vs "scattered roundup co-mentions". Also gates the
+    # across N incidents" vs "scattered roundup co-mentions". Also requires a
+    # minimum number of stories before a co-occurrence is promoted, and orders
+    # the adjudication queue.
     relationship_evidence_structure: bool = True
     narrative_themes_enabled: bool = True  # parse the briefing's grouping (free, no AI call)
     narrative_theme_gating: bool = False  # let it veto promotions — flip on once themes exist
@@ -447,7 +448,7 @@ class Settings(BaseSettings):
     thread_narrate_limit: int = 10  # threads given an AI spine per nightly run
     # When on, an entry's thread membership answers the feed_echo and
     # source_convergence signals instead of the entity-overlap probe. Off falls
-    # back to the probe everywhere — the scoring behaviour before threads.
+    # back to the probe everywhere — the scoring behavior before threads.
     thread_signals_enabled: bool = True
 
     # Webhooks
@@ -482,10 +483,10 @@ class Settings(BaseSettings):
     postgres_ssl: bool = False
 
     # Global copilot: when true (default), /api/ai/copilot/stream dispatches the
-    # Claude Code CLI run to the dedicated `claude_code` Celery worker
-    # (celery-worker-ai, which owns the OAuth credentials volume) and relays the
-    # streamed events back over Redis. This is the correct prod topology — the api
-    # container never needs the CLI or credentials. Set false to run the CLI
+    # Claude Code CLI run to the `ai` Celery queue (celery-worker-ai, which owns
+    # the OAuth credentials volume) and relays the streamed events back over
+    # Redis. This is the prod topology: the api container never needs the CLI or
+    # credentials. Set false to run the CLI
     # in-process in the api container instead (only works where the api has the
     # CLI + credentials, e.g. a single-container dev box).
     copilot_worker_dispatch: bool = True

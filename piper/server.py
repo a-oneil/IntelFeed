@@ -4,10 +4,11 @@ Runs as an isolated sidecar (like the LibreTranslate service) so the heavy
 ONNX/audio deps stay out of the shared backend image. The celery-worker POSTs
 article/summary text here and gets back an MP3; nothing else talks to this service.
 
-Synthesis STREAMS piper's audio chunks straight into ffmpeg (writing MP3 to a
-temp file) rather than buffering the whole WAV in memory — a ~13-minute daily
-summary would otherwise build a ~30MB+ WAV and OOM the 512M container. A lock
-serializes synthesis so concurrent requests can't stack peak memory.
+Synthesis streams piper's audio chunks directly into ffmpeg (writing MP3 to a
+temp file) rather than buffering the whole WAV in memory; a ~13-minute daily
+summary would otherwise build a ~30MB+ WAV on top of the model's own memory
+(prod caps the container at 1536M). A lock serializes synthesis so concurrent
+requests can't add up their peak memory.
 """
 
 import os

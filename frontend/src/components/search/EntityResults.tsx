@@ -8,18 +8,11 @@ import { NO_SUGGESTIONS, type SuggestionSource } from "./types";
 import { ALL_FIELDS, FIELD_HINTS, FIELD_VALUES } from "./queryFields";
 
 /**
- * What survives of the workbench's intelligence search.
+ * Helpers for entity search results.
  *
- * The search itself is gone. This file used to own a second engine —
- * `useIntelSearch` against `/intelligence/search`, plus its own result
- * renderer — which the workbench's mobile overlay ran instead of the unified
- * one. It understood only `type:` filters, silently discarded every other
- * field, and never returned articles, so a phone got materially different
- * answers from a laptop. `/search` is the one engine now.
+ * `/search` is the app's only search engine. This file does not run a search of its own; a separate one here (`useIntelSearch` against `/intelligence/search`, used by the workbench's mobile overlay) understood only `type:` filters, discarded every other field and never returned articles, so a phone got different answers from a laptop.
  *
- * Left here: the display helpers and the routing table the new results page
- * uses, and the intelligence autocomplete dictionary (which completes from
- * `queryFields.ts` like everything else).
+ * What it holds: the display helpers and the routing table the results page uses, and the intelligence autocomplete dictionary (which completes from `queryFields.ts` like everything else).
  */
 
 export const ENTITY_TYPE_LABELS: Record<string, string> = {
@@ -41,8 +34,7 @@ export const ENTITY_TYPE_LABELS: Record<string, string> = {
 };
 
 export function getSearchResultName(r: EntitySearchResult): string {
-  // Catalog-keyed types lead with the id, the way the profile header does —
-  // "Use After Free" alone is ambiguous, "CWE-416 Use After Free" is not.
+  // Catalog-keyed types lead with the id, the way the profile header does: "Use After Free" alone is ambiguous, "CWE-416 Use After Free" is not.
   if (r.cwe_id) return r.name && r.name !== r.cwe_id ? `${r.cwe_id} ${r.name}` : r.cwe_id;
   if (r.name) return r.name;
   if (r.cve_id) return r.cve_id;
@@ -75,8 +67,7 @@ export function getSearchResultSubtext(r: EntitySearchResult): string | null {
   if (r.type === "detection_rule") return r.rule_type || null;
   if (r.type === "campaign") return [r.status, r.tlp_marking].filter(Boolean).join(" / ") || null;
   if (r.type === "intel_report") return [r.template_type?.replace(/_/g, " "), r.status].filter(Boolean).join(" / ") || null;
-  // A note is only meaningful next to what it is about, so the subtext carries
-  // its subject rather than a type name the badge already shows.
+  // A note is only meaningful next to what it is about, so the subtext shows its subject rather than a type name the badge already shows.
   if (r.type === "note") {
     if (r.note_source === "entity_note") {
       const subject = r.entity_name || r.entity_type?.replace(/_/g, " ");
@@ -88,11 +79,7 @@ export function getSearchResultSubtext(r: EntitySearchResult): string | null {
   return null;
 }
 
-/**
- * `type:` means **entity type** here and **feed type** in the unified entry
- * grammar. That collision is deliberately left unresolved (risk R5) — this map
- * stays scope-local pre-processing for the intelligence half only.
- */
+/** `type:` means **entity type** here and **feed type** in the unified entry grammar. That collision is deliberately left unresolved (risk R5), so this map is used only for the intelligence grammar. */
 export const TYPE_FILTER_MAP: Record<string, string> = {
   ttp: "ttp",
   cve: "cve",
@@ -111,23 +98,17 @@ export const TYPE_FILTER_MAP: Record<string, string> = {
 /**
  * The intelligence grammar's completions.
  *
- * These were a hand-kept list of five fields, which is what the workbench scope
- * still offered long after the language grew to ninety-four — a field could be
- * documented in the reference card and remain uncompletable here. Both now read
- * the same table in `queryFields.ts`.
+ * Built from the same table in `queryFields.ts` that the reference card reads, so every documented field can be completed here. A hand-kept list here would fall behind the query language.
  */
 export const INTEL_FILTER_FIELDS: Record<string, string[]> = {
-  // Every field completes its name; an empty list means "we know the field but
-  // not its values", which is still worth offering.
+  // Every field completes its name; an empty list means the field is known but its values are not, and the name is still worth offering.
   ...Object.fromEntries(
     ALL_FIELDS.map((f) => {
       const name = f.token.replace(/:$/, "");
       return [name, FIELD_VALUES[name] ?? []];
     }),
   ),
-  // LAST on purpose: in the intelligence grammar `type:` means entity type,
-  // shadowing the entry grammar's feed type (risk R5). Spreading it earlier let
-  // the feed-type values win and broke `type:cve` in the workbench overlay.
+  // LAST on purpose: in the intelligence grammar `type:` means entity type, overriding the entry grammar's feed type (risk R5). Spread earlier, the feed-type values would win and `type:cve` would not complete.
   type: Object.keys(TYPE_FILTER_MAP),
 };
 
@@ -144,13 +125,9 @@ export interface IntelSuggestion {
 }
 
 /**
- * Completions for the intelligence grammar, from a purely local dictionary —
- * `/intelligence/search` has no autocomplete endpoint and the fields it
- * understands are a fixed vocabulary.
+ * Completions for the intelligence grammar, from a local dictionary: `/intelligence/search` has no autocomplete endpoint and the fields it understands are a fixed vocabulary.
  *
- * Module scope because `OmniSearchInput` calls it as a hook (see
- * `SuggestionSource`), and it returns `NO_SUGGESTIONS` rather than a fresh `[]`
- * — the shared hook's selection-reset effect keys off this identity (R6).
+ * Module scope because `OmniSearchInput` calls it as a hook (see `SuggestionSource`). It returns `NO_SUGGESTIONS` rather than a fresh `[]` because the shared hook's selection-reset effect depends on that identity (R6).
  */
 export const useIntelSuggestions: SuggestionSource<IntelSuggestion> = (token, enabled) =>
   useMemo(() => {
@@ -171,12 +148,7 @@ export const useIntelSuggestions: SuggestionSource<IntelSuggestion> = (token, en
     return NO_SUGGESTIONS;
   }, [token, enabled]);
 
-/**
- * The workbench's entity routing table: entity profiles by route, with the
- * three special cases (rule / campaign / report) and entries handed to the
- * feed reader. `pir` and any other unlisted type fall through and do nothing —
- * pinned by the characterisation tests.
- */
+/** The workbench's entity routing table: entity profiles by route, the special cases (rule / campaign / report / note), and entries handed to the feed reader. `pir` and any other unlisted type fall through and do nothing, which the characterization tests check. */
 export function useEntityResultNavigate() {
   const navigate = useNavigate();
   const addToRecentPivots = useIntelStore((s) => s.addToRecentPivots);
@@ -202,9 +174,7 @@ export function useEntityResultNavigate() {
       navigate(`/workbench/report/${id}`);
       return;
     }
-    // Notes live in three places, so a note row opens the one that holds it:
-    // the entity's Notes tab, the article's reader panel, or the note browser
-    // with the query carried over so the matched note is on screen.
+    // Notes live in three places, so a note row opens the one that holds it: the entity's Notes tab, the article's reader panel, or the note browser filtered to the note's title so the matched note is on screen.
     if (type === "note") {
       if (r.note_source === "entity_note" && r.entity_type && r.entity_id) {
         navigate(`/workbench/${r.entity_type}/${r.entity_id}?tab=notes`);
@@ -217,8 +187,7 @@ export function useEntityResultNavigate() {
         return;
       }
       useUIStore.getState().setActivePanel("notes");
-      // The browser has no per-note route; seeding its filter with the note
-      // title is what puts the row you clicked at the top of it.
+      // The browser has no per-note route; setting its filter to the note title puts the clicked note at the top of the list.
       useUIStore.getState().setPendingNoteSearch(r.title || "");
       navigate("/");
       return;

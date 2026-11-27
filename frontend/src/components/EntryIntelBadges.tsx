@@ -90,7 +90,7 @@ function PirSummary({ pirs }: { pirs: PIRMatch[] }) {
     setOpen(false);
   };
 
-  // Build category counts
+  // Group matches by category
   const byCat: Record<string, PIRMatch[]> = {};
   for (const pir of pirs) {
     (byCat[pir.category] ??= []).push(pir);
@@ -202,12 +202,10 @@ export function EntryIntelBadges({ counts, starred, bookmarked, echo, tags, entr
   const hasPirs = !!pirMatches && pirMatches.length > 0;
   const noteCount = counts?.notes ?? 0;
 
-  // Personal state markers — "I flagged this". Note presence rides on the intel
-  // note count, so it shows here as a marker rather than as an evidence chip.
+  // Personal state markers ("I flagged this"). Note presence comes from the intel note count, so it shows here as a marker rather than as an evidence chip.
   const hasState = !!echo || !!starred || !!bookmarked || noteCount > 0;
 
-  // Named subject — the "who / what" headline. Actors take precedence over
-  // malware; a single chip names the primary entity with a +N overflow.
+  // Named subject: who or what the entry is about. Actors take precedence over malware; a single chip names the primary entity with a +N overflow.
   const actors = counts?.actors ?? [];
   const malware = counts?.malware ?? [];
   const subjectName = actors[0] ?? malware[0];
@@ -218,21 +216,19 @@ export function EntryIntelBadges({ counts, starred, bookmarked, echo, tags, entr
 
   const hasIntel = hasPirs || hasSubject || (counts?.total ?? 0) > 0 || (counts?.rules ?? 0) > 0;
 
-  // Analyst-authored chips — "someone decided this about this entry" — lead the
-  // row, ahead of the personal markers.
+  // Tag chips (tags promoted to chips) lead the row, ahead of the personal markers.
   const hasChips = chipTags(tags).length > 0;
 
   if (!hasIntel && !hasState && !hasChips) return null;
 
-  // Telemetry-aware opportunity tier; fall back to the legacy binary flag when
-  // the API payload predates detection_opportunity.
+  // Telemetry-aware opportunity tier; fall back to the legacy has_detection_gap flag when the API payload has no detection_opportunity field.
   const opportunity =
     counts?.detection_opportunity !== undefined
       ? counts.detection_opportunity
       : counts?.has_detection_gap
         ? "actionable_gap"
         : null;
-  // KEV / high-risk CVE elevation trumps tier display
+  // A detection gap with a KEV or high-risk CVE takes precedence over the tier display
   const hotOpportunity = !!counts?.has_detection_gap && !!counts?.has_high_risk_cve;
   const showOpportunity = hotOpportunity || opportunity != null;
 
@@ -309,7 +305,7 @@ export function EntryIntelBadges({ counts, starred, bookmarked, echo, tags, entr
           <span className={styles.chipLabel}>{s.label}</span>
         </span>
       ))}
-      {/* Detection opportunity — the filled call-to-action, always the row's endpoint */}
+      {/* Detection opportunity chip, always last in the row */}
       {hotOpportunity ? (
         <span
           className={`${styles.chip} ${counts?.has_kev_cve ? styles.kev : styles.hot}`}

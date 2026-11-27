@@ -60,6 +60,7 @@ async def generate_entity_assessment(
       {"status": "unsupported_type" | "not_found" | "no_description_field"
                  | "already_has_assessment" | "no_ai"}
       {"status": "provider_paused", "pause_until": iso-str | None}
+      {"status": "ai_error", "ai_status": "parse_error" | "provider_error" | ...}
     """
     if entity_type not in ENTITY_MODEL_MAP:
         return {"status": "unsupported_type"}
@@ -192,10 +193,10 @@ Recent articles ({len(articles)} most recent):
 
     db.add(entity)
 
-    # Sign the write. Every other path that fills a profile field records who
-    # asserted it (enrichment adapters, the gap-fill pass, analyst edits); the
-    # assessment did not, so an AI-written description showed on the profile as
-    # unsourced and nothing downstream could tell it apart from an import.
+    # Record the source of the write, as every other path that fills a profile
+    # field does (enrichment adapters, the gap-fill pass, analyst edits).
+    # Without it an AI-written description shows on the profile as unsourced
+    # and nothing downstream can tell it apart from an import.
     # record_claims filters to PROVENANCE_FIELDS, so types that don't track the
     # field (observables' `context`) are skipped rather than special-cased here.
     from app.services.claim_provenance import record_claims

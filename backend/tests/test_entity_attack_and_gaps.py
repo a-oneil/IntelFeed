@@ -184,7 +184,7 @@ async def test_mentions_timeseries_default_window(client: AsyncClient, auth_head
     assert data["bucket"] == "day"
     assert len(data["points"]) == 90
     # Fixture entries are dated in the past relative to "now" in this test env, so
-    # just assert the shape and that total mentions across the window is non-negative.
+    # assert only the shape and that total mentions across the window is non-negative.
     total = sum(p["count"] for p in data["points"])
     assert total >= 0
     assert all(set(p.keys()) == {"date", "count", "feeds"} for p in data["points"])

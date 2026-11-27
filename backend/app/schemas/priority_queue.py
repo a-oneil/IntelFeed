@@ -1,7 +1,7 @@
 """Priority Queue — the ranked reading queue, entries and story threads in one list.
 
 The queue is not just a sorted entry list: a story covered by eleven outlets is
-one row, not eleven, and the thread row ranks by the best beat it holds, read or not.
+one row, not eleven, and the thread row ranks by its highest-scoring article, read or not.
 Assembling that server-side means every consumer (the reader, the CLI, an agent)
 sees the same queue in the same order.
 """

@@ -35,10 +35,7 @@ interface EntryAIPanelProps {
   ) => Promise<{ answer: string; remaining_today?: number | null }>;
 }
 
-/**
- * The reader's AI tab: suggested next actions, one-click AI task rows,
- * the Ask Agent chat, and persisted AI results for this entry.
- */
+/** The reader's AI tab: suggested next actions, one-click AI task rows, the Ask Agent chat, and persisted AI results for this entry. */
 export default function EntryAIPanel({
   entryId,
   entryTitle,
@@ -50,11 +47,9 @@ export default function EntryAIPanel({
   aiAskAgentFn,
 }: EntryAIPanelProps) {
   const [newAIResults, setNewAIResults] = useState<AIResult[]>([]);
-  // Shared-page (readOnly) only: the slim Ask Agent chat. Authenticated users
-  // get the global copilot instead (tool-calling, article pinned as context).
+  // Shared-page (readOnly) only: the simple Ask Agent chat. Authenticated users get the global copilot instead (tool-calling, article pinned as context).
   const [showAskAgent, setShowAskAgent] = useState(false);
-  // Shared-page only: what the link may still run today. Task runs and Ask
-  // Agent questions spend the same daily budget, so one count serves both.
+  // Shared-page only: how many runs the link has left today. Task runs and Ask Agent questions use the same daily budget, so one count serves both.
   const [remainingToday, setRemainingToday] = useState<number | null>(null);
 
   // In readOnly mode, pass empty entryId to hooks so they don't fire (enabled: !!entryId)
@@ -82,8 +77,7 @@ export default function EntryAIPanel({
             if (readOnly) {
               setShowAskAgent((v) => !v);
             } else {
-              // Pin the article in the global copilot (content is injected
-              // server-side) and let the analyst ask their own question.
+              // Pin the article in the global copilot (content is injected server-side) and let the analyst ask their own question.
               useUIStore.getState().openCopilotWith({
                 context: { entry_id: entryId, label: entryTitle },
                 lockContext: true,
@@ -149,8 +143,7 @@ export default function EntryAIPanel({
               tokens_output: null,
               cost_estimate: data.cost_estimate,
               processing_time_ms: null,
-              // A share-page result: the instance answered, and the row
-              // never comes back from the API with who asked.
+              // A share-page result: the instance answered, and the API never returns who asked.
               caller_kind: "share",
               user_id: null,
               key_owner_id: null,
@@ -177,8 +170,7 @@ export default function EntryAIPanel({
           targetId={readOnly ? "" : entryId}
           staticResults={readOnly ? [...(aiStaticResults || []), ...newAIResults] : undefined}
           onAskFollowUp={readOnly ? undefined : (context) => {
-            // Follow up in the copilot: pin the article and open with the
-            // result inline so the thread starts from what was generated.
+            // Follow up in the copilot: pin the article and open with the result inline so the thread starts from what was generated.
             useUIStore.getState().openCopilotWith({
               context: { entry_id: entryId, label: entryTitle },
               lockContext: true,
@@ -193,13 +185,7 @@ export default function EntryAIPanel({
 
 /* ─── Suggested Actions ─── */
 
-/**
- * Rule-based "next actions" derived purely from the entry's existing enrichment
- * signals (TTPs, CVEs, actors, malware, linked rules). No per-entry AI call is
- * made to compute these — each suggestion just routes to an existing action
- * (rule generation, the copilot, or the campaign flow). Shows 1–3 suggestions;
- * renders nothing when none apply.
- */
+/** Rule-based "next actions" derived from the entry's existing enrichment signals (TTPs, CVEs, actors, malware, linked rules). No per-entry AI call is made to compute these; each suggestion routes to an existing action (rule generation, the copilot, or the campaign flow). Shows 1–3 suggestions; renders nothing when none apply. */
 function SuggestedActions({
   entryId,
   entryTitle,
@@ -223,8 +209,7 @@ function SuggestedActions({
 }) {
   const openCopilotWith = useUIStore((s) => s.openCopilotWith);
 
-  // Pick the single most notable CVE to anchor a detection question:
-  // KEV > highest EPSS > highest CVSS. Only counts if it clears a risk bar.
+  // Pick the single most notable CVE for a detection question: KEV > highest EPSS > highest CVSS. Only CVEs that are KEV, CVSS >= 7.0, or EPSS >= 0.1 qualify.
   const notableCve = (() => {
     const ranked = [...cves]
       .filter((c) => {
@@ -246,7 +231,7 @@ function SuggestedActions({
   interface Suggestion {
     key: string;
     label: string;
-    /** Short accent-colored action verb rendered on the right (e.g. "Gen Rules"). */
+    /** Short accent-colored action verb rendered on the right (e.g. "Generate rules →"). */
     action: string;
     icon: React.ReactNode;
     onClick: () => void;
@@ -299,7 +284,7 @@ function SuggestedActions({
     });
   }
 
-  // 4. Fallback: rich intel article with entities but no sharper action above.
+  // 4. Fallback: an article with TTPs or CVEs where none of the suggestions above applied.
   if (suggestions.length === 0 && (ttps.length > 0 || cves.length > 0)) {
     suggestions.push({
       key: "analyze",
@@ -315,13 +300,12 @@ function SuggestedActions({
     });
   }
 
-  // Named actors/malware present → offer to track this in a campaign
-  // (rendered as its own chip with the campaign dropdown attached).
+  // Named actors/malware present → offer to track this in a campaign (rendered as its own chip with the campaign dropdown attached).
   const showCampaignChip = actors.length > 0 || malware.length > 0;
 
   if (suggestions.length === 0 && !showCampaignChip) return null;
 
-  // Keep it unobtrusive — at most three suggestions (campaign chip included).
+  // At most three suggestions (campaign chip included).
   const shown = suggestions.slice(0, showCampaignChip ? 2 : 3);
 
   return (

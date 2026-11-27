@@ -1,5 +1,4 @@
-/* Engine → Processing: per-entry pipeline matrix. Colors resolve through the
-   app's runtime theme variables (index.css) so theme-switching just works. */
+/* Engine → Processing: per-entry pipeline matrix. Colors come from the app's runtime theme variables (index.css), so switching theme recolors it. */
 
 .wrap {
   display: flex;

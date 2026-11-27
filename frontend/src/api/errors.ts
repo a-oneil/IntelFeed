@@ -5,12 +5,7 @@ interface ErrorDetail {
   msg?: string;
 }
 
-/**
- * The error envelope on an axios failure ({error: {code, message, details}}),
- * or the thrown message. A validation refusal says only "Request validation
- * failed" at the top; the reason lives in details, so the first one is
- * appended (with its field, when named) and someone typing 0 as a cap sees why.
- */
+/** The error envelope on an axios failure ({error: {code, message, details}}), or the thrown message. A validation refusal says only "Request validation failed" at the top and the reason is in details, so the first detail is appended (with its field, when named) and a user who enters 0 as a cap sees why. */
 export interface ApiErrorInfo {
   code: string | null;
   message: string;
@@ -23,12 +18,7 @@ export function hasErrorEnvelope(err: unknown): boolean {
   return !!(err as { response?: { data?: { error?: unknown } } })?.response?.data?.error;
 }
 
-/**
- * True when the browser gave up waiting (axios `timeout`), as opposed to the
- * server answering with an error. Axios sets `ECONNABORTED` for its own
- * deadline and `ETIMEDOUT` for a socket one; the message check covers an
- * error that was rewrapped on the way up and lost its code.
- */
+/** True when the browser gave up waiting (axios `timeout`), as opposed to the server answering with an error. Axios sets `ECONNABORTED` for its own deadline and `ETIMEDOUT` for a socket one; the message check covers an error that was rewrapped on the way up and lost its code. */
 export function isTimeout(err: unknown): boolean {
   const e = err as { code?: unknown; message?: unknown; response?: unknown } | null;
   if (!e || typeof e !== "object" || e.response) return false;
@@ -36,7 +26,7 @@ export function isTimeout(err: unknown): boolean {
   return typeof e.message === "string" && /^timeout of \d+ms exceeded/i.test(e.message);
 }
 
-/** The plain reading of a timeout, instead of axios's "timeout of 15000ms exceeded". */
+/** The message shown for a timeout, in place of axios's "timeout of 15000ms exceeded". */
 export const TIMEOUT_MESSAGE = "The server took too long to respond. Try again in a moment.";
 
 export function apiErrorInfo(err: unknown): ApiErrorInfo {
@@ -61,10 +51,7 @@ export function apiErrorInfo(err: unknown): ApiErrorInfo {
   return { code: null, message: err instanceof Error ? err.message : "Request failed", details: null };
 }
 
-/**
- * The `reason` an AI refusal names in its details (`user_ai_key_required`
- * carries {reason: "no_key" | "monthly_cap" | ...}), or null.
- */
+/** The `reason` an AI refusal names in its details (`user_ai_key_required` carries {reason: "no_key" | "monthly_cap" | ...}), or null. */
 export function apiErrorReason(err: unknown): string | null {
   const { details } = apiErrorInfo(err);
   if (!details || Array.isArray(details)) return null;

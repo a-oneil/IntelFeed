@@ -1,10 +1,10 @@
-"""Ransomware victim tracker API (plan §7).
+"""Ransomware victim tracker API.
 
 Read-only aggregates over victim_disclosures. Powers Leak Watch (the feed) and
 Ransomware Landscape (the dashboard).
 
-Every stat counts disclosure *events* (one posting = one "victim" on the mocks),
-so group/sector/country aggregates are plain GROUP BYs over victim_disclosures,
+Every stat counts disclosure *events* (one leak-site posting counts as one
+victim), so group/sector/country aggregates are plain GROUP BYs over victim_disclosures,
 which carries denormalized group_id/sector/country_id.
 """
 
@@ -198,8 +198,8 @@ async def _timeseries(db: AsyncSession, start: datetime, now: datetime) -> list[
     ).all()
     counts = {r[0].date(): r[1] for r in rows}
     # Fill every week from the Monday of `start` up to the last *complete* week.
-    # The week containing `now` is still in progress, so plotting it would drop the
-    # line to a partial-bucket cliff — stop before it.
+    # The week containing `now` is still in progress, and its partial count would
+    # plot as a false drop at the end of the line, so stop before it.
     cursor = (start - timedelta(days=start.weekday())).date()
     end = (now - timedelta(days=now.weekday())).date()  # Monday of current (partial) week
     points: list[TimeseriesPoint] = []

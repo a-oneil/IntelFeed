@@ -5,10 +5,7 @@ import api from "@/api/client";
 import type { QueryLanguage } from "@/utils/queryLanguage";
 
 /* ── Hunt packs ──────────────────────────────────────────────────────────────
-   A starting point for a hunt, not a record of one: hypotheses and queries
-   the analyst copies into their SIEM or downloads as ATHF hunt files. One
-   service for both surfaces: the Threats board drawer asks for its window
-   (7d, 14d, 30d), the profile for "all" — everything reported. */
+   A starting point for a hunt, not a record of one: hypotheses and queries the analyst copies into their SIEM or downloads as ATHF hunt files. One service backs both places that show them: the Threats board drawer asks for its window (7d, 14d, 30d), the entity profile for "all" (everything reported). */
 
 /** Everything reported: the profile's pack. */
 export const PROFILE_SCOPE = "all";
@@ -86,8 +83,7 @@ export const huntPackKey = (entityType: string, entityKey: string, scope: string
   scope,
 ];
 
-/** The entity's pack for a scope, polled every few seconds while a draft runs.
-    The language is the user's preferred query language, applied server-side. */
+/** The entity's pack for a scope, polled every 4 seconds while a draft runs. The language is the user's preferred query language, applied server-side. */
 export function useHuntPack(entityType: string, entityKey: string, scope: string, enabled = true) {
   return useQuery({
     queryKey: huntPackKey(entityType, entityKey, scope),
@@ -101,8 +97,7 @@ export function useHuntPack(entityType: string, entityKey: string, scope: string
   });
 }
 
-/** Queue a draft (or redraft) on the AI worker. Returns at once with
-    status "drafting"; useHuntPack polls until it settles. */
+/** Queue a draft (or redraft) on the AI worker. Returns at once with status "drafting"; useHuntPack polls until it settles. */
 export function useDraftHuntPack() {
   const qc = useQueryClient();
   return useMutation({
@@ -166,12 +161,7 @@ export async function downloadHuntPackage(entityType: string, entityId: string, 
   saveBlob(res.data, filenameFrom(String(res.headers?.["content-disposition"] ?? ""), fallback));
 }
 
-/**
- * The "Download hunt package" button: drafts the hunts first when none exist
- * (or the last draft failed), waits for the AI worker, then downloads the
- * zip. When hunts can't be drafted — no provider, nothing to hunt from, the
- * draft failed — it says why and downloads the rest of the package anyway.
- */
+/** The "Download hunt package" button: drafts the hunts first when none exist (or the last draft failed), waits for the AI worker, then downloads the zip. When hunts can't be drafted (no provider, nothing to hunt from, the draft failed) it says why and downloads the rest of the package anyway. */
 export function useHuntPackageDownload(entityType: string, entityKey: string, label: string) {
   const supported = huntsSupported(entityType);
   const { data } = useHuntPack(entityType, entityKey, PROFILE_SCOPE, supported);

@@ -39,9 +39,7 @@ export default function WidgetPicker({
   timeRangeStart,
   timeRangeEnd,
 }: Props) {
-  // Sort by label so the picker order remains stable regardless of registry
-  // declaration order. Retired types are filtered out here but still render on
-  // dashboards that already persist them.
+  // Sort by label so the picker order stays stable regardless of registry declaration order. Retired types are filtered out here but still render on dashboards that already persist them.
   const widgets = useMemo(
     () =>
       WIDGET_REGISTRY.filter((w) => !w.hidden).sort((a, b) =>
@@ -118,8 +116,7 @@ export default function WidgetPicker({
                   </span>
                 </div>
 
-                {/* Live preview: the real component, real data, current range,
-                    at the height it will occupy on the grid. */}
+                {/* Live preview: the real component, real data, current range, at the height it will occupy on the grid. */}
                 <div
                   className={styles.previewCard}
                   style={{

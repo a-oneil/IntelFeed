@@ -2,7 +2,7 @@
 # IntelFeed Database Backup Script
 # Usage: ./scripts/ops/backup.sh [backup_dir]
 # Runs pg_dump against the Docker Compose PostgreSQL container.
-# Keeps the last 7 daily backups by default.
+# Deletes backups older than RETENTION_DAYS days (default 7).
 
 set -euo pipefail
 

@@ -56,11 +56,10 @@ class Feed(Base):
     ai_analysis_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )  # Run the one-pass AI analysis on this feed's entries at ingest.
-    # Until this existed, the only way to stop the AI reading a feed was to set
-    # intel_extraction_mode="none", which also kills autolinking and extraction —
-    # so a noisy source you still wanted matched against your catalog had no
-    # setting that expressed it. Gated globally by `ai_one_pass_enabled` too:
-    # both must be on.
+    # Separate from intel_extraction_mode="none", which also turns off
+    # autolinking and extraction: this flag stops only the AI, for a noisy
+    # source you still want matched against the catalog. Gated globally by
+    # `ai_one_pass_enabled` too: both must be on.
     extract_tools: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )  # Allow AI extraction to create tool entities from this feed's entries.

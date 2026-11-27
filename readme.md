@@ -243,7 +243,7 @@ in your own environment.
 Python 3.14 · FastAPI · SQLAlchemy (async) · Alembic · Celery + Redis · PostgreSQL 16 · Meilisearch ·
 React 19 · TypeScript · Vite · TanStack Query + Zustand · Docker Compose · Caddy
 
-## Acknowledgements
+## Acknowledgments
 
 IntelFeed depends on open-source software and public threat data. Thank you to the projects and
 teams below. Articles shown in IntelFeed belong to the sites that published them.

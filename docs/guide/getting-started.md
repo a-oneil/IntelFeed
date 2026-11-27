@@ -101,7 +101,7 @@ exploited. See [Entities and profiles](entities.md).
 ## What happens next
 
 Feeds are checked on a schedule. As articles arrive, IntelFeed finds known
-entities in each one and links them. If AI is set up, it also summarises each
+entities in each one and links them. If AI is set up, it also summarizes each
 article and pulls out more detail.
 
 Entity pages fill in over time. Expect little on day one and more after a few

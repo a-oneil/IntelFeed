@@ -49,15 +49,11 @@ function shortError(message: string, max = 40): string {
 
 function monthResetLabel(iso: string): string {
   const d = new Date(iso);
-  // The cap resets at midnight UTC; a local-time render showed "Oct 31" the evening before.
+  // The cap resets at midnight UTC, so the date is formatted in UTC; in local time, west of UTC it would show the previous day (e.g. "Oct 31" for a Nov 1 reset).
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
-/**
- * Settings → My AI: one person's keys, which prompts use them, what they've
- * spent, and what happens when a key can't answer. Every number here is the
- * caller's own; the admin's instance-wide view is the Cost Dashboard.
- */
+/** Settings → My AI: one person's keys, which prompts use them, what they've spent, and what happens when a key can't answer. Every number here is the caller's own; the admin's instance-wide view is the Cost Dashboard. */
 export function MyAISection() {
   const me = useAuthStore((s) => s.user);
   const { data: overview, isLoading, isError, error, refetch } = useMyAI();
@@ -75,8 +71,7 @@ export function MyAISection() {
       </div>
     );
   }
-  // The key list is empty until the providers query answers; without this
-  // gate "No keys yet" flashes before the person's keys arrive.
+  // The key list is empty until the providers query returns; without this check "No keys yet" flashes before the person's keys arrive.
   if (isLoading || !overview || providersLoading) return <AsyncStateLoading label="Loading your AI settings…" />;
 
   const { policy, usage } = overview;
@@ -128,8 +123,7 @@ function UsageCard({ overview, myKeys }: { overview: NonNullable<ReturnType<type
   const segments = usage.by_key.map((k, i) => ({
     ...k,
     color: palette[i % palette.length],
-    // Against the cap when there is one; otherwise each key's share of the
-    // month's spend, so the bar still says something with no cap set.
+    // Width is a share of the cap when there is one; otherwise each key's share of the month's spend, so the bar is still meaningful with no cap set.
     width: cap > 0 ? Math.min(100, (Number(k.month_cost) / cap) * 100) : spent > 0 ? (Number(k.month_cost) / spent) * 100 : 0,
   }));
 
@@ -387,11 +381,7 @@ function KeysCard({
   );
 }
 
-/**
- * The model the default key answers with. A select when the key's models are
- * known, else a text field committed on Enter or blur; "Make default" picks
- * the first model, and this is where the person changes it.
- */
+/** The model the default key answers with. A select when the key's models are known, otherwise a text field saved on Enter or blur. "Make default" picks the first model; this is where the person changes it. */
 function DefaultModelPicker({
   provider,
   model,
@@ -485,9 +475,7 @@ function AddKeyForm({
         test: true,
       });
       setSaved(`Connected · ${key.models.length} models · saved`);
-      // The cap is the person's, not the key's; the form offers it here
-      // because this is where someone first thinks about it. A refused cap
-      // keeps the form open so the refusal is seen: the key itself is saved.
+      // The cap belongs to the person, not the key; the form offers it here because adding a key is when someone first thinks about it. If the cap is rejected, the form stays open so the error is visible; the key itself is already saved.
       const capInput = cap.trim();
       if (capInput && capInput !== formatCapInput(overview.monthly_cap_usd)) {
         try {
@@ -681,8 +669,7 @@ function RoutesCard({
       return;
     }
     if (value === "instance") {
-      // A per-prompt route with no key: this prompt goes to the instance's
-      // provider even though a default key exists.
+      // A per-prompt route with no key: this prompt goes to the instance's provider even though a default key exists.
       upsertRoute.mutate({ task_id: prompt.task_id, provider_id: null });
       return;
     }
@@ -833,7 +820,7 @@ function FallbackCard({ overview }: { overview: NonNullable<ReturnType<typeof us
           <div className={page.settingInfo}>
             <span className={page.settingLabel}>Fall back to the instance's providers</span>
             <span className={page.settingHint}>
-              If your key fails or reaches a cap, the prompt runs on the instance's provider and the result is labelled.
+              If your key fails or reaches a cap, the prompt runs on the instance's provider and the result is labeled.
               If this is off, the prompt stops with an error instead.
             </span>
           </div>

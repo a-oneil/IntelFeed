@@ -345,7 +345,7 @@ async def test_externalize_entry_links_swaps_in_app_links(db_session, day_feed):
 
 @pytest.mark.asyncio
 async def test_externalize_entry_links_keeps_link_without_source_url(db_session, day_feed, monkeypatch):
-    """An entry with no source URL keeps its app link, absolutised when the
+    """An entry with no source URL keeps its app link, absolutized when the
     public origin is configured."""
     from app.config import settings
     from app.services.daily_briefing import externalize_entry_links
@@ -396,7 +396,7 @@ async def test_use_daily_summary_action_externalizes_links(db_session, daily_sum
 async def test_use_daily_summary_action_links_app_keeps_reader_links(
     db_session, daily_summary_task, day_feed, monkeypatch
 ):
-    """links='app' keeps the IntelFeed deep links, absolutised for the post."""
+    """links='app' keeps the IntelFeed deep links, absolutized for the post."""
     from app.automation.actions import _action_use_daily_summary
     from app.config import settings
     from app.services.daily_briefing import yesterday_key

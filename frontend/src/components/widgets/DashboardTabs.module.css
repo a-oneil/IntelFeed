@@ -65,8 +65,7 @@
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
-/* Rename / delete affordances, revealed on hover or while the tab is active so
-   they're discoverable without relying on the double-click gesture. */
+/* Rename / delete buttons, shown on hover or while the tab is active so they can be found without knowing about double-click. */
 .tabAction {
   display: flex;
   align-items: center;

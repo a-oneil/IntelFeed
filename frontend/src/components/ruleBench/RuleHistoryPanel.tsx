@@ -29,13 +29,7 @@ type Row =
   | { kind: "upstream"; at: string; commit: CommitTimeline["commits"][number]; imported: boolean }
   | { kind: "import"; at: string };
 
-/**
- * One timeline, newest first: the versions saved here and the commits the
- * upstream repo made to the same file. Local versions diff and roll back as
- * before; upstream rows say what changed and link to the commit. The sync
- * snapshots the body it replaces as a version, so an upstream change has a
- * local version right beside it to diff against.
- */
+/** One timeline, newest first: the versions saved here and the commits the upstream repo made to the same file. Local versions can be diffed and rolled back; upstream rows say what changed and link to the commit. The sync saves the body it replaces as a version, so an upstream change has a local version right beside it to diff against. */
 export function RuleHistoryPanel({
   rule,
   versions,
@@ -69,10 +63,7 @@ export function RuleHistoryPanel({
   const repo = commitTimeline?.owner && commitTimeline?.repo ? `${commitTimeline.owner}/${commitTimeline.repo}` : rule?.source_repo;
   // Two date sources, two offset spellings ("Z" vs "+00:00"): compare instants.
   const ts = (s: string | null | undefined) => (s ? Date.parse(s) || 0 : 0);
-  // The import took the file as it was when the rule was created: the newest
-  // commit at or before that moment. Older commits are the file's earlier
-  // history, filled in by the upstream backfill. That commit's row carries the
-  // v1 mark, so the import isn't a second row for the same sha.
+  // The import took the file as it was when the rule was created: the newest commit at or before that moment. Older commits are the file's earlier history, filled in by the upstream backfill. That commit's row carries the v1 mark, so the import isn't a second row for the same sha.
   const imported = rule?.source_repo
     ? commits
         .filter((c) => c.date && ts(c.date) <= ts(rule.created_at))

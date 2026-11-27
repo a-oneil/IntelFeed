@@ -147,8 +147,8 @@ async def mark_not_duplicate(
 
 # The retired link validator's proposals: anything in the link log that the
 # adjudicate stage did not file. Nothing re-judges them (the adjudication
-# backfill walks entries, not these rows), so past this age they only pad the
-# Review badge.
+# backfill walks entries, not these rows), so past this age they only inflate
+# the Review badge count.
 LEGACY_LINK_PROPOSAL_MAX_AGE_DAYS = 30
 EXPIRE_LEGACY_LINK_PROPOSALS_SQL = """
 DELETE FROM entity_link_validation_log l
@@ -207,7 +207,7 @@ VENDOR_AUTOLINK = "vendor_autolink"
 
 def _proposed_vendor_exists():
     """SQL: a vendor_autolink row's proposed vendor still exists. Compared as
-    text so a malformed id is simply "gone", never a query error."""
+    text so a malformed id counts as gone, never a query error."""
     from app.models.vendor import Vendor
 
     return (
@@ -219,7 +219,7 @@ def _proposed_vendor_exists():
 
 def entity_alive_clause(log):
     """SQL predicate: the log row's entity still exists, or the row has no
-    catalogue entity (a pseudo type such as an edge, or no entity id). For the
+    catalog entity (a pseudo type such as an edge, or no entity id). For the
     maintenance log, a vendor link also needs its proposed vendor.
 
     The Review list drops groups whose entity is gone; the pending feed and
@@ -326,8 +326,9 @@ async def settle_gone_entity(
 
 async def clear_entity_proposals(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> int:
     """Delete every pending proposal about an entity that no longer exists —
-    both logs, every action. Called when an analyst deletes the entity from a
-    review queue, so its rows do not linger as "gone" lines to dismiss by hand.
+    both logs, every action. Called by ``settle_gone_entity`` and when an
+    analyst deletes the entity from a review queue, so its rows do not linger
+    as "gone" lines to dismiss by hand.
     Applied rows stay: they are history and undo records."""
     n = (
         await db.execute(

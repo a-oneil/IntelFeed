@@ -1,20 +1,13 @@
-// chrome.storage.local: the server, the signed-in session (the same
-// access/refresh pair the web app holds — never the password), the feature
-// switches, the sites highlighting is off for, the user's IntelFeed theme, and
-// sends waiting for the server. Short-lived state lives elsewhere: per-tab
-// badge state and the text for the rule window in chrome.storage.session,
-// lookup caches in the background worker's memory.
+// chrome.storage.local: the server, the signed-in session (the same access/refresh pair the web app holds — never the password), the feature switches, the sites highlighting is off for, the user's IntelFeed theme, and sends waiting for the server. Short-lived state lives elsewhere: per-tab badge state and the text for the rule window in chrome.storage.session, lookup caches in the background worker's memory.
 
 const DEFAULT_FEATURES = {
   // Right-click "Look up in IntelFeed" on selected text.
   lookupMenu: true,
-  // A dot on the toolbar button: green when the page is already in
-  // IntelFeed, accent-colored when the site has a feed or repo you don't follow.
+  // A dot on the toolbar button: green when the page is already in IntelFeed, accent-colored when the site has a feed or repo you don't follow.
   pageDot: true,
   // Highlight known entities on the page, with a card on hover.
   highlight: true,
-  // On a CVE page (NVD, cve.org, a vendor advisory) or an ATT&CK technique
-  // page, a panel with what IntelFeed knows about it.
+  // On a CVE page (NVD, cve.org, a vendor advisory) or an ATT&CK technique page, a panel with what IntelFeed knows about it.
   contextPanel: true,
   // A notification when IntelFeed has finished with a page you sent, saying what it found.
   notifyResults: true,
@@ -32,7 +25,7 @@ const KEYS = [
   // Sends waiting for the server (lib/outbox.js), and the ones it refused.
   "outbox",
   "outboxFailed",
-  // Pages sent this session whose results haven't come back yet.
+  // Pages sent in the last 30 minutes whose results haven't come back yet (background.js polls them).
   "watching",
   // Telemetry source picked per part of a site (lib/telemetry.js).
   "telemetryPicks",

@@ -171,9 +171,9 @@ async def test_a_query_that_does_not_parse_is_empty_rather_than_raising(db_sessi
 
 
 async def test_an_empty_query_claims_nothing(db_session: AsyncSession, feed: Feed):
-    """ "Everything" is not a source. An empty string used to be a plan with
-    entry intent and no filter, which the index would answer with the whole
-    corpus."""
+    """ "Everything" is not a source. Without this guard an empty string becomes
+    a plan with entry intent and no filter, which the index answers with the
+    whole corpus."""
     await _entry(db_session, feed, "everything")
     await db_session.flush()
 

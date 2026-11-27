@@ -251,8 +251,9 @@ async def get_public_default_theme(db: AsyncSession = Depends(get_db)):
     return resp
 
 
-# Only variable names the app actually themes are emitted, so a malformed
-# css_variables row can't inject arbitrary CSS into every page load.
+# Only variable names made of lowercase letters, digits and hyphens are emitted
+# (and values containing "}" or ";" are dropped), so a malformed css_variables
+# row can't inject arbitrary CSS into every page load.
 _CSS_VAR_NAME = re.compile(r"^[a-z0-9-]+$")
 
 
@@ -291,9 +292,10 @@ async def get_default_theme_css(db: AsyncSession = Depends(get_db)):
     return Response(
         content=css,
         media_type="text/css",
-        # Blocks first paint, so it must come off the disk cache on repeat loads.
-        # A default change lands within the window, and the logged-out React path
-        # (same 5 min staleTime) repaints it sooner for anyone sitting on /login.
+        # This stylesheet blocks first paint, so repeat loads must come from the
+        # disk cache. A changed default reaches browsers within the 5-minute
+        # max-age, and the logged-out React query (same 5 min staleTime) repaints
+        # it sooner for anyone left on /login.
         headers={"Cache-Control": "public, max-age=300"},
     )
 

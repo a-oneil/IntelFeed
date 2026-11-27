@@ -201,7 +201,7 @@ A staged write is stored in Redis at `copilot:action:{action_id}` for **900 seco
 `POST /api/ai/copilot/confirm` (`copilot_confirm`, `backend/app/api/copilot.py`) then runs or cancels it:
 
 - The stored call must belong to the caller (404 otherwise, and 404 once it has expired).
-- `edited_params` may replace the arguments, except on a destructive call: that one is confirmed as shown or cancelled.
+- `edited_params` may replace the arguments, except on a destructive call: that one is confirmed as shown or canceled.
 - A claim key (`copilot:action:{id}:claim`, 900 s, as long as the staged call can live) lets only one approval run at a time, so a double click, two tabs or a slow tool cannot run it twice; a second approval gets 409. After claiming, the call must still exist: a click that arrives after another approval finished gets 404, not a second run.
 - `run_confirmed` runs the tool as the user who clicked, re-checking `ADMIN_TOOLS` against their role at that moment. A tool with a two-step token flow (the seven deletes: `delete_entity`, `delete_feed`, `delete_campaign`, `delete_automation_rule`, `delete_detection_rule`, `delete_intel_report`, `delete_requirement`; `confirmation_token_tools` finds them by their schema) gets its token here, server-side: the click is the confirmation.
 - On success, a `✓ Done: <summary>. Result: …` message is appended to the conversation. If the tool returns an error, the staged call is kept so the user can retry.

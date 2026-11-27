@@ -7,9 +7,7 @@ with one media item each. This module groups those by `metadata.telegram_grouped
 moves all sibling media onto the canonical caption-bearing entry, and deletes the
 strays.
 
-Trigger via:
-    docker compose exec api python -m app.scripts.backfill_telegram_albums
-or queue from the worker shell:
+Trigger by queuing it from a worker shell:
     backfill_telegram_albums.delay()
 """
 
@@ -94,7 +92,7 @@ async def _backfill(feed_id: str | None) -> dict:
                     None,
                 )
                 if canonical is None:
-                    # Whole album is media-only — keep the lowest-id entry as canonical
+                    # Whole album is media-only — keep the lowest message_id entry as canonical
                     # so subsequent fetches don't re-create the stragglers.
                     canonical = min(group, key=lambda e: (e.metadata_ or {}).get("message_id", 0))
                 sibling_ids = [e.id for e in group if e.id != canonical.id]

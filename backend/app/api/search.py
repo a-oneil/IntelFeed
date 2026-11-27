@@ -304,8 +304,8 @@ async def _search_unread_page(
     scanned = [h["id"] for h in scan.get("hits", []) if "id" in h]
     if len(scanned) >= HIDE_READ_SCAN_CAP:
         # The unread total below is then a floor rather than the count, and a
-        # page past the cap comes back empty. Saying so beats a number that
-        # looks exact.
+        # page past the cap comes back empty. Log it so the total is not read as
+        # exact.
         logger.warning(
             "Hide Read scan hit its %d-hit cap for query %r; unread total is a floor",
             HIDE_READ_SCAN_CAP,
@@ -677,12 +677,12 @@ async def unified_search(
         # constraint but nothing for the index to actually search: either an
         # entity-only query, or a Postgres-backed entry filter like `signal:`
         # with no text term. Passing tens of thousands of IDs as a Meilisearch
-        # filter string is what used to happen, and it silently returned zero.
+        # filter string silently returns zero hits.
         #
         # The size threshold is the builder's own `id IN [...]` cap, not a
         # number of its own: the builder keeps the first 500 IDs and drops the
-        # rest, so a constraint of 501-800 used to come here, lose its tail in
-        # the filter string, and answer with a subset nothing announced.
+        # rest, so a larger constraint sent to the index would lose its tail and
+        # return a subset without saying so.
         _no_text_to_search = not plan.meili_query.strip() and not plan.meili_filters
         if (
             entry_id_constraint is not None
@@ -738,9 +738,9 @@ async def unified_search(
 
     # Count entities by type BEFORE trimming, so the facet sidebar can offer
     # "Threat Actors 57" while the payload carries only the first page of each
-    # group. Trimming first is what made this endpoint answer a plain-text query
-    # with ten actors and nothing else: the global slice ran after a relevance
-    # sort that puts one type on top.
+    # group. The trim is per type rather than one global slice because the list
+    # is sorted by relevance across types, and a global slice would keep only
+    # the type that ranks first.
     entity_counts: dict[str, int] = dict(Counter(e["type"] for e in entity_results))
     entity_results = _trim_entities_per_type(entity_results, body.entity_group_limit)
 
@@ -875,8 +875,8 @@ FIELD_SUGGESTIONS = [
 
 # Static value suggestions for known fields
 # `is:` and `sort:` are taken from the planner that executes them rather than
-# retyped: the hand-written copies here offered five of the eight `is:` values
-# and every sort except `radar`, which is the one worth discovering.
+# retyped, so the suggestions cannot fall out of step with what the planner
+# accepts (a hand-written copy missed three `is:` values and `sort:radar`).
 STATIC_VALUES = {
     "is": list(IS_FILTER_VALUES),
     "sort": sorted(VALID_SORTS),
@@ -888,7 +888,7 @@ STATIC_VALUES = {
     "rule.severity": ["critical", "high", "medium", "low"],
     "note.type": ["annotation", "analysis", "action_taken", "false_positive", "context"],
     # `entry` and `standalone` name the other note table; the rest are the
-    # entity kinds a note can hang off.
+    # entity kinds a note can be attached to.
     "note.about": [
         "entry",
         "standalone",
@@ -1183,7 +1183,7 @@ async def _get_dynamic_values(
             )
 
     elif field_name in ("observable", "ioc"):
-        # Ledger values: never-suggest denied or expired rows, busiest first.
+        # Ledger values, excluding denied and expired rows, most reported first.
         from app.models.observable import Observable
 
         result = await db.execute(
@@ -1226,8 +1226,7 @@ _NAME_VALUE_FIELDS: dict[str, tuple[str, str, str | None]] = {
 # Fields whose values are a distinct set drawn from one column. Every field the
 # grammar accepts whose values are a vocabulary rather than a range belongs
 # here: a field missing from these tables completes its name and then offers
-# nothing after the colon, which reads as "no such values" rather than "nobody
-# taught the autocomplete this one".
+# nothing after the colon, which looks as if the field has no values.
 _DISTINCT_VALUE_FIELDS: dict[str, tuple[str, str]] = {
     "tool.type": ("app.models.tool:Tool", "tool_type"),
     "vendor.type": ("app.models.vendor:Vendor", "vendor_type"),
@@ -1296,9 +1295,9 @@ async def _generic_value_suggestions(db: AsyncSession, field_name: str, partial_
 
     out: list[dict] = []
     if field_name == "signal":
-        # The engine's own registry, not a copy of it: a signal that stops
-        # firing is still a thing to search for, and a new one is offered the
-        # day it ships rather than the day someone remembers this list.
+        # Read from the engine's own registry, not a copy of it: a signal that
+        # no longer fires is still worth searching for, and a new signal is
+        # offered without anyone editing a list here.
         from app.intelligence.signals import SIGNAL_FAMILIES
 
         return [_value_suggestion(field_name, name) for name in sorted(SIGNAL_FAMILIES) if partial_value in name]
@@ -1355,8 +1354,9 @@ async def _generic_value_suggestions(db: AsyncSession, field_name: str, partial_
     elif field_name in _DISTINCT_VALUE_FIELDS:
         model_path, attr = _DISTINCT_VALUE_FIELDS[field_name]
         col = getattr(_load(model_path), attr)
-        # Case-folded for the same reason as the array fields above: one value
-        # spelled two ways is one suggestion, and the filter matches both.
+        # Case-folded for the same reason as the array fields (see
+        # _array_element_values): one value spelled two ways is one suggestion,
+        # and the filter matches both.
         stmt = (
             select(func.mode().within_group(col).label("value"))
             .where(col.ilike(f"%{partial_value}%"))
@@ -1389,9 +1389,9 @@ async def _array_element_values(db: AsyncSession, field_name: str, partial_value
     elements = rows_stmt.subquery()
     # Group case-insensitively and offer the spelling most rows actually use.
     # Tags and log-source names come from upstream rule repos, which write
-    # "DNS" and "dns" for one thing, and listing both twice over is what made
-    # the dropdown look broken. Folding here rather than rewriting the rows
-    # keeps vendor data as published and cannot drift back, and the filter is
+    # "DNS" and "dns" for one thing, and listing both makes the dropdown look
+    # broken. Folding here rather than rewriting the rows keeps vendor data as
+    # published, and a later sync cannot reintroduce the duplicates. The filter is
     # already case-insensitive, so the suggestion still matches every variant
     # it stands for.
     stmt = (

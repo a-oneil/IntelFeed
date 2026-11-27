@@ -29,8 +29,7 @@ type AISection = "providers" | "prompts" | "keys" | "cost";
 const SECTIONS: readonly AISection[] = ["providers", "prompts", "keys", "cost"];
 
 export default function AISettings() {
-  // `?tab=` is how the Engine's settings search deep-links a key that lives
-  // here (the personal-key policy on User keys).
+  // `?tab=` is how the Engine's settings search deep-links a key that lives here (the personal-key policy on User keys).
   const [searchParams] = useSearchParams();
   const requested = searchParams.get("tab");
   const [activeSection, setActiveSection] = useState<AISection>(
@@ -101,11 +100,7 @@ export default function AISettings() {
   );
 }
 
-/**
- * Cross-tab health banner: auto-pause on quota exhaustion is easy to miss when
- * you're on the Prompts or Cost tab. Surface paused/unavailable providers at the
- * top of AI Configuration regardless of the active tab, with a one-click Resume.
- */
+/** Cross-tab health banner: a provider auto-paused on quota exhaustion is easy to miss from the Prompts or Cost tab, so paused/unavailable providers are shown at the top of AI Configuration on every tab, with a one-click Resume. */
 function ProviderHealthBanner({ onGoToProviders }: { onGoToProviders?: () => void }) {
   const { data: allProviders } = useAIProviders();
   // The admin's own personal key is listed alongside; it is not the instance's.
@@ -174,8 +169,7 @@ function ProviderHealthBanner({ onGoToProviders }: { onGoToProviders?: () => voi
   );
 }
 
-// Per-model knobs the Ollama provider reads from config / config.model_overrides.
-// All values are kept as strings while editing; empty string = inherit/unset.
+// Per-model settings the Ollama provider reads from config / config.model_overrides. All values are kept as strings while editing; empty string = inherit/unset.
 type OllamaKnobs = {
   think: string; // "" inherit | "on" | "off"
   num_ctx_max: string;
@@ -399,8 +393,7 @@ function openAIKnobsToConfig(k: OpenAICompatKnobs): Record<string, unknown> {
   return out;
 }
 
-/** extra_body is merged into every request payload, so anything but a plain
- *  object (an array, a string, a number) breaks every call on the provider. */
+/** extra_body is merged into every request payload, so anything but a plain object (an array, a string, a number) breaks every call on the provider. */
 function parseExtraBody(text: string): Record<string, unknown> {
   let parsed: unknown;
   try {
@@ -579,8 +572,7 @@ function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider;
 
 function ProvidersSection() {
   const { data: allProviders, isLoading } = useAIProviders();
-  // GET /ai/providers also returns the caller's personal keys; those live on
-  // My AI, and the instance's assignments can't point at them.
+  // GET /ai/providers also returns the caller's personal keys; those are managed on My AI, and the instance's assignments can't point at them.
   const providers = allProviders?.filter((p) => !p.user_id);
   const createProvider = useCreateAIProvider();
   const updateProvider = useUpdateAIProvider();
@@ -611,8 +603,7 @@ function ProvidersSection() {
     await createProvider.mutateAsync({
       name: newProvider.name,
       provider_type: newProvider.provider_type,
-      // ClaudeProvider forwards base_url straight to the Anthropic SDK, so a
-      // stale value from another type must never reach it.
+      // ClaudeProvider forwards base_url straight to the Anthropic SDK, so a stale value from another type must never reach it.
       base_url: requiresBaseUrl ? newProvider.base_url || undefined : undefined,
       api_key: newProvider.api_key || undefined,
     });
@@ -885,11 +876,7 @@ const CALLER_LABELS: Record<AICallerCostRow["caller_kind"], string> = {
   unattributed: "Unattributed (before Oct 2026)",
 };
 
-/**
- * Spend by who asked, with each person's day against the site allowance. The
- * headline splits instance spend (the admin's) from user-key spend (theirs);
- * one total would mix money paid by different people.
- */
+/** Spend per user, with each person's requests today against the site's per-user allowance. The headline splits instance spend (the admin's) from user-key spend (the users'), because one total would mix money paid by different people. */
 function ByUserTable({ breakdown }: { breakdown: AICostBreakdown }) {
   const [filter, setFilter] = useState<"all" | "instance" | "user">("all");
   const allowance = breakdown.site_allowance_per_user;

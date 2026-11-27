@@ -151,7 +151,7 @@ export function DetectionWorkbenchPage() {
       });
       setSavedRuleIndices((prev) => new Set(prev).add(index));
     } catch {
-      // silently fail for now
+      // Save errors are ignored; the button stays in its unsaved state.
     }
   };
 

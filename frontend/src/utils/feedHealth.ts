@@ -9,10 +9,7 @@ function shortUrl(url: string): string {
   }
 }
 
-/**
- * "Paused automatically after HTTP 403 for 30 days (412 failed fetches)".
- * A feed paused by a person has no pause_reason and just reads "Paused".
- */
+/** "Paused automatically after HTTP 403 for 30 days (412 failed fetches)". A feed paused by a person has no pause_reason and reads "Paused". */
 export function describePauseReason(reason: FeedPauseReason): string {
   const what = reason.last_error || "repeated errors";
   const span = reason.days != null ? ` for ${reason.days} day${reason.days === 1 ? "" : "s"}` : "";

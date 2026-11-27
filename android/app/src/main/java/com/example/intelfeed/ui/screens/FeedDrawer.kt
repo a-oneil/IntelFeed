@@ -213,9 +213,7 @@ fun FeedDrawerSheet(
                 IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, contentDescription = strings.drawerAccountSettings, tint = TextSecondary) }
             }
 
-            // "Find a feed" sits below the views and saved searches, so its results used to
-            // appear under the keyboard. Typing scrolls the feed section to the top, and the list
-            // stays above the keyboard.
+            // "Find a feed" sits below the views and saved searches, so without this its results would appear under the keyboard. Typing scrolls the feed section to the top, and the list stays above the keyboard.
             val listState = rememberLazyListState()
             LaunchedEffect(feedQuery.isNotBlank()) {
                 if (feedQuery.isNotBlank()) listState.animateScrollToItem(1)

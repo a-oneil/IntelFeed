@@ -39,25 +39,29 @@ class NVDAdapter(ExtendedAdapter):
             params["lastModStartDate"] = start.strftime("%Y-%m-%dT%H:%M:%S.000")
             params["lastModEndDate"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.000")
 
-        if keywords:
-            params["keywordSearch"] = " ".join(keywords)
-            params["keywordExactMatch"] = ""
-
         meta = ParsedFeedMeta(
             title="NVD CVE Database",
             description="NIST National Vulnerability Database",
             site_url="https://nvd.nist.gov/",
         )
 
+        # Each keyword is its own exact-phrase search and a CVE matching any of
+        # them is kept: "fortinet, ivanti" means either vendor. Joined into one
+        # phrase they would match only descriptions containing "fortinet ivanti".
+        searches = [{**params, "keywordSearch": k, "keywordExactMatch": ""} for k in keywords if k] or [params]
+        vulnerabilities: list[dict] = []
+        seen_ids: set[str] = set()
         async with httpx.AsyncClient(timeout=60.0, headers=headers) as client:
-            response = await client.get(NVD_API_BASE, params=params)
-            if response.status_code != 200:
-                logger.warning(f"NVD API returned {response.status_code}")
-                return meta, []
-
-            data = response.json()
-
-        vulnerabilities = data.get("vulnerabilities", [])
+            for search in searches:
+                response = await client.get(NVD_API_BASE, params=search)
+                if response.status_code != 200:
+                    logger.warning(f"NVD API returned {response.status_code}")
+                    continue
+                for vuln in response.json().get("vulnerabilities", []):
+                    cve_id = vuln.get("cve", {}).get("id", "")
+                    if cve_id not in seen_ids:
+                        seen_ids.add(cve_id)
+                        vulnerabilities.append(vuln)
         entries = []
 
         for vuln in vulnerabilities:
@@ -111,7 +115,7 @@ class NVDAdapter(ExtendedAdapter):
 
 
 def _extract_cvss_score(cve: dict) -> float | None:
-    """Extract the highest CVSS score from a CVE record."""
+    """Extract the base score of the newest CVSS version a CVE record carries."""
     metrics = cve.get("metrics", {})
 
     # Try CVSS v3.1 first, then v3.0, then v2.0

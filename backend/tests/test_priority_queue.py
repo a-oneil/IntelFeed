@@ -1,8 +1,8 @@
 """The Priority Queue endpoint: what the ranked reading queue is made of.
 
 The queue is entries and story threads in one ordered list, so these tests are
-mostly about the seam between them — where a thread row lands, which entries it
-swallows on the way, and whether paging through the queue ever shows the same
+mostly about how the two mix: where a thread row lands, which member entries it
+hides from the list, and whether paging through the queue ever shows the same
 story twice.
 """
 
@@ -24,7 +24,7 @@ pytestmark = pytest.mark.asyncio
 
 @pytest.fixture(autouse=True)
 def surfaced(monkeypatch):
-    """Signal engine surfacing on with a known threshold — the queue's premise."""
+    """Signal engine surfacing on with a known threshold, which the queue depends on."""
     from app.config import settings as env_settings
 
     monkeypatch.setattr(env_settings, "signal_engine_surface", True)
@@ -188,7 +188,7 @@ class TestThreadFolding:
 
         body = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
 
-        # Twelve outlets don't add to the row's score: it ranks on its 5.0 beat.
+        # Twelve outlets don't add to the row's score: it ranks on its 5.0 article.
         assert titles(body) == ["Lone article", "Everyone covered it"]
         assert body["items"][1]["score"] == pytest.approx(5.0)
 
@@ -213,7 +213,7 @@ class TestThreadFolding:
 
         body = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
 
-        # The echo's 9.0 is a reprint, not a beat — the row ranks on the 3.0.
+        # The echo's 9.0 is a reprint, not original reporting, so the row ranks on the 3.0.
         assert body["items"][0]["score"] == pytest.approx(3.0)
 
     async def test_reading_an_article_does_not_change_the_story_score(
@@ -229,8 +229,8 @@ class TestThreadFolding:
         await db_session.commit()
         after = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
 
-        # The loud beat is read, but the story keeps its 6.0 while the quiet one
-        # is still unread — it doesn't drop to 0.0.
+        # The 6.0 article is read, but the story keeps its 6.0 while the 0.0 one
+        # is still unread; it doesn't drop to 0.0.
         assert kinds(before) == kinds(after) == ["thread"]
         assert before["items"][0]["score"] == after["items"][0]["score"] == pytest.approx(6.0)
         assert after["items"][0]["thread"]["top_score"] == pytest.approx(6.0)
@@ -335,7 +335,7 @@ class TestPaging:
         assert titles(body) == ["First"]
         assert body["has_more"] is True
 
-        # Last page of entries: nothing is left for it to outrank, so it lands.
+        # Last page of entries: nothing is left for it to outrank, so it is placed.
         body = (
             await client.get(f"/api/entries/priority-queue?limit=1&cursor={body['next_cursor']}", headers=auth_headers)
         ).json()

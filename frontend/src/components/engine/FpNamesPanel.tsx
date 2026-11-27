@@ -39,9 +39,7 @@ const COPY: Record<AutolinkNameList, { heading: string; sub: React.ReactNode; ad
   },
 };
 
-/** An autolink name-list setting as a table. Each is one comma-separated string
- *  underneath — at ~170 entries a textarea can't be read, searched, or edited a
- *  name at a time. */
+/** An autolink name-list setting as a table. Each list is stored as one comma-separated string; at ~170 entries a textarea is too hard to read, search, or edit one name at a time. */
 export function FpNamesPanel({ list = "fp" }: { list?: AutolinkNameList }) {
   const [q, setQ] = useState("");
   const [offset, setOffset] = useState(0);

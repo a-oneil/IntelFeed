@@ -13,9 +13,7 @@ describe("deriveIntelLevel", () => {
   });
 
   it("no longer claims 'known entities only' when the AI is reading the feed", () => {
-    // The old model mapped {full, autoExtract:false} to a 0.25 rail labelled
-    // "Known entities only — match against existing database", while the AI
-    // was reading every article and creating entities from it.
+    // Regression guard: {full, autoExtract:false} was mapped to a 0.25 rail labeled "Known entities only — match against existing database", even though the AI reads every article and creates entities from it.
     const level = deriveIntelLevel({ mode: "full", aiAnalysis: true, autoExtract: false });
     expect(level.label).toContain("AI analysis");
     expect(level.label).not.toContain("Known entities only");

@@ -41,12 +41,7 @@ function errorMessage(err: unknown): string {
   return e.response?.data?.error?.message || e.message || "Something went wrong";
 }
 
-/**
- * Side panel for one telemetry source: what it is, then the notes and saved
- * links analysts have about it. Shared by the Telemetry page and the rule
- * rail. Notes are markdown, written and shown with the same editor and card
- * as every other note. Anyone adds; the author or an admin edits and deletes.
- */
+/** Side panel for one telemetry source: what it is, then the notes and saved links analysts have about it. Shared by the Telemetry page and the rule rail. Notes are markdown, written and shown with the same editor and card as every other note. Anyone can add one; only the author or an admin can edit or delete it. */
 export function TelemetrySourceDrawer({ source, onClose }: { source: TelemetrySourceInfo; onClose: () => void }) {
   const { data, isLoading } = useTelemetryNotes(source.name);
   const create = useCreateTelemetryNote();
@@ -56,7 +51,7 @@ export function TelemetrySourceDrawer({ source, onClose }: { source: TelemetrySo
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // The note editor handles its own Escape (cancel) and marks it handled.
+      // The note editor handles its own Escape (cancel) and calls preventDefault, so skip events it already handled.
       if (e.key === "Escape" && !e.defaultPrevented) onClose();
     };
     window.addEventListener("keydown", onKey);
@@ -204,8 +199,7 @@ function NoteRow({ note }: { note: TelemetrySourceNote }) {
         showTitle={false}
         editable={canEdit}
         onSave={(d) =>
-          // The link and quote stay as saved; the editor holds the note text.
-          // NoteCard shows the error; give it the server's message.
+          // The link and quote stay as saved; the editor only edits the note text. NoteCard shows the error, so pass it the server's message.
           update.mutateAsync({ id: note.id, content: d.markdown.trim() }).catch((err) => {
             throw new Error(errorMessage(err));
           })

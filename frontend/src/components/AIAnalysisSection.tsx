@@ -17,11 +17,10 @@ import { apiErrorInfo, apiErrorReason } from "@/api/errors";
 import { blockedReasonShort, fallbackFixLabel, isCapReason } from "@/utils/aiProvenance";
 import styles from "./AIAnalysisSection.module.css";
 
-// Tasks that need a special UI instead of one-click run (Ask Agent chat lives
-// in the AI panel action bar, not as a task row).
+// Tasks that need a special UI instead of a one-click run (Ask Agent chat lives in the AI panel action bar, not as a task row).
 const CHAT_TASKS = new Set(["entry_qa"]);
 
-// Steerable one-shots: tasks that accept an optional "focus" to shape output.
+// Single-run tasks that accept an optional "focus" to shape the output.
 const FOCUSABLE_TASKS = new Set([
   "article_summary",
   "intelligence_briefing",
@@ -49,11 +48,11 @@ export interface RunTaskResult {
   remaining_today?: number | null;
 }
 
-/** What a click on a task row does, said before the click. */
+/** What a click on a task row will do, shown on the row before the click. */
 export interface RowRun {
   /** "user": the person's key; "site": the instance's provider; "refused": the policy stops it. */
   on: "user" | "site" | "refused";
-  /** Why the person's key can't answer, when it can't (null when it can, or when there is none to speak of). */
+  /** Why the person's key can't answer, when it can't (null when it can, or when there is no key to report on). */
   reason: string | null;
   /** The personal route that would answer, for the estimate. */
   route: { provider_id: string; model_name: string | null } | null;
@@ -61,12 +60,7 @@ export interface RowRun {
   aware: boolean;
 }
 
-/**
- * Where a click runs, from the overview row when there is one. Without an
- * overview (the policy says this person has no routes, so it is never
- * fetched) the policy alone answers: a required key that is missing refuses
- * every eligible task; otherwise the instance's provider answers quietly.
- */
+/** Where a click runs, from the overview row when there is one. Without an overview (the policy says this person has no routes, so it is never fetched) the policy alone decides: a required key that is missing refuses every eligible task; otherwise the instance's provider answers and the row shows no key indicator. */
 export function rowRun(
   task: AITask,
   policy: UserAIPolicyStatus | undefined,
@@ -80,7 +74,7 @@ export function rowRun(
   if (row) {
     const myRoute = row.route ?? overview?.default_route ?? null;
     const routed = !!myRoute && myRoute.provider_id !== null;
-    // Older servers send no verdict; then a routed key is what answers.
+    // Older servers send no verdict; then a routed key answers.
     const on = row.will_run_on ?? (routed ? "user" : "site");
     const reason = row.blocked_reason ?? null;
     return {
@@ -141,12 +135,9 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
   const hookRunTask = useRunAIOnEntry();
   const hookRunEntity = useRunAIOnEntity();
   const { data: assignments } = useAllTaskAssignments();
-  // Unfiltered on purpose: the estimate looks up the site assignment's
-  // provider or the person's own key, whichever will answer.
+  // Unfiltered on purpose: the estimate looks up the site assignment's provider or the person's own key, whichever will answer.
   const { data: providers } = useAIProviders();
-  // Which tasks a click would run on the person's own key, so the row says so
-  // before they click. The policy read is cheap and answers for most people:
-  // personal keys off, or no routes, and the overview is never fetched.
+  // Which tasks a click would run on the person's own key, so the row says so before they click. The policy read is cheap and is enough for most people: with personal keys off, or no routes, the overview is never fetched.
   const signedIn = useAuthStore((s) => !!s.accessToken);
   const { data: myPolicy } = useMyAIPolicy(signedIn && !runTaskFn);
   const { data: myAI } = useMyAI(!!myPolicy?.allow_user_ai_providers && myPolicy.has_routes);
@@ -162,9 +153,7 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
 
   const allTasks = tasksProp ?? hookTasks;
 
-  // Action tasks: visibility is a per-task, per-surface setting (Settings > AI) —
-  // articles and entity profiles toggle independently. Extraction and chat
-  // tasks never render as rows.
+  // Action tasks: visibility is a per-task, per-surface setting (Settings > AI); articles and entity profiles toggle independently. Extraction, maintenance, validation and chat tasks never render as rows.
   const isVisible = (t: AITask) =>
     isEntity ? (t.show_in_entity_actions ?? true) : (t.show_in_entry_actions ?? true);
   const actionTasks = (allTasks ?? []).filter(
@@ -238,13 +227,11 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
             <div className={styles.groupLabel}>{group.label}</div>
             {groupTasks.map((task) => {
               const isCompleted = completedTasks?.has(task.name) || localCompleted.has(task.name);
-              // Personal keys on: the row says what a click does before the
-              // click, by the server's own verdict for this task.
+              // With personal keys on, the row says what a click does before the click, using the server's own verdict for this task.
               const run = rowRun(task, myPolicy, myAI);
               const onMyKey = run.on === "user";
               const refused = run.on === "refused";
-              // Estimate from whatever will actually answer: the personal key's
-              // provider + model when the click runs there, else the site assignment.
+              // Estimate from whatever will answer: the personal key's provider + model when the click runs there, else the site assignment.
               const est = estimateTask(
                 task.category,
                 task.name,

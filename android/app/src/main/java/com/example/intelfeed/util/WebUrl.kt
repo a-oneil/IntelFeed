@@ -4,12 +4,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 object WebUrl {
 
-    /**
-     * Cleans up a web address the user typed or pasted (a feed, a website, an article page):
-     * trims it, adds https:// when no scheme is given, and returns null unless it's a valid
-     * http(s) URL with a host. Unlike ServerUrl.normalize, the path and query are kept, because
-     * feed addresses often depend on them (…/feed?format=rss).
-     */
+    /** Cleans up a web address the user typed or pasted (a feed, a website, an article page): trims it, adds https:// when no scheme is given, and returns null unless it's a valid http(s) URL with a host. Unlike ServerUrl.normalize, the path and query are kept, because feed addresses often depend on them (…/feed?format=rss). */
     fun normalize(raw: String): String? {
         val trimmed = raw.trim()
         if (trimmed.isEmpty() || trimmed.any { it.isWhitespace() }) return null

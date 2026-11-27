@@ -11,17 +11,14 @@ const INVALIDATION_DEBOUNCE_MS = 2000;
 
 export function useSSE() {
   const queryClient = useQueryClient();
-  // Keyed on the token itself, not just "signed in": a token rotation re-runs
-  // connect(), which is what revives a stream whose retries ran out during an
-  // outage. Rotation is rare (the access token lives for hours), so it's cheap.
+  // Keyed on the token itself, not just "signed in": a token rotation re-runs connect(), which is what restarts a stream whose retries ran out during an outage. Rotation is rare (the access token lives for hours), so the reconnect costs little.
   const token = useAuthStore((s) => s.accessToken);
   const eventSourceRef = useRef<EventSource | null>(null);
   const retriesRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const genRef = useRef(0);
 
-  // Debounce SSE-triggered invalidations to prevent request storms
-  // when many feeds are fetched in quick succession
+  // Debounce SSE-triggered invalidations to prevent request storms when many feeds are fetched in quick succession
   const pendingInvalidationsRef = useRef(new Set<string>());
   const invalidationTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -76,8 +73,7 @@ export function useSSE() {
     const es = new EventSource(url);
     eventSourceRef.current = es;
 
-    // feed_fetched now carries entry data too (coalesced on backend)
-    // entry_new kept for backwards compat but both debounce to the same invalidation
+    // feed_fetched also carries entry data (coalesced on the backend); entry_new is kept for backward compatibility, and both debounce to the same invalidation
     const onFeedFetched = () => {
       debouncedInvalidate("entries", "feeds");
     };
@@ -151,8 +147,7 @@ export function useSSE() {
         // The modal's queue list reads this query; refetch it on every change.
         queryClient.invalidateQueries({ queryKey: ["ingest-batch", data.batch_id] });
         if (data.status === "created") {
-          // A new entry on the Manual Uploads feed — and, the first time ever,
-          // the feed itself.
+          // A new entry on the Manual Uploads feed, and on the very first upload the feed itself.
           debouncedInvalidate("entries", "entries-count", "feeds");
         }
       } catch {

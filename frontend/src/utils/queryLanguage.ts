@@ -1,9 +1,4 @@
-/**
- * The analyst's preferred query language — the one setting every place that
- * writes a query or detection logic for them reads. Mirrors
- * backend/app/ai/query_language.py: ids, names and the library rule format a
- * language maps onto, when one exists.
- */
+/** The analyst's preferred query language, the one setting every place that writes a query or detection logic for them reads. Mirrors backend/app/ai/query_language.py: ids, names and the library rule format a language maps onto, when one exists. */
 export type QueryLanguage =
   | "kql"
   | "spl"
@@ -21,8 +16,7 @@ export interface QueryLanguageOption {
   value: QueryLanguage;
   label: string;
   short: string;
-  /** The detection-rule format this language is stored as. ES|QL and EQL
-      share `elastic_ql`; the rest map one to one. */
+  /** The detection-rule format this language is stored as. ES|QL and EQL share `elastic_ql`; the rest map one to one. */
   ruleType: string | null;
 }
 
@@ -52,9 +46,7 @@ export function queryLanguageShort(id: string | null | undefined): string {
   return (id && BY_ID.get(id as QueryLanguage)?.short) || "query";
 }
 
-/** Rule formats to generate when nothing was chosen: Sigma, which converts
-    everywhere, plus the preferred language's own format when the library has
-    one. Same backend rule (`default_rule_types`). */
+/** Rule formats to generate when nothing was chosen: Sigma, which converts everywhere, plus the preferred language's own format when the library has one. Same rule as the backend (`default_rule_types`). */
 export function defaultRuleTypes(lang: QueryLanguage): string[] {
   const own = BY_ID.get(lang)?.ruleType ?? null;
   return own && own !== "sigma" ? ["sigma", own] : ["sigma"];

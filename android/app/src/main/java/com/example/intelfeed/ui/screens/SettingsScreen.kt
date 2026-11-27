@@ -150,15 +150,14 @@ fun SettingsScreen(
     var showThemePicker by remember { mutableStateOf(false) }
     var showVoiceSettings by remember { mutableStateOf(false) }
 
-    // Whether Android lets the app post notifications at all (Android 13+ permission and the app's
-    // system switch). Re-read when the screen resumes, since both can change in system settings.
+    // Whether Android lets the app post notifications at all (Android 13+ permission and the app's system switch). Re-read when the screen resumes, since both can change in system settings.
     var systemAllowsAlerts by remember { mutableStateOf(IntelNotificationHelper.canPostNotifications(context)) }
     LifecycleResumeEffect(Unit) {
         systemAllowsAlerts = IntelNotificationHelper.canPostNotifications(context)
         onPauseOrDispose { }
     }
     var sendTestAfterGrant by remember { mutableStateOf(false) }
-    // The permission prompt was opened by the update-notices switch, not the intel alerts one.
+    // True when the permission prompt was opened by the update-notices switch rather than the intel alerts one.
     var updatesAfterGrant by remember { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(

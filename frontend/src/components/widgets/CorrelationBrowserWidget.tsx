@@ -25,18 +25,13 @@ interface Props {
   config: Record<string, unknown>;
 }
 
-/**
- * Full correlation event browser as a dashboard widget. Filters live on the
- * shared triage view (same store the priority queue reads), so they persist
- * per user rather than per widget instance.
- */
+/** Full correlation event browser as a dashboard widget. Filters live on the shared triage view (same store the priority queue reads), so they persist per user rather than per widget instance. */
 export default function CorrelationBrowserWidget({ config }: Props) {
   const navigate = useNavigate();
   const limit = (config.limit as number) || 50;
 
   const { view, setWidget } = useTriageView();
-  // Event read state is shared and a visitor can't change it, so they see
-  // every event: no "smart" or "unread" filter, nothing to mark read.
+  // Event read state is shared and a visitor can't change it, so they see every event: no "smart" or "unread" filter, nothing to mark read.
   const isVisitor = useIsVisitor();
   const savedFilter = view.widgets.correlations.filter;
   const corrFilter = isVisitor ? "all" : savedFilter;
@@ -86,9 +81,7 @@ export default function CorrelationBrowserWidget({ config }: Props) {
     return () => document.removeEventListener("mousedown", handler);
   }, [showEventTypePicker]);
 
-  // Honor the dashboard's global range bar. Presets map straight onto the
-  // API's rolling-window shorthand; a custom range sends explicit bounds with
-  // the end date included in full.
+  // Honor the dashboard's global range bar. Presets map straight onto the API's rolling-window shorthand; a custom range sends explicit bounds with the end date included in full.
   const timeBounds = useMemo<{ since?: string; until?: string }>(() => {
     const range = config.timeRange as string | undefined;
     if (!range || range === "all") return {};

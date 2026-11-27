@@ -23,7 +23,7 @@ AI_PATH_PREFIX = "/api/ai/"
 # Auth paths get aggressive rate limiting to prevent brute force
 AUTH_PATHS = {"/api/auth/login", "/api/auth/register", "/api/auth/refresh"}
 
-# Chat streaming endpoint — protect against credit burn
+# Chat streaming endpoint: limited to cap AI API spend
 CHAT_POST_PATH = "/api/chat"
 
 # Limits: (max_requests, window_seconds)
@@ -158,13 +158,13 @@ def _get_identity(request: Request) -> str:
 
 
 def client_ip(request: Request) -> str:
-    """The address of whoever is really calling.
+    """The address of the real client, behind any proxy.
 
     In prod the direct peer is always the proxy on the Docker network, and
     nothing in the stack sets forwarded_allow_ips, so request.client is
     the proxy for every visitor and every anonymous bucket (login, the
     share page's AI calls) would be one shared bucket. When the direct
-    peer is on a private network — our proxy, or the dev server — the
+    peer is on a private network (the stack's proxy, or the dev server), the
     first X-Forwarded-For hop is the client: Caddy strips the incoming
     header and writes its own peer there, so it can't be forged. Behind
     Cloudflare that hop is the edge node, shared by every visitor through

@@ -46,8 +46,7 @@ interface Props {
 type MetaFact = { label: string; value: string };
 type MetaLink = { label: string; url: string };
 
-/** Match the entity profile routes the remark plugin emits. The popover lookup
- *  and per-type styling both key off these. group 2 = entity slug. */
+/** Match the entity profile routes the remark plugin emits. The popover lookup and per-type styling both key off these. group 2 = entity slug. */
 const ENTITY_HREF_RE =
   /^\/(intelligence|workbench)\/(actor|malware|cve|ttp|vendor|product|country|sector|tool|mitigation)\//;
 
@@ -63,8 +62,7 @@ function withWiki(links: MetaLink[], url: string | null): MetaLink[] {
   return links;
 }
 
-// Build the popover metadata for each named-entity type from the day-entities
-// payload — mirrors the entry reader's builders so the tooltip is identical.
+// Build the popover metadata for each named-entity type from the day-entities payload — mirrors the entry reader's builders so the tooltip is identical.
 function actorMeta(a: DayActor): HighlightEntityMeta {
   const facts: MetaFact[] = [];
   if (a.motivation) facts.push({ label: "Motivation", value: a.motivation });
@@ -153,9 +151,7 @@ function dayWindowIso(dayKey: string): { since: string; before: string } | null 
   return { since: start.toISOString(), before: end.toISOString() };
 }
 
-/** Slice the summary down to its TL;DR section (everything before the second
- * top-level `## ` heading). If the model didn't structure with sections, the
- * whole summary is returned — graceful fallback. */
+/** Slice the summary down to its TL;DR section (everything before the second top-level `## ` heading). If the model didn't structure with sections, the whole summary is returned. */
 function tldrOnly(summary: string): string {
   const lines = summary.split("\n");
   let seenH2 = 0;
@@ -175,9 +171,7 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
   const { data: cached, isLoading: cacheLoading } = useDailySummary(dayKey, filters);
   const generate = useGenerateDailySummary();
 
-  // Read-aloud reuses the global speech player. A hidden full-summary render
-  // (below) is the extraction source so we speak the whole thing even when the
-  // visible body is collapsed to the TL;DR.
+  // Read-aloud reuses the global speech player. A hidden full-summary render (below) is the extraction source so we speak the whole thing even when the visible body is collapsed to the TL;DR.
   const speechEntryId = `daily-summary:${dayKey}`;
   const playSpeech = usePlayerStore((s) => s.playSpeech);
   const stopSpeech = usePlayerStore((s) => s.stopSpeech);
@@ -193,8 +187,7 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
     typeof window !== "undefined" && "speechSynthesis" in window;
   const readAloudAvailable = readAloudEngine === "piper" || speechSupported;
   const fullBodyRef = useRef<HTMLDivElement>(null);
-  // Visible, entity-highlighted body — the selection-menu scopes to this element
-  // so highlighting text raises the same create-note/entity menu as the reader.
+  // Visible, entity-highlighted body — the selection-menu scopes to this element so highlighting text raises the same create-note/entity menu as the reader.
   const bodyRef = useRef<HTMLDivElement>(null);
 
   const handleListen = async () => {
@@ -218,9 +211,7 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
         paragraphs,
       });
     if (readAloudEngine === "piper") {
-      // Text is resolved server-side from the cached summary (matches the morning
-      // pre-generation); pass the same filters used to fetch it. Falls back to the
-      // browser voice (reading the rendered paragraphs) if Piper is unavailable.
+      // Text is resolved server-side from the cached summary (matches the morning pre-generation); pass the same filters used to fetch it. Falls back to the browser voice (reading the rendered paragraphs) if Piper is unavailable.
       const ok = await tts.start({
         source: "summary",
         id: dayKey,
@@ -243,12 +234,7 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
     { feed_id: filters.feed_id, category_id: filters.category_id },
     hasSummary,
   );
-  // The remark plugin highlights entity mentions as anchors at the markdown-AST
-  // level (safe — react-markdown owns the DOM), and `entityByHref` maps each
-  // anchor's href back to a rich HighlightEntity so hovering it shows the same
-  // popover the entry reader uses. Both are built in one pass: each entity emits
-  // one link per surface form (matched_names first — the exact wording the model
-  // saw — then name/aliases), all pointing at the same href + metadata.
+  // The remark plugin highlights entity mentions as anchors at the markdown-AST level (safe — react-markdown owns the DOM), and `entityByHref` maps each anchor's href back to a rich HighlightEntity so hovering it shows the same popover the entry reader uses. Both are built in one pass: each entity emits one link per surface form (matched_names first — the exact wording the model saw — then name/aliases), all pointing at the same href + metadata.
   const { linkEntities, entityByHref } = useMemo(() => {
     const links: RemarkEntityLink[] = [];
     const byHref = new Map<string, HighlightEntity>();
@@ -352,19 +338,13 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
     return { linkEntities: links, entityByHref: byHref };
   }, [dayEntities]);
 
-  // IMPORTANT: pass as [plugin, options] tuple — not remarkEntityLinks(linkEntities).
-  // The latter returns the transformer, and unified then treats the transformer
-  // itself as the plugin, calls it with undefined as args, and never registers a
-  // real transformer — so `tree` ends up undefined inside our walker.
+  // IMPORTANT: pass as [plugin, options] tuple — not remarkEntityLinks(linkEntities). The latter returns the transformer, and unified then treats the transformer itself as the plugin, calls it with undefined as args, and never registers a real transformer — so `tree` ends up undefined inside our walker.
   const remarkPlugins = useMemo<PluggableList>(
     () => [remarkGfm, [remarkEntityLinks, linkEntities]],
     [linkEntities],
   );
 
-  // Hover popover state — driven by the entity anchors the remark plugin emits.
-  // Opening on a 300ms hover-in delay (matching the reader) and closing on
-  // outside-click / Escape (handled inside EntityPopover) means we never touch
-  // react-markdown's DOM, so React reconciliation stays intact.
+  // Hover popover state — driven by the entity anchors the remark plugin emits. Opening on a 300ms hover-in delay (matching the reader) and closing on outside-click / Escape (handled inside EntityPopover) means we never touch react-markdown's DOM, so React reconciliation stays intact.
   const [popover, setPopover] = useState<{ entity: HighlightEntity; x: number; y: number } | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectEntity = useIntelStore((s) => s.selectEntity);
@@ -376,15 +356,10 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
     const rect = el.getBoundingClientRect();
     setPopover({ entity, x: rect.left + rect.width / 2, y: rect.bottom + 4 });
   };
-  // Collapsed by default. The divider component remounts whenever the view
-  // mode changes (magazine ↔ list ↔ compact) or the page reloads, so an
-  // "expanded by default" default would re-expand on every remount and force
-  // the user to re-collapse it. Showing it collapsed keeps the list scannable;
-  // the user clicks Expand when they want to read.
+  // Collapsed by default. The divider component remounts whenever the view mode changes (magazine ↔ list ↔ compact) or the page reloads, so expanding by default would re-expand on every remount and force the user to re-collapse it. Showing it collapsed keeps the list scannable; the user clicks Expand when they want to read.
   const [showFull, setShowFull] = useState(false);
 
-  // While the initial cache lookup is in flight, show nothing — avoids a flash
-  // of the "Summarize" button only to be replaced by an existing summary.
+  // While the initial cache lookup is in flight, show nothing — avoids a flash of the "Summarize" button only to be replaced by an existing summary.
   if (cacheLoading) return null;
 
   const summary = cached?.summary ?? null;
@@ -430,8 +405,7 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
               <path d="M13 9l.6 1.7L15.3 11l-1.7.6L13 13.3l-.6-1.7L10.7 11l1.7-.6L13 9z" />
             </svg>
           )}
-          {/* The label is the feature's advertisement — an icon alone reads as
-              decoration, and this is one of the most guest-impressive features. */}
+          {/* The text label stays next to the icon: an icon alone reads as decoration, and this button is how visitors discover the feature. */}
           <span className={styles.generateLabel}>
             {isGenerating ? "Summarizing…" : label === "Today" ? "Summarize today" : "Summarize day"}
           </span>
@@ -488,8 +462,7 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
           {isGenerating ? "Regenerating…" : "Regenerate"}
         </button>
       </div>
-      {/* Offscreen full-summary render — extraction source for read-aloud so we
-          speak the whole summary even when the visible body shows only the TL;DR. */}
+      {/* Offscreen full-summary render — extraction source for read-aloud so we speak the whole summary even when the visible body shows only the TL;DR. */}
       <div ref={fullBodyRef} aria-hidden style={{ display: "none" }}>
         <Markdown remarkPlugins={remarkPlugins}>{summary}</Markdown>
       </div>
@@ -500,8 +473,7 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
             a: ({ href, children, ...rest }) => {
               const entityType = entityTypeFromHref(href);
               if (entityType) {
-                // Entity mention — styled underline + hover popover (the same
-                // popover the entry reader shows), and click still navigates.
+                // Entity mention — styled underline + hover popover (the same popover the entry reader shows), and click still navigates.
                 return (
                   <a
                     {...rest}

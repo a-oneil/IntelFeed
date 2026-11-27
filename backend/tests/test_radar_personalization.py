@@ -122,7 +122,7 @@ def test_coefficients_keep_echo_negative_weighting():
 
 def test_lift_reproduces_a_full_rescore():
     """score + personal_lift must equal what the engine would produce with the
-    user's multipliers — that equality is the whole contract of the feature."""
+    user's multipliers; the read-time lift is correct only if this holds."""
     hits = [SignalHit("kev_added", 0.8, ""), SignalHit("novel_entity", 0.5, ""), SignalHit("feed_echo", 0.6, "")]
     weights = {"severity": 1.25, "novelty": 0.8, "coverage": 1.1}
 
@@ -204,7 +204,7 @@ async def test_fit_job_writes_weights_and_clears_stale_ones(db_session, feed, te
     assert result["cleared"] == 1
 
 
-async def test_fit_job_honours_the_sample_floor(db_session, feed, test_user, monkeypatch):
+async def test_fit_job_honors_the_sample_floor(db_session, feed, test_user, monkeypatch):
     """Below the floor a family stays neutral — no row, no lift."""
     from app.models.entry_signal_feedback import EntrySignalFeedback
     from app.workers import signal_tasks
@@ -236,8 +236,8 @@ async def test_fit_job_ignores_votes_outside_the_window(db_session, feed, test_u
 
 
 class _SessionHandle:
-    """Async-context shim so the worker's `async with _get_worker_session()` runs
-    on the test's session without committing it away."""
+    """Async context manager that gives the worker's `async with _get_worker_session()`
+    the test's session and leaves it open on exit."""
 
     def __init__(self, session):
         self._session = session

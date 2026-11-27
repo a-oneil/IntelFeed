@@ -158,9 +158,9 @@ _CONFINEMENT_FLAGS = (
 #   stages them and only the user's click runs one, whatever the model is told.
 # * WebSearch, which Anthropic runs server-side; nothing leaves this host.
 #
-# Assignment configs written before this list "Bash"/"Read"/"Skill" (the old
-# skill-over-shell route) — those now mean the IntelFeed tools. WebFetch fetches
-# from this host, so it is dropped rather than translated.
+# Older assignment configs list "Bash"/"Read"/"Skill" (from the earlier
+# skill-over-shell route); those names map to the IntelFeed tools. WebFetch
+# fetches from this host, so it is dropped rather than mapped.
 INTELFEED_TOOL = "IntelFeed"
 # Every built-in the CLI ships that can touch this host, the network, other
 # agents or the session (names taken from the pinned binary). Denied on every
@@ -236,8 +236,8 @@ def _normalize_model(model: str) -> str:
 class ClaudeCodeProvider(AIProvider):
     """Provider that shells out to the Claude Code CLI."""
 
-    # The CLI is a full agent harness — tool calls (Bash/Read/Skill/Web*)
-    # execute inside the subprocess, gated by allowed_tools.
+    # Tool calls (IntelFeed MCP tools, WebSearch) execute inside the CLI
+    # subprocess, limited by allowed_tools and the tool policy above.
     supports_tools: ClassVar[bool] = True
 
     def __init__(
@@ -260,11 +260,11 @@ class ClaudeCodeProvider(AIProvider):
         self.cli_retries: int = int(self.config.get("cli_retries", 1))
         self.max_budget_usd: float = float(self.config.get("max_budget_usd", 1.0))
         self.extra_args: list[str] = list(self.config.get("extra_args", []))
-        # Per-task tool access. When unset/empty, ALL tools are disallowed
-        # (safe default — extraction tasks run pure prompt-in/json-out).
-        # When set, the listed tools are explicitly allowed and --disallowedTools
-        # is omitted. Use ["Bash", "Read", "Skill"] for tasks that invoke the
-        # intelfeed skill, or ["*"] for full access (avoid).
+        # Per-task tool access, filtered through the tool policy at the top of
+        # this module. When unset/empty, the run gets no tools (extraction tasks
+        # are prompt-in/JSON-out). "IntelFeed" (or the aliases "Bash", "Read",
+        # "Skill", "Glob", "Grep", "*") attaches the IntelFeed MCP server, and
+        # "WebSearch" is the only built-in passed through. Other names are dropped.
         self.allowed_tools: list[str] = list(self.config.get("allowed_tools") or [])
         # Where the IntelFeed MCP server lives and how it reaches the API.
         # Compose mounts ./intelfeed-mcp read-only at this path in the AI worker.
@@ -538,7 +538,7 @@ class ClaudeCodeProvider(AIProvider):
 
     @staticmethod
     def _parse_inner_json(text: str) -> str:
-        """Strip markdown fences if Claude wrapped its JSON in a code block (mirror engine.py:236-247)."""
+        """Strip markdown fences if Claude wrapped its JSON in a code block (mirrors engine.parse_ai_json)."""
         content = text.strip()
         if "```json" in content:
             content = content.split("```json", 1)[1].split("```", 1)[0].strip()
@@ -931,7 +931,7 @@ class ClaudeCodeProvider(AIProvider):
                     text = delta.get("text") or ""
                     if text:
                         out.append({"kind": "text", "text": text})
-            # NB: we do NOT emit tool_call on content_block_start — its input is
+            # We do NOT emit tool_call on content_block_start — its input is
             # empty at that point (args stream via input_json_delta). We emit the
             # tool_call from the top-level "assistant" message below, which
             # carries the fully-assembled input.

@@ -57,7 +57,7 @@ def fetch_wikipedia(query: str, fallback_query: str | None = None) -> str | None
             continue
         try:
             _wiki_calls += 1
-            # Rate limit: ~1 req/sec to be polite
+            # Rate limit: wait 0.5 s between calls (at most ~2 requests/sec) to go easy on Wikipedia
             if _wiki_calls > 1:
                 time.sleep(0.5)
             page = wiki.page(q)

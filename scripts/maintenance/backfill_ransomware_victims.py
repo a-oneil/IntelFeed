@@ -1,8 +1,8 @@
 """Backfill `victim_disclosures` from ransomware.live's per-year history.
 
 The live sync only reads /recentvictims, so a fresh install holds just the latest
-victims. This script feeds the same resolver and dedup path the per-year history
-endpoint instead, so the Landscape dashboard has trend data from `--start-year` on.
+victims. This script runs the per-year history endpoint through the same resolver
+and dedup path, so the Landscape dashboard has trend data from `--start-year` on.
 
 Run inside the API container (`./scripts` is bind-mounted at /app/scripts):
 

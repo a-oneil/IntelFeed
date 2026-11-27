@@ -1,8 +1,4 @@
-/**
- * RowMenu — a "⋯" menu for a Review row that is not about one catalogue
- * entity (a relationship edge, an article): open either end, open the graph.
- * Same trigger and popover as EntityRowActions, so every row ends the same way.
- */
+/** RowMenu — a "⋯" menu for a Review row that is not about one catalog entity (a relationship edge, an article): open either end, open the graph. Same trigger and popover as EntityRowActions, so every row ends the same way. */
 
 import { useEffect, useRef, useState } from "react";
 

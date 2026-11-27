@@ -25,7 +25,7 @@
   background: var(--bg-primary);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  /* Never competes with the diagram for attention until pointed at. */
+  /* Faded until the diagram is hovered or the toolbar has focus, so it does not distract from the diagram. */
   opacity: 0.55;
   transition: opacity 0.12s;
 }
@@ -79,9 +79,7 @@
   width: max-content;
 }
 
-/* Sizing is pinned inline from the viewBox (see normalize() in the component) —
-   mermaid's own width="100%" collapses to the 300x150 replaced-element default
-   inside a max-content box. Only the block display belongs here. */
+/* Width and height are set inline from the viewBox (see normalize() in the component), because mermaid's own width="100%" collapses to the 300x150 replaced-element default inside a max-content box. Only the block display belongs here. */
 .canvas :global(svg) {
   display: block;
 }

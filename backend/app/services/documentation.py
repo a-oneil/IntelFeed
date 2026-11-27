@@ -37,7 +37,7 @@ _H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 
 @dataclass(frozen=True)
 class DocPage:
-    """One markdown file, summarised for an index listing."""
+    """One markdown file, summarized for an index listing."""
 
     slug: str
     title: str
@@ -78,7 +78,7 @@ def summary_of(markdown: str) -> str | None:
 
 
 def section_for(slug: str) -> str:
-    """The page's directory, humanised. Root-level pages share one section."""
+    """The page's directory, humanized. Root-level pages share one section."""
     if "/" not in slug:
         return ROOT_SECTION
     folder = slug.rsplit("/", 1)[0].rsplit("/", 1)[-1]
@@ -157,7 +157,7 @@ def index() -> list[DocPage]:
 
 
 def reset_index_cache() -> None:
-    """Drop the memoised index. Used by tests that swap the docs root."""
+    """Drop the memoized index. Used by tests that swap the docs root."""
     global _index_cache
     _index_cache = None
 

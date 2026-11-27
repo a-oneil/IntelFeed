@@ -1,5 +1,4 @@
-// Saving a page to a telemetry source's notes: remembering which source the
-// user picked for which part of which site. No browser APIs.
+// Saving a page to a telemetry source's notes: remembering which source the user picked for which part of which site. No browser APIs.
 
 export const MAX_PICKS = 200;
 

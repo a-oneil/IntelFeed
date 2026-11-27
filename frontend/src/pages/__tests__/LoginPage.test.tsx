@@ -54,8 +54,7 @@ describe("LoginPage", () => {
   it("shows the title and subtitle", () => {
     renderLoginPage();
 
-    // The wordmark splits "Intel" and "Feed" across elements to accent the
-    // second half, so match on the heading's accessible name.
+    // The wordmark splits "Intel" and "Feed" across elements to accent the second half, so match on the heading's accessible name.
     expect(screen.getByRole("heading", { level: 1 })).toHaveAccessibleName("IntelFeed");
     expect(screen.getByText("Monitor · Correlate · Detect")).toBeInTheDocument();
   });

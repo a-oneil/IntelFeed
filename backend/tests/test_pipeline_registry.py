@@ -40,8 +40,8 @@ def _sig_names(signatures) -> list[str]:
 def test_dispatch_without_extraction_matches_legacy_structure():
     eid = str(uuid.uuid4())
     captured = _capture_dispatch(eid, run_extraction=False)
-    # Legacy: [autolink, telegram_links] → entry_post_processing(entry_id=…);
-    # the observables stage joined the parallel header in the ledger build.
+    # [autolink, observables, telegram_links] run in parallel, then
+    # entry_post_processing(entry_id=…) as the callback.
     assert _sig_names(captured["header"]) == [
         "app.workers.intel_feed_tasks.autolink_entry_task",
         "app.workers.intel_feed_tasks.observables_entry_task",

@@ -1,20 +1,20 @@
-"""Outbound observable feeds — IntelFeed as a source (design Phase 3, optional).
+"""Outbound observable feeds: IntelFeed as an indicator source (optional).
 
-Two consumer-facing shapes over the same policy-filtered ledger slice:
+Two consumer-facing formats over the same policy-filtered set of ledger rows:
 
-- **EDL / lookup files** — plain text or CSV your firewall and SIEM pull on a
-  schedule (Palo Alto EDL, pfBlockerNG, a Splunk lookup). Network atoms only;
-  host artifacts go to the lookup CSV, never a blocklist.
+- **EDL / lookup files** — plain text or CSV that a firewall or SIEM pulls on a
+  schedule (Palo Alto EDL, pfBlockerNG, a Splunk lookup). Blocklists carry
+  network indicators only; host artifacts go to the lookup CSV, never a blocklist.
 - **A minimal TAXII 2.1 read-only collection** — STIX 2.1 indicator objects
   with ``valid_until`` derived from confidence decay, so downstream tools age
   indicators exactly the way the ledger does.
 
 Everything is OFF until ``observables_publish_enabled`` is set and a bearer
-token is configured; every request must present that token. The policy is
-confidence + age + lifecycle — no sharing-protocol ceremony — plus the
-analyst's never-capture tombstones, which are excluded everywhere by
-definition. Each pull stamps redis so the Engine's Publishing view can show
-which feeds are actually consumed (a feed nobody pulls is a signal to cut).
+token is configured; every request must present that token. The publish policy
+filters on confidence, age and lifecycle status (no sharing-protocol markings),
+and always excludes the analyst's never-capture tombstones. Each pull records a
+timestamp in Redis so the Engine's Publishing view can show which feeds are
+actually consumed (a feed nobody pulls is a candidate to remove).
 """
 
 import csv
@@ -69,7 +69,7 @@ _CSV_FILES: dict[str, list[str]] = {
 
 
 #: STIX 2.1 pattern builders per kind. Kinds without a sane pattern (ja3/ja4,
-#: uri_path, scripts) stay out of the TAXII slice rather than shipping junk.
+#: uri_path, scripts) are left out of the TAXII collection.
 def _stix_escape(v: str) -> str:
     return v.replace("\\", "\\\\").replace("'", "\\'")
 
@@ -151,9 +151,9 @@ def _publish_host(o: Observable) -> str | None:
 def _suffix_excluded(o: Observable, never_suffixes: list[str]) -> bool:
     """Publish-boundary exclusion for host-bearing kinds: shared CDN/hosting
     suffixes (blocking cloudfront blocks a CDN edge for everyone) plus the
-    analyst's own never-publish suffixes (your own org's domains must never
-    land on your own blocklist). Excluded rows stay in the ledger — this is a
-    publish filter, not a capture rule."""
+    analyst's own never-publish suffixes (an organization's own domains must
+    never land on its own blocklist). Excluded rows stay in the ledger — this is
+    a publish filter, not a capture rule."""
     host = _publish_host(o)
     if host is None:
         return False
@@ -163,7 +163,7 @@ def _suffix_excluded(o: Observable, never_suffixes: list[str]) -> bool:
 
 
 async def _policy_rows(db: AsyncSession, kinds: list[str]) -> list[Observable]:
-    """The policy-filtered slice: active, confident, fresh, never denied,
+    """The rows that pass the publish policy: active, confident, fresh, never denied,
     never dual-use infrastructure (a VPN exit on an EDL blocks customers),
     never shared-infra or never-publish suffixes."""
     min_conf = float(await get_setting("observables_publish_min_confidence", db) or 0.6)

@@ -7,8 +7,8 @@ is about this industry being hit", not "this word appeared".
 
 ``sector`` keeps the canonical slug as a natural key (the vocabulary is closed,
 so it never changes) and ``sector_id`` is the FK the correlation engine pivots
-on. Every slug-keyed reader — the ``sector:`` search filter, the threat-surface
-scope match, the ransomware landscape — keeps working untouched.
+on. Slug-keyed readers — the ``sector:`` search filter, the threat-surface
+scope match, the ransomware landscape — read ``sector`` directly.
 """
 
 import uuid

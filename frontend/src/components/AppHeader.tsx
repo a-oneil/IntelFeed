@@ -31,9 +31,7 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
   const isVisitor = useIsVisitor();
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Desktop: once open, this button only expands/collapses the panel — it
-  // never re-closes it (the panel's own "×" is the only full close). Mobile
-  // has no collapsed rail, so it stays a plain open/close toggle there.
+  // Desktop: once open, this button only expands/collapses the panel and never closes it (the panel's own "×" is the only full close). Mobile has no collapsed rail, so there it is a plain open/close toggle.
   const handleCopilotClick = isMobile ? toggleCopilot : toggleCopilotPanel;
   const copilotLabel = isMobile
     ? copilotOpen
@@ -61,10 +59,7 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
         </button>
       )}
       {!isMobile && <BrandButton />}
-      {/* The app's only search input, on every route and every breakpoint. The
-          mobile workbench used to suppress it in favour of its own full-screen
-          overlay, which ran a second, weaker search engine — that overlay is
-          gone. */}
+      {/* The app's only search input, on every route and every breakpoint (visitors get a spacer instead). The mobile workbench does not hide it behind a full-screen search overlay of its own, because that overlay ran a second, weaker search engine. */}
       {isVisitor ? <div className={styles.visitorSpacer} /> : <HeaderSearch inputRef={searchInputRef} />}
       <div className={styles.actions}>
         {!isMobile && !isVisitor && (
@@ -113,8 +108,7 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
                 <button
                   className={styles.iconBtn}
                   onClick={() => {
-                    // The engine light folds the settings nav away; the gear
-                    // always brings it back.
+                    // Clicking the engine light collapses the settings nav; the gear always expands it again.
                     setSettingsNavCollapsed(false);
                     navigate("/settings");
                   }}
@@ -145,7 +139,7 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
             </Hint>
           </>
         )}
-        {/* No keyboard, no shortcuts: the button is desktop-only. */}
+        {/* Phones have no keyboard, so the shortcuts button is desktop-only. */}
         {!isMobile && (
           <Hint
             title="Keyboard shortcuts"
@@ -173,8 +167,7 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
             </button>
           </Hint>
         )}
-        {/* Last icon in the bar, on purpose: logout is destructive and sits
-            furthest from the controls people click all day. */}
+        {/* Logout is the last icon in the bar on purpose: it is destructive, so it sits furthest from the controls people click all day. */}
         {isVisitor && (
           <button
             className={styles.signInBtn}
@@ -193,9 +186,7 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
             <button
               className={styles.iconBtn}
               onClick={async () => {
-                // Confirmed, not because logging out loses data, but because it
-                // is one stray click from the shortcuts button and costs a
-                // re-auth to undo.
+                // Asks for confirmation not because logging out loses data, but because the button is one stray click from the shortcuts button and undoing it means signing in again.
                 if (
                   !(await confirmDialog({
                     title: "Log out?",

@@ -174,9 +174,7 @@
   flex-shrink: 0;
 }
 
-/* Mirrors the dashboard's widget card so the preview reads as the real thing.
-   Height is set inline from the widget's grid rows; it shrinks to fit the
-   modal when the widget is taller than the available space. */
+/* Mirrors the dashboard's widget card so the preview looks like the real widget. Height is set inline from the widget's grid rows; it shrinks to fit the modal when the widget is taller than the available space. */
 .previewCard {
   background: var(--card-bg);
   border: 1px solid var(--border);

@@ -1,8 +1,4 @@
-/* A story card in the magazine grid. It shares the article card's frame (see
-   .magazineCard in EntryList.module.css) so the grid keeps one rhythm, and
-   departs from it exactly where the difference is the point: an intel-accent
-   rule down the side, no image well, and the count line set as the headline's
-   equal rather than as footnote meta. */
+/* A story card in the magazine grid. It shares the article card's frame (see .magazineCard in EntryList.module.css) so the grid stays consistent, and differs from it only where a story differs from an article: an intel-accent border down the side, no image area, and the count line styled as prominently as the headline rather than as small meta text. */
 
 .card {
   position: relative;
@@ -84,8 +80,7 @@
   overflow: hidden;
 }
 
-/* The card's argument for existing — sized and colored to be read, not skimmed
-   past the way the article card's meta line is. */
+/* The count line is the card's main information, so it is sized and colored to be read, unlike the article card's meta line. */
 .count {
   font-size: var(--fs-md);
   font-weight: 600;
@@ -144,8 +139,7 @@
 }
 
 @media (max-width: 767px) {
-  /* One card per row on a phone: the chips are the first thing to go, since
-     the title and the count line are what the card is for. */
+  /* One card per row on a phone: the chips are hidden, since the title and the count line matter most. */
   .chips {
     display: none;
   }

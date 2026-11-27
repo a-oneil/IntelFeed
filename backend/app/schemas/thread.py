@@ -125,7 +125,7 @@ class SimilarEntry(BaseModel):
     priority_score: float | None
     feed_title: str
     similarity: float = Field(description="Cosine similarity, 0-1")
-    thread_id: uuid.UUID | None = Field(description="Set when the neighbour already belongs to a story thread")
+    thread_id: uuid.UUID | None = Field(description="Set when the neighbor already belongs to a story thread")
 
 
 class SimilarEntriesResponse(BaseModel):

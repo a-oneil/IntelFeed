@@ -52,12 +52,7 @@ function doRefresh(): Promise<string | null> {
   return refreshPromise;
 }
 
-/**
- * Whether the instance is browsable without an account. Asked of the server
- * when the answer isn't known yet (a cold load whose refresh failed before
- * registration-status came back) or when `recheck` is set: a 401 with no
- * tokens may mean an admin just switched the mode off.
- */
+/** Whether the instance is browsable without an account. Asked of the server when the answer isn't known yet (a cold load whose refresh failed before registration-status came back) or when `recheck` is set: a 401 with no tokens may mean an admin just switched the mode off. */
 let lastModeCheck = 0;
 async function publicModeNow(recheck = false): Promise<boolean> {
   const store = useAuthStore.getState();
@@ -83,34 +78,24 @@ async function refreshAccessToken(): Promise<string | null> {
     useAuthStore.getState().setTokens(data.access_token, data.refresh_token);
     return data.access_token as string;
   } catch (err) {
-    // Only hard-logout on explicit 401 rejection (revoked/expired refresh token).
-    // Transient network errors should not wipe the session.
+    // Only hard-logout on an explicit 401 or 403 rejection (revoked/expired refresh token). Transient network errors should not wipe the session.
     const status = (err as { response?: { status?: number } })?.response?.status;
     if (status === 401 || status === 403) {
       const publicReadOnly = await publicModeNow();
       useAuthStore.getState().logout();
       if (publicReadOnly) {
-        // The instance is browsable without an account: drop back to the
-        // public view, not a login wall.
+        // The instance is browsable without an account: go back to the public view, not the login page.
         window.location.assign("/");
         return null;
       }
-      // Hard navigation, not a router push: logout() clears the persisted
-      // per-account keys, but the in-memory Zustand stores still hold the old
-      // account's workspace state and would write those keys straight back on
-      // the next set(). A full reload is what the logout buttons do, and it is
-      // the only thing that actually drops that state.
+      // Hard navigation, not a router push: logout() clears the persisted per-account keys, but the in-memory Zustand stores still hold the old account's workspace state and would write those keys straight back on the next set(). A full reload is what the logout buttons do, and it is the only thing that drops that state.
       window.location.assign("/login");
     }
     return null;
   }
 }
 
-// Public auth endpoints that must NOT carry a bearer token (they issue or
-// precede one). Everything else under /auth (me, me/password, logout) is
-// authenticated and needs the token attached like any other request — matching
-// the whole "/auth/" prefix here previously left PUT /auth/me tokenless, so it
-// 401'd on every call and only recovered via the response-interceptor retry.
+// Public auth endpoints that must NOT carry a bearer token (they issue or precede one). Everything else under /auth (me, me/password, logout) is authenticated and needs the token attached like any other request. The list names paths rather than matching the whole "/auth/" prefix, because the prefix left PUT /auth/me without a token, so it got a 401 on every call and only recovered through the response-interceptor retry.
 const PUBLIC_AUTH_PATHS = [
   "/auth/login",
   "/auth/register",
@@ -118,8 +103,7 @@ const PUBLIC_AUTH_PATHS = [
   "/auth/registration-status",
 ];
 
-// The read-only POSTs a visitor may send (the server allows the same list,
-// core/public_access.py ANONYMOUS_READ_POSTS).
+// The read-only POSTs a visitor may send (the server allows the same set in core/public_access.py: ANONYMOUS_READ_POSTS plus ANONYMOUS_READ_POST_TEMPLATES).
 const VISITOR_READ_POSTS = [
   "/entries/intel-counts",
   "/entries/resolve-names",
@@ -154,8 +138,7 @@ function refuseVisitorWrite(config: InternalAxiosRequestConfig): boolean {
 api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
   if (refuseVisitorWrite(config)) {
     console.debug("Read-only view: refused", config.method?.toUpperCase(), config.url);
-    // Controls that write are hidden for visitors, so this is a slip: say so
-    // once, quietly, instead of a stack of error toasts.
+    // Controls that write are hidden for visitors, so reaching this means one was missed: show one quiet toast instead of a stack of error toasts.
     if (Date.now() - lastReadOnlyToast > 10_000) {
       lastReadOnlyToast = Date.now();
       toast("This view is read-only.");
@@ -178,7 +161,7 @@ api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
   return config;
 });
 
-// Handle token refresh on 401 and rate-limit backoff on 429
+// Refresh the token and retry once on 401; reject a 429 without retrying
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError<ApiError>) => {
@@ -201,9 +184,7 @@ api.interceptors.response.use(
         original.headers.Authorization = `Bearer ${newToken}`;
         return api(original);
       }
-      // A visitor refused: the mode may just have been switched off. If so,
-      // the store flips and the route guard sends them to the login page
-      // instead of leaving a half-loaded app.
+      // A visitor was refused: the mode may just have been switched off. If so, the store updates and the route guard sends them to the login page instead of leaving a half-loaded app.
       const store = useAuthStore.getState();
       if (!store.accessToken && store.publicReadOnly) void publicModeNow(true);
     }

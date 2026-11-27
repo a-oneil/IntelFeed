@@ -1,10 +1,6 @@
 package com.example.intelfeed.data.model
 
-/**
- * The entity types the app can open as a profile. [key] is the server's type name (search results,
- * relationships, watchlist, entity notes). [searchField] is the unified-search filter that returns
- * the entity's articles, e.g. threat_actor:"APT29".
- */
+/** The entity types the app can open as a profile. [key] is the server's type name (search results, relationships, watchlist, entity notes). [searchField] is the unified-search filter that returns the entity's articles, e.g. threat_actor:"APT29". */
 enum class EntityType(
     val key: String,
     val label: String,
@@ -23,16 +19,12 @@ enum class EntityType(
     COUNTRY("country", "Country", "Countries", "country", true),
     CAMPAIGN("campaign", "Campaign", "Campaigns", "campaign", false),
     MITIGATION("mitigation", "Mitigation", "Mitigations", "mitigation", false),
-    // The server's type name is "cwe" (docs/data-model.md, the website's profile routes). It was
-    // "weakness", so relationships and shared notes for weaknesses never matched the server's.
+    // The server's type name is "cwe" (docs/data-model.md, the website's profile routes). The key is not "weakness": relationships and shared notes for weaknesses would then not match the server's.
     WEAKNESS("cwe", "Weakness", "Weaknesses", "cwe", false),
     OBSERVABLE("observable", "Observable", "Observables", "observable", false),
     RULE("rule", "Detection rule", "Detection rules", null, false);
 
-    /**
-     * The type's name in the profile timeline paths (/api/entities/{type}/…, /api/intelligence/timeline/{type}/…).
-     * Null for types without a timeline.
-     */
+    /** The type's name in the profile timeline paths (/api/entities/{type}/…, /api/intelligence/timeline/{type}/…). Null for types without a timeline. */
     val timelinePath: String?
         get() = if (this == RULE) null else key
 

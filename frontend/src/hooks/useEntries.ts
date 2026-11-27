@@ -13,15 +13,9 @@ import type {
 import { useQuery } from "@tanstack/react-query";
 
 /**
- * Debounced read-state reconcile. Mark-read/unread fires on every article
- * opened (and on scroll with markReadOnScroll), and the optimistic update has
- * already put the new state on screen, so the refetch that reconciles with
- * the server waits until the clicking stops. Otherwise each click refetches
- * every loaded list page, the sidebar's six counts and the feeds, and a quick
- * run through a dozen articles queues hundreds of requests on the API.
+ * Debounced read-state reconcile. Mark-read/unread fires on every article opened (and on scroll with markReadOnScroll), and the optimistic update has already put the new state on screen, so the refetch that reconciles with the server waits until the clicking stops. Otherwise each click refetches every loaded list page, the sidebar's five counts, the list's total count and the feeds, and quickly clicking through a dozen articles queues hundreds of requests on the API.
  *
- * The timer is module-level: every component that marks entries read shares
- * one reconcile.
+ * The timer is module-level: every component that marks entries read shares one reconcile.
  */
 let reconcileTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -85,13 +79,9 @@ export function useEntries(filters: EntryFilters, { enabled = true }: { enabled?
 }
 
 /**
- * The Priority Queue: radar-ranked entries with story threads folded in as
- * single rows. One request rather than the list plus a threads call merged in
- * the client — the server owns the order, so what an analyst reads here is what
- * an agent asking "what should I read next" gets back.
+ * The Priority Queue: radar-ranked entries with story threads folded in as single rows. One request rather than the list plus a threads call merged in the client: the server owns the order, so what an analyst reads here is what an agent asking "what should I read next" gets back.
  *
- * `excludeThreadIds` are threads this reader cleared: the row goes, and its
- * members come back as standalone entries rather than vanishing with it.
+ * `excludeThreadIds` are threads this reader cleared: the thread row is removed, and its members come back as standalone entries rather than disappearing with it.
  */
 export function usePriorityQueue(
   {
@@ -131,22 +121,14 @@ export function useEntriesCount(filters: EntryFilters, enabled = true) {
       return res.data.total;
     },
     staleTime: 30_000,
-    // Keep the last count on screen while a refetch runs (e.g. filter/window
-    // change) instead of flashing to undefined.
+    // Keep the last count on screen while a refetch runs (e.g. filter/window change) instead of flashing to undefined.
     placeholderData: keepPreviousData,
   });
 }
 
-/**
- * Unread counts for the sidebar's Articles quick-view chips (last 24h, this
- * week, watched, bookmarked, starred). Each is a small /entries/count query;
- * the time anchors are frozen per mount so the query keys stay cache-stable.
- * Returns a folder → count map (undefined while a count is still loading).
- */
+/** Unread counts for the sidebar's Articles quick-view chips (last 24h, this week, watched, bookmarked, starred). Each is a small /entries/count query; the time anchors are rounded to the hour so the query keys stay stable for the cache. Returns a folder → count map (undefined while a count is still loading). */
 export function useVirtualFolderCounts() {
-  // Bucket the window anchors to the top of the current hour so the query keys
-  // stay identical across sidebar remounts — a fresh Date.now() each mount would
-  // mint a new key every time, defeat the cache, and make the chip counts flicker.
+  // Round the window anchors down to the start of the current hour so the query keys stay identical across sidebar remounts; a fresh Date.now() on each mount would create a new key every time, bypass the cache, and make the chip counts flicker.
   const hourStart = Math.floor(Date.now() / 3_600_000) * 3_600_000;
   const since24h = useMemo(() => new Date(hourStart - 24 * 60 * 60 * 1000).toISOString(), [hourStart]);
   const sinceWeek = useMemo(() => new Date(hourStart - 7 * 24 * 60 * 60 * 1000).toISOString(), [hourStart]);
@@ -169,10 +151,7 @@ export function useVirtualFolderCounts() {
   );
 }
 
-/**
- * Unread, radar-surfaced entry count for the sidebar's Priority Queue badge.
- * Returns 0 when signal surfacing is disabled (backend short-circuits).
- */
+/** Unread, radar-surfaced entry count for the sidebar's Priority Queue badge. Returns 0 when signal surfacing is disabled (the backend returns early). */
 export function usePriorityUnreadCount() {
   // The sidebar shows a visitor an arrow, not a count.
   const isVisitor = useIsVisitor();
@@ -188,11 +167,7 @@ export function usePriorityUnreadCount() {
   });
 }
 
-/**
- * Total count for the sidebar's Priority Queue badge, matching the rows the
- * queue actually renders: unread radar-surfaced entries with live story threads
- * folded in (computed directly by GET /api/entries/priority-unread-count).
- */
+/** Total count for the sidebar's Priority Queue badge, matching the rows the queue renders: unread radar-surfaced entries with live story threads folded in (computed by GET /api/entries/priority-unread-count). */
 export function usePriorityQueueCount() {
   const { data: radarUnread } = usePriorityUnreadCount();
   return radarUnread ?? 0;
@@ -212,30 +187,20 @@ export function useEntry(entryId: string | null) {
 /**
  * Shared read/unread mutation with optimistic cache updates.
  *
- * The list (`["entries"]` infinite queries) and the open reader (`["entry", id]`)
- * both derive their read state from separate caches. Relying on
- * invalidate → refetch alone leaves a visible window — as long as the server
- * round-trip — where one cache has flipped and the other hasn't, so a just-read
- * article lingers in the list (dimmed) while the reader shows it unread, or vice
- * versa. Under rapid auto-read navigation the windows stack and the mismatch
- * looks permanent. We update both caches synchronously in `onMutate` (rolling
- * back on error) so they can never disagree — flipping the flag in place, or
- * dropping the entry from any list whose read-state filter it no longer matches
- * (the Hide-Read list) — then reconcile with the server in `onSettled`.
+ * The list (`["entries"]` infinite queries) and the open reader (`["entry", id]`) read their read state from separate caches. Relying on invalidate → refetch alone leaves a visible gap, as long as the server round-trip, where one cache has changed and the other hasn't, so a just-read article stays in the list (dimmed) while the reader shows it unread, or the reverse. Under rapid auto-read navigation these gaps overlap and the mismatch looks permanent. Both caches are updated synchronously in `onMutate` (rolled back on error) so they never disagree, either by flipping the flag in place or by dropping the entry from any list whose read-state filter it no longer matches (the Hide-Read list). The debounced reconcile with the server runs from `onSettled`.
  */
 function useReadStateMutation(read: boolean) {
   const queryClient = useQueryClient();
   const reconcile = useDebouncedReadReconcile();
   return useMutation({
     mutationFn: async (entryId: string) => {
-      // A visitor has no read state: opening and scrolling articles must not
-      // try to record one (the server would refuse it anyway).
+      // A visitor has no read state: opening and scrolling articles must not try to record one (the server would refuse it anyway).
       if (isVisitorNow()) return;
       await api.put(`/entries/${entryId}/${read ? "read" : "unread"}`);
     },
     onMutate: async (entryId: string) => {
       if (isVisitorNow()) return undefined;
-      // Stop in-flight refetches from clobbering the optimistic write.
+      // Stop in-flight refetches from overwriting the optimistic write.
       await queryClient.cancelQueries({ queryKey: ["entries"] });
       await queryClient.cancelQueries({ queryKey: ["entry", entryId] });
 
@@ -244,15 +209,7 @@ function useReadStateMutation(read: boolean) {
       }>({ queryKey: ["entries"] });
       const prevDetail = queryClient.getQueryData<EntryDetail>(["entry", entryId]);
 
-      // Update every cached entries list, reading each query's own filter so we
-      // do the right thing per list. A list scoped to a single read-state (the
-      // Hide-Read list keys on `is_read: false`) must DROP the entry once its new
-      // state no longer matches the filter — otherwise a just-read article
-      // lingers as a dimmed row instead of disappearing. Lists with no read
-      // filter just flip the flag in place. Removing optimistically (rather than
-      // leaning on the onSettled refetch) is essential under rapid auto-read
-      // navigation, where each onMutate's cancelQueries would otherwise cancel
-      // the prior mutation's reconciling refetch and let read rows pile up.
+      // Update every cached entries list, reading each query's own filter to decide what to do. A list scoped to a single read state (the Hide-Read list keys on `is_read: false`) must DROP the entry once its new state no longer matches the filter; otherwise a just-read article stays as a dimmed row instead of disappearing. Lists with no read filter flip the flag in place. Removing optimistically (rather than relying on the onSettled refetch) is essential under rapid auto-read navigation, where each onMutate's cancelQueries would otherwise cancel the previous mutation's reconciling refetch and let read rows pile up.
       for (const [key] of prevEntries) {
         const filterIsRead = (key[1] as EntryFilters | undefined)?.is_read;
         const drops = filterIsRead !== undefined && filterIsRead !== read;
@@ -288,8 +245,7 @@ function useReadStateMutation(read: boolean) {
       queryClient.setQueryData(["entry", ctx.entryId], ctx.prevDetail);
     },
     onSettled: () => {
-      // Nothing changed for a visitor, and refetching would only spend their
-      // rate-limit budget.
+      // Nothing changed for a visitor, and refetching would only use up their rate-limit budget.
       if (isVisitorNow()) return;
       reconcile();
     },
@@ -378,8 +334,7 @@ export function useBulkAction() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: { entry_ids: string[]; action: string }) => {
-      // Bulk actions are read state, stars, tags and the like: a visitor has
-      // none of them (Shift+M and a thread's "mark read" land here too).
+      // Bulk actions change read state, stars, tags and similar per-user data, which a visitor doesn't have (Shift+M and a thread's "mark read" call this too).
       if (isVisitorNow()) return null;
       const res = await api.post("/entries/bulk-action", data);
       return res.data;
@@ -407,7 +362,7 @@ export interface SimilarEntry {
   word_count?: number | null;
   /** Cosine similarity 0-1. Only present on embedding-backed results. */
   similarity?: number;
-  /** Set when the neighbour already belongs to a story thread. */
+  /** Set when the neighbor already belongs to a story thread. */
   thread_slug?: string | null;
   thread_title?: string | null;
 }

@@ -52,8 +52,7 @@ beforeEach(() => {
 
 describe("CampaignIntake", () => {
   it("still offers intake on a campaign with nothing feeding it", () => {
-    // It used to return null here — which is exactly a new campaign, the one
-    // that most needs to be told what to collect.
+    // Regression guard: the component once rendered nothing here, which hid intake on new campaigns, the ones that most need it set up.
     render(<CampaignIntake campaignId="c1" />);
 
     expect(screen.getByText("Campaign intake")).toBeInTheDocument();

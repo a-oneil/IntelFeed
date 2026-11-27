@@ -100,8 +100,8 @@ async def _get_entry(
     if not entry:
         return {"error": "Entry not found"}
 
-    # The autolinker scans the whole body, so a silent cut here hides the very
-    # paragraph an entity link points at. Say how much there is and where to resume.
+    # The autolinker scans the whole body, so cutting it off silently could hide the
+    # paragraph an entity link points at. Report the full length and the offset to resume from.
     body = entry.content_text or entry.content_html or ""
     start = max(offset, 0)
     end = start + min(max(max_chars, 1), _ENTRY_WINDOW_CAP)
@@ -422,7 +422,7 @@ async def _get_observable(db: AsyncSession, user_id: uuid.UUID, observable: str,
         "registered_at": str(obs.registered_at) if obs.registered_at else None,
         "popularity_rank": obs.popularity_rank,
         "noise_class": obs.noise_class,
-        # Attribution edges onto this row — what the ledger exists to answer.
+        # Entities that claim this observable (attribution), the main question the IOC ledger answers.
         "claimed_by": (await _observable_claims(db, obs.id)),
         "first_seen_at": str(obs.first_seen_at),
         "last_seen_at": str(obs.last_seen_at),
@@ -612,9 +612,9 @@ async def _get_cwe(db: AsyncSession, user_id: uuid.UUID, cwe_id: str) -> dict:
     ).one()
     rolled = (await _cwe_rolled_counts(db)).get(cwe.id, (0, 0))
 
-    # Root-first path to the pillar. A Class or Pillar's direct count is close to
-    # meaningless on its own — NVD tags a CVE wherever the analyst chose — so the
-    # rolled figure and the lineage are what make the number interpretable.
+    # Ancestor path, root (pillar) first. A Class or Pillar's direct count means little
+    # on its own, because NVD tags a CVE at whatever level its analyst chose, so the
+    # rolled-up count and the lineage are what make the number readable.
     by_id = {row.cwe_id: row for row in (await db.execute(select(CWE))).scalars()}
     lineage, cursor, seen = [], cwe.parent_cwe_id, set()
     while cursor and cursor not in seen and len(lineage) < 12:
@@ -868,7 +868,7 @@ async def _list_telegram_feeds(db: AsyncSession, user_id: uuid.UUID, limit: int 
                 "adapter_config": {
                     k: v
                     for k, v in (f.adapter_config or {}).items()
-                    # Don't leak campaign/actor UUIDs to display; truncate
+                    # Return only these known Telegram adapter_config keys; drop the rest
                     if k
                     in (
                         "channel",

@@ -3,9 +3,9 @@
 Uses the official ``anthropic`` Python SDK (``AsyncAnthropic``) with:
 
 * Dual auth: ``sk-ant-api03-*`` (API-key billing) and ``sk-ant-oat01-*``
-  (OAuth subscription / Agent SDK credit pool, launches June 15, 2026).
+  (OAuth subscription / Agent SDK credit pool, launched June 15, 2026).
   Selected by token prefix; unknown prefixes default to API-key billing
-  for forwards compatibility.
+  for forward compatibility.
 * Prompt caching: when a ``system`` prompt is supplied to ``complete()`` it
   is sent as a text block with ``cache_control={"type": "ephemeral"}`` —
   subsequent calls within the 5-minute TTL are billed at ~10% of the input
@@ -83,12 +83,11 @@ def _cache_aware_cost(model: str, uncached: int, cache_read: int, cache_write: i
 def _parse_retry_after(headers: object) -> None:
     """Reserved hook for future retry-after parsing.
 
-    Today we return ``None`` — the engine defaults to a +1 hour pause when
-    ``reset_at`` is ``None``. We intentionally don't try to parse the
-    ``retry-after`` header here because (a) the SDK exposes it on the
-    response object in different shapes across versions, and (b) a wrong
-    parse leaks into the auto-pause window. Conservative: hand back None
-    and let the engine apply its default backoff.
+    Always returns ``None``; the engine defaults to a +1 hour pause when
+    ``reset_at`` is ``None``. The ``retry-after`` header is deliberately not
+    parsed because (a) the SDK exposes it on the response object in
+    different shapes across versions, and (b) a wrong parse would set the
+    wrong auto-pause window.
     """
     return None
 
@@ -143,7 +142,7 @@ class ClaudeProvider(AIProvider):
             kwargs["auth_token"] = token
             kwargs["default_headers"] = {"anthropic-beta": OAUTH_BETA_HEADER}
         else:
-            # Forwards-compat default: treat anything else as an API key.
+            # Forward-compatible default: treat anything else as an API key.
             # AsyncAnthropic accepts api_key=None and will read from
             # ANTHROPIC_API_KEY env, which preserves existing behavior for
             # provider rows that haven't had a key configured yet.

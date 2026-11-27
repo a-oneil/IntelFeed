@@ -1,9 +1,4 @@
-/**
- * MentionsTimeline — the profile's activity chart: mention counts over a
- * selectable window (24h → all time) with correlation events plotted on the
- * baseline. The selected window also scopes the ActivityFeed below it, so the
- * Overview reads as one time slice.
- */
+/** MentionsTimeline — the profile's activity chart: mention counts over a selectable window (24h → all time) with correlation events plotted on the baseline. The selected window also scopes the ActivityFeed below it, so the Overview reads as one time slice. */
 import { useEffect, useMemo, useState } from "react";
 import {
   MENTIONS_WINDOWS,
@@ -58,9 +53,7 @@ function bucketLabel(
   });
 }
 
-// Chart geometry: fixed virtual space, stretched to the container. The line
-// keeps its width via vector-effect; dots/labels live in an HTML overlay so
-// they never distort.
+// Chart geometry: fixed virtual space, stretched to the container. The line keeps its width via vector-effect; dots/labels live in an HTML overlay so they never distort.
 const VW = 100;
 const VH = 100;
 const TOP_PAD = 8;
@@ -91,8 +84,7 @@ export function MentionsTimeline({
   const { data, isLoading } = useEntityMentionsTimeseries(entityType, entityId, window);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [markerHover, setMarkerHover] = useState<number | null>(null);
-  // Click selection: a chart bucket (→ fetch + list its articles) or an event
-  // cluster (→ list its events). The timeline is an index into the reading.
+  // Click selection: a chart bucket (→ fetch + list its articles) or an event cluster (→ list its events), so the chart works as an index into the articles.
   const [selection, setSelection] = useState<
     { kind: "bucket"; idx: number } | { kind: "cluster"; idx: number } | null
   >(null);
@@ -112,26 +104,20 @@ export function MentionsTimeline({
   const x = (i: number) => (n > 1 ? (i / (n - 1)) * VW : 0);
   const y = (c: number) => VH - (c / max) * (VH - TOP_PAD);
 
-  // Sparse discrete counts (hourly/daily buckets) read as harsh sawteeth when
-  // connected — draw those as bars; the aggregated weekly series keeps line+area.
+  // Sparse discrete counts (hourly/daily buckets) look like jagged sawteeth when connected, so they are drawn as bars; the aggregated weekly series keeps line+area.
   const asBars = bucket !== "week";
   const barW = n > 1 ? Math.max((VW / n) * 0.55, 0.35) : 2;
 
   const linePath = counts.map((c, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(2)},${y(c).toFixed(2)}`).join(" ");
   const areaPath = n > 1 ? `${linePath} L${VW},${VH} L0,${VH} Z` : "";
 
-  // Non-article events inside the window, placed on the baseline by date and
-  // clustered when they'd overlap — one legible marker per spot, not confetti.
+  // Non-article events inside the window, placed on the baseline by date and clustered when they would overlap, so each spot gets one readable marker.
   const markerClusters = useMemo(() => {
     if (n < 2) return [];
     const start = new Date(bucket === "hour" ? points[0].date : `${points[0].date}T00:00:00`).getTime();
     const span = Date.now() - start;
     if (span <= 0) return [];
-    // Catch-all "Related to …" rows are machine-dated bulk-extraction noise —
-    // annotations keep typed relationships, rules, campaigns. The cap keeps
-    // the NEWEST events (ascending-then-slice used to keep the oldest 80 and
-    // silently dropped every recent marker on busy entities); story rows ride
-    // outside the cap — a busy week must not crowd a story off the chart.
+    // Catch-all "Related to …" rows are bulk-extraction noise with machine-assigned dates; the markers keep typed relationships, rules and campaigns. The cap keeps the 80 NEWEST events (slicing the ascending list would keep the oldest 80 and drop every recent marker on busy entities). Story rows are exempt from the cap so a busy week cannot push a story off the chart.
     const dated = events
       .filter((e) => e.date && e.event_type && e.event_type !== "article")
       .filter((e) => !e.title.startsWith("Related to "))
@@ -152,8 +138,7 @@ export function MentionsTimeline({
     return clusters;
   }, [events, points, bucket, n]);
 
-  // Coverage peak: the loudest bucket, annotated when the window is wide
-  // enough for "peak" to mean something and the peak is a real spike.
+  // Coverage peak: the highest bucket, annotated only when there are at least 10 buckets and the peak count is at least 5, so a "peak" is a real spike.
   const peakIdx = useMemo(() => {
     if (n < 10 || max < 5) return null;
     const idx = counts.indexOf(max);
@@ -458,9 +443,7 @@ export function MentionsTimeline({
                     className={styles.bucketPanelRow}
                     disabled={!e.entry_id && !e.nav_context?.entity_id && !e.thread_slug}
                     onClick={() => {
-                      // Article first — see ActivityFeed.renderEventRow: an
-                      // event with an entry opens in the docked reader rather
-                      // than leaving the profile for the feed's thread reader.
+                      // Article first — see ActivityFeed.renderEventRow: an event with an entry opens in the docked reader rather than leaving the profile for the feed's thread reader.
                       if (e.entry_id) onOpenArticle?.(e.entry_id);
                       else if (e.thread_slug) onOpenStory?.(e.thread_slug);
                       else if (e.nav_context?.entity_id && e.nav_context.entity_type)
@@ -483,8 +466,7 @@ export function MentionsTimeline({
 
           {(markerClusters.length > 0 || peakIdx != null) && (
             <div className={styles.eventLegend}>
-              {/* Class key, not an event list — the markers themselves carry
-                  the details (hover a dot; click for the full cluster). */}
+              {/* A legend of marker types, not an event list: the markers carry the details (hover a dot; click for the full cluster). */}
               <span className={styles.eventLegendItem}>
                 <span className={styles.eventLegendSwatch} style={{ background: accent }} />
                 articles

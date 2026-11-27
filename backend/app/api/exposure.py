@@ -57,7 +57,7 @@ class StackExposureItem(BaseModel):
     missing_data_sources: list[str] = []
     entry_count: int = 0
     lift: float = 0.0
-    # Phase 7 heuristic (only set for no_rule CVEs when the flag is on):
+    # Heuristic, set only for no_rule CVEs when exposure_attack_visibility_enabled is on:
     # {detectable, data_sources[], available[], missing[]}
     attack_visibility: dict | None = None
 
@@ -180,15 +180,15 @@ async def get_stack_exposure(
 
     cve_ids = [rec["cve"].cve_id for rec in per_cve.values()]
 
-    # Detection posture (org telemetry) + entry mention counts.
+    # Detection posture (from the telemetry inventory) + entry mention counts.
     from app.services.detection_coverage import classify_cves
 
     coverage = await classify_cves(db, cve_ids)
     _STATUS_TO_POSTURE = {"covered": "defended", "library_only": "blind", "no_rule": "no_rule"}
 
-    # Phase 7 (heuristic, flag-gated): for CVEs with no rule, estimate whether the
-    # org's telemetry could still detect exploitation via the CVE's co-occurring
-    # ATT&CK techniques' data sources.
+    # Heuristic, gated on exposure_attack_visibility_enabled: for CVEs with no rule,
+    # estimate whether the telemetry inventory could still detect exploitation via
+    # the data sources of the ATT&CK techniques that co-occur with the CVE.
     attack_vis: dict[str, dict] = {}
     if await get_setting("exposure_attack_visibility_enabled", db):
         from app.services.attack_visibility import cve_attack_visibility

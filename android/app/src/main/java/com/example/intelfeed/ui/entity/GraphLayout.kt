@@ -9,13 +9,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
-/**
- * The web profile graph's radial layout (EntityGraph `re()`), first ring only: the entity in the
- * middle, its neighbours on a ring, grouped by type into sectors in the order the types first
- * appear, strongest links first, at most [perType] per type (the rest become a "+N" pill).
- * Sector widths follow each type's share, at least 0.25 rad, starting at the top (-π/2).
- * Coordinates are in abstract units around (0, 0); the view scales them to fit.
- */
+/** The web profile graph's radial layout (EntityGraph `re()`), first ring only: the entity in the middle, its neighbors on a ring, grouped by type into sectors in the order the types first appear, strongest links first, at most [perType] per type (the rest become a "+N" pill). Sector widths follow each type's share, at least 0.25 rad, starting at the top (-π/2). Coordinates are in abstract units around (0, 0); the view scales them to fit. */
 object GraphLayout {
 
     data class Placed(val node: GraphNode, val x: Float, val y: Float, val angle: Float, val seed: Boolean)
@@ -40,19 +34,19 @@ object GraphLayout {
     fun layout(graph: EntityGraph, perType: Int, hiddenTypes: Set<String>, size: Float = 400f): Result {
         val seed = graph.nodes.firstOrNull() ?: return Result(emptyList(), emptyList(), emptyList(), emptyList(), 0f)
         val byId = graph.nodes.associateBy { it.id }
-        // Strongest link per pair, and the seed's neighbours in the order the edges list them.
+        // Strongest link per pair, and the seed's neighbors in the order the edges list them.
         val weights = HashMap<String, Double>()
-        val neighbours = LinkedHashSet<String>()
+        val neighbors = LinkedHashSet<String>()
         for (e in graph.edges) {
             val key = listOf(e.source, e.target).sorted().joinToString("|")
             if (e.weight > (weights[key] ?: 0.0)) weights[key] = e.weight
-            if (e.source == seed.id) neighbours += e.target
-            if (e.target == seed.id) neighbours += e.source
+            if (e.source == seed.id) neighbors += e.target
+            if (e.target == seed.id) neighbors += e.source
         }
         fun weight(id: String) = weights[listOf(seed.id, id).sorted().joinToString("|")] ?: 0.0
 
         val groups = LinkedHashMap<String, MutableList<GraphNode>>()
-        for (id in neighbours) {
+        for (id in neighbors) {
             val n = byId[id] ?: continue
             if (n.id == seed.id || n.type in hiddenTypes) continue
             groups.getOrPut(n.type) { mutableListOf() } += n

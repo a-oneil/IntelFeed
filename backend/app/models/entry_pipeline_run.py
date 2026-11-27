@@ -14,7 +14,8 @@ class EntryPipelineRun(Base):
     Written by the @pipeline_stage decorator (workers/pipeline_logging.py) on
     stage completion — one INSERT per stage per entry, no "running" rows.
     Powers the entry processing popover and per-stage retry. Pruned after
-    30 days by prune_engine_tables; cascade-deletes with the entry.
+    engine_run_retention_days (default 30) by prune_engine_tables;
+    cascade-deletes with the entry.
     """
 
     __tablename__ = "entry_pipeline_runs"
@@ -24,8 +25,8 @@ class EntryPipelineRun(Base):
         UUID(as_uuid=True), ForeignKey("entries.id", ondelete="CASCADE"), nullable=False, index=True
     )
     stage: Mapped[str] = mapped_column(String(30), nullable=False)
-    # autolink, telegram_links, extract, cooccurrence, correlation,
-    # requirements, score, automate, translate
+    # translate, autolink, observables, telegram_links, extract, cooccurrence,
+    # correlation, requirements, score, adjudicate, automate
     status: Mapped[str] = mapped_column(String(12), nullable=False)  # success, error, retry
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     error: Mapped[str | None] = mapped_column(Text)

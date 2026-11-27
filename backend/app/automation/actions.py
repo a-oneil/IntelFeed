@@ -40,8 +40,9 @@ logger = logging.getLogger(__name__)
 
 
 async def _validate_webhook_url(url: str) -> str | None:
-    """Why a webhook must not be called, or None. Resolves the hostname: a
-    name that points at the LAN is the attack, not the literal address."""
+    """Why a webhook must not be called, or None. Resolves the hostname, because
+    the risk is a public name that resolves to a LAN address, not only a literal
+    private IP."""
     from app.config import settings
     from app.core.outbound import check_outbound_url
 
@@ -61,9 +62,9 @@ def _webhook_client(**kwargs):
 
 async def observable_template_context(db: AsyncSession, entry: Entry) -> dict:
     """``{observables_count}`` / ``{observables}`` for notification templates:
-    the entry's captured observables sighted by a reporting door (the
-    indicator-feed door is excluded — a blocklist mirror is not news),
-    defanged, one per line as ``kind value (role)``."""
+    the entry's captured observables (up to 50), excluding sightings from
+    indicator feeds (source "feed") because a value copied from a blocklist is
+    not a new report, defanged, one per line as ``kind value (role)``."""
     from app.intelligence.observables import defang
     from app.models.observable import EntryObservable, Observable
 
@@ -100,7 +101,8 @@ def _render_template(
     Supported variables are the single-brace ({ }) set declared in
     ``variables.NOTIFICATION_TEMPLATE_FIELDS``:
       {title}, {url}, {app_url}, {author}, {summary}, {published_at},
-      {ai_summary}, {feed_name}, {entry_count}
+      {ai_summary}, {feed_name}, {observables_count}, {observables},
+      {entry_count}
 
     ``escape`` is applied to every substituted value (``html.escape`` for an
     HTML email body), never to the template itself. ``overrides`` replaces a
@@ -227,9 +229,10 @@ async def execute_action(
 ) -> dict:
     """Execute a single automation action against an entry, as automation.
 
-    The rule's author is ``user_id``, but nothing in here is the author
-    clicking: every AI call beneath this frame defaults to an automation
-    caller, so a new action can't bill a personal key by omission.
+    The rule's author is ``user_id``, but the author is not the one running
+    these actions: every AI call beneath this frame defaults to an automation
+    caller, so a new action cannot bill the author's personal API key by
+    accident.
     """
     with caller_scope(Caller.automation(user_id)):
         return await _execute_action(db, entry, action, user_id, context)
@@ -627,7 +630,7 @@ async def _action_use_daily_summary(
     reader has no session (and may have no account), so ``links: "original"``
     (the default) rewrites every one of them to the article's own source URL
     before it reaches the notification/webhook actions. ``links: "app"`` keeps
-    the IntelFeed deep links instead, absolutised via PUBLIC_BASE_URL.
+    the IntelFeed deep links instead, made absolute with PUBLIC_BASE_URL.
     """
     from app.services.daily_briefing import (
         ensure_daily_summary,
@@ -703,7 +706,7 @@ def _clean_tag_name(raw: object) -> str:
 
 
 def _tag_spec(item) -> dict | None:
-    """Normalise one `add_tags` entry: a bare name, or a dict that also carries
+    """Normalize one `add_tags` entry: a bare name, or a dict that also carries
     the presentation and scope to use if the tag has to be created."""
     if isinstance(item, str):
         name = _clean_tag_name(item)
@@ -720,7 +723,7 @@ async def _action_add_tags(db: AsyncSession, entry: Entry, config: dict, user_id
     `config["tags"]` holds bare names or `{name, color, description, chip,
     global}` objects. The presentation and scope fields apply only when the tag
     doesn't exist yet: an existing tag's record is the source of truth and is
-    never recoloured or re-scoped from under the other entries carrying it.
+    never recolored or re-scoped from under the other entries carrying it.
 
     Each assignment belongs to the rule's owner — it shows on their cards and
     nobody else's — unless the tag is global, in which case it is shared. A
@@ -1557,8 +1560,8 @@ async def _action_mark_priority(db: AsyncSession, entry: Entry, config: dict, us
 
 # The rules running in this call stack, outermost first (execute_automation
 # pushes each one).
-# A chain that comes back to a rule already on it, or goes deeper than this,
-# stops: every hop re-runs the rule's webhooks and AI tasks.
+# A chain that comes back to a rule already on the stack, or goes deeper than
+# MAX_CHAIN_DEPTH, stops: every hop re-runs the rule's webhooks and AI tasks.
 _CHAIN_STACK: contextvars.ContextVar[tuple[uuid.UUID, ...]] = contextvars.ContextVar("automation_chain", default=())
 MAX_CHAIN_DEPTH = 5
 
@@ -1675,7 +1678,7 @@ async def _action_hide_entry(db: AsyncSession, entry: Entry, user_id: uuid.UUID)
 
 async def _action_remove_tags(db: AsyncSession, entry: Entry, config: dict, user_id: uuid.UUID) -> dict:
     """Remove tags from an entry."""
-    # Names normalised exactly as `add_tags` does, so a rule removes what it added.
+    # Names normalized exactly as `add_tags` does, so a rule removes what it added.
     tag_names = [spec["name"] for spec in map(_tag_spec, config.get("tags") or []) if spec]
     if not tag_names:
         return {"status": "skipped", "message": "No tags specified"}
@@ -1946,9 +1949,9 @@ async def _action_add_to_campaign(
       - campaign_id: str (UUID, required)
       - notes: str (optional)
       - link_observables: bool (optional) — also attach the entry's captured
-        observables (reporting doors only, dual-use infra excluded) as
-        campaign entities, so an on_observable_captured rule builds the
-        campaign's infrastructure list as articles land.
+        observables (indicator-feed sightings and dual-use infrastructure
+        excluded) as campaign entities, so an on_observable_captured rule
+        builds the campaign's infrastructure list as articles arrive.
       - observable_kinds / observable_roles: comma lists narrowing which
         captured observables are attached (blank = any).
     """
@@ -1997,8 +2000,9 @@ async def _action_add_to_campaign(
 async def _link_captured_observables_to_campaign(
     db: AsyncSession, entry: Entry, campaign_id: uuid.UUID, config: dict, user_id: uuid.UUID
 ) -> int:
-    """CampaignEntity(entity_type="observable") rows for the entry's
-    reporting-door observables; idempotent. Returns rows added."""
+    """Add CampaignEntity(entity_type="observable") rows for the entry's
+    captured observables, skipping indicator-feed sightings, denied values and
+    dual-use infrastructure; idempotent. Returns the number of rows added."""
     from app.models.campaign import CampaignEntity
     from app.models.observable import EntryObservable, Observable
 
@@ -2105,10 +2109,10 @@ async def _action_create_intel_report(
 async def _action_track_on_threat_board(db: AsyncSession, entry: Entry) -> dict:
     """Pin the entry's linked actors/malware onto the Threats board as tracked.
 
-    The automation seed for the board's pull path: a PIR or sector trigger
-    ("healthcare ransomware", "any KEV in our stack") tracks threats without a
-    human noticing first. Insert-if-absent only — a handled or muted threat was
-    decided by a person, and an automation rule doesn't outrank that.
+    Lets a rule with a PIR or sector trigger ("healthcare ransomware", "any KEV
+    in my stack") track threats before a person has noticed them. Inserts only
+    when no board state exists: a threat a person marked handled or muted keeps
+    that state, because an automation rule does not override a person's call.
     """
     from sqlalchemy import text as sa_text
 

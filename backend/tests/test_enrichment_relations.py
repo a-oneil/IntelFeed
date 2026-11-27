@@ -331,7 +331,7 @@ async def test_a_co_occurrence_edge_is_lifted_then_handed_back(db_session, ref_s
     await db_session.flush()
 
     assert await apply_relations(db_session, "threat_actor", actor.id, "ref_catalog", _tools("Cobalt Strike"))
-    # Lent, not rewritten: the row keeps its own (empty) description.
+    # The source's claim takes over the existing row without rewriting it: the row keeps its own (empty) description.
     assert (edge.source, edge.confidence, edge.description) == ("enrichment", "probable", None)
 
     assert await apply_relations(db_session, "threat_actor", actor.id, "ref_catalog", {})

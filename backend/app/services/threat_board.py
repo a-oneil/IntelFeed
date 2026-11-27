@@ -5,7 +5,9 @@ Entry.id)`` over the window. That count is ``feed_echo``: the signal the entry
 scorer subtracts, because it measures how many aggregators re-reported a story.
 On real data it returns a Patch-Tuesday batch every week.
 
-Three counts per threat, kept separate and never blended into a score:
+Four counts per threat, each returned as its own field. ``_rank_score``
+combines ``stories``, ``new`` and a capped outlet term into the ranking score;
+``on_record`` does not affect the rank:
 
 ``attention``   distinct source domains in the window. The independent-outlet
                 unit, not the feed-row unit — one outlet publishing through four
@@ -14,16 +16,16 @@ Three counts per threat, kept separate and never blended into a score:
 ``new``         techniques whose first-ever appearance for this threat falls
                 inside the window. This is the "is there anything to write?"
                 number.
-``on_record``   distinct techniques ever extracted for this threat. A loud week
-                with no new tradecraft still leaves this body of work unaudited,
-                which is a different job, not a lower-priority one.
+``on_record``   distinct techniques ever extracted for this threat. A busy week
+                with no new techniques still leaves these unaudited; auditing
+                them is a separate job, not a lower-priority one.
 ``stories``     distinct *stories* behind those outlets, from story threads. One
                 wave carried by eleven outlets is one story; three separate
                 intrusions carried by five are three. This is what the ranking
                 counts, because "how many things happened" is the question a
                 triage board is actually asking. Where no thread holds an
-                article it contributes its own source domain instead, so a
-                corpus with no embeddings scores exactly as it did before.
+                article it contributes its own source domain instead, so
+                without embeddings this equals ``attention``.
 
 A coverage percentage is deliberately absent. ``source_ttps`` tag equality
 returns 88-90% for every actor in the database (median 90 over the 147 actors
@@ -83,18 +85,18 @@ GENERIC_ENTITY_NAMES: frozenset[str] = frozenset(
 
 # Ranking weight. Story units alone put an arrest story at the top of the week;
 # new tradecraft alone buries a genuinely hot threat whose techniques were
-# already on record. Both counts stay visible in the payload so a bad rank is
-# arguable rather than opaque.
+# already on record. Both counts stay visible in the payload so a reader can
+# see why a row ranked where it did.
 #
 # _W_ATTENTION keeps its name and its value because story units *are* the
-# attention unit once threading has an opinion: a thread replaces the outlets
-# that carried it, and an article no thread holds still counts as its domain.
+# attention unit once threads exist: a thread replaces the outlets that carried
+# it, and an article no thread holds still counts as its domain.
 _W_ATTENTION = 1.0
 _W_NEW = 2.5
 
-# Outlets still say something after the story count has said the main thing —
-# eleven outlets on one wave is more corroborated than two. Capped, because
-# uncapped it is feed_echo again under another name.
+# The outlet count adds a small corroboration bonus on top of the story count:
+# eleven outlets on one story is better corroborated than two. Capped, because
+# uncapped it would measure feed_echo (re-reporting volume) again.
 _W_OUTLET = 0.25
 _OUTLET_CAP = 2.0
 
@@ -110,18 +112,18 @@ STORY = "story"
 THREAD_MERGE_SHARE = 0.75
 THREAD_MERGE_MIN_ENTRIES = 2
 
-# A thread speaks for a row — supplies its headline, its beat count, and the
-# story its precedent is measured from — only once it holds half of what the
-# row was written about in the window. Below that it is one of several stories
-# the row appears in, and the article that opened it is not this row's lede.
+# A thread represents a row (supplies its headline, its beat count, and the
+# story its precedent is measured from) only once it holds at least half of the
+# row's window articles. Below that it is one of several stories the row
+# appears in, and the article that opened it is not this row's lead article.
 THREAD_LEAD_SHARE = 0.5
 
 # An entity row's tradecraft term counts techniques first seen *for that
 # entity*. A story row has no entity to have seen them before, so every
-# technique on it is new to it — which is the honest analogue, and without it
-# a story row can only ever score its beats and sit at the floor of the board
-# no matter what it carries. Capped, so that a technique-dense write-up cannot
-# buy the top of the board on volume alone.
+# technique on it counts as new — the closest equivalent. Without it a story
+# row could only score its beats and would sit at the bottom of the board no
+# matter what it carries. Capped, so that a technique-dense write-up cannot
+# reach the top of the board on technique count alone.
 STORY_TECHNIQUE_CAP = 6
 
 # Row types whose lead article a thread can speak for.
@@ -164,9 +166,9 @@ class ThreatRow:
     # write" number the counts can't see: fresh observables on an old technique
     # are writable work even when new_techniques is zero.
     writable_observables: int = 0
-    # ── Vulnerability-row extras. A CVE is a board citizen, not a transplant
-    # from another page: same row shape, same state machine, its exploitation
-    # state where an actor row has its tradecraft counts. None/False elsewhere.
+    # ── Vulnerability-row extras. CVE rows use the same row shape and state
+    # machine as threat rows, with exploitation state in place of an actor
+    # row's technique counts. None/False on other rows.
     product: str | None = None
     in_stack: bool = False
     is_kev: bool = False
@@ -174,7 +176,7 @@ class ThreatRow:
     epss_score: float | None = None
     exploit_status: str | None = None
     # blind (rule exists, telemetry doesn't) | no_rule | defended — from
-    # classify_cves against the enabled inventory, same as Vendor Watch used.
+    # classify_cves against the enabled inventory, as in Vendor Watch.
     posture: str | None = None
     # ── Story-thread context. The thread holding most of this row's window
     # coverage: its slug opens the story, its beat count says whether the
@@ -191,8 +193,8 @@ class ThreatRow:
     # CVE rows are keyed by cve_id everywhere (rule_coverage, state, workspace)
     # but the entity profile routes on the row uuid — carry it for navigation.
     profile_id: str | None = None
-    # Your surface, or the landscape? False for a CVE affecting nothing you run
-    # with no fireable rule. Informational only: the board ranks by score and
+    # Whether the row concerns something the caller runs. False for a CVE
+    # affecting nothing the caller runs with no fireable rule. Informational only: the board ranks by score and
     # the in-stack chip already says what matters, so this never sorts or
     # hides a row. Threat rows are always on-surface.
     on_surface: bool = True
@@ -206,21 +208,20 @@ class ThreatRow:
     def action(self) -> str:
         """The job this row represents, derived from the counts.
 
-        Named rather than generic: today every row renders "Author from intel",
-        and on an actor row that navigates to /workbench/rule/new with no
-        parameters at all.
+        A specific verb per row (write, extend, audit, ...) instead of one
+        generic "Author from intel" action, which on an actor row opened
+        /workbench/rule/new with no parameters at all.
         """
         if self.is_generic:
             return "merge"
         if self.entity_type == STORY:
             # Nothing to extend or audit against: the story has no entity yet.
-            # Collecting it is the job — read it, and name what it is about.
+            # The job is to read it and name what it is about.
             return "collect"
         if self.entity_type == entity_types.CVE:
             # Posture decides the verb: nothing authored → write; authored but
-            # blocked by missing telemetry → collect (a sourcing job, the same
-            # honesty as the workspace's below-the-line divider); authored and
-            # fireable → adopt.
+            # blocked by missing telemetry → collect (a log-sourcing job);
+            # authored and fireable → adopt.
             if self.prior_rules == 0:
                 return "write"
             if self.posture == "blind":
@@ -266,7 +267,7 @@ _LEADING_NOISE = ("the", "mini", "new", "a")
 _MIN_STEM = 4
 
 # Entity names that are an identifier for something else entirely — a CVE id
-# extracted as a malware family, for instance. Extraction artefacts, not threats.
+# extracted as a malware family, for instance. Extraction artifacts, not threats.
 _ID_SHAPED = re.compile(r"^(cve-\d{4}-\d{4,}|t\d{4}(\.\d{3})?|s\d{4}|g\d{4})$", re.I)
 
 
@@ -386,14 +387,14 @@ LIMIT :candidate_limit
 # ── Story threads ───────────────────────────────────────────────────────────
 # What the ranking counts. ``story_units`` is one per thread holding this row's
 # window coverage, plus one per source domain no thread has claimed — so a
-# corpus with no embeddings returns exactly the old attention count, and a
-# threaded corpus collapses a wave of re-reports into the one story it is.
+# corpus with no embeddings returns the attention count, and a threaded corpus
+# counts a wave of re-reports as one story.
 # ``echoes_folded`` is what that collapse hid, kept visible in the caption.
 #
 # A domain that carried one of the threads is *not* also counted for its
 # unthreaded articles: it is already represented by that thread, and counting
-# it twice let the story count climb above the outlet count, which is the one
-# thing this number must never do.
+# it twice would let the story count climb above the outlet count, which this
+# number must never do.
 _STORY_UNITS_SQL = text("""
 WITH src AS (
     SELECT e.id AS entry_id,
@@ -621,10 +622,10 @@ ORDER BY j.entity_type, j.entity_key, j.names_entity DESC, (j.role = 'origin') D
 async def _threads_in_window(db: AsyncSession, since: datetime) -> bool:
     """Is there any threaded coverage in this window at all?
 
-    One index probe that lets the whole feature cost nothing where it has
-    nothing to say — an instance with embeddings switched off, or one still
-    working through its first backfill. Without it every board request pays
-    for four thread queries to be told, at length, that there are no threads.
+    One index probe that lets callers skip the thread queries when there are
+    no threads — an instance with embeddings switched off, or one still
+    working through its first backfill. Without it every board request would
+    run the thread queries only to get empty results.
     """
     return bool(
         (
@@ -640,8 +641,8 @@ def _rank_score(story_units: int, attention: int, new_techniques: int) -> float:
     """The board's ranking, in one place.
 
     Stories, not articles and not outlets: a wave carried by eleven outlets is
-    one thing that happened. Outlets still earn a capped corroboration bump —
-    uncapped, that term is ``feed_echo`` wearing a different name.
+    one thing that happened. Outlets still add a capped corroboration bonus;
+    uncapped, that term would measure ``feed_echo`` again.
     """
     return _W_ATTENTION * story_units + _W_NEW * new_techniques + min(_W_OUTLET * attention, _OUTLET_CAP)
 
@@ -718,8 +719,7 @@ GROUP BY entity_key
 """)
 
 # Affected product/vendor names + whether any of them is in the caller's stack
-# (user_entity_watches mode='stack' — Vendor Watch's own join, finally read by
-# the board).
+# (user_entity_watches mode='stack' — the same join Vendor Watch uses).
 _CVE_AFFECTED_SQL = text("""
 SELECT c.cve_id,
        (array_agg(DISTINCT coalesce(p.name, v.name)) FILTER (WHERE coalesce(p.name, v.name) IS NOT NULL))[1:3]
@@ -918,8 +918,8 @@ async def _apply_thread_lead(db: AsyncSession, rows: list[ThreatRow], since: dat
     ``_EVIDENCE_SQL`` picks the article that names the threat and carries the
     most techniques. That is the right answer when nothing knows what the story
     is, and the wrong one once something does: the fourth outlet to pick a
-    story up routinely out-scores the one that broke it. Where a thread speaks
-    for the row (``thread_slug`` — see ``THREAD_LEAD_SHARE``), the row's own
+    story up routinely out-scores the one that broke it. Where a thread represents
+    the row (``thread_slug`` — see ``THREAD_LEAD_SHARE``), the row's own
     earliest article in that story wins instead, and the row says so.
     """
     keyed = {t: [r.entity_key for r in rows if r.thread_slug and r.entity_type == t] for t in _LEAD_TYPES}
@@ -1005,9 +1005,9 @@ async def build_threat_board(
     for r in technique_rows:
         by_key.setdefault((r.entity_type, r.entity_key), r)
 
-    # The pull path: tracked threats enter the board regardless of the
-    # attention floor — you arrived with the name, the ranking doesn't get a
-    # veto. Quiet tracked rows get zero-count aggregates and real labels.
+    # Tracked threats enter the board regardless of the attention floor: the
+    # user asked to follow them, so the ranking must not hide them. Quiet
+    # tracked rows get zero-count aggregates and real labels.
     tracked_rows = (
         await db.execute(
             text("""
@@ -1138,7 +1138,7 @@ async def build_threat_board(
         # path carries an outlet count over the TTP-bearing subset of those.
         # The number that ranks must never exceed the outlets the row shows.
         stories = min(int(su.story_units or 0), r.attention) if su is not None else r.attention
-        # A thread speaks for the row only if it holds half its coverage.
+        # A thread represents the row only if it holds at least half its coverage.
         leads = (
             su is not None
             and su.dominant_thread_id is not None
@@ -1203,7 +1203,7 @@ async def build_threat_board(
     folded = _merge_by_thread(list(merged.values()), dominant_thread)
     out = [r for r in folded if include_handled or r.state in ("open", "tracked") or r.is_generic]
     # Tracked rows are pinned above the ranking and never cut by the limit —
-    # the whole point of tracking is that the score doesn't get a veto.
+    # tracking exists so that a low score cannot hide a row.
     out.sort(key=lambda r: (r.is_generic, r.state != "tracked", -r.score))
     tracked_count = sum(1 for r in out if r.state == "tracked")
     out = out[: max(limit, tracked_count)]
@@ -1373,9 +1373,8 @@ async def build_cve_board(
             1.0,
         )
         # The stack base multiplies only stack matches — exposure's own
-        # semantics. Applying it to the whole landscape made every KEV read
-        # as the caller's problem, which is exactly the complaint the
-        # on_surface split answers.
+        # semantics. Applying it to every CVE would mark every KEV as the
+        # caller's problem; on_surface keeps the two apart.
         lift = severity_mult * (EXPOSURE_BASE if in_stack else 1.0)
         su = story_units.get(r.cve_id)
         stories = min(int(su.story_units or 0), r.attention) if su is not None else r.attention
@@ -1475,10 +1474,10 @@ async def build_cve_board(
 
 # ── Story rows ──────────────────────────────────────────────────────────────
 # A thread whose articles resolved to no actor, no malware and no CVE. The
-# board is entity-keyed, so today this story cannot appear at all: there is
-# nothing to key a row on until extraction names something. A thread needs no
-# name, which makes it the only thing on the platform that can carry the story
-# nobody has named yet — usually the one worth reading first.
+# board is entity-keyed, so without these rows such a story could not appear:
+# there is nothing to key a row on until extraction names something. A thread
+# needs no name, so it is the only object that can represent a story no entity
+# has been extracted for yet — often the one worth reading first.
 _STORY_ROW_SQL = text("""
 WITH candidates AS (
     SELECT t.id, t.slug, t.title
@@ -1522,7 +1521,7 @@ LIMIT :candidate_limit
 # Techniques on a story row are the thread's, and "new" keeps its meaning: a
 # technique whose first sighting anywhere in the corpus falls inside the window.
 # Without an entity there is no per-entity first sighting to measure against,
-# and a global one is the honest substitute.
+# and a global one is the substitute.
 _STORY_TECH_SQL = text("""
 WITH members AS (
     SELECT ste.thread_id, ste.entry_id
@@ -1591,7 +1590,7 @@ async def build_story_rows(
 
     Not every entity-less story belongs here. A funding announcement, a policy
     statement and a webinar all resolve to no actor and no malware for the
-    same boring reason: there is nothing in them to extract. The board is a
+    same reason: there is nothing in them to extract. The board is a
     queue of detection work, so a story earns a row by offering some — a
     technique the extractor found, an observable sentence, or a product the
     caller actually runs. Measured on the dev corpus this is the difference

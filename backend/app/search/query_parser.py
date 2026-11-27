@@ -126,11 +126,11 @@ def tokenize(query: str) -> list[Token]:
             i += 1
         word = query[start:i]
 
-        # Classify keywords. Matching is case-insensitive: a lowercase `not`
-        # used to tokenize as the search word "not" *and* leave the filter it
-        # was meant to negate in place positively, so `not tag:noise` quietly
-        # returned the opposite of what it says. Quote the word to search for
-        # it literally ("and", "not").
+        # Classify keywords. Matching is case-insensitive: if a lowercase `not`
+        # tokenized as the search word "not", the filter it was meant to negate
+        # would stay in place positively, and `not tag:noise` would return the
+        # opposite of what it says. Quote the word to search for it literally
+        # ("and", "not").
         upper = word.upper()
         if upper == "AND":
             tokens.append(Token(TokenType.AND, word, start))
@@ -255,8 +255,9 @@ class Parser:
 def _find_field_colon(word: str) -> int | None:
     """Find the colon that separates field from value, ignoring colons inside values.
 
-    Valid field names: lowercase letters, digits, underscores, dots.
-    The colon must not be the last character (field: with no value is handled separately).
+    Valid field names: letters, digits, underscores, dots, starting with a letter.
+    A trailing colon (``field:`` with no value) still counts; the parser then takes a
+    following quoted phrase as the value.
     """
     for i, ch in enumerate(word):
         if ch == ":":

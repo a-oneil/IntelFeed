@@ -133,7 +133,7 @@ async def test_mark_read(client: AsyncClient, auth_headers: dict, sample_entry: 
     assert response.status_code == 200
     assert response.json()["message"] == "Marked as read"
 
-    # Verify the entry is now marked as read in the list
+    # Verify the entry detail now shows it as read
     response = await client.get(f"/api/entries/{sample_entry.id}", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["is_read"] is True

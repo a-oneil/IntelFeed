@@ -49,8 +49,7 @@
   color: var(--text-primary);
 }
 
-/* Scrollable region hosting the reused panels (CreateEntityPanel / AddAliasPanel)
-   or the standalone note form. */
+/* Scrollable region hosting the reused panels (CreateEntityPanel / AddAliasPanel) or the standalone note form. */
 .body {
   padding: 16px;
   overflow-y: auto;

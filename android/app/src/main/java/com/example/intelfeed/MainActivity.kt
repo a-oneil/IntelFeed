@@ -32,15 +32,12 @@ class MainActivity : ComponentActivity() {
     // A web link shared to IntelFeed from another app, waiting for the user to confirm adding it.
     private var pendingSharedUrl by mutableStateOf<String?>(null)
 
-    // Where a tapped notification should go, handled once the session is ready. Set from onCreate
-    // (app started by the tap) and onNewIntent (app already open: the tap used to do nothing).
+    // Where a tapped notification should go, handled once the session is ready. Set from onCreate (app started by the tap) and onNewIntent (app already open).
     private var pendingRoute by mutableStateOf<IntelNotificationHelper.Route?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Not after a configuration change or process restore: the same tap would be handled again.
-        // A link still waiting for "Add article" comes back from the saved state instead (rotating
-        // the screen used to dismiss the dialog and lose the link).
+        // Not after a configuration change or process restore: the same tap would be handled again. A link still waiting for "Add article" comes back from the saved state instead, so rotating the screen keeps the dialog and the link.
         if (savedInstanceState == null) {
             handleShareIntent(intent)
         } else {
@@ -79,8 +76,7 @@ class MainActivity : ComponentActivity() {
                         MainNavigation(viewModel = viewModel, app = app)
 
                     val sharedUrl = pendingSharedUrl
-                    // A link to an article on the signed-in IntelFeed server (…/?entry=<id>) opens
-                    // that article instead of offering to add the page as a new one.
+                    // A link to an article on the signed-in IntelFeed server (…/?entry=<id>) opens that article instead of offering to add the page as a new one.
                     val sharedEntryId = sharedUrl?.let { InAppLinks.entryId(it, uiState.serverUrl) }
                     LaunchedEffect(sharedEntryId, uiState.isLoggedIn) {
                         if (sharedEntryId != null && uiState.isLoggedIn) {
@@ -120,8 +116,7 @@ class MainActivity : ComponentActivity() {
         takeNotificationRoute()
     }
 
-    // The route stays in the application until it's handled, so a tap waiting for sign-in survives
-    // the activity being re-created (e.g. rotating the sign-in screen).
+    // The route stays in the application until it's handled, so a tap waiting for sign-in survives the activity being re-created (e.g. rotating the sign-in screen).
     private fun takeNotificationRoute() {
         val app = application as IntelFeedApplication
         app.pendingNotificationRoute?.let { pendingRoute = it }

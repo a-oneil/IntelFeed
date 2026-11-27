@@ -1,6 +1,4 @@
-/* The workbench's section nav. Lifted out of WorkbenchPage.module.css when the
-   workbench stopped carrying a rail of its own and moved into the app sidebar's
-   Workbench mode — the markup is unchanged, only its home. */
+/* The workbench's section nav. It renders inside the app sidebar's Workbench mode, so its styles live here rather than in WorkbenchPage.module.css. */
 
 .nav {
   display: flex;
@@ -31,7 +29,7 @@
 }
 
 .sectionChevron {
-  /* All-caps label — see the caps note in Sidebar.module.css. */
+  /* Sized for the all-caps group label beside it; see the caps note in Sidebar.module.css. */
   width: 1em;
   height: 1em;
   transition: transform 0.15s ease;
@@ -73,8 +71,7 @@
   background: var(--bg-active);
 }
 
-/* Colour square standing in for the old 14px glyph — the entity palette is
-   the vocabulary, and at this size the glyphs read as noise. */
+/* A color square instead of a 14px glyph: the entity palette already identifies each type, and at this size the glyphs are hard to tell apart. */
 .navSwatch {
   width: 10px;
   height: 10px;

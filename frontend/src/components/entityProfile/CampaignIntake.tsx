@@ -1,26 +1,14 @@
 /**
  * CampaignIntake — what feeds this campaign, and what it could take next.
  *
- * These were three surfaces (a Searches tab, a Suggestions tab, and a rail
- * card) answering one question, and splitting them made each one too small to
- * be legible: the rail in particular could show that something *would* be added
- * without ever showing *what*. One section in the main column, wide enough to
- * name the articles before you commit to them.
+ * One section in the main column covers what separate Searches and Suggestions tabs and a rail card covered, because split up each was too small to read: the rail card could say that something would be added but not which articles. The section is wide enough to list the articles before you add them.
  *
  * Two halves, because they are two different commitments:
  *
- * * **Feeding it** — standing intake. A followed entity or story reads the
- *   campaign's own curation; a typed query catches what nobody has named yet.
- *   Both are campaign-owned, so a teammate can read and pause either.
- * * **Could take** — offers. Each expands to the articles it would actually
- *   add, and carries both verbs: take these once, or follow it so later waves
- *   arrive on their own.
+ * * **Standing intake** — sources that keep adding articles. A followed entity or story adds from the campaign's own curation; a typed query catches articles about something nobody has named yet. Both belong to the campaign, so a teammate can see and pause either.
+ * * **Suggested intake** — offers. Each expands to the articles it would add and has two actions: add these articles once, or follow the source so later articles arrive on their own.
  *
- * The section always renders. It used to vanish when there was nothing held and
- * nothing offered — which is exactly a new campaign, the one that most needs to
- * be told what to collect. "Add intake" (CampaignIntakeComposer) is the way to
- * point it at anything by hand; before that, intake could only be *accepted*
- * from what the backend had already proposed.
+ * The section renders even when nothing is held and nothing is offered, because that is a new campaign, the one that most needs to be told what to collect. "Add intake" (CampaignIntakeComposer) points the campaign at any query, entity, story or saved search by hand, so intake is not limited to what the backend has proposed.
  */
 import { useRef, useState } from "react";
 import { toast } from "sonner";
@@ -95,10 +83,7 @@ export function CampaignIntake({
   const linkedSearchIds = new Set(searchRows.map((r) => r.saved_search_id));
   const availableSearches = (allSearches ?? []).filter((s) => !linkedSearchIds.has(s.id));
 
-  // Offers from both directions, in one list. A story the campaign part-holds
-  // shows up in each — as something to take now (/suggest) and as something to
-  // follow (sources) — so they are merged on the thread id rather than listed
-  // twice saying almost the same thing.
+  // Offers from both directions, in one list. A story the campaign part-holds shows up in each — as something to take now (/suggest) and as something to follow (sources) — so they are merged on the thread id rather than listed twice.
   const followedRefs = new Set(sourceRows.map((s) => `${s.kind}:${s.ref_id}`));
   const storyGroups = groupSuggestions(suggestions ?? []).filter((g) => g.kind === "story");
   const looseCount = groupSuggestions(suggestions ?? []).filter((g) => g.kind === "entry").length;
@@ -182,10 +167,7 @@ export function CampaignIntake({
               aria-label="Rewrite this query"
               onChange={(e) => setEditing({ id: source.id, text: e.target.value })}
               onKeyDown={(e) => {
-                // Both exits go through blur so there is one save path. Escape
-                // marks the intent first, because by the time blur runs the
-                // difference between "left it alone" and "changed my mind" is
-                // no longer visible in the value.
+                // Both exits go through blur so there is one save path. Escape marks the intent first, because by the time blur runs the difference between "left it alone" and "changed my mind" is no longer visible in the value.
                 if (e.key === "Escape") abandonEdit.current = true;
                 if (e.key === "Escape" || e.key === "Enter") e.currentTarget.blur();
               }}
@@ -330,8 +312,7 @@ export function CampaignIntake({
 
       {(offers.length > 0 || looseCount > 0) && (
         <div className={styles.intakeOffers}>
-          {/* Linking a saved search moved into the composer's own tab — it is
-              one of four ways to add intake, not a verb belonging to offers. */}
+          {/* Linking a saved search lives in the composer's own tab: it is one of four ways to add intake, not an action on offers. */}
           <div className={styles.intakeOffersHead}>
             <span>Suggested intake</span>
           </div>

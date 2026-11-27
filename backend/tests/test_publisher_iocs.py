@@ -1,5 +1,5 @@
-"""The publisher IOC-file door: allow-listed link detection, the publishers'
-file formats, and storage sighted on the article."""
+"""Publisher IOC files: allow-listed link detection, the publishers' file
+formats, and storing the values as observables sighted on the article."""
 
 import json
 import uuid

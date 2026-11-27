@@ -9,11 +9,7 @@ export interface GlossaryTermHighlight {
   search_terms?: string[];
 }
 
-/**
- * Annotate glossary terms in sanitized HTML by wrapping them in
- * <span class="glossary-term" data-glossary-id="..." data-glossary-category="...">
- * elements. Must be called on already-sanitized HTML (post-DOMPurify).
- */
+/** Annotate glossary terms in sanitized HTML by wrapping them in <span class="glossary-term" data-glossary-id="..." data-glossary-category="..."> elements. Must be called on already-sanitized HTML (post-DOMPurify). */
 export function annotateGlossaryHTML(html: string, terms: GlossaryTermHighlight[]): string {
   if (terms.length === 0 || !html) return html;
 

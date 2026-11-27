@@ -23,17 +23,13 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 /**
- * A story thread in the reader pane: the spine, then the evidence.
+ * A story thread in the reader pane: the spine first, then the member articles.
  *
- * The spine is the point — dated waves of what actually changed, with the
- * re-reports counted rather than listed. The member list below it stays
- * available because an analyst eventually wants the sources, but it is not what
- * the page leads with.
+ * The spine is a dated list of the waves of coverage and what each one added, with repeat reports counted rather than listed. The member article list below it is there for when an analyst needs the sources, but the page leads with the spine.
  */
 export function ThreadReader({ slug }: ThreadReaderProps) {
   const { data: thread, isLoading } = useThread(slug);
-  // Docked in the workbench this reader is the dock's occupant, not the feed's
-  // selection: opening an article swaps the dock, and Close clears it.
+  // Docked in the workbench, this reader fills the dock rather than following the feed's selection: opening an article replaces it in the dock, and Close clears the dock.
   const openEntry = useOpenEntry();
   const openThread = useOpenThread();
   const setSelectedThread = useUIStore((s) => s.setSelectedThread);
@@ -47,8 +43,7 @@ export function ThreadReader({ slug }: ThreadReaderProps) {
   const isVisitor = useIsVisitor();
   const dismissThread = useUIStore((s) => s.dismissThread);
 
-  // Same clear the thread's row in the queue offers, kept here so finishing a
-  // story doesn't mean hunting the row back down in the list.
+  // The same clear action the thread's row in the queue offers, repeated here so finishing a story doesn't mean finding the row again in the list.
   const clearThread = () => {
     if (!thread) return;
     if (thread.entry_ids.length) {
@@ -58,7 +53,7 @@ export function ThreadReader({ slug }: ThreadReaderProps) {
     closeReader();
   };
 
-  // Opening the thread is what "N new" is measured from.
+  // Marks the thread opened; the "N new" count is measured from this point.
   const threadId = thread?.id;
   const markOpenedMutate = markOpened.mutate;
   useEffect(() => {

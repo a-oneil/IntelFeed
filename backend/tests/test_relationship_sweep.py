@@ -100,7 +100,7 @@ async def test_the_case_shows_the_passage_naming_both_ends(db_session: AsyncSess
     block = render_case(case)
     assert block.startswith("CLAIM: Warlock ") and "(threat_actor) uses Cobalt Strike " in block
     assert f'passage: "{ARTICLE}"' in block
-    # The roundup has no sentence naming both: each end's first mention instead.
+    # The roundup has no sentence naming both, so the case shows each end's first mention instead.
     assert 'is named (no passage names both): "This week: Warlock claimed a utility.' in block
     assert ARTICLE in case.passages[0].text  # the article with a passage naming both first
 

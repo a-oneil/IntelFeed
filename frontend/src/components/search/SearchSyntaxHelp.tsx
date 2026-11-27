@@ -2,12 +2,7 @@ import { EXAMPLE_QUERIES, FIELD_GROUPS } from "./queryFields";
 import styles from "./SearchSyntaxHelp.module.css";
 
 interface Props {
-  /**
-   * `"panel"` is the strip that drops in over the results when the toolbar's
-   * `?` is on: its own ground and a bottom rule, flush under the toolbar.
-   * `"card"` is the standalone block the empty state shows, enclosed on all
-   * four sides because nothing is stacked against it.
-   */
+  /** `"panel"` is the strip that drops in over the results when the toolbar's `?` is on: its own background and a bottom border, flush under the toolbar. `"card"` is the standalone block the empty state shows, bordered on all four sides because nothing is stacked against it. */
   variant?: "panel" | "card";
   /** When given, every token becomes a button that appends itself to the query. */
   onInsert?: (token: string) => void;
@@ -24,10 +19,7 @@ export function SearchSyntaxHelp({ variant = "panel", onInsert, onRunExample }: 
         {FIELD_GROUPS.map((group) => (
           <div key={group.label} className={styles.group}>
             <div className={styles.groupLabel}>
-              {/* Only entity groups carry a colour — the palette is the
-                  workbench's entity vocabulary, and Articles or Operators are
-                  not entities. Groups are one-per-entity so the colour can sit
-                  on the heading instead of on every token beneath it. */}
+              {/* Only entity groups carry a color: the palette is the workbench's entity colors, and Articles or Operators are not entities. Groups are one per entity type so the color can sit on the heading instead of on every token beneath it. */}
               {group.accent && <span className={styles.groupRule} style={{ background: group.accent }} />}
               {group.label}
             </div>

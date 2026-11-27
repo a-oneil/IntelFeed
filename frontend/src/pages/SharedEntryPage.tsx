@@ -211,9 +211,7 @@ interface SharedEntryData {
   feed_type: string | null;
   metadata: Record<string, unknown> | null;
   media: Array<{ id: string; media_type: string; url: string; thumbnail_url: string | null; duration_seconds: number | null }>;
-  // Entity arrays use the full API types — the public endpoint returns the same
-  // response schemas as the authenticated intelligence endpoints, so the rich
-  // popover fields (description, wikipedia thumbnail, platforms, …) are present.
+  // Entity arrays use the full API types: the public endpoint returns the same response schemas as the authenticated intelligence endpoints, so the popover fields (description, wikipedia thumbnail, platforms, …) are present.
   ttps: TTP[];
   cves: CVE[];
   threat_actors: ThreatActor[];
@@ -323,8 +321,7 @@ export function SharedEntryPage() {
       if (ttp.technique_id) entities.push({ id: ttp.id, type: "ttp", value: ttp.technique_id, ttpMeta });
       if (ttp.technique_name) entities.push({ id: ttp.id, type: "ttp", value: ttp.technique_name, ttpMeta });
     }
-    // Prefer matched_names (the exact surface forms the backend detected with
-    // word-boundary checks). Fall back to name + aliases when none are recorded.
+    // Prefer matched_names (the exact text the backend matched, with word-boundary checks). Fall back to name + aliases when none are recorded.
     const pushFor = <T extends { id: string; name: string; aliases?: string[] | null; matched_names?: string[] | null }>(
       type: HighlightEntity["type"],
       item: T,
@@ -377,8 +374,7 @@ export function SharedEntryPage() {
     [entry],
   );
 
-  // WorkbenchPanel preloaded data (entity arrays already use the API types;
-  // detection_rules keeps a narrow shared shape, so it still needs a cast)
+  // WorkbenchPanel preloaded data (entity arrays already use the API types; detection_rules keeps a narrow shared shape, so it still needs a cast)
   const preloadedData = useMemo(() => {
     if (!entry) return undefined;
     return {
@@ -402,7 +398,7 @@ export function SharedEntryPage() {
     [entry],
   );
 
-  // AI results already run — build set of completed task names + static results array
+  // AI results that already ran: build the set of completed task names and the static results array
   const aiCompletedTasks = useMemo(
     () => new Set((entry?.ai_results || []).map((r) => r.task_name).filter(Boolean) as string[]),
     [entry],
@@ -413,7 +409,7 @@ export function SharedEntryPage() {
     [entry],
   );
 
-  // AI run function for shared pages — calls public endpoint with one-time enforcement
+  // AI run function for shared pages: calls the public endpoint, which runs each task at most once per article
   const aiRunTaskFn = useCallback(async (taskName: string): Promise<RunTaskResult> => {
     const { data } = await publicApi.post<RunTaskResult>(`/shared/${token}/run-ai-task`, { task_name: taskName }, { timeout: 120000 });
     return data;

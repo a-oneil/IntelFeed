@@ -1,8 +1,5 @@
 /* ──────────────────────────────────────────────────────────────
-   Correlation events — shared by the correlation browser widget
-   (components/widgets/CorrelationBrowserWidget) and the card
-   renderers in components/triage/corrEventCards, which also show
-   inline inside the priority queue.
+   Correlation events — shared by the correlation browser widget (components/widgets/CorrelationBrowserWidget) and the card renderers in components/triage/corrEventCards, which also show inline inside the priority queue.
    ────────────────────────────────────────────────────────────── */
 
 .panelEmpty {
@@ -467,8 +464,7 @@
   white-space: nowrap;
 }
 
-/* Severity and entity-type badges are Chips now (see CORR_SEVERITY_COLORS in
-   corrEventCards.tsx). Only the casing survives — Chip never sets it. */
+/* Severity and entity-type badges are Chips (see CORR_SEVERITY_COLORS in corrEventCards.tsx). Only the casing is set here, because Chip never sets it. */
 .corrSeverity {
   text-transform: uppercase;
 }

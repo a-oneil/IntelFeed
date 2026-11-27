@@ -4,7 +4,7 @@ After the one-pass ``entry_analysis`` payload has been fanned out to rows
 (``store_entry_analysis``), this module decides whether the entry gets a
 second, smaller AI call that re-reads the article next to a manifest of
 everything that was written to it — entity links of every source, entities
-minted by this entry (with their nearest catalogue names pre-fetched),
+minted by this entry (with their nearest catalog names pre-fetched),
 pending-tier promotions, held matches the analysis rejected, relationship
 claims, AI observables — and answers one question per item: is this right?
 
@@ -13,13 +13,13 @@ Three pieces, all entry-scoped:
 - ``enqueue_adjudication`` — the gates (mode → plan → echo → trigger → score
   floor → hourly budget), recorded on ``ai_analysis_requests``.
 - ``build_manifest`` — the review items and the rendered prompt block. The
-  reviewer runs on a single prompt with no tools, so every catalogue fact it
+  reviewer runs on a single prompt with no tools, so every catalog fact it
   needs (nearest existing names, article counts, the one-pass verdicts) is
   looked up here and printed on the item line.
 - ``apply_verdicts`` — shadow files every verdict as a proposal in the two
-  hygiene logs the Proposals lens already reads; apply (a later commit) acts
-  on high-confidence verdicts with the same audit rows the existing tools
-  write, so the rows double as the undo record.
+  hygiene logs the Proposals lens already reads; apply acts on verdicts at or
+  above ``adjudication_apply_min_confidence`` with the same audit rows the
+  existing tools write, so the rows double as the undo record.
 
 Design: docs/engine-settings.md "Adjudicate stage". Replaces the nightly link
 validator, hygiene reviewer and merge engine, and folds in relationship
@@ -79,7 +79,7 @@ VALID_FOR_KIND: dict[str, set[str]] = {
     "held": {"keep", "link"},
 }
 # Verdicts that count toward the circuit breaker: the ones that take
-# something away. A merge keeps the data under the catalogue name the model
+# something away. A merge keeps the data under the catalog name the model
 # was shown, so it is not counted.
 DESTRUCTIVE = {"remove", "veto", "demote", "reverb", "drop"}
 # Types a link can be reclassified between (the merge engine's convertible set).
@@ -186,7 +186,7 @@ SKIPPED_BUDGET = "skipped_budget"
 SKIPPED_PAUSED = "skipped_paused"
 PENDING = "pending"
 # Reviewed once, but the article has gained links or held-match rejects since
-# (settle_held_on_analysed_entries): the resweep queues it again.
+# (settle_held_on_analyzed_entries): the resweep queues it again.
 RECHECK = "recheck"
 COMPLETED = "completed"
 FAILED = "failed"
@@ -496,7 +496,7 @@ async def enqueue_and_dispatch(
 
 async def reopen_adjudication(db: AsyncSession, entry_id: uuid.UUID, since: datetime) -> None:
     """Owe an article a recheck: of the held matches settled at or after
-    ``since`` (``settle_held_on_analysed_entries``) and of the candidates no
+    ``since`` (``settle_held_on_analyzed_entries``) and of the candidates no
     review has judged (``queue_candidate_reviews``). The resweep queues it,
     and the recheck judges only those.
 
@@ -765,7 +765,7 @@ async def select_backfill_entries(db: AsyncSession, limit: int = 500, since_days
     from app.models.ai_task import AITask
     from app.models.entry import Entry
 
-    analysed = select(AIResult.target_id).where(
+    analyzed = select(AIResult.target_id).where(
         AIResult.target_type == "entry",
         AIResult.is_current.is_(True),
         AIResult.task_id == select(AITask.id).where(AITask.name == "entry_analysis").scalar_subquery(),
@@ -774,7 +774,7 @@ async def select_backfill_entries(db: AsyncSession, limit: int = 500, since_days
         select(Entry.id)
         .outerjoin(AIAnalysisRequest, AIAnalysisRequest.entry_id == Entry.id)
         .where(
-            Entry.id.in_(analysed),
+            Entry.id.in_(analyzed),
             or_(AIAnalysisRequest.id.is_(None), AIAnalysisRequest.adjudicated_at.is_(None)),
             or_(
                 AIAnalysisRequest.adjudication_status.is_(None),
@@ -1066,7 +1066,7 @@ def _locate(text: str, patterns: list[re.Pattern | None], *, structured_only: bo
 
 
 async def _nearest_candidates(db: AsyncSession, entity_type: str, entity, limit: int = _MAX_CANDIDATES) -> list[dict]:
-    """The catalogue neighbours a brand-new entity could be a duplicate of —
+    """The catalog neighbors a brand-new entity could be a duplicate of —
     the same matchers the creation gate runs, excluding the entity itself.
     The reviewer may only merge into one of these."""
     from app.intelligence.entity_dedup import find_entity_by_name_or_alias
@@ -1212,7 +1212,7 @@ async def _link_items(
         .all()
     }
     restored = await _recently_restored(db, entry.id)
-    # `entities` is what buys the catalogue lookup, and the lookup is what
+    # `entities` is what buys the catalog lookup, and the lookup is what
     # makes veto and merge answerable — without it nothing is reviewed as new.
     # Without `links`, only the rows this article minted are reviewed at all.
     review_new = "entities" in scope
@@ -1288,8 +1288,8 @@ async def _link_items(
             )
         )
 
-    # The cap used to trim whatever the list happened to end with, which was
-    # always the AI TTPs. Judge the rows that only this review can judge:
+    # Sorted before the cap, or the cap would trim whatever the list ends
+    # with, which is always the AI TTPs. Judge the rows that only this review can judge:
     # entities it minted (the sole veto/merge candidates), then pending-tier
     # promotions, then anything the AI asserted, then the autolinker's bulk.
     if len(items) > _MAX_LINKS:
@@ -1348,7 +1348,7 @@ async def _link_items(
                 line += "\n    nearest existing names: none"
             resolver = resolver_rows.get(item.entity_id)  # type: ignore[arg-type]
             if resolver and resolver.get("norm_exact"):
-                line += f"\n    resolver: created as '{resolver['norm_exact']}' — no catalogue name matched at creation"
+                line += f"\n    resolver: created as '{resolver['norm_exact']}' — no catalog name matched at creation"
         pend = promoted.get((item.entity_type or "", item.entity_id))  # type: ignore[arg-type]
         if pend is not None:
             forms = ", ".join(dict.fromkeys(pend.matched_names or [])) or item.name
@@ -1459,7 +1459,7 @@ async def _held_items(db: AsyncSession, entry, text: str) -> list[ReviewItem]:
 async def _recheck_items(
     db: AsyncSession, entry, scope: set[str], text: str, since: datetime, parsed: dict | None
 ) -> list[ReviewItem]:
-    """A recheck's manifest: links held matches created at or after ``since``,
+    """A recheck's manifest: the links held matches created at or after ``since``,
     the held-match rejects not yet judged, and the candidates not yet judged
     (see build_manifest)."""
     from app.models.pending_autolink import PendingAutolinkMatch
@@ -1917,10 +1917,10 @@ async def build_manifest(
     ``dropped_out`` collects the link and edge items the per-entry caps left out.
 
     With ``recheck_since`` the article was reviewed before, and only its held
-    matches changed: the manifest is the links those matches created at or
-    after that moment plus the rejects not yet judged. Everything else was
-    judged already, and judging it again would re-file what an analyst
-    dismissed."""
+    matches and candidates changed: the manifest is the links those matches
+    created at or after that moment, the rejects not yet judged and the
+    candidates not yet judged. Everything else was judged already, and judging
+    it again would re-file what an analyst dismissed."""
     from app.services.entry_analysis import analysis_content_text
 
     scope = scope or {"links", "entities", "relationships", "observables"}
@@ -1978,7 +1978,7 @@ async def build_variables(
     recheck_since: datetime | None = None,
 ) -> tuple[list[ReviewItem], dict, list]:
     """(items, prompt variables, legacy rows to supersede after the review).
-    ``dropped_out`` collects the link items the per-entry cap left out;
+    ``dropped_out`` collects the link and edge items the per-entry caps left out;
     ``recheck_since`` scopes the manifest to a recheck (see build_manifest)."""
     from app.models.feed import Feed
     from app.services.analysis_window import analysis_content_window
@@ -2125,8 +2125,8 @@ def _reason_affirms(reason: str) -> bool:
 
 # A link remove argued from the entity being on the defenders' side ("linking
 # it implies the software is an adversary", "a defensive product", "not an
-# attacker tool"). A link is not an adversary claim — WHAT A LINK MEANS in the
-# prompt — but small models still reach for it, so the guard holds the line.
+# attacker tool"). A link is not an adversary claim (see WHAT A LINK MEANS in
+# the prompt), but small models still argue it, so this pattern voids those removes.
 _BYSTANDER_RE = re.compile(
     r"\bimpl(?:y|ies|ying)\b[^.]{0,60}\b(?:adversar\w*|attacker|malicious|threat\s+actor)\b"
     r"|\b(?:defensive|legitimate|benign)\s+(?:security\s+)?(?:product|tool|software|vendor|service|platform)\b"
@@ -2222,9 +2222,9 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
     raw = result.get("verdicts")
     # unknown: item ids not in the manifest; coerced: verdicts the item's kind
     # or state does not accept (treated as keep).
-    # unnamed_reason / affirming_reason: removes, demotes and links whose
-    # reason does not name the item, destructive verdicts whose reason argues
-    # for it.
+    # unnamed_reason / affirming_reason: removes, demotes, reverbs, links and
+    # captured-indicator drops whose reason does not name the item; destructive
+    # verdicts whose reason argues for it.
     # bystander_reason: link removes argued from the entity being a defender.
     stats = {
         "unknown": 0,
@@ -2346,7 +2346,7 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
     for item_id, v in verdicts.items():
         # Candidates are exempt: one reason fits many of them ("a version
         # number", "listed in the IoC table") without the model losing track.
-        # Keeps are, except on edges, where a keep is corroboration: one
+        # Keeps are exempt too, except on edges, where a keep is corroboration: one
         # reason pasted onto several claims weighed none of them.
         if (
             v.item.kind in ("link", "held", "ioc", "edge")
@@ -3048,7 +3048,7 @@ def _json_safe(resp) -> dict | str:
 async def _merge_entity(
     db: AsyncSession, entity_type: str, entity_id: uuid.UUID, target: dict, reason: str
 ) -> dict | None:
-    """Merge a minted duplicate into the catalogue entity the reviewer chose,
+    """Merge a minted duplicate into the catalog entity the reviewer chose,
     through the merge engine's own primitives so tombstones and undo apply."""
     from app.api.entity_merge import (
         MergeRequest,
@@ -3142,8 +3142,9 @@ async def _proposal_pending(
     db: AsyncSession, action: str, entity_type: str, entity_id: uuid.UUID | None, entry_id: uuid.UUID
 ) -> bool:
     """True when this entry already has an unapplied proposal of this kind about
-    this subject. Re-reviewing an entry (a resweep, a re-analysis) filed every
-    edge demote twice; the second copy only doubles the queue."""
+    this subject. Without this check, re-reviewing an entry (a resweep, a
+    re-analysis) files every edge demote twice, and the second copy only
+    doubles the queue."""
     from app.models.entity_maintenance import EntityMaintenanceLog
 
     if entity_id is None:
@@ -3240,7 +3241,7 @@ def _row_look_key(source: str, row) -> LookKey | None:
 async def earlier_proposals(db: AsyncSession, entry_id: uuid.UUID) -> dict[LookKey, list[tuple[str, Any]]]:
     """The verdicts earlier reviews of this article left pending, by look key.
     Only the stage's own rows: the duplicate review's merges and aliases are
-    about the catalogue, not this article, and settle in that job."""
+    about the catalog, not this article, and settle in that job."""
     from app.models.ai_result import AIResult
     from app.models.ai_task import AITask
     from app.models.entity_link_validation_log import EntityLinkValidationLog
@@ -3456,8 +3457,8 @@ async def apply_verdicts(
     # (or an earlier apply) folded it out of — dropped, never filed.
     flip_guarded = 0
     # Changes that actually ran, vs edges a keep promoted. Promotions are not
-    # changes the analyst can undo from the queue, so they are counted apart —
-    # folding them into `applied` made `shadowed` under-report.
+    # changes the analyst can undo from the queue, so they are counted apart:
+    # folding them into `applied` would make `shadowed` under-report.
     applied_n = 0
     captured_n = 0
     promoted_n = 0
@@ -3486,13 +3487,13 @@ async def apply_verdicts(
     destructive = [v for v in judged if v.verdict in DESTRUCTIVE]
     # Everything that files a row an analyst still has to decide. `reclassify`
     # is advisory in both modes, so it never counts as applied — but it is a
-    # pending proposal, and leaving it out made `shadowed` read 0 on a run that
-    # filed nothing but advisories. The breaker still counts only `destructive`.
+    # pending proposal, and leaving it out would make `shadowed` read 0 on a run
+    # that filed nothing but advisories. The breaker still counts only `destructive`.
     changes = [v for v in verdicts if v.verdict in DESTRUCTIVE | {"merge", "reclassify", "link", "capture"}]
     items_n = len([v for v in verdicts if v.item.kind != "assessment"])
     ratio = (len(destructive) / len(judged)) if judged else 0.0
     # A small run is not a pattern: on a one-item recheck a single remove is
-    # already 100%, and the breaker held every such fix in Review.
+    # already 100%, and the breaker would hold every such fix in Review.
     breaker = len(judged) >= cfg["breaker_min_items"] and ratio > cfg["breaker_pct"]
     # The rolling breaker pauses dispatch for an hour, and it exists to stop
     # damage — which a shadow run does none of. Sampling shadow runs would
@@ -3633,7 +3634,7 @@ async def apply_verdicts(
                     continue
                 if await reclassify_dismissed(db, etype, eid):  # type: ignore[arg-type]
                     continue
-                # A type change is catalogue-wide, so one article's say-so is
+                # A type change is catalog-wide, so one article's say-so is
                 # not enough: it is applied once `reclassify_consensus`
                 # distinct articles agree on the target (this one included),
                 # at or above the confidence floor. Until then it is filed

@@ -8,8 +8,7 @@ const W = 900;
 const H = 230;
 const PAD = { l: 34, r: 14, t: 14, b: 24 };
 
-/** Weekly victim-disclosure line/area chart. Self-contained SVG (no chart lib),
- * following the MentionsTimeline geometry but decoupled from entity data. */
+/** Weekly victim-disclosure line/area chart. Self-contained SVG (no chart library), using the MentionsTimeline geometry but not tied to entity data. */
 export function VictimsTimeChart({ points }: { points: TimeseriesPoint[] }) {
   const [hover, setHover] = useState<number | null>(null);
 

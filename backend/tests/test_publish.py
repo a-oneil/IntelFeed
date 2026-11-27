@@ -106,7 +106,7 @@ async def test_taxii_envelope_and_stix_shape(client, db_session):
     assert "valid_until" in ip_obj  # IPs decay, so expiry ships downstream
     assert "c2" in ip_obj["labels"]
     dom_obj = next(o for o in envelope["objects"] if "domain-name" in o["pattern"])
-    assert dom_obj["description"] == "s"  # evidence rides along
+    assert dom_obj["description"] == "s"  # the evidence text ships as the description
 
 
 @pytest.mark.asyncio

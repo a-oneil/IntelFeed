@@ -69,9 +69,7 @@ export function SidebarLayout() {
           />
         )}
         <div className={styles.content}>
-          {/* Boundary lives HERE, not at the app root: a lazy page suspending
-              must swap only this pane, leaving the header, sidebar and copilot
-              dock mounted. */}
+          {/* The Suspense boundary is here, not at the app root, so a suspending lazy page replaces only this pane and the header, sidebar and copilot dock stay mounted. */}
           <Suspense fallback={<RouteFallback />}>
             <Outlet />
           </Suspense>

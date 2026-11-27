@@ -339,9 +339,9 @@ TOOLS: dict[str, dict] = {
     "get_coverage_workspace": {
         "description": (
             "Detection coverage workspace for one threat (actor, malware, CVE or ATT&CK technique) "
-            "over a window: its recent articles and the behaviours extracted from them, each with the "
+            "over a window: its recent articles and the behaviors extracted from them, each with the "
             "quote it came from, the telemetry channels it needs and whether enabled telemetry can "
-            "see it. A behaviour flagged below_line has no matching telemetry: a sourcing gap, not a "
+            "see it. A behavior flagged below_line has no matching telemetry: a sourcing gap, not a "
             "detection gap."
         ),
         "params": {
@@ -1835,7 +1835,7 @@ TOOLS: dict[str, dict] = {
             "tools, vendors, products, countries, mitigations, campaigns and intel reports. Returns "
             "matching entities with type and key details. Note results use type 'note' and carry "
             "note_source: 'note' for a note on an article or a standalone note, 'entity_note' for a "
-            "note attached to an entity. Their description snippet is centred on the match, not the "
+            "note attached to an entity. Their description snippet is centered on the match, not the "
             "note's opening line."
         ),
         "params": {

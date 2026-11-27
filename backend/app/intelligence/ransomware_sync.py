@@ -2,8 +2,10 @@
 disclosures (see docs/automation-ai-enrichment.md "Ransomware victims").
 
 Kept self-contained (separate from external_feeds.py) so the tracker owns its dedup
-and never leaks into the article stream. The Celery wrapper + JOB_REGISTRY entry live
-in app/workers/intel_feed_tasks.py; this module is the pure async orchestrator.
+and never leaks into the article stream. The Celery wrapper lives in
+app/workers/intel_feed_tasks.py and its JOB_REGISTRY entry comes from the
+ransomware.live source manifest (app/enrichment/catalogs.py); this module is the
+pure async orchestrator.
 
 Resolution rules:
   - group   → ThreatActor via resolve_entity_creation (tombstones/gates/aliases),
@@ -44,7 +46,7 @@ RANSOMWARE_LIVE_GROUPS_URL = "https://api.ransomware.live/v2/groups"
 
 # Trailing version token on a leak-site group slug (lockbit2, lockbit3, lockbit3_fs,
 # lockbit5) — stripped to produce a base-name ALIAS CANDIDATE so the existing resolver
-# can fold versions into the base group (e.g. 'lockbit' → your LockBit actor). This
+# can fold versions into the base group (e.g. 'lockbit' → an existing LockBit actor). This
 # only generates a candidate key; resolve_entity_creation still decides the match.
 _VERSION_SUFFIX = re.compile(r"[\s_-]*v?\d+(?:[\s_-]?fs|[\s_-]?v\d+)?$", re.IGNORECASE)
 
@@ -299,7 +301,7 @@ async def _ingest_posting(
     stats["new_disclosures"] += 1
 
     # Capture the fields watchlist alerting needs (JSON-serializable, no post-commit
-    # lazy loads). Emitted after the source commits.
+    # lazy loads). Emitted once every source has committed.
     new_disclosures.append(
         {
             "disclosure_id": str(disclosure.id),
@@ -362,7 +364,7 @@ async def emit_watchlist_alerts(db: AsyncSession, new_disclosures: list[dict]) -
 
     sent = 0
     for d in new_disclosures:
-        # Per-user hits, one event per user: org beats group beats sector as the reason.
+        # One event per user; the reason is the most specific watch: org, then group, then sector.
         reason_by_user: dict[str, str] = {}
         for uid in watchers_by_sector.get(d.get("sector") or "", ()):
             reason_by_user[uid] = "watched sector"

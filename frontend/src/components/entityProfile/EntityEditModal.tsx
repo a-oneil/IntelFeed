@@ -1,12 +1,7 @@
 /**
- * EntityEditModal — the profile's in-place editors gathered into one form, so an
- * entity can be maintained from the workbench table without opening its profile.
+ * EntityEditModal — the profile's in-place editors gathered into one form, so an entity can be maintained from the workbench table without opening its profile.
  *
- * The field list is derived from the same entityProfileConfig the profile header
- * reads: the display name (when the type's identity isn't an external id), the
- * alias list, every click-to-edit signal badge, the identity meta fields, and
- * the description. Only fields the operator actually changed are sent, so a
- * value the row payload didn't carry can never be blanked by saving.
+ * The field list is derived from the same entityProfileConfig the profile header reads: the display name (when the type's identity isn't an external id), the alias list, every click-to-edit signal badge, the identity meta fields, and the description. Only fields the operator actually changed are sent, so a value the row payload didn't carry can never be blanked by saving.
  */
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -32,10 +27,7 @@ export function isEditableEntityType(entityType: string): boolean {
   return (EDITABLE_ENTITY_TYPES as readonly string[]).includes(entityType);
 }
 
-/**
- * The editable surface of a profile, in the order the profile presents it:
- * name → aliases → signal badges → identity fields → description.
- */
+/** The editable surface of a profile, in the order the profile presents it: name → aliases → signal badges → identity fields → description. */
 export function editableFieldsFor(
   config: EntityProfileConfig,
   entity: EntitySearchResult,
@@ -52,8 +44,7 @@ export function editableFieldsFor(
   if (config.hasAliases) {
     push({ key: "aliases", label: "Aliases", kind: "aliases", placeholder: "One per line" });
   }
-  // Badges carry the type's headline attributes (motivation, severity, tactic…);
-  // the ones flagged click-to-edit on the profile are the ones editable here.
+  // Badges carry the type's headline attributes (motivation, severity, tactic…); the ones flagged click-to-edit on the profile are the ones editable here.
   for (const badge of config.signalBadges(entity)) {
     if (!badge.editKey) continue;
     push({

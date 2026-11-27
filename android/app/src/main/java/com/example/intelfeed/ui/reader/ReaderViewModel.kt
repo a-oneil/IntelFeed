@@ -44,8 +44,7 @@ data class ReaderUiState(
     val currentUser: UserProfile? = null,
     val fontSize: ReaderFontSize = ReaderFontSize.MEDIUM,
     val serverUrl: String? = null,
-    // True when opening the article marked it read (the "auto-mark as read" setting), so the
-    // reader can say so and offer to undo it.
+    // True when opening the article marked it read (the "auto-mark as read" setting), so the reader can say so and offer to undo it.
     val autoMarkedRead: Boolean = false,
     // Settings › Highlight entities in articles.
     val highlightEntities: Boolean = true,
@@ -69,10 +68,7 @@ data class ReaderUiState(
 /**
  * One article. Scoped to its back-stack entry, so each open article keeps its own state.
  *
- * The reader pager builds a ViewModel for the article on screen and for its neighbours (so a swipe
- * shows text immediately). Creating one only loads the article itself. Marking it read and loading
- * the side panels (linked intelligence, notes, similar coverage) wait for [activate], which the
- * screen calls once the page is actually on screen.
+ * The reader pager builds a ViewModel for the article on screen and for its neighbors (so a swipe shows text immediately). Creating one only loads the article itself. Marking it read and loading the side panels (linked intelligence, notes, similar coverage) wait for [activate], which the screen calls once the page is actually on screen.
  */
 class ReaderViewModel(
     private val entryId: String,
@@ -127,8 +123,7 @@ class ReaderViewModel(
                 }
             }
         }
-        // Suspending calls run before update {}: update retries its lambda when the state changed
-        // meanwhile, which re-sent the request (the eight linked-intel calls went out twice).
+        // Suspending calls run before update {}: update retries its lambda when the state changed meanwhile, which would re-send the request (the eight linked-intel calls went out twice).
         viewModelScope.launch {
             val url = repository.currentServerUrl()
             _state.update { it.copy(serverUrl = url) }
@@ -159,9 +154,7 @@ class ReaderViewModel(
 
     private fun onVisible() {
         val detail = _state.value.detail ?: return
-        // At most once per article while the reader is open (the page's ViewModel may be cleared
-        // and re-created), so reading an article again after marking it unread by hand doesn't
-        // flip it back.
+        // At most once per article while the reader is open (the page's ViewModel may be cleared and re-created), so reading an article again after marking it unread by hand doesn't flip it back.
         if (autoReadIds.add(entryId)) {
             if (!detail.isRead) {
                 viewModelScope.launch {
@@ -187,9 +180,7 @@ class ReaderViewModel(
             val matches = repository.getIntelCounts(listOf(entryId))[entryId]?.pirMatches.orEmpty()
             if (matches.isNotEmpty()) _state.update { it.copy(pirMatches = matches) }
         }
-        // The article's tags come from GET /api/tags/entries/{id}, as on the web. The detail's own
-        // `tags` field can be empty for an article that has tags (seen on the live server), which
-        // made the reader show "Add tag" on tagged articles.
+        // The article's tags come from GET /api/tags/entries/{id}, as on the web. The detail's own `tags` field can be empty for an article that has tags (seen on the live server), which would make the reader show "Add tag" on tagged articles.
         viewModelScope.launch {
             repository.getEntryTags(entryId).onSuccess { tags ->
                 if (!tagsEdited) _state.update { it.copy(tags = tags) }

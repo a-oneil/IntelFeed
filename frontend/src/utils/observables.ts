@@ -1,15 +1,13 @@
-/** Shared observable value helpers: defanging and client-side STIX export.
+/**
+ * Shared observable value helpers: defanging and client-side STIX export.
  *
- * One implementation for every surface (reader panel Copy-all, profile page
- * rail) — the two previously diverged and one defanged hashes and cmdlines
- * into unusable strings.
+ * One implementation for every surface (reader panel Copy-all, profile page rail). Separate copies diverged, and one defanged hashes and cmdlines into unusable strings.
  */
 
 /** Kinds where defanging means anything; everything else copies verbatim. */
 const DEFANGABLE_KINDS = new Set(["ipv4", "ipv6", "domain", "url", "email"]);
 
-/** Render a network value the way analysts share it: neutered. Non-network
- * kinds (hashes, cmdlines, registry keys, paths) pass through untouched. */
+/** Render a network value the way analysts share it: defanged, so it can't be clicked or resolved. Non-network kinds (hashes, cmdlines, registry keys, paths) pass through untouched. */
 export function defangObservable(kind: string, value: string): string {
   if (!DEFANGABLE_KINDS.has(kind)) return value;
   let v = value.replace(/^http/i, "hxxp").replace(/\./g, "[.]");
@@ -21,8 +19,7 @@ function stixEscape(v: string): string {
   return v.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
-/** Minimal client-side STIX 2.1 pattern per kind; unpatternable kinds skip.
- * Every value is escaped — observables are attacker-controlled strings. */
+/** Minimal client-side STIX 2.1 pattern per kind; unpatternable kinds skip. Every value is escaped — observables are attacker-controlled strings. */
 export const STIX_PATTERNS: Record<string, (v: string) => string> = {
   ipv4: (v) => `[ipv4-addr:value = '${stixEscape(v)}']`,
   ipv6: (v) => `[ipv6-addr:value = '${stixEscape(v)}']`,
@@ -38,8 +35,7 @@ export const STIX_PATTERNS: Record<string, (v: string) => string> = {
   cert_fingerprint: (v) => `[x509-certificate:hashes.'SHA-1' = '${stixEscape(v)}']`,
 };
 
-/** RFC-4122 v4 id with a fallback: crypto.randomUUID only exists in secure
- * contexts, and self-hosted deployments run over plain HTTP on LAN IPs. */
+/** RFC-4122 v4 id with a fallback: crypto.randomUUID only exists in secure contexts, and self-hosted deployments run over plain HTTP on LAN IPs. */
 export function uuid4(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
   const bytes =
@@ -62,8 +58,7 @@ export interface StixIndicatorSource {
   last_seen_at?: string | null;
 }
 
-/** A valid STIX 2.1 bundle: indicators carry the REQUIRED created/modified/
- * valid_from (python-stix2 rejects a bundle without them). */
+/** A valid STIX 2.1 bundle: indicators carry the REQUIRED created/modified/valid_from (python-stix2 rejects a bundle without them). */
 export function stixBundle(items: StixIndicatorSource[]): string {
   const now = new Date().toISOString();
   const objects = items
@@ -88,11 +83,7 @@ export function stixBundle(items: StixIndicatorSource[]): string {
 }
 
 
-/**
- * How many independent sources back an observable, in words an analyst reads
- * the way they mean it: reporting articles first, indicator feeds second. A
- * value on one feed's eighteen CSV variants is "1 feed", never "18 sightings".
- */
+/** How many independent sources back an observable, counted the way an analyst means it: reporting articles first, indicator feeds second. A value on one feed's eighteen CSV variants is "1 feed", never "18 sightings". */
 export function observableSourcesLabel(o: {
   report_count?: number | null;
   feed_source_count?: number | null;
@@ -154,7 +145,7 @@ interface ObservableResponseLike {
   noise_class?: string | null;
 }
 
-/** Human labels for the ledger's capture doors (`Observable.created_via`). */
+/** Display labels for the ways an observable gets recorded (`Observable.created_via`). */
 export const CAPTURED_BY_LABELS: Record<string, string> = {
   ai_extraction: "AI analysis",
   ttp_observable: "TTP observable",

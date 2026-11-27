@@ -29,11 +29,13 @@ class EntityMaintenanceLog(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    # 'threat_actor' | 'malware' (extend as new entity types join the maintenance loop)
+    # app.entity_types slug: 'threat_actor', 'malware', 'vendor', ... (the adjudicate stage and the resolver
+    # write rows for every type they handle)
     entity_type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
     # Surviving entity for merge actions; updated entity for update actions; NULL for cluster no-ops.
     entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
-    # 'merge' | 'update_description' | 'update_aliases' | 'no_op'
+    # e.g. 'merge' | 'update_description' | 'update_aliases' | 'no_op', the adjudicate stage's
+    # 'adjudication_*' actions, and the resolver's 'resolution_*' decisions
     action: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     # 'shadow' | 'apply'
     mode: Mapped[str] = mapped_column(String(10), nullable=False)
@@ -138,7 +140,7 @@ class EntityMergeSuggestionDismissal(Base):
     one row covers the pair regardless of the direction it was suggested in.
     Entity ids are intentionally not FKs: a dismissed pair should stay
     dismissed even if one side is later deleted and recreated elsewhere, and
-    stale rows are harmless (they simply never match a live pair again).
+    stale rows are harmless (they never match a live pair again).
     """
 
     __tablename__ = "entity_merge_suggestion_dismissals"

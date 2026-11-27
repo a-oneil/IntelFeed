@@ -119,8 +119,8 @@ async def build_detection_summary(
             {"rule_type": r.rule_type, "title": r.title} for r in rule_result.all()
         ]
 
-        # Find related articles that share entities with our input articles
-        # by finding entries linked to the same IOCs, TTPs, actors, or malware
+        # Find related articles that share entities with the input articles:
+        # entries linked to the same TTPs, CVEs, actors, or malware
         shared_entry_ids: set[uuid.UUID] = set()
         for junction_model, fk_col in [
             (EntryTTP, EntryTTP.ttp_id),
@@ -158,16 +158,17 @@ async def build_detection_summary(
             ]
         variables["related_articles"] = related_articles
 
-        # Gather user's telemetry sources for feasibility assessment
+        # Gather the user's telemetry sources for the feasibility assessment
         from app.intelligence.telemetry_context import get_telemetry_for_prompt
 
         variables["telemetry_sources"] = await get_telemetry_for_prompt(db, user_id)
 
     # Run the AI task. This runs synchronously inside the API request, so bound
-    # the provider call below the gunicorn worker timeout (180s) — otherwise a
-    # slow claude_code CLI call (+ its retry) outlasts the worker, which gets
-    # killed mid-request and surfaces to the client as a 502. 150s leaves a
-    # margin for context gathering above and response handling below.
+    # the provider call below the gunicorn worker timeout (--timeout 330 in
+    # backend/Dockerfile and docker-compose.prod.yml). Otherwise a slow
+    # claude_code CLI call (plus its retry) can outlast the worker, which is
+    # killed mid-request and the client sees a 502. 150s leaves a margin for
+    # context gathering above and response handling below.
     parsed = await run_task(
         db=db,
         user_id=user_id,

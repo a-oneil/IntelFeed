@@ -82,7 +82,7 @@ class TestAcquireRateLimit:
         assert result is False
         mock_sleep.assert_not_awaited()
 
-    async def test_acquire_rate_limit_honours_min_interval(self, mock_redis):
+    async def test_acquire_rate_limit_honors_min_interval(self, mock_redis):
         """An explicit ``min_interval`` wins when it exceeds the configured one."""
         mock_redis.eval.return_value = b"0"
 

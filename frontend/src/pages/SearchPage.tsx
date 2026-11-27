@@ -25,11 +25,7 @@ function daysAgoISO(days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/**
- * Turn a `date:>YYYY-MM-DD` filter back into the window that produced it, so the
- * radio row reads as selected. Tolerant by a day because the query is a fixed
- * date and "7 days ago" moves.
- */
+/** Turn a `date:>YYYY-MM-DD` filter back into the window that produced it, so the radio row shows as selected. Allows one day of difference because the query holds a fixed date while "7 days ago" moves. */
 function windowFromDateFilter(value: string | undefined): number | null {
   if (!value || !value.startsWith(">")) return null;
   const then = Date.parse(value.slice(1));
@@ -46,9 +42,7 @@ function filterToken(field: string, value: string): string {
 /**
  * Fold a saved search's structured `tags` list into the query language.
  *
- * Tag pivots (the tag manager, the top-tags widget) and older API-created rows
- * carry tags as a list rather than as query tokens; the search page speaks only
- * the query language, so they are translated on the way in.
+ * Tag pivots (the tag manager, the top-tags widget) and older API-created rows carry tags as a list rather than as query tokens; the search page reads only the query language, so they are converted to `tag:` tokens when the saved search is loaded.
  */
 function withTagFilters(query: string, tags: string[] | undefined): string {
   if (!tags?.length) return query;
@@ -59,13 +53,10 @@ function withTagFilters(query: string, tags: string[] | undefined): string {
 /**
  * The one place search results are rendered.
  *
- * Its facet rail is a second sidebar inside the content area — the same shape as
- * the workbench and settings rails, and it folds the app sidebar away the same
- * way — so search can be entered from any route without stacking two navs.
+ * Its facet rail is a second sidebar inside the content area, the same shape as the workbench and settings rails, and it collapses the app sidebar the same way, so search can be opened from any route without showing two navs side by side.
  */
 export function SearchPage() {
-  // The facet rail is this page's nav; the app sidebar folds away beside it,
-  // exactly as it does for the workbench and settings.
+  // The facet rail is this page's nav; the app sidebar collapses beside it, as it does for the workbench and settings.
   useAppSidebarAutoCollapse();
   const isMobile = useIsMobile();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -85,16 +76,12 @@ export function SearchPage() {
   const pendingSavedSearch = useUIStore((s) => s.pendingSavedSearch);
   const clearPendingSavedSearch = useUIStore((s) => s.clearPendingSavedSearch);
 
-  // The rail is a permanent column on desktop and a sheet on mobile, where
-  // there is no room for both it and the results. Separate state because the
-  // desktop collapse is a persisted preference and this is a transient sheet.
+  // The rail is a permanent column on desktop and a sheet on mobile, where there is no room for both it and the results. Separate state because the desktop collapse is a persisted preference and this is a transient sheet.
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [entityTypeFilter, setEntityTypeFilter] = useState<string | null>(null);
   const [matchKinds, setMatchKinds] = useState<Set<MatchKind>>(new Set(ALL_MATCH_KINDS));
   const [offset, setOffset] = useState(0);
-  // Hide Read is answered by the server: read state is per-user Postgres state
-  // the index cannot filter on, and filtering the fetched page here instead
-  // hid unread articles that ranked past the page break.
+  // Hide Read is applied by the server: read state is per-user Postgres state the search index cannot filter on, and filtering the fetched page on the client would hide unread articles that ranked past the page break.
   const [hideRead, setHideRead] = useState(false);
 
   const debouncedQuery = useDebouncedValue(query, 300);
@@ -109,11 +96,7 @@ export function SearchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // A saved search picked anywhere in the app lands here. It restores the whole
-  // search UI, not just the text: the "Search in" scope, the entity-type facet
-  // and the match kinds are part of what was saved, so reopening one reproduces
-  // exactly the view it was saved from. The rail is expanded with it, so the
-  // restored filters are visible rather than hidden behind a collapsed column.
+  // A saved search picked anywhere in the app is loaded here. It restores the whole search UI, not just the text: the "Search in" scope, the entity-type facet and the match kinds are part of what was saved, so reopening one reproduces the view it was saved from. On desktop the rail is expanded too, so the restored filters are visible rather than hidden behind a collapsed column.
   useEffect(() => {
     if (!pendingSavedSearch) return;
     const f = pendingSavedSearch.filters ?? {};
@@ -122,8 +105,7 @@ export function SearchPage() {
     if (f.scope) setScope(f.scope);
     setEntityTypeFilter(f.entity_type ?? null);
     setMatchKinds(new Set(f.match_kinds?.length ? f.match_kinds : ALL_MATCH_KINDS));
-    // Mobile shows the rail as a sheet over the results; popping it open would
-    // hide the very results the saved search just fetched.
+    // Mobile shows the rail as a sheet over the results; opening it would hide the results the saved search just fetched.
     if (!isMobile) setFacetsCollapsed(false);
     setOffset(0);
     clearPendingSavedSearch();
@@ -137,10 +119,7 @@ export function SearchPage() {
     limit: 100,
     offset,
     hideRead,
-    // Matches what the workbench's own /intelligence/search asks for, so the
-    // two can no longer disagree about how much of the graph matched. The
-    // group cap is opted out of here: the facet rail needs the whole set to
-    // count it, and the page caps groups itself at render time.
+    // Matches what the workbench's own /intelligence/search asks for, so the two agree on how many entities matched. The group cap is raised here because the facet rail needs the whole set to count it, and the page caps groups itself at render time.
     entityLimit: 200,
     entityGroupLimit: 500,
   });
@@ -194,17 +173,14 @@ export function SearchPage() {
       const next = new Set(prev);
       if (next.has(kind)) next.delete(kind);
       else next.add(kind);
-      // Unchecking both would silently blank the intelligence half; the last
-      // one standing stays checked.
+      // Unchecking both would leave the intelligence results empty with no explanation, so the last checked kind stays checked.
       return next.size === 0 ? new Set([kind]) : next;
     });
   }, []);
 
   const entityCounts = results?.entities.counts ?? {};
   const items = useMemo(() => results?.entities.items ?? [], [results]);
-  // The rail's entity value facets show what the stream shows: unticking
-  // "Mentioned in text" has to remove those entities from the filter list too,
-  // or the rail offers filters for rows that are not on screen.
+  // The rail's entity value facets match what the results show: unticking "Mentioned in text" has to remove those entities from the filter list too, or the rail offers filters for rows that are not on screen.
   const visibleEntities = useMemo(
     () => items.filter((e) => matchKinds.has(e.match_kind === "direct" ? "direct" : "mention")),
     [items, matchKinds],
@@ -218,11 +194,7 @@ export function SearchPage() {
 
   const readerOpen = !!selectedEntryId && scope !== "workbench";
 
-  // Reading mode, the same trade the feed reader makes: opening an article
-  // folds the filter rail away so the results list and the reader get the
-  // width, and closing it hands the rail back. Only what this took is given
-  // back — a rail the user had already collapsed stays collapsed, and one they
-  // re-open by hand while reading is theirs to keep.
+  // Reading mode, as in the feed reader: on desktop, opening an article collapses the filter rail so the results list and the reader get the width, and closing it expands the rail again. Only a rail this effect collapsed is expanded again: a rail the user had already collapsed stays collapsed, and one they reopen by hand while reading stays open.
   const facetsAutoCollapsedRef = useRef(false);
   useEffect(() => {
     if (isMobile) return;
@@ -237,23 +209,16 @@ export function SearchPage() {
       facetsAutoCollapsedRef.current = false;
       setFacetsCollapsed(false);
     }
-    // Closing an entry hands the app sidebar back — the right move in the feed
-    // reader, where it is the only nav, and the wrong one here, where it would
-    // land beside the facet rail and stack two navs. Re-fold it as the page's
-    // own auto-collapse did on the way in, still flagged so leaving the page
-    // restores it.
+    // Closing an entry expands the app sidebar again. That is right in the feed reader, where it is the only nav, and wrong here, where it would sit beside the facet rail as a second nav. Collapse it again as the page's own auto-collapse did on entry, with sidebarAutoCollapsed set so leaving the page restores it.
     if (!useUIStore.getState().sidebarCollapsed) {
       useUIStore.setState({ sidebarCollapsed: true, sidebarAutoCollapsed: true });
     }
   }, [readerOpen, isMobile, setFacetsCollapsed]);
 
-  // The results column collapses away entirely for a full-width read, exactly
-  // as the entry list does; `entryListCollapsed` is that same shared pane
-  // state, so the choice carries between the two surfaces.
+  // The results column can collapse entirely for a full-width read, as the entry list does; `entryListCollapsed` is the same shared pane state, so the choice carries over between the two pages.
   const listCollapsed = readerOpen && !isMobile && entryListCollapsed;
   const railHidden = isMobile ? !filterSheetOpen : facetsCollapsed;
-  // The rail is a sized column only on desktop; on mobile it is a sheet whose
-  // width the stylesheet owns.
+  // The rail is a sized column only on desktop; on mobile it is a sheet whose width the stylesheet sets.
   const facetRailWidth = useRailWidth("search-facets", { default: 232, min: 180, max: 480 });
 
   return (

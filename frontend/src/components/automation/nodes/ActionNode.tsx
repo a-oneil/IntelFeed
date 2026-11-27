@@ -340,7 +340,7 @@ export const ActionNode = memo(function ActionNode({ data }: NodeProps) {
                 onUpdate?.({
                   config: {
                     ...config,
-                    // Keep a new tag's colour / chip settings for names still listed.
+                    // Keep a new tag's color / chip settings for names still listed.
                     tags: specsFromNames(
                       e.target.value
                         .split(",")

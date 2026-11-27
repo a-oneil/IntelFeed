@@ -5,7 +5,7 @@ returns. A single-page app (NCSC, Europol, MSRC) serves a shell whose only
 text is its ``<noscript>`` notice, and a bot wall (Cloudflare, FortiGuard)
 serves a challenge page — readability extracts that message and it would
 replace the feed's own description as the article body. These pages are
-short and carry a recognisable phrase, so a length cap plus a phrase list
+short and carry a recognizable phrase, so a length cap plus a phrase list
 separates them from real articles that merely mention JavaScript.
 """
 

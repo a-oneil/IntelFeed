@@ -405,24 +405,36 @@ class TestDiscoverYouTubeChannel:
         assert result.title == "Security Weekly"
         assert result.feed_type == "youtube"
 
-    async def test_discover_youtube_at_handle_url_not_matched(self):
-        """A youtube.com/@handle URL does NOT match the channel regex.
-
-        The current YOUTUBE_CHANNEL_RE expects a '/' between '@' and the handle
-        (i.e. youtube.com/@/handle), but real YouTube @handle URLs are
-        youtube.com/@handle (no slash). This means @handle URLs fall through
-        to normal HTML page discovery, which won't find RSS/Atom <link> tags
-        on a YouTube page and returns None.
-        """
+    async def test_discover_youtube_at_handle_url(self):
+        """A youtube.com/@handle URL goes through the YouTube channel path."""
         mock_client = _mock_async_client(_mock_response(YOUTUBE_CHANNEL_PAGE, content_type="text/html"))
 
         with patch("httpx.AsyncClient", return_value=mock_client):
             result = await discover_feed("https://www.youtube.com/@SecurityWeekly")
 
-        # @handle URLs don't match the YouTube regex, so they fall through
-        # to the HTML path. The YouTube HTML has no RSS/Atom <link> tags,
-        # so discovery returns None.
-        assert result is None
+        assert result is not None
+        assert result.url == "https://www.youtube.com/feeds/videos.xml?channel_id=UC1234567890abcdef"
+        assert result.feed_type == "youtube"
+
+    async def test_discover_sends_youtube_consent_cookie_only_to_youtube(self):
+        """The client carries SOCS for youtube.com and nothing for other sites.
+
+        Without it, an EU server address gets consent.youtube.com instead of
+        the channel page, and discovery finds nothing.
+        """
+        mock_client = _mock_async_client(_mock_response(YOUTUBE_CHANNEL_PAGE, content_type="text/html"))
+
+        with patch("httpx.AsyncClient", return_value=mock_client) as client_cls:
+            await discover_feed("https://www.youtube.com/@SecurityWeekly")
+
+        jar = client_cls.call_args.kwargs["cookies"]
+        assert jar.get("SOCS", domain=".youtube.com") == "CAI"
+        yt = httpx.Request("GET", "https://www.youtube.com/@SecurityWeekly")
+        other = httpx.Request("GET", "https://example.com/feed.xml")
+        jar.set_cookie_header(yt)
+        jar.set_cookie_header(other)
+        assert yt.headers.get("cookie") == "SOCS=CAI"
+        assert "cookie" not in other.headers
 
     async def test_discover_youtube_c_url(self):
         """A youtube.com/c/... URL should discover the channel's feed."""
@@ -472,7 +484,7 @@ class TestDiscoverYouTubeChannel:
         assert result.title == "Linked Channel"
 
     async def test_discover_youtube_ignores_channel_id_key(self):
-        """A bare "channelId" is no longer trusted — it can match embedded content."""
+        """A bare "channelId" is not trusted — it can match embedded content."""
         page = '<html><body><script>{"channelId":"UCembeddedvideo00"}</script></body></html>'
         mock_client = _mock_async_client(_mock_response(page, content_type="text/html"))
 
@@ -541,7 +553,7 @@ class TestDiscoverYouTubeVideoURL:
         assert result is None
 
     async def test_youtube_video_url_with_feed_link(self):
-        """If a YouTube video page somehow contains a feed <link>, it would be followed."""
+        """If a YouTube video page does contain a feed <link>, it is followed."""
         video_page_with_link = (
             "<!DOCTYPE html>\n<html>\n<head>\n"
             '  <link rel="alternate" type="application/rss+xml" '

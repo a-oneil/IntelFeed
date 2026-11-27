@@ -13,8 +13,7 @@
   flex-wrap: wrap;
 }
 
-/* The badges below are Chips — these rules are additive only (case, tracking,
-   type family). Colour, size and shape come from the primitive. */
+/* The badges below are Chips; these rules only add case, letter spacing and font family. Color, size and shape come from the primitive. */
 .ruleType {
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -98,10 +97,7 @@
   margin-top: var(--sp-3);
 }
 
-/* `solid` derives its own foreground from the tint; Chip's generic
-   `.clickable:hover` would repaint that to --text-primary (3.4:1 on the
-   fill), so pin it back. Doubled class beats `.clickable:hover` on
-   specificity rather than on bundle order. */
+/* `solid` derives its own foreground from the tint; Chip's generic `.clickable:hover` would repaint that to --text-primary (3.4:1 on the fill), so this keeps the tint foreground. The doubled class wins over `.clickable:hover` on specificity rather than on bundle order. */
 .techniqueBadge {
   font-family: monospace;
 }

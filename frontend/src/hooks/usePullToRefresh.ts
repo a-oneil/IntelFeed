@@ -30,9 +30,7 @@ export function usePullToRefresh({
   const [pullDistance, setPullDistance] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Refs mirror state so the touch listeners can read current values without
-  // being re-attached on every render — re-attaching mid-gesture causes iOS
-  // Safari to drop the rest of the gesture.
+  // Refs mirror state so the touch listeners can read current values without being re-attached on every render; re-attaching mid-gesture makes iOS Safari drop the rest of the gesture.
   const pullDistanceRef = useRef(0);
   const isRefreshingRef = useRef(false);
   const onRefreshRef = useRef(onRefresh);
@@ -67,8 +65,7 @@ export function usePullToRefresh({
       }
       const deltaY = e.touches[0].clientY - startY;
       if (deltaY > 0) {
-        // Block native rubber-band as soon as we know the user is pulling
-        // down — waiting until the indicator is visible is too late on iOS.
+        // Block the native rubber-band scroll as soon as the user is pulling down; waiting until the indicator is visible is too late on iOS.
         if (e.cancelable) e.preventDefault();
         const distance = Math.min(deltaY * 0.5, maxPull);
         setDistance(distance);

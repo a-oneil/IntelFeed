@@ -19,11 +19,7 @@ function slugify(text: string, seen: Set<string>): string {
   return slug;
 }
 
-/**
- * Sticky "Contents" card for long-form articles. Only renders once the
- * article body has enough headings to be worth a jump-list — most entries
- * are short news items and would just get visual noise otherwise.
- */
+/** Sticky "Contents" card for long-form articles. Renders only when the article is long enough and has enough headings to be worth a jump list; most entries are short news items, where it would only add clutter. */
 export function ReaderTOC({
   containerRef,
   contentLength,
@@ -45,14 +41,12 @@ export function ReaderTOC({
     const container = containerRef.current;
     if (!container) return;
 
-    // Article HTML is injected via SafeHTML after this effect's first run —
-    // poll briefly for headings to appear, then observe for later swaps
-    // (translation toggle, entry navigation re-rendering the same DOM node).
-    let cancelled = false;
+    // Article HTML is injected via SafeHTML after this effect's first run, so poll briefly for headings to appear, then observe for later swaps (translation toggle, entry navigation re-rendering the same DOM node).
+    let canceled = false;
     let observer: MutationObserver | null = null;
 
     const scan = () => {
-      if (cancelled) return;
+      if (canceled) return;
       const headingEls = Array.from(container.querySelectorAll<HTMLElement>("h1, h2, h3"));
       if (headingEls.length < MIN_HEADINGS) {
         setEntries([]);
@@ -72,7 +66,7 @@ export function ReaderTOC({
     observer.observe(container, { childList: true, subtree: true });
 
     return () => {
-      cancelled = true;
+      canceled = true;
       observer?.disconnect();
     };
   }, [containerRef, eligible]);

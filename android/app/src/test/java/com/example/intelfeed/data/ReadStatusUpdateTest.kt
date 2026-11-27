@@ -88,8 +88,7 @@ class ReadStatusUpdateTest {
         server.enqueue(MockResponse().setResponseCode(204))
         val repository = IntelFeedRepository(auth)
         val ids = (1..300).map { "article-$it" }
-        // Collects on the test thread, so it only runs when the emitter suspends (like the UI's
-        // collectors on the main thread). More than the 256-update buffer is sent at once.
+        // Collects on the test thread, so it only runs when the emitter suspends (like the UI's collectors on the main thread). More than the 256-update buffer is sent at once.
         val updates = async { repository.entryUpdates.take(ids.size * 2).toList() }
         runCurrent()
 

@@ -7,7 +7,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Priority scores run 0–10 and the Radar threshold sits around 8 — every queue entry clears it. */
+/** Priority scores run 0–10 and the Radar threshold is around 8, so every Priority Queue entry scores above it. */
 class PriorityAlertScoreTest {
     @Test fun defaultAlertCutOffIsTheRedBand() {
         assertEquals(CyberRed, scoreColor(PriorityAlerts.DEFAULT_CUTOFF))

@@ -1,7 +1,6 @@
-/* Full-width per-stage settings panel (re-hosts the old Pipeline stage panels). */
+/* Full-width per-stage settings panel. */
 
-/* Renders inside the console's table card, between the toolbar and the table
-   — full-bleed section, not a floating card (mock-E). */
+/* Renders inside the console's table card, between the toolbar and the table — a full-width section, not a floating card. */
 .panel {
   background: color-mix(in srgb, var(--bg-tertiary) 55%, var(--card-bg));
   border-bottom: 1px solid var(--border);
@@ -75,9 +74,7 @@
   text-decoration: underline;
 }
 
-/* Pinned to the right edge on its own, so a stage with no registry row (no
-   kind, description or runs link — the analyze column) still closes from
-   the corner. Next to the runs link, that link keeps the gap. */
+/* Pinned to the right edge on its own, so a stage with no registry row (no kind, description or runs link — the analyze column) still closes from the corner. Next to the runs link, that link keeps the gap. */
 .close {
   appearance: none;
   background: none;

@@ -239,8 +239,7 @@ describe("ExternalLinkGuard", () => {
   });
 
   it("opens a new tab with noopener for target=_blank links", () => {
-    // SafeHTML's sanitiser drops `target`, so use one of the app's own
-    // hand-written target="_blank" links, which need scope "all".
+    // SafeHTML's sanitizer drops `target`, so use one of the app's own hand-written target="_blank" links, which need scope "all".
     useAuthStore.setState({ user: user({ external_link_mode: "all" }) });
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     renderPage("<p>body</p>", EVIL);
@@ -320,8 +319,7 @@ describe("ExternalLinkGuard", () => {
   });
 
   it("keeps keystrokes from reaching the page's global shortcuts while open", () => {
-    // EntryList/EntryReader bind Enter, j/k, Escape... on window/document and only
-    // skip text inputs — a focused dialog button must not also drive the page.
+    // EntryList/EntryReader bind Enter, j/k, Escape... on window/document and only skip text inputs — a focused dialog button must not also drive the page.
     const seen: string[] = [];
     const onKey = (e: KeyboardEvent) => seen.push(e.key);
     window.addEventListener("keydown", onKey);

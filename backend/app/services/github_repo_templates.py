@@ -1,9 +1,10 @@
 """Pre-configured GitHub repository templates for detection engineering feeds.
 
 Provides ``DETECTION_REPO_TEMPLATES`` — a list of well-known detection rule
-repositories with sensible defaults for path filters, content types, and
-polling intervals.  Used by the bulk-setup API endpoint to let users subscribe
-to all major detection repos in one click.
+repositories with the branch, path filters and content types to use for each.
+The polling interval and backfill window come from ``get_template_feed_configs``.
+Used by the bulk-setup API endpoint to let users subscribe to all of these
+repos in one click.
 """
 
 from __future__ import annotations

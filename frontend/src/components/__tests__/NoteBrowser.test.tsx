@@ -91,8 +91,7 @@ vi.mock("@/hooks/useUndoableDelete", () => ({
   useUndoableDelete: vi.fn(() => vi.fn()),
 }));
 
-// NoteBody renders markdown via EntityLinkedMarkdown, which scans text for
-// entities via react-query — stub it so tests don't need a QueryClient.
+// NoteBody renders markdown via EntityLinkedMarkdown, which scans text for entities via react-query — stub it so tests don't need a QueryClient.
 vi.mock("@/hooks/useEntityScan", () => ({
   useEntityScan: () => ({ data: [] }),
 }));

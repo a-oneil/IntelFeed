@@ -45,7 +45,7 @@ def test_packs_load():
 
 def test_exactly_one_recommended_pack():
     """The wizard pre-selects the recommended packs; more than one core set
-    would quietly make the default first run much bigger than it reads."""
+    would make the default first run much bigger than the wizard suggests."""
     assert [p.id for p in load_packs() if p.recommended] == ["core"]
 
 
@@ -112,9 +112,9 @@ def test_no_telegram_feeds_ship():
 
 
 def test_no_feed_ships_with_analysis_off():
-    """A feed worth nothing to the engine isn't worth a slot in a starter pack.
-    Mode `none` still fetches, scores and stores every item, so shipping one
-    hands every new install a cost with no tags to show for it."""
+    """A feed with extraction off gives the engine nothing, so it has no place in
+    a starter pack. Mode `none` still fetches, scores and stores every item, so
+    shipping one gives every new install that cost with no tags to show for it."""
     off = [
         f"{pack_id}: {outline.get('text')}"
         for pack_id, outline in all_outlines()
@@ -263,7 +263,7 @@ async def test_every_pack_imports_with_its_settings_intact(client: AsyncClient, 
     netsec = next(f for f in feeds.values() if f.adapter_config.get("subreddit") == "netsec")
     assert netsec.feed_type == "reddit"
 
-    # Advisory and rule feeds name affected software, not wielded tooling, so
+    # Advisory and rule feeds name affected software, not attacker tools, so
     # they ship with tool extraction off.
     assert any(f.extract_tools is False for f in feeds.values())
 
@@ -291,3 +291,33 @@ async def test_import_starter_pack_rejects_unknown_id(client: AsyncClient, admin
 async def test_import_starter_pack_is_admin_only(client: AsyncClient, auth_headers: dict):
     response = await client.post("/api/opml/starter-packs/import", headers=auth_headers, json=["core"])
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_pack_feeds_mark_what_is_already_followed(client: AsyncClient, admin_headers: dict):
+    from unittest.mock import patch
+
+    listed = await client.get("/api/opml/starter-packs/podcasts/feeds", headers=admin_headers)
+    assert listed.status_code == 200
+    feeds = listed.json()["feeds"]
+    assert len(feeds) == next(p.feed_count for p in load_packs() if p.id == "podcasts")
+    assert not any(f["followed"] for f in feeds)
+
+    first = feeds[0]["url"]
+    with patch("app.workers.feed_tasks.fetch_feed.delay"):
+        imported = await client.post(
+            "/api/opml/starter-packs/podcasts/import", headers=admin_headers, json={"urls": [first]}
+        )
+    assert imported.status_code == 200
+    assert imported.json()["feeds_added"] == 1
+
+    again = (await client.get("/api/opml/starter-packs/podcasts/feeds", headers=admin_headers)).json()["feeds"]
+    assert [f["url"] for f in again if f["followed"]] == [first]
+    packs = (await client.get("/api/opml/starter-packs", headers=admin_headers)).json()["packs"]
+    assert next(p for p in packs if p["id"] == "podcasts")["followed_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_pack_feed_import_rejects_unknown_pack(client: AsyncClient, admin_headers: dict):
+    response = await client.post("/api/opml/starter-packs/not-a-pack/import", headers=admin_headers, json={"urls": []})
+    assert response.status_code == 404

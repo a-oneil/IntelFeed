@@ -62,9 +62,9 @@ class DayIntelContractTest {
         assertEquals("f1", day["feed_id"]!!.jsonPrimitive.content)
         api.markAllRead(com.example.intelfeed.data.model.MarkAllReadRequest())
         val all = ApiJson.json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
-        // Unchanged: plain "mark all read" never sends a time window.
+        // Plain "mark all read" never sends a time window.
         assertEquals(false, "since" in all || "before" in all)
-        // ...nor the Priority Queue limit.
+        // It doesn't send the Priority Queue's radar_only flag either.
         assertEquals(false, "radar_only" in all)
     }
 

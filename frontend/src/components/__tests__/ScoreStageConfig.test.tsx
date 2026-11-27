@@ -43,9 +43,7 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-// The stage now embeds the scoring slice of the system settings form. That
-// form fetches on its own and is covered by its own tests; stub it out so
-// these stay about the signal readout and the watchlist.
+// The stage embeds the scoring slice of the system settings form. That form fetches on its own and is covered by its own tests; stub it out so these tests stay about the signal readout and the watchlist.
 vi.mock("@/components/SystemSettings", () => ({
   default: () => <div data-testid="system-settings" />,
 }));

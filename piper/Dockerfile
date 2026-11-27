@@ -1,5 +1,5 @@
 # Isolated Piper TTS sidecar. Heavy ONNX/audio deps live here, not in the
-# shared backend image (which rebuilds on every deploy against a build-cache cap).
+# shared backend image (which rebuilds on every backend deploy, under a build-cache size cap).
 FROM python:3.12.16-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

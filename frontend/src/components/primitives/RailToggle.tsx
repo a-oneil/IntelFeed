@@ -12,16 +12,11 @@ interface RailToggleProps {
   className?: string;
 }
 
-/**
- * The 16px collapse rail used between layout panes. Chevron points toward the
- * direction the click moves the pane: collapsed → points away from the pane's
- * edge (expand), expanded → points back at it (collapse).
- */
+/** The 16px collapse rail used between layout panes. Chevron points toward the direction the click moves the pane: collapsed → points away from the pane's edge (expand), expanded → points back at it (collapse). */
 export function RailToggle({ side, collapsed, onToggle, label, verbs, className }: RailToggleProps) {
   const [expandVerb, collapseVerb] = verbs ?? ["Open", "Close"];
   const text = collapsed ? `${expandVerb} ${label}` : `${collapseVerb} ${label}`;
-  // A rail on the right of the viewport mirrors: its pane lives to the right,
-  // so "expand" points left rather than right.
+  // A rail on the right of the viewport mirrors: its pane lives to the right, so "expand" points left rather than right.
   const pointsRight = side === "right" ? !collapsed : collapsed;
   return (
     <button

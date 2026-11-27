@@ -28,9 +28,7 @@
 }
 
 .viewTitle {
-  /* Peer of WorkbenchPage's .contentTitle — same nav level, same role, so
-     same treatment. Was 15px / 650 / mono, which made adjacent
-     workbench routes read as different apps. */
+  /* Styled the same as WorkbenchPage's .contentTitle, since both are page titles at the same navigation level. A different size, weight or font here makes neighboring workbench routes look like different apps. */
   font-size: var(--fs-lg);
   font-weight: 600;
   font-family: var(--font-body);

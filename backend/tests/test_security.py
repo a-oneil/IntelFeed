@@ -349,17 +349,18 @@ class TestGetAdminUser:
     async def test_admin_endpoint_integration_admin_passes(
         self, client: AsyncClient, admin_headers: dict, admin_user: User
     ):
-        """An admin should pass the gate on an admin-gated endpoint (POST /api/ai/providers).
+        """An admin is not refused by POST /api/ai/providers.
 
         We send an intentionally incomplete body so the response is a validation
-        error (400/422), NOT a 403 -- proving the admin gate was passed.
+        error (400/422), NOT a 403. Any signed-in user may call this route, so the
+        test shows only that the admin gets past authorization.
         """
         resp = await client.post(
             "/api/ai/providers",
             headers=admin_headers,
             json={},
         )
-        # 400/422 means the admin gate passed but the request body was invalid
+        # 400/422 means authorization passed but the request body was invalid
         assert resp.status_code in (400, 422)
 
     @pytest.mark.asyncio
@@ -367,9 +368,9 @@ class TestGetAdminUser:
         self, client: AsyncClient, auth_headers: dict, test_user: User
     ):
         """A regular user should receive 403 from an admin-gated endpoint."""
-        # Creating a provider is no longer admin-only (anyone may register a
-        # personal key when the admin allows it); the admin's list of every
-        # personal key is.
+        # Creating a provider is not admin-only (anyone may register a personal
+        # key when the admin allows it); the admin's list of every personal key
+        # is.
         resp = await client.get("/api/ai/providers/user-keys", headers=auth_headers)
         assert resp.status_code == 403
 

@@ -121,9 +121,7 @@
   margin-bottom: var(--sp-6);
 }
 
-/* Section eyebrow: this view only ever renders embedded in the Engine console,
-   where these <h2>s read as group labels above a table, not as page headings.
-   Single definition — the old `.embedded .sectionTitle` duplicate is gone. */
+/* Section label: this view only renders embedded in the Engine console, where these <h2>s act as group labels above a table, not as page headings. */
 .sectionTitle {
   font-size: var(--fs-xs);
   font-weight: 600;
@@ -214,8 +212,7 @@
   color: var(--text-muted);
 }
 
-/* How many analysts a broken feed actually costs. Admin-only: the cell renders
-   empty for everyone else, so the column just reads as slack. */
+/* How many analysts a broken feed affects. Admin-only: the cell renders empty for everyone else, so for them the column is blank. */
 .reachCol {
   width: 120px;
   flex-shrink: 0;
@@ -638,8 +635,7 @@
 }
 
 /* ---- Engine-console embedded skin ------------------------------------- */
-/* Applied when the view renders inside the Engine card's Feeds tab so it
-   reads as part of the console, not a transplanted analytics page. */
+/* Applied when the view renders inside the Engine card's Feeds tab, so it matches the console styling instead of looking like a separate analytics page. */
 
 .embedded {
   background: none;

@@ -1,5 +1,4 @@
-/* Canonical small label. Replaces ad-hoc .badge / .chip / .pill classes,
-   of which the audit counted 301 across 170 modules. */
+/* Canonical small label. Replaces ad-hoc .badge / .chip / .pill classes, of which the audit counted 301 across 170 modules. */
 .chip {
   display: inline-flex;
   align-items: center;
@@ -9,18 +8,15 @@
   background: var(--bg-tertiary);
   color: var(--text-secondary);
   font-size: var(--fs-xs);
-  /* Chips are dense 9-10px labels; 600 keeps them legible against the
-     surrounding body text at that size. */
+  /* Chips are dense 9-10px labels; 600 keeps them legible against the surrounding body text at that size. */
   font-weight: 600;
   line-height: 1.5;
   padding: 0 var(--sp-2);
   white-space: nowrap;
   vertical-align: middle;
-  /* Never let a chip be squeezed by a flex row — it would ellipsise a label
-     that is already only a few characters long. */
+  /* Never let a chip be squeezed by a flex row — it would ellipsize a label that is already only a few characters long. */
   flex: none;
-  /* Non-interactive by default; .clickable re-declares this as `pointer` and
-     wins on source order. */
+  /* Non-interactive by default; .clickable re-declares this as `pointer` and wins on source order. */
   cursor: default;
 }
 
@@ -48,9 +44,7 @@
 }
 
 .solid {
-  /* --chip-fg defaults to --accent-text, which is only the right foreground
-     when --chip-tint is the accent. Callers tinting with a severity or entity
-     color should pass `fg` explicitly. */
+  /* Chip.tsx sets --chip-fg from the tint for solid chips. The --accent-text fallback applies only when the tint cannot be resolved to a hex color, and it is only the right foreground when --chip-tint is the accent. */
   color: var(--chip-fg, var(--accent-text));
   border-color: var(--chip-tint);
   background: var(--chip-tint);
@@ -59,15 +53,13 @@
 .quiet {
   border-color: transparent;
   background: transparent;
-  /* Overridable: a quiet chip at --text-secondary is as common as one at
-     --text-muted, and hardcoding the latter blocked status legends. */
+  /* Overridable through --chip-fg: a quiet chip at --text-secondary is as common as one at --text-muted, and status legends need the override. */
   color: var(--chip-fg, var(--text-muted));
   padding-left: 0;
   padding-right: 0;
 }
 
-/* Full-strength tinted border over the normal ground — distinct from `toned`,
-   which also fills. Outlined severity pills need this. */
+/* Full-strength tinted border over the normal background, unlike `toned`, which also fills. Outlined severity pills use this. */
 .outline {
   color: var(--chip-fg, var(--chip-tint));
   border-color: var(--chip-tint);
@@ -95,7 +87,7 @@
   outline-offset: 1px;
 }
 
-/* Leading colour marker — the square used in the workbench nav and legends. */
+/* Leading color marker — the square used in the workbench nav and legends. */
 .marker {
   width: 8px;
   height: 8px;
@@ -114,8 +106,7 @@
   cursor: not-allowed;
 }
 
-/* Opt-in shrink + ellipsis. The default `flex: none; white-space: nowrap` is
-   right for short labels, but pushed long ones past their row in widget lists. */
+/* Opt-in shrink + ellipsis. The default `flex: none; white-space: nowrap` is right for short labels, but long ones overflow their row in widget lists. */
 .truncate {
   flex: 0 1 auto;
   min-width: 0;

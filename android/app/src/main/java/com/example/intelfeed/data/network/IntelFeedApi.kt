@@ -133,15 +133,11 @@ interface IntelFeedApi {
         @Query("dedup") dedup: Boolean? = true
     ): com.example.intelfeed.data.model.EntryCount
 
-    /**
-     * Per-entry intelligence summary for list cards (the web's badges): body is a JSON array of up
-     * to 100 entry ids; the response maps each id to its counts. Reads only.
-     */
+    /** Per-entry intelligence summary for list cards (the web's badges): body is a JSON array of up to 100 entry ids; the response maps each id to its counts. Reads only. */
     @POST("api/entries/intel-counts")
     suspend fun getIntelCounts(@Body entryIds: List<String>): kotlinx.serialization.json.JsonElement
 
-    // Intelligence requirements (PIRs): shared, server-side questions with keywords that every
-    // incoming article is matched against. Shapes checked on the live server, 2026-09-23.
+    // Intelligence requirements (PIRs): shared, server-side questions with keywords that every incoming article is matched against. Shapes checked on the live server, 2026-09-23.
 
     /** Leak-site victim postings (the web's Ransomware tracker). Filters repeat: group=a&group=b. */
     @GET("api/ransomware/disclosures")
@@ -213,9 +209,7 @@ interface IntelFeedApi {
     @PUT("api/entries/{id}/unread")
     suspend fun markUnread(@Path("id") id: String): Response<Unit>
 
-    // The server has no /unstar or /unbookmark routes: /star and /bookmark toggle. The repository
-    // sets star/bookmark state explicitly through bulkAction instead, so a stale local flag can't
-    // flip it the wrong way. Kept for reference only.
+    // The server has no /unstar or /unbookmark routes: /star and /bookmark toggle. The repository sets star/bookmark state explicitly through bulkAction instead, so a stale local flag can't flip it the wrong way. Kept for reference only.
     @PUT("api/entries/{id}/star")
     suspend fun toggleStar(@Path("id") id: String): Response<Unit>
 
@@ -240,10 +234,7 @@ interface IntelFeedApi {
     @POST("api/entries/ingest/url")
     suspend fun ingestUrl(@Body request: IngestUrlRequest): IngestUrlResponse
 
-    /**
-     * Cached AI briefing for one day (day_key YYYY-MM-DD). The body is JSON null when none exists,
-     * which a DailySummary return type can't decode, so the repository parses this. GET never generates.
-     */
+    /** Cached AI briefing for one day (day_key YYYY-MM-DD). The body is JSON null when none exists, which a DailySummary return type can't decode, so the repository parses this. GET never generates. */
     @GET("api/entries/daily-summary")
     suspend fun getDailySummary(
         @Query("day_key") dayKey: String,
@@ -254,10 +245,7 @@ interface IntelFeedApi {
         @Query("dedup") dedup: Boolean? = true
     ): kotlinx.serialization.json.JsonElement
 
-    /**
-     * The day's top entity of each type for a day divider. [since]/[before] are the local day's
-     * bounds as UTC ISO timestamps; the filters are the same ones the web sends for the list.
-     */
+    /** The day's top entity of each type for a day divider. [since]/[before] are the local day's bounds as UTC ISO timestamps; the filters are the same ones the web sends for the list. */
     @GET("api/entries/day-intel")
     suspend fun getDayIntel(
         @Query("since") since: String,
@@ -298,8 +286,7 @@ interface IntelFeedApi {
     @GET("api/entries/{id}/products")
     suspend fun getEntryProducts(@Path("id") id: String): List<Product>
 
-    // Also used by the web reader to mark names in the text. Read as JSON and decoded item by item
-    // (IntelFeedRepository.decodeItems), so one odd row doesn't empty the whole list.
+    // Also used by the web reader to mark names in the text. Read as JSON and decoded item by item (IntelFeedRepository.decodeItems), so one odd row doesn't empty the whole list.
 
     @GET("api/entries/{id}/cwes")
     suspend fun getEntryCwes(@Path("id") id: String): kotlinx.serialization.json.JsonElement

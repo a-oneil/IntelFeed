@@ -1,13 +1,9 @@
 import type { TableLayout } from "@/stores/uiStore";
 
 /**
- * The slice of a DataTable's state that follows the user across devices,
- * stored server-side under `user.settings.table_layouts`.
+ * The slice of a DataTable's state that follows the user across devices, stored server-side under `user.settings.table_layouts`.
  *
- * Deliberately layout-only: which columns are shown, how wide, in what order.
- * Active filters and the client sort stay device-local — those are transient
- * "what am I looking at right now" state, and pushing one device's search box
- * onto another is surprising rather than helpful.
+ * Deliberately layout-only: which columns are shown, how wide, in what order. Active filters and the client sort stay device-local — those are transient "what am I looking at right now" state, and pushing one device's search box onto another is surprising rather than helpful.
  */
 export interface SharedTableLayout {
   columnVisibility: Record<string, boolean>;
@@ -36,11 +32,7 @@ function filterRecord<T>(raw: unknown, ok: (v: unknown) => v is T): Record<strin
 const isBool = (v: unknown): v is boolean => typeof v === "boolean";
 const isFiniteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
-/**
- * Sanitize one layout coming back from the server. The settings blob is
- * free-form JSON that any client can write, so nothing here is trusted —
- * bad shapes degrade to the default rather than crashing the table.
- */
+/** Sanitize one layout coming back from the server. The settings blob is free-form JSON that any client can write, so nothing here is trusted — bad shapes degrade to the default rather than crashing the table. */
 function parseLayout(raw: unknown): SharedTableLayout | null {
   if (!isPlainObject(raw)) return null;
   const order = Array.isArray(raw.columnOrder)
@@ -71,12 +63,7 @@ const isDefaultLayout = (l: SharedTableLayout) =>
   Object.keys(l.columnWidths).length === 0 &&
   l.columnOrder.length === 0;
 
-/**
- * Project the store's per-table state down to the shareable layout map.
- * Untouched tables (all defaults, never stamped) are dropped so the settings
- * blob only carries layouts the user actually arranged — but a stamped empty
- * layout is kept, since that's how a "reset columns" propagates to other devices.
- */
+/** Project the store's per-table state down to the shareable layout map. Untouched tables (all defaults, never stamped) are dropped so the settings blob only carries layouts the user actually arranged — but a stamped empty layout is kept, since that's how a "reset columns" propagates to other devices. */
 export function toTableLayoutMap(tables: Record<string, TableLayout>): TableLayoutMap {
   const out: TableLayoutMap = {};
   for (const [tableId, t] of Object.entries(tables)) {

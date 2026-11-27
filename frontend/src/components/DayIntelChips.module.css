@@ -1,9 +1,7 @@
 .chips {
   display: flex;
   align-items: center;
-  /* Single horizontally-scrolling lane. Wrapping pushed the divider taller on
-     narrow widths and shoved the entry list down; scrolling keeps the strip a
-     fixed one-row height at every viewport. */
+  /* Single horizontally-scrolling lane. Wrapping pushed the divider taller on narrow widths and shoved the entry list down; scrolling keeps the strip a fixed one-row height at every viewport. */
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
@@ -11,10 +9,7 @@
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
   gap: 6px;
-  /* The intel strip claims its own full-width row inside the day divider and
-     sits (order: 2) below the meta + action-button row. This keeps the
-     "Mark day read" / "Summarize day" buttons aligned on the top line instead
-     of wrapping into an awkward, lower-right island beneath the chips. */
+  /* The intel strip claims its own full-width row inside the day divider and sits (order: 2) below the meta + action-button row. This keeps the "Mark day read" / "Summarize day" buttons aligned on the top line instead of wrapping onto a line of their own at the lower right, beneath the chips. */
   flex-basis: 100%;
   order: 2;
   margin-top: var(--sp-1);
@@ -30,9 +25,7 @@
   align-items: center;
   gap: 5px;
   height: 22px;
-  /* Override the global mobile `button { min-height: 36px }` touch-target rule
-     in index.css — these dense info chips are not primary tap targets and must
-     stay uniform height whether they render as <button> or <span>. */
+  /* Override the global mobile `button { min-height: 36px }` touch-target rule in index.css — these dense info chips are not primary tap targets and must stay uniform height whether they render as <button> or <span>. */
   min-height: 22px;
   line-height: 1;
   box-sizing: border-box;
@@ -47,8 +40,7 @@
   text-transform: none;
   letter-spacing: 0;
   white-space: nowrap;
-  /* Chips must keep their natural width inside the scroller instead of being
-     squeezed by the flex container. */
+  /* Chips must keep their natural width inside the scroller instead of being squeezed by the flex container. */
   flex: 0 0 auto;
   max-width: 220px;
   transition: background 0.15s, border-color 0.15s;
@@ -87,16 +79,12 @@
   --chip-color: var(--entity-country);
 }
 
-/* Display-only chips (rendered where the list can't be filtered — see
-   DayIntelChips) shouldn't look clickable. */
+/* Display-only chips (rendered where the list can't be filtered — see DayIntelChips) shouldn't look clickable. */
 .static {
   cursor: default;
 }
 
-/* Engaged: the list below is narrowed to this chip. Kept in the chip's own
-   colour rather than a shared accent, so which one is shaping the list is
-   obvious without the strip growing a second colour language. The ring is what
-   carries it — a heavier fill alone reads as hover on the denser chips. */
+/* Engaged: the list below is narrowed to this chip. Kept in the chip's own color rather than a shared accent, so it is clear which chip is filtering the list without adding another color to the strip. The ring is the main signal; a heavier fill alone looks like the hover state on the denser chips. */
 .chipActive {
   background: color-mix(in srgb, var(--chip-color, var(--text-muted)) 40%, transparent);
   border-color: var(--chip-color, var(--text-muted));
@@ -124,8 +112,7 @@
   letter-spacing: -0.2px;
 }
 
-/* Signal chip: actively-exploited CVEs. Solid alert treatment, distinct from
-   the frequency chips so a dangerous day reads at a glance. */
+/* Signal chip: actively-exploited CVEs. Solid alert treatment, distinct from the frequency chips so a dangerous day reads at a glance. */
 .signal {
   --chip-color: var(--danger);
   font-weight: 600;
@@ -179,8 +166,7 @@
   font-weight: 600;
 }
 
-/* "?" chip that opens the legend. Muted and iconic so it reads as an aside to
-   the strip rather than another piece of intel. */
+/* "?" chip that opens the legend. Muted and icon-only so it reads as an aside to the strip rather than another piece of intel. */
 .explain {
   --chip-color: var(--text-muted);
   width: 22px;
@@ -200,8 +186,7 @@
   border-color: color-mix(in srgb, var(--text-muted) 55%, transparent);
 }
 
-/* Legend panel — portalled to <body>, so it is positioned in viewport space and
-   escapes the strip's overflow clipping. */
+/* Legend panel — portalled to <body>, so it is positioned in viewport space and escapes the strip's overflow clipping. */
 .legend {
   position: fixed;
   z-index: 1000;
@@ -233,8 +218,7 @@
   color: var(--text-secondary);
 }
 
-/* Two-column grid so every blurb starts at the same x — the term column
-   sizes to the widest chip, capped so a runaway name can't squeeze the text. */
+/* Two-column grid so every blurb starts at the same x — the term column sizes to the widest chip, capped so a very long name can't squeeze the text. */
 .legendList {
   margin: 0;
   display: grid;
@@ -271,11 +255,7 @@
 }
 
 @media (max-width: 767px) {
-  /* Push chips to their own row so they don't share a cramped line with
-     the date label / count / buttons — but keep them compact so a few
-     stacked chips don't dominate the divider. The action buttons are compact
-     icon buttons on mobile too, so the desktop `order: 2` (chips below the
-     meta + action row) applies unchanged here. */
+  /* Push chips to their own row so they don't share a cramped line with the date label / count / buttons — but keep them compact so a few stacked chips don't dominate the divider. The action buttons are compact icon buttons on mobile too, so the desktop `order: 2` (chips below the meta + action row) applies unchanged here. */
   .chips {
     flex-basis: 100%;
     gap: var(--sp-2);
@@ -290,8 +270,7 @@
     max-width: 100%;
   }
 
-  /* 8.5px is below the scale floor (--fs-2xs is 9px) and snapping it up would
-     erase the mobile shrink relative to the desktop label. Left raw. */
+  /* --fs-2xs (9px) is the smallest step on the type scale, so this is as far as the mobile label shrinks relative to the desktop one. */
   .chipLabel {
     font-size: var(--fs-2xs);
     padding: 1px var(--sp-2);

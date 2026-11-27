@@ -1,4 +1,4 @@
-"""Mitigations are ATT&CK catalog rows only; an article's advice rides on the link."""
+"""Mitigations are ATT&CK catalog rows only; an article's own advice is stored on the entry-mitigation link."""
 
 import pytest
 from sqlalchemy import func, select

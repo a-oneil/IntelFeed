@@ -1,11 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-/**
- * The dashboard grid starts locked on every viewport: rearranging a board is a
- * deliberate act, and an accidental drag on a phone is destructive — the grid
- * collapses to one column there, and saving that clamped layout flattens every
- * widget to a 1/12-width sliver on desktop.
- */
+/** The dashboard grid starts locked on every viewport: rearranging a board should be deliberate, and an accidental drag on a phone is destructive. The grid collapses to one column there, and saving that clamped layout shrinks every widget to 1/12 width on desktop. */
 async function freshStore(isNarrow: boolean) {
   localStorage.clear();
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -47,8 +42,7 @@ describe("dashboard layout lock", () => {
     const persisted = JSON.parse(localStorage.getItem("intelfeed-ui") ?? "{}");
     expect(persisted.state.dashboardLocked).toBe(false);
 
-    // Rehydrating from that storage keeps the user unlocked rather than
-    // re-applying the locked default.
+    // Rehydrating from that storage keeps the user unlocked rather than re-applying the locked default.
     vi.resetModules();
     const { useUIStore } = await import("@/stores/uiStore");
     expect(useUIStore.getState().dashboardLocked).toBe(false);

@@ -1,8 +1,4 @@
-/**
- * IdentityMetaFields — the editable scalar identity fields (ISO code, Website,
- * Vendor…) rendered in the profile header meta row, config-driven. Fields with
- * a badge twin live in SignalBadges instead; this row keeps only the rest.
- */
+/** IdentityMetaFields — the editable scalar identity fields (ISO code, Website, Vendor…) rendered in the profile header meta row, config-driven. Fields with a badge twin live in SignalBadges instead; this row keeps only the rest. */
 import type { EntitySearchResult } from "@/api/types";
 import type { EntityType } from "@/stores/intelStore";
 import type { EntityProvenance } from "@/hooks/useEntityProvenance";

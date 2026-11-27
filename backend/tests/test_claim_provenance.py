@@ -54,7 +54,7 @@ async def graded_entry(db_session) -> Entry:
 # ── value rendering ───────────────────────────────────────────────
 
 
-def test_render_value_normalises_shapes():
+def test_render_value_normalizes_shapes():
     assert render_value(None) == ""
     assert render_value(["healthcare", "energy"]) == "healthcare, energy"
     assert render_value(9.80) == "9.8"
@@ -237,7 +237,7 @@ async def test_claims_are_marked_against_the_live_value(db_session, actor):
 
 
 async def test_populated_but_unclaimed_fields_are_reported(db_session, actor):
-    """'Nothing on a profile should be unattributable' — so say when it isn't."""
+    """Populated fields with no recorded claim are listed, so a profile shows which values have no source."""
     out = await get_entity_claims(db_session, entity_types.THREAT_ACTOR, actor.id, entity_row=actor)
     assert "motivation" in out["unsourced_fields"]
     assert "country" in out["unsourced_fields"]

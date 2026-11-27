@@ -7,8 +7,7 @@ import type {
   PaginatedResponse,
 } from "@/api/types";
 
-/** Which enrichment sources claim an entity's connections
- *  (GET /entity-relationships/claims/{type}/{id}). */
+/** Which enrichment sources claim an entity's connections (GET /entity-relationships/claims/{type}/{id}). */
 export interface RelationClaims {
   entity_type: string;
   entity_id: string;
@@ -38,7 +37,7 @@ export function useRelationClaims(entityType: string | undefined, entityId: stri
       return data;
     },
     enabled: enabled && !!entityType && !!entityId,
-    // Supplementary: without it the rows simply carry no source tag.
+    // Optional: if this fails, the rows just carry no source tag.
     meta: { silenceToast: true },
     staleTime: 60_000,
   });
@@ -132,9 +131,7 @@ export interface RelationshipSignals {
   top: RelationshipSignalTop[];
 }
 
-/** Batched relationship signals for table columns — one request per loaded page.
- * POST body, not query params: the id list grows with every infinite-scroll page
- * and overflows the server's request-line limit (414) as a GET. */
+/** Batched relationship signals for table columns, one request per loaded page. The ids go in a POST body, not query params: the id list grows with every infinite-scroll page and as a GET would exceed the server's request-line limit (414). */
 type SignalsById = Record<string, RelationshipSignals>;
 
 /** Module-level so useQueries keeps the merged map's identity until a page changes. */
@@ -142,10 +139,7 @@ function mergeSignals(results: UseQueryResult<SignalsById>[]): SignalsById {
   return Object.assign({}, ...results.map((r) => r.data ?? {}));
 }
 
-/**
- * Signals for a paged table: one request per page of ids, so a page is fetched
- * once as it loads and earlier pages stay cached, however far the table scrolls.
- */
+/** Signals for a paged table: one request per page of ids, so a page is fetched once as it loads and earlier pages stay cached, however far the table scrolls. */
 export function useRelationshipSignals(entityType: string | undefined, pages: string[][]) {
   return useQueries({
     queries: pages.map((ids) => ({

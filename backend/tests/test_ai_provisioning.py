@@ -24,7 +24,7 @@ async def system_tasks(db_session: AsyncSession) -> list[AITask]:
     main.py seeds these at startup, which tests don't run. Seeding the genuine
     list rather than a stand-in matters here: these tests are about which tasks
     are agentic and which model each one asks for, so a fake catalog would prove
-    nothing about the behaviour that broke.
+    nothing about the behavior that broke.
     """
     tasks = [
         AITask(

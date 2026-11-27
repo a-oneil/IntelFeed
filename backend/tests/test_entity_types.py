@@ -1,10 +1,11 @@
 """The canonical entity-type vocabulary is the single source of truth.
 
-Three spellings (``malware_family``, ``offensive_tool``, ``actor``) were retired
-in the 2026-08 unification because the split silently orphaned rows — a
-relationship written as ``malware_family`` never joined the ``malware`` ones.
-These tests keep them retired, and keep each layer's registry aligned with the
-capability set that describes it.
+Four spellings are retired: ``malware_family``, ``offensive_tool`` and ``actor``
+(in the 2026-08 unification, because the split silently orphaned rows — a
+relationship written as ``malware_family`` never joined the ``malware`` ones),
+and ``victim``, which folds onto ``ransomware_victim``. These tests keep them
+retired, and keep each layer's registry aligned with the capability set that
+describes it.
 """
 
 import ast
@@ -19,8 +20,9 @@ from app import entity_types
 APP_ROOT = Path(entity_types.__file__).parent
 BACKEND_ROOT = APP_ROOT.parent
 # Standalone scripts talk to the same API and write the same columns, so they
-# have to speak the same vocabulary — they just live outside app/. The repo-root
-# scripts/ dir is only visible outside the container (which mounts backend/ alone).
+# have to use the same vocabulary, but they live outside app/. The repo-root
+# scripts/ dir is BACKEND_ROOT.parent / "scripts" on the host; the dev api
+# container bind-mounts it at /app/scripts, which is BACKEND_ROOT / "scripts".
 SCRIPT_ROOTS = [BACKEND_ROOT / "scripts", BACKEND_ROOT.parent / "scripts"]
 
 # Occurrences that read like a retired slug but are not entity_type
@@ -175,10 +177,9 @@ def test_searchable_matches_the_search_field_roots():
     from app.search.query_planner import ENTITY_FIELD_ROOTS
 
     # Detection rules, PIRs, campaigns, reports and notes are searchable objects
-    # but not entity types — they have entry links without being first-class
-    # intelligence nouns. Reports joined the list when `intel_report:` became a
-    # query field, and notes when `note:` did: search already returned them, but
-    # nothing could filter them.
+    # but not entity types — they have entry links but are not catalog entities.
+    # Reports and notes have roots here because `intel_report:` and `note:` are
+    # query fields.
     # "ioc" is an alias root for "observable" — one type, two spellings in the
     # search bar — so it is excluded here alongside the non-entity roots.
     non_entity_roots = {"rule", "pir", "campaign", "intel_report", "note", "ioc"}

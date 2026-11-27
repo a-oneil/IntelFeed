@@ -4,9 +4,7 @@ import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { RouteFallback } from "@/components/RouteFallback";
 
-// Assistant messages cite IntelFeed objects as relative links (/?entry=…,
-// /workbench/…). On this public page a normal full-page navigation into the
-// app is correct; external links open in a new tab.
+// Assistant messages cite IntelFeed objects as relative links (/?entry=…, /workbench/…). On this public page those do a normal full-page navigation into the app; external links open in a new tab.
 const markdownComponents: Components = {
   a: ({ href, children, ...props }) => {
     const isInternal = !!href && href.startsWith("/") && !href.startsWith("//");
@@ -36,38 +34,34 @@ interface SharedConversation {
   messages: SharedMessage[];
 }
 
-/**
- * Public, read-only view of a shared copilot conversation. No auth — fetches the
- * unauthenticated /api/shared/copilot/{token} endpoint directly.
- */
+/** Public, read-only view of a shared copilot conversation. No auth: it fetches the unauthenticated /api/shared/copilot/{token} endpoint directly. */
 export function SharedCopilotPage() {
   const { token } = useParams<{ token: string }>();
   const [data, setData] = useState<SharedConversation | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
 
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
     fetch(`/api/shared/copilot/${token}`)
       .then((r) => {
         if (!r.ok) throw new Error("not found");
         return r.json();
       })
       .then((d: SharedConversation) => {
-        if (!cancelled) {
+        if (!canceled) {
           setData(d);
           setState("ok");
         }
       })
       .catch(() => {
-        if (!cancelled) setState("error");
+        if (!canceled) setState("error");
       });
     return () => {
-      cancelled = true;
+      canceled = true;
     };
   }, [token]);
 
-  // The app shell (App.tsx) is a fixed-height flex row with overflow:hidden,
-  // so this page must own its scrolling or long conversations get clipped.
+  // The app shell (App.tsx) is a fixed-height flex row with overflow:hidden, so this page must handle its own scrolling or long conversations get clipped.
   const page: React.CSSProperties = {
     height: "100%",
     overflowY: "auto",

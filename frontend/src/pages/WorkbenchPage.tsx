@@ -132,8 +132,7 @@ export function WorkbenchLayout() {
   const [readerFullscreen, setReaderFullscreen] = useState(false);
   const location = useLocation();
 
-  // The docked reader closes on Escape and whenever the route changes — it is
-  // a companion to the surface that opened it, not a global panel.
+  // The docked reader closes on Escape and whenever the route changes: it belongs to the page that opened it, not to the whole app.
   useEffect(() => {
     if (!readerOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -146,16 +145,9 @@ export function WorkbenchLayout() {
     closeWorkbenchReader();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
-  // Detail routes (entity profiles, rule detail, report builder) collapse the
-  // sidebar to give the content full width; returning to the index restores
-  // it — but only if the auto-collapse is what closed it. A manual toggle
-  // clears sidebarAutoCollapsed, so an explicit choice is never overridden.
-  // This avoids the failure mode of the earlier blanket auto-collapse, which
-  // never restored and made users re-expand the sidebar after every profile.
-  // The dashboard and the section browser are full workbench pages, not detail
-  // views — keep the nav open there.
-  // /workbench/exposure survives only as a redirect into Threats, but keeping
-  // it here avoids a one-frame collapse while the redirect resolves.
+  // Detail routes (entity profiles, rule detail, report builder) collapse the sidebar to give the content full width; returning to the index restores it, but only if the auto-collapse is what closed it. A manual toggle clears sidebarAutoCollapsed, so an explicit choice is never overridden. An auto-collapse that never restored would make users re-expand the sidebar after every profile.
+  // The dashboard and the section browser are full workbench pages, not detail views, so the nav stays open there.
+  // /workbench/exposure is only a redirect into Threats, but listing it here avoids a one-frame collapse while the redirect resolves.
   const FULL_WORKBENCH_PAGES = [
     "/workbench/dashboard",
     "/workbench/explore",
@@ -164,17 +156,13 @@ export function WorkbenchLayout() {
   ];
   const onDetailRoute =
     /^\/workbench\/./.test(location.pathname) && !FULL_WORKBENCH_PAGES.includes(location.pathname);
-  // Only detail routes (profiles, rule bench, report builder) auto-fold the
-  // nav. The rules library and ransomware sections keep it open even though
-  // they carry their own facet rail — the nav is the way back out.
+  // Only detail routes (profiles, rule bench, report builder) auto-collapse the nav. The rules library and ransomware sections keep it open even though they have their own facet rail, because the nav is the way back out.
   const foldWorkbenchNav = onDetailRoute;
   const isMobile = useIsMobile();
 
   useEffect(() => {
     const ui = useUIStore.getState();
-    // One rail now, so the fold targets the app sidebar. Restoring is still
-    // gated on sidebarAutoCollapsed: a manual toggle clears it, so an explicit
-    // choice survives the trip in and back out of a profile.
+    // The workbench has no nav rail of its own, so the collapse targets the app sidebar. Restoring is gated on sidebarAutoCollapsed: a manual toggle clears it, so an explicit choice survives the trip into and back out of a profile.
     if (foldWorkbenchNav) {
       if (!ui.sidebarCollapsed) {
         useUIStore.setState({ sidebarCollapsed: true, sidebarAutoCollapsed: true });
@@ -184,20 +172,14 @@ export function WorkbenchLayout() {
     }
   }, [foldWorkbenchNav]);
 
-  // Fullscreen reading: the reader takes the whole workbench, so the nav and
-  // the page it was opened from step aside. The page stays mounted (hidden,
-  // not unmounted) so its table state survives the round trip.
+  // Fullscreen reading: the reader takes the whole workbench, and the page it was opened from is hidden. The page stays mounted (hidden, not unmounted) so its table state survives the round trip.
   const readerExpanded = readerOpen && readerFullscreen && !isMobile;
 
   return (
     <div className={styles.container}>
-      {/* No rail of its own any more: the app sidebar *is* the workbench nav
-          while it is in Workbench mode, on both breakpoints. Two stacked navs
-          were what forced the old auto-collapse of the app sidebar, which in
-          turn buried every non-reader surface. */}
+      {/* The workbench has no nav rail of its own: the app sidebar is the workbench nav while it is in Workbench mode, on both breakpoints. With two stacked navs the app sidebar had to auto-collapse, which hid the links to every surface other than the reader. */}
       <div className={`${styles.mainContent} ${readerExpanded ? styles.mainContentHidden : ""}`}>
-        {/* One modal for both openers — the entity table's header button
-            and the mobile section sheet. */}
+        {/* One modal for both openers: the entity table's header button and the mobile section sheet. */}
         {createEntityOpen && (
           <div className={styles.createEntityOverlay} onClick={closeCreateEntity}>
             <div className={styles.createEntityModal} onClick={(e) => e.stopPropagation()}>
@@ -208,16 +190,13 @@ export function WorkbenchLayout() {
             </div>
           </div>
         )}
-        {/* Nested lazy routes (dashboard, engine, exposure, profiles) get
-            their own boundary so the workbench nav survives the swap. */}
+        {/* Nested lazy routes (dashboard, engine, exposure, profiles) get their own Suspense boundary so the workbench layout stays mounted while they load. */}
         <Suspense fallback={<RouteFallback />}>
           <Outlet />
         </Suspense>
       </div>
 
-      {/* The workbench's docked reader: the page on the left is the entry
-          list, the reader rides the right — the same pairing (and the same
-          collapse/resize furniture) as every other rail in the app. */}
+      {/* The workbench's docked reader: the page on the left is the entry list and the reader sits on the right, with the same collapse and resize controls as every other rail in the app. */}
       {readerOpen && !isMobile && (
         <RailToggle
           side="right"
@@ -241,9 +220,7 @@ export function WorkbenchLayout() {
           className={`${styles.dockedReader} ${readerExpanded ? styles.dockedReaderExpanded : ""}`}
           style={isMobile || readerExpanded ? undefined : readerRail.style}
         >
-          {/* Labelled explicitly: an unlabelled RouteFallback names the *route*,
-              so a slow reader chunk read as "Loading Threat Actor Profile…"
-              inside the reader pane — which looks like the click did nothing. */}
+          {/* Labeled explicitly: an unlabeled RouteFallback names the *route*, so a slow reader chunk showed "Loading Threat Actor Profile…" inside the reader pane, which looks like the click did nothing. */}
           <Suspense fallback={<RouteFallback label={readerThreadSlug ? "story" : "article"} />}>
             {readerThreadSlug ? (
               <DockedThreadReader slug={readerThreadSlug} />
@@ -257,8 +234,7 @@ export function WorkbenchLayout() {
   );
 }
 
-// Entity types migrated to the unified full-width profile page — they open via
-// route instead of the legacy inline panel. (Country still uses the panel.)
+// Entity types that use the full-width profile page: selecting one navigates to its profile route.
 const ROUTED_PROFILE_TYPES = new Set<string>([
   "threat_actor", "malware", "cve", "cwe", "ttp", "country", "sector", "tool", "mitigation", "vendor", "product", "observable",
 ]);
@@ -273,13 +249,11 @@ export function WorkbenchPage() {
   const setActiveSection = useIntelStore((s) => s.setActiveSection);
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // ?section=rules deep link (e.g. entity profile "Search library" CTA) —
-  // activate the section, then consume the param so it doesn't linger.
+  // ?section=rules deep link (e.g. entity profile "Search library" CTA): activate the section, then remove the param so it doesn't linger.
   useEffect(() => {
     const section = searchParams.get("section");
     if (section && SECTION_KEYS.has(section)) {
-      // A link into a section a visitor can't open is consumed, not followed:
-      // saving it as their section would leave every later visit "Not available".
+      // A link into a section a visitor can't open is removed, not followed: saving it as their section would show "Not available" on every later visit.
       if (!(isVisitor && VISITOR_HIDDEN_SECTIONS.has(section))) setActiveSection(section as WorkspaceSection);
       const next = new URLSearchParams(searchParams);
       next.delete("section");
@@ -292,7 +266,7 @@ export function WorkbenchPage() {
       ? selectedEntityType
       : undefined;
 
-  // Migrated types open as a full-width route instead of the legacy inline panel.
+  // Routed types open as a full-width profile route.
   useEffect(() => {
     if (routedSlug && selectedEntityId) {
       const id = selectedEntityId;
@@ -301,7 +275,7 @@ export function WorkbenchPage() {
     }
   }, [routedSlug, selectedEntityId, clearSelectedEntity, navigate]);
 
-  // Redirecting a selected migrated entity to its full-width page — render nothing this frame.
+  // A selected routed entity is being redirected to its full-width page; render nothing this frame.
   if (routedSlug && selectedEntityId) return null;
 
   if (isVisitor && VISITOR_HIDDEN_SECTIONS.has(activeSection)) return <NotAvailable />;
@@ -382,7 +356,7 @@ function AliasesCell({ aliases }: { aliases: string[] }) {
   );
 }
 
-/** Render controlled-vocabulary sector slugs (e.g. "financial-services") as readable chips. */
+/** Turn a controlled-vocabulary sector slug (e.g. "financial-services") into a readable label. */
 function sectorLabel(slug: string): string {
   return slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -399,13 +373,10 @@ function SectorsCell({ sectors }: { sectors: string[] | undefined }) {
   );
 }
 
-/** Provenance columns shared by the entity types that record how a row was created.
+/**
+ * Provenance columns shared by the entity types that record how a row was created.
  *
- * These replace the old "Source" / "Confidence" columns, which read the
- * entry-junction fields on the response schema — always null when the row comes
- * from a catalog list endpoint rather than a per-entry lookup, so the columns
- * could never show anything. `created_via` / `created_confidence` are the real
- * provenance and are populated by the extraction pipeline.
+ * They read `created_via` / `created_confidence`, which the extraction pipeline populates, not the entry-junction fields on the response schema: those are always null when the row comes from a catalog list endpoint rather than a per-entry lookup, so columns built on them never showed anything.
  */
 type WithProvenance = { created_via?: string | null; created_confidence?: string | null; needs_review?: boolean };
 
@@ -457,13 +428,7 @@ function PROVENANCE_COLUMNS<T extends WithProvenance>(): ColumnDef<T>[] {
   ];
 }
 
-/**
- * CVE severity / risk tier -> the app's theme-managed severity ramp. The old
- * .badge* classes hardcoded a light-mode palette (#dc2626 / #ea580c / #ca8a04 /
- * #16a34a / #2563eb) that sat at 2.4-3.4:1 on the dark ground; --severity-* is
- * the token family that exists for exactly this axis and every theme supplies
- * its own values.
- */
+/** Map a CVE severity / risk tier to the app's theme-managed severity colors (--severity-*), which every theme defines. Hardcoded light-mode colors (#dc2626 / #ea580c / #ca8a04 / #16a34a / #2563eb) measured only 2.4-3.4:1 contrast on dark backgrounds. */
 function getSeverityTint(severity: string | null) {
   switch (severity?.toLowerCase()) {
     case "critical": return "var(--severity-critical)";
@@ -517,12 +482,7 @@ function ExploitBadge({ availability }: { availability: string | null }) {
   const key = availability || "none";
   const label = EXPLOIT_LABELS[key] || key.replace(/_/g, " ");
   const title = key.replace(/_/g, " ");
-  // Exploit availability is its own axis, not a severity — the amber/orange
-  // steps stay the literals the old .exploit* classes carried rather than
-  // aliasing --severity-*. The red step is the exception: as a toned chip the
-  // literal #dc2626 measured 3.66:1, under AA, and --danger is both the
-  // semantically correct token and 5.06:1. The ramp is therefore partly themed
-  // until an --exploit-* family exists to carry all three steps.
+  // Exploit availability is a separate scale from severity, so the amber and orange steps are literal colors rather than aliases of --severity-*. The red step is the exception: as a toned chip the literal #dc2626 measured 3.66:1, under WCAG AA, while --danger is the semantically correct token and measures 5.06:1. The scale stays partly themed until an --exploit-* token family exists for all three steps.
   const tint = availability === "poc" ? "#ca8a04"
     : availability === "weaponized" ? "#ea580c"
     : availability === "active_exploitation" ? "var(--danger)"
@@ -541,13 +501,9 @@ function ExploitBadge({ availability }: { availability: string | null }) {
 
 // --- Entity section column definitions ---
 //
-// `serverSort` keys must be accepted by that endpoint's `sort_by` pattern —
-// everything else sorts client-side over the loaded rows. The primary
-// name/ID column carries `serverText` so its filter box searches the whole
-// corpus via `?search=`; the remaining filters narrow the loaded rows (the
-// table backfills pages while they're active).
+// `serverSort` keys must be accepted by that endpoint's `sort_by` pattern; everything else sorts client-side over the loaded rows. The primary name/ID column has `serverText` so its filter box searches the whole corpus via `?search=`; the remaining filters narrow the loaded rows (the table keeps loading pages while they're active).
 
-/** Muted, ellipsised text cell — the default for secondary entity fields. */
+/** Muted, ellipsized text cell, the default for secondary entity fields. */
 function MetaCell({ value }: { value: string | null | undefined }) {
   if (!value) return <span className={table.zero}>·</span>;
   return <span className={`${styles.entityMeta} ${table.ellipsis}`} title={value}>{value}</span>;
@@ -558,7 +514,7 @@ function DateCell({ value }: { value: string | null | undefined }) {
   return <span className={table.dateCell} title={new Date(value).toLocaleString()}>{formatDate(value)}</span>;
 }
 
-/** External link cell — stops propagation so it doesn't also open the profile. */
+/** External link cell; stops propagation so the click doesn't also open the profile. */
 function LinkCell({ href, label }: { href: string | null | undefined; label?: string }) {
   if (!href) return <span className={table.zero}>·</span>;
   let text = label;
@@ -1528,9 +1484,7 @@ const OBSERVABLE_COLUMNS: ColumnDef<ObservableResponse>[] = [
     },
   },
   {
-    // article_count stays off the column list: sightings count the same
-    // junction today, and "Linked" (the shared claims column every entity
-    // table gets) is the design mock's linked count.
+    // article_count is not a column: sightings count the same junction, and "Linked" (the shared claims column every entity table gets) is the linked count from the design mock.
     key: "report_count", label: "Sources", width: 120, minWidth: 90,
     serverSort: true, numValue: (o) => o.report_count,
     render: (o) => <span title={`${o.sighting_count} raw sightings`}>{observableSourcesLabel(o)}</span>,
@@ -1637,9 +1591,7 @@ const CWE_COLUMNS: ColumnDef<CWEResponse>[] = [
     render: (c) => <Chip truncate>{c.abstraction || "-"}</Chip>,
   },
   {
-    // The headline number: NVD tags a CVE wherever the analyst chose on the
-    // ladder, so a Class or Pillar's direct count reads as near-zero until the
-    // subtree is folded in.
+    // The headline number. NVD maps a CVE to whichever level of the CWE hierarchy the analyst chose, so a Class or Pillar's direct count is near zero until the counts of the CWEs under it are rolled up.
     key: "cve_count_rolled", label: "CVEs", width: 90, minWidth: 70,
     serverSort: true, numValue: (c) => c.cve_count_rolled ?? c.cve_count,
     render: (c) => (
@@ -1652,9 +1604,7 @@ const CWE_COLUMNS: ColumnDef<CWEResponse>[] = [
     render: (c) => <NumCell value={c.cve_count} />,
   },
   {
-    // Rolled, to match the CVEs column: a rolled CVE count beside a direct KEV
-    // count reads as a near-zero exploitation rate on exactly the Class and
-    // Pillar rows where the rollup is the point.
+    // Rolled up, to match the CVEs column: a rolled-up CVE count next to a direct KEV count would show a near-zero exploitation rate on the Class and Pillar rows, which are where the rollup matters most.
     key: "kev_count_rolled", label: "KEV", width: 78, minWidth: 60, hideable: true,
     serverSort: true, numValue: (c) => c.kev_count_rolled ?? c.kev_count,
     render: (c) => <NumCell value={c.kev_count_rolled ?? c.kev_count} tone="critical" />,
@@ -1670,9 +1620,7 @@ const CWE_COLUMNS: ColumnDef<CWEResponse>[] = [
     render: (c) => <ArticleCount count={c.article_count} />,
   },
   {
-    // MITRE's own verdict on whether a CVE should carry this id. Anything other
-    // than Allowed means the tagging is imprecise, and roughly a sixth of the
-    // corpus's links are.
+    // MITRE's own guidance on whether a CVE should be mapped to this id. Anything other than Allowed means the mapping is imprecise, and roughly a sixth of the corpus's links are.
     key: "mapping_usage", label: "Mapping", width: 150, minWidth: 100, hideable: true,
     serverSort: true, serverChoice: true, serverParam: "mapping_usage", choices: CWE_USAGE_CHOICES,
     render: (c) =>
@@ -1694,8 +1642,7 @@ const CWE_COLUMNS: ColumnDef<CWEResponse>[] = [
         : <span className={table.zero}>·</span>,
   },
   {
-    // Derived through cve_affected, so it's blank where the CPE strings never
-    // resolved — which is most of the long tail, not a bug.
+    // Derived through cve_affected, so it's blank where the CPE strings never resolved. That is most of the long tail and is expected, not a bug.
     key: "top_vendor", label: "Top vendor", width: 150, minWidth: 110, hideable: true,
     textValue: (c) => c.top_vendor ?? "",
     render: (c) =>
@@ -1732,8 +1679,7 @@ const CWE_COLUMNS: ColumnDef<CWEResponse>[] = [
 
 function ObservablesSection() {
   const [searchParams, setSearchParams] = useSearchParams();
-  // ?linked_entity=<type>:<uuid> is the profile's "Open in observables
-  // browser" pivot: only the infrastructure behind that entity.
+  // ?linked_entity=<type>:<uuid> is the profile's "Open in observables browser" pivot: it shows only the infrastructure behind that entity.
   const linkedEntity = searchParams.get("linked_entity");
   const linkedType = linkedEntity?.split(":")[0];
 
@@ -1941,7 +1887,7 @@ type RuleSearchScope = "both" | "metadata" | "content";
 /** One-click selections over the rail's Telemetry group. */
 type RuleTelemetryFilter = "any" | "covered" | "missing";
 
-// Saved research views — client presets that set filter/sort state.
+// Saved research views: client-side presets that set filter and sort state.
 const RULE_SAVED_VIEWS: { key: string; label: string }[] = [
   { key: "all", label: "All rules" },
   { key: "new_week", label: "New this week" },
@@ -1976,8 +1922,7 @@ function ruleProducts(rule: DetectionRuleListItem): string[] {
 function isRecent(iso: string | null): boolean {
   return !!iso && Date.now() - new Date(iso).getTime() < 7 * 24 * 3600 * 1000;
 }
-/** A rule's required telemetry, missing sources first so a truncated row still
- *  shows the one that blocks it. */
+/** A rule's required telemetry, missing sources first so a truncated row still shows the one that blocks it. */
 function telemetrySources(tel: { required: string[]; missing: string[] }): { name: string; have: boolean }[] {
   const missing = new Set(tel.missing);
   return tel.required
@@ -2009,12 +1954,10 @@ function RulesSection() {
   const ruleFacetsCollapsed = useUIStore((s) => s.ruleFacetsCollapsed);
   const setRuleFacetsCollapsed = useUIStore((s) => s.setRuleFacetsCollapsed);
   const facetRailWidth = useRailWidth("rule-facets", { default: 210, min: 170, max: 420 });
-  // Seeded from the persisted snapshot so opening a rule and coming back
-  // restores the list, rather than resetting to "all rules, no filters".
+  // Seeded from the persisted snapshot so opening a rule and coming back restores the list, rather than resetting to "all rules, no filters".
   const saved = useRef(useIntelStore.getState().ruleLibrary).current;
   const [draftFilter, setDraftFilter] = useState<boolean | undefined>(saved.draftFilter);
-  // One map keyed by the index attribute rather than ten scalars: every group is
-  // multi-select now, and the keys are the same names the endpoint takes.
+  // One map keyed by index attribute rather than one state variable per group: every group is multi-select. The keys are the index attribute names; `extraParams` below maps them to the endpoint's parameter names.
   const [facetSel, setFacetSel] = useState<Record<string, string[]>>(saved.facetSel);
   const toggleFacet = useCallback((key: string, value: string) => {
     setFacetSel((prev) => {
@@ -2030,14 +1973,11 @@ function RulesSection() {
   const [createdAfter, setCreatedAfter] = useState<string | undefined>(saved.createdAfter);
   const [activeView, setActiveView] = useState(saved.activeView);
   const [lens, setLens] = useState<RuleLens>(saved.lens);
-  // Which attributes the box searches. Content is indexed after the metadata
-  // fields, so "both" still ranks a title match above a body match.
+  // Which attributes the box searches. Content is indexed after the metadata fields, so "both" still ranks a title match above a body match.
   const [searchScope, setSearchScope] = useState<RuleSearchScope>(saved.scope);
-  // Which rail values the enabled telemetry inventory answers. The match is
-  // tiered and fuzzy, so only the server can say — see the endpoint.
+  // Which rail values the enabled telemetry inventory covers. The matching is tiered and fuzzy, so only the server can work it out (see the endpoint).
   const { data: telemetryVocab } = useRuleTelemetryVocabulary();
-  // ?rules_q= deep link (entity profile "Search library" CTA) seeds the search box.
-  // A ?rules_q= deep link is an explicit request and outranks the snapshot.
+  // A ?rules_q= deep link (entity profile "Search library" CTA) seeds the search box; it is an explicit request, so it takes precedence over the saved snapshot.
   const [search, setSearch] = useState(() => searchParams.get("rules_q") || saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(search.trim());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -2086,9 +2026,7 @@ function RulesSection() {
     }
   };
 
-  // Write the filter set back on every change so it survives the unmount that
-  // navigating to a rule causes. One effect rather than a setter on each
-  // control, so no control can be added later and silently not persist.
+  // Write the filter set back on every change so it survives the unmount caused by navigating to a rule. One effect rather than a setter on each control, so a control added later can't silently skip persisting.
   useEffect(() => {
     useIntelStore.getState().setRuleLibrary({
       search,
@@ -2123,13 +2061,11 @@ function RulesSection() {
     created_after: createdAfter,
     q: debouncedSearch || undefined,
     scope: debouncedSearch ? searchScope : undefined,
-    // A text query has relevance to rank by; without one, fall back to the
-    // column the sort header is on.
+    // A text query has relevance to rank by; without one, fall back to the column the sort header is on.
     sort_by: debouncedSearch ? "relevance" : sort.field,
     sort_order: sort.order,
   };
-  // Rows and facet counts arrive together from Meilisearch, so the rail narrows
-  // with the list instead of showing library-wide totals.
+  // Rows and facet counts arrive together from Meilisearch, so the rail's counts narrow with the list instead of showing library-wide totals.
   const { data: infiniteData, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey: ["detection-rule-search", extraParams],
     queryFn: async ({ pageParam = 0 }) => {
@@ -2154,9 +2090,7 @@ function RulesSection() {
   const importRules = useImportRules();
   const exportRules = useExportRules();
 
-  // IntersectionObserver to trigger loading more when sentinel is visible.
-  // The rows scroll inside the .main column, so the observer root must be that
-  // container (not the viewport) or the sentinel never intersects and paging stalls.
+  // IntersectionObserver loads the next page when the sentinel is visible. The rows scroll inside the .main column, so the observer root must be that container (not the viewport) or the sentinel never intersects and paging stalls.
   useEffect(() => {
     const el = sentinelRef.current;
     if (!el) return;
@@ -2230,15 +2164,11 @@ function RulesSection() {
   const anyFacet = Object.keys(facetSel).length > 0;
   const clearFacets = () => setFacetSel({});
 
-  // The Telemetry switch is a bulk-select over the rail's Telemetry group, not a
-  // filter of its own: clicking it ticks the boxes, and the boxes do the
-  // filtering. So the list can never disagree with what the rail shows, and any
-  // tick stays adjustable afterwards.
+  // The Telemetry switch is a bulk-select over the rail's Telemetry group, not a separate filter: clicking it ticks the boxes, and the boxes do the filtering. That way the list always matches what the rail shows, and every tick can still be changed afterward.
   const telemetrySel = facetSel.telemetry_tokens ?? [];
   const sameSet = (a: string[], b: string[] | undefined) =>
     !!b && b.length > 0 && a.length === b.length && new Set(a).size === new Set([...a, ...b]).size;
-  // "" when the ticks are a hand-edited subset: no segment lights up rather than
-  // one claiming a preset that is no longer what's selected.
+  // "" when the ticks are a hand-edited subset: no segment is highlighted, rather than one claiming a preset that no longer matches the selection.
   const telemetryPreset: RuleTelemetryFilter | "" = !telemetrySel.length
     ? "any"
     : sameSet(telemetrySel, telemetryVocab?.collected)
@@ -2337,10 +2267,7 @@ function RulesSection() {
                 className={lib.telRing}
                 style={{ "--p": Math.round(rule.telemetry.coverage_pct * 100), "--c": telColor(rule.telemetry.coverage_pct) } as React.CSSProperties}
               />
-              {/* The ring already says how much is covered, so the text says
-                  *what* instead of repeating the ratio. Every source is listed
-                  — a "+2" in this column hides exactly the thing the column
-                  exists to answer. Gaps sort first so they lead the cell. */}
+              {/* The ring already shows how much is covered, so the text lists *which* sources instead of repeating the ratio. Every source is listed, because a "+2" in this column would hide exactly what the column is for. Missing sources sort first so they lead the cell. */}
               <span className={lib.telSources}>
                 {telemetrySources(rule.telemetry).map(({ name, have }) => (
                   <span key={name} className={`${lib.ds} ${have ? lib.dsHave : lib.dsMissing}`} title={name}>
@@ -2360,9 +2287,7 @@ function RulesSection() {
     );
   };
 
-  /** Bind one facet group to the selection map. `cap`/`searchable` mirror the
-   *  search rail: wide groups (techniques, tags, actors) get a filter box and a
-   *  fold rather than being cut off at eight with no way to reach the rest. */
+  /** Bind one facet group to the selection map. `cap`/`searchable` match the search rail: wide groups (techniques, tags, actors) get a filter box and a "show more" toggle rather than being cut off at eight with no way to reach the rest. */
   const facetGroup = (
     label: string,
     key: string,
@@ -2376,8 +2301,7 @@ function RulesSection() {
       label: format ? format(b.value) : b.value,
       count: b.count,
     }));
-    // A value can drop out of the distribution once other facets narrow past it;
-    // keep it listed so it stays untickable-from-the-rail.
+    // A selected value can drop out of the facet counts once other facets exclude it; keep it listed so it can still be unticked from the rail.
     for (const v of selected) {
       if (!rows.some((r) => r.value === v)) rows.push({ value: v, label: format ? format(v) : v, count: 0 });
     }
@@ -2427,8 +2351,7 @@ function RulesSection() {
           "telemetry_tokens",
           facets?.telemetry_tokens,
           undefined,
-          // Same action as the header switch, at the group it fills — this is
-          // where you look when you want to see or adjust what got ticked.
+          // Same action as the header switch, placed on the group it fills, since this is where you look to see or adjust what got ticked.
           telemetryVocab?.collected.length ? (
             <button
               className={lib.facetSelectMine}
@@ -2468,8 +2391,7 @@ function RulesSection() {
   );
 
   return (
-    /* The facet rail is a full-height column: it sits beside the page header
-       rather than under it, the same way the search page's rail does. */
+    /* The facet rail is a full-height column: it sits beside the page header rather than under it, as the search page's rail does. */
     <div className={lib.shell}>
       {facetRail}
       <div className={lib.shellMain}>
@@ -2477,9 +2399,7 @@ function RulesSection() {
         title="Rules Library"
         count={total}
         actions={
-          // Four buttons wrap onto a second line on a phone and cost a third of
-          // the screen, so all but the primary action fold behind ⋯ — the same
-          // treatment the entity tables use.
+          // On a phone four buttons wrap onto a second line and take a third of the screen, so all but the primary action go behind ⋯, as in the entity tables.
           isMobile ? (
             <>
               <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={handleNewRule}>+ New</button>
@@ -2641,11 +2561,7 @@ function RulesSection() {
             ) : (
               <>
                 <table className={`${styles.entityTable} ${lib.rulesTable}`}>
-                  {/* The content columns are proportional, not fixed: with
-                      pixel widths the one flexible column (Rule) absorbed every
-                      spare pixel, so on a wide screen a short title sat in a
-                      third of the row of empty space while Telemetry clipped its
-                      names at 112px. */}
+                  {/* The content columns are proportional, not fixed: with pixel widths the one flexible column (Rule) took every spare pixel, so on a wide screen a short title sat in a mostly empty cell while Telemetry clipped its names at 112px. */}
                   <colgroup>
                     <col style={{ width: 3 }} />
                     <col style={{ width: 30 }} />
@@ -2757,8 +2673,7 @@ function TelemetrySourcesSection() {
   const [dirty, setDirty] = useState(false);
   const { data: noteCounts } = useTelemetryNoteCounts();
   const [openSource, setOpenSource] = useState<CatalogItem | null>(null);
-  // ?source=AWS%20GuardDuty (the browser extension's link after saving a note)
-  // opens that source's drawer once the catalog is in.
+  // ?source=AWS%20GuardDuty (the browser extension's link after saving a note) opens that source's drawer once the catalog has loaded.
   const [sourceParams, setSourceParams] = useSearchParams();
   const linkedSource = sourceParams.get("source");
   useEffect(() => {
@@ -3009,7 +2924,7 @@ const REPORT_COLUMNS: ColumnDef<IntelReport>[] = [
 function ReportsSection() {
   const navigate = useNavigate();
   const [sort, setSort] = useState<{ key: string; dir: SortDir }>({ key: "updated_at", dir: "desc" });
-  // Status is the table's own serverChoice column filter now.
+  // Status is filtered by the table's own serverChoice column filter.
   const [reportServerFilters, setReportServerFilters] = useState<Record<string, string>>({});
   const onReportServerFiltersChange = useCallback(
     (f: Record<string, string>) => setReportServerFilters(f),
@@ -3157,10 +3072,9 @@ const REQUIREMENT_COLUMNS: ColumnDef<IntelligenceRequirement>[] = [
   },
   {
     key: "priority", label: "Priority", width: 100, minWidth: 80,
-    // Ranked, not alphabetical — "critical" must sort above "high".
+    // Ranked, not alphabetical: "critical" must sort above "high".
     sortValue: (r) => PRIORITY_ORDER[r.priority] ?? 9,
-    // serverChoice: narrows the whole result set, not just loaded rows — this
-    // is the filter that used to live as a select in the page header.
+    // serverChoice: narrows the whole result set, not just the loaded rows.
     serverChoice: true,
     choices: [
       { value: "all", label: "Any priority" },
@@ -3507,7 +3421,7 @@ function RequirementsSection() {
         }
       />
 
-      {/* Periodic review reminder — active PIRs untouched for 90+ days */}
+      {/* Periodic review reminder: active PIRs not reviewed for 90+ days */}
       {coverage && coverage.needs_review?.length > 0 && !reviewBannerDismissed && (
         <div className={styles.reqReviewBanner}>
           <span className={styles.reqReviewBannerText}>
@@ -3658,8 +3572,7 @@ function RequirementsSection() {
         </div>
       )}
 
-      {/* The pane's width rides a custom property so the narrow-screen rules
-          can still cap it, and stack it full-width below 768px. */}
+      {/* The pane's width is set through a custom property so the narrow-screen CSS rules can still cap it, and stack it full-width below 768px. */}
       <div
         className={styles.reqLayout}
         style={{ "--req-detail-w": `${detailPane.width}px` } as React.CSSProperties}
@@ -3692,8 +3605,7 @@ function RequirementsSection() {
 
         {/* Right: Detail Panel */}
         {selectedReq && (
-          /* The pane sits to the right of the handle, so a drag right has to
-             shrink it — the delta is inverted. */
+          /* The pane sits to the right of the handle, so dragging right has to shrink it; the delta is inverted. */
           <ResizeHandle
             label="requirement details"
             onResize={(delta) => detailPane.handleProps.onResize(-delta)}

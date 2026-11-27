@@ -3,11 +3,7 @@ import api from "@/api/client";
 import { useAuthStore } from "@/stores/authStore";
 import type { TokenResponse, User } from "@/api/types";
 
-/**
- * Drop every cached query except the instance's registration status. Signing
- * in from the public view would otherwise show the visitor's responses — the
- * stand-in dashboards, counts with hidden areas zeroed — until each refetched.
- */
+/** Drop every cached query except the instance's registration status. Otherwise, signing in from the public view would keep showing the visitor's responses (the stand-in dashboards, counts with hidden areas zeroed) until each query refetched. */
 function dropCachedQueries(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== "registrationStatus" });
 }
@@ -93,11 +89,7 @@ export function useRegistrationStatus() {
         useAuthStore.getState().setPublicReadOnly(!!res.data.public_read_only_enabled);
         return res.data;
       } catch (err) {
-        // Unanswered on the first try, treat the instance as private: a
-        // signed-out user gets the login page rather than a spinner that waits
-        // on this forever. A later failure (a background refetch, a blip on
-        // reconnect) keeps the answer already known, so a browsing visitor
-        // isn't sent to the login page by one dropped request.
+        // If no answer is known yet, treat the instance as private: a signed-out user gets the login page rather than a spinner that waits on this forever. A later failure (a background refetch, a blip on reconnect) keeps the answer already known, so a browsing visitor isn't sent to the login page by one dropped request.
         if (!useAuthStore.getState().publicReadOnlyKnown) useAuthStore.getState().setPublicReadOnly(false);
         throw err;
       }

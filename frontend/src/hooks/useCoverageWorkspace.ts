@@ -1,10 +1,7 @@
 /**
  * Coverage Workspace — the authoring lane on a threat's Detection tab.
  *
- * Every read here is served from stored rows (articles, extracted behaviours,
- * `rule_coverage` candidates), never from an AI call: the summary generator
- * 503s under load and `GET /detection-rules/{id}` measures ~5s, so opening the
- * workspace has to be a read.
+ * Every read here is served from stored rows (articles, extracted behaviors, `rule_coverage` candidates), never from an AI call: the summary generator returns 503 under load and `GET /detection-rules/{id}` takes about 5s, so opening the workspace has to be a plain read.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
@@ -12,8 +9,7 @@ import api from "@/api/client";
 /** Strongest tier the enabled telemetry reaches for a required source. */
 export type TelemetryTier = "source" | "log_type" | "category" | null;
 
-/** What is being done with a rule right now — not a lifecycle state. A skip
-    persists with its reason: it explains the gap to the next person. */
+/** What is being done with a rule right now, not a lifecycle state. A skip is saved with its reason, so it explains the gap to the next person. */
 export type SetOp = "adopt" | "extend" | "new" | "skip";
 
 export interface WorkspaceQuote {
@@ -25,7 +21,7 @@ export interface WorkspaceQuote {
   paragraph_indices: number[];
   /** domain_pattern | path | cmdline | registry | client_id | header | hash | other */
   observable_type: string | null;
-  /** The concrete artefact, verbatim — what a rule draft compiles into a clause. */
+  /** The concrete artifact, verbatim — what a rule draft compiles into a clause. */
   observable_value: string | null;
 }
 
@@ -47,7 +43,7 @@ export interface WorkspaceChannel {
   tier: TelemetryTier;
 }
 
-export interface WorkspaceBehaviour {
+export interface WorkspaceBehavior {
   technique_id: string;
   technique_name: string;
   tactic: string | null;
@@ -71,15 +67,14 @@ export interface CoverageWorkspace {
   label: string;
   window: string;
   articles: WorkspaceArticle[];
-  behaviours: WorkspaceBehaviour[];
-  /** Every article in the window. `articles` above is a capped page of it, so
-      the provenance fold cites this rather than the page length. */
+  behaviours: WorkspaceBehavior[];
+  /** Every article in the window. `articles` above is a capped page of it, so the provenance section cites this rather than the page length. */
   article_total: number;
   /** Of those, the ones that carried at least one technique. */
   article_contributed_total: number;
   missing_categories: string[];
   below_line_count: number;
-  /** Rules resolving to the threat itself — candidates for every behaviour. */
+  /** Rules resolving to the threat itself — candidates for every behavior. */
   threat_prior_rules: number;
   threat_prior_rules_strong: number;
   /** Exploitation context, present only on the CVE face. */
@@ -108,7 +103,7 @@ export interface PriorRuleItem {
   repo: string;
   license: string | null;
   is_draft: boolean;
-  /** "technique" = tagged with this behaviour; "threat" = names the threat. */
+  /** "technique" = tagged with this behavior; "threat" = names the threat. */
   scope: "technique" | "threat";
   via: "tag" | "meta" | "text";
   confidence: "high" | "medium" | "low";
@@ -116,9 +111,7 @@ export interface PriorRuleItem {
   tier: TelemetryTier;
   required: string[];
   missing: string[];
-  /** Upstream commit date where the importer recorded one, else our row's.
-      Ranks a maintained rule above one abandoned in 2022 — the only signal that
-      reliably varies when every candidate is tagged, strong and satisfiable. */
+  /** Upstream commit date where the importer recorded one, else the local row's date. Ranks a maintained rule above one abandoned in 2022; it is the only signal that reliably varies when every candidate is tagged, strong and satisfiable. */
   maintained_at: string | null;
 }
 
@@ -153,19 +146,14 @@ export interface SavedSet {
   updated_at: string;
   entry_ids: string[];
   item_count: number;
-  /** Adopted/extended rules whose upstream commit postdates the save — the
-      community changed a rule you adopted; worth a re-read. */
+  /** Adopted/extended rules whose upstream commit is newer than the save: the upstream rule changed after it was adopted, so it is worth re-reading. */
   upstream_moved: string[];
   content: { items: SetItem[]; label?: string; window?: string };
 }
 
 /** Types with an "articles that contributed techniques" question to answer. */
-/** One Detection tab, four faces: threats get the board + workspace; a CVE gets
-    the workspace with exploitation context; a technique gets an unranked
-    coverage bench for itself. Everything else hides the tab. */
-// Campaigns included: the workspace reads behaviours off an entity's articles,
-// and a campaign's articles are simply chosen rather than matched — so the
-// Detection tab gives it the same Build bench as an actor, not a bare list.
+/** Entity types that get a Detection tab: threats get the board + workspace; a CVE gets the workspace with exploitation context; a technique gets an unranked coverage bench for itself. Every other type hides the tab. */
+// Campaigns are included: the workspace reads behaviors from an entity's articles, and a campaign's articles are chosen by hand rather than matched, so the Detection tab gives it the same Build bench as an actor instead of a plain list.
 export const WORKSPACE_TYPES = new Set(["threat_actor", "malware", "cve", "ttp", "campaign"]);
 
 export function useCoverageWorkspace(entityType: string, entityKey: string, window: string, enabled: boolean) {
@@ -183,7 +171,7 @@ export function useCoverageWorkspace(entityType: string, entityKey: string, wind
   });
 }
 
-export function useBehaviourRules(entityType: string, entityKey: string, techniqueId: string | null) {
+export function useBehaviorRules(entityType: string, entityKey: string, techniqueId: string | null) {
   return useQuery({
     queryKey: ["coverage-workspace-rules", entityType, entityKey, techniqueId],
     queryFn: async () => {
@@ -246,9 +234,7 @@ export function useSaveCoverageSet(entityType: string, entityKey: string) {
 }
 
 /**
- * The export writer is deliberately a stub: it hands back the assembled set
- * with its provenance so an existing exporter can render it. Adding a second
- * serialiser here would give one set two that drift.
+ * The export writer is deliberately a stub: it returns the assembled set with its provenance so an existing exporter can render it. A second serializer here would give one set two formats that drift apart.
  */
 export function useExportCoverageSet() {
   return useMutation({
@@ -266,8 +252,7 @@ export function useExportCoverageSet() {
 export function useDeleteCoverageSet(entityType: string, entityKey: string) {
   const qc = useQueryClient();
   return useMutation({
-    // The set is a detection_summaries row; deletion is the endpoint that
-    // already owns that table.
+    // The set is a detection_summaries row, so it is deleted through the endpoint that already owns that table.
     mutationFn: async (summaryId: string) => {
       await api.delete(`/intelligence/detection-summaries/${summaryId}`);
     },

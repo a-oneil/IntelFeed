@@ -1,12 +1,7 @@
 import { useQuery, useQueries, type UseQueryResult } from "@tanstack/react-query";
 import api from "@/api/client";
 
-/**
- * Entity context — what the enabled enrichment sources say about one entity,
- * shaped by each source's manifest (GET /entities/{type}/{id}/context).
- * Lives in its own file, beside useEnrichment.ts, so the console and the
- * profile panel don't fight over one module.
- */
+/** Entity context: what the enabled enrichment sources say about one entity, shaped by each source's manifest (GET /entities/{type}/{id}/context). It lives in its own file, beside useEnrichment.ts, so the enrichment console and the profile panel don't share one module. */
 
 export type ContextDisplay = "fact" | "chips" | "table" | "timeline" | "link" | "badge";
 
@@ -122,11 +117,7 @@ function mergeContextValues(results: UseQueryResult<ContextValues>[]): ContextVa
   return Object.assign({}, ...results.map((r) => r.data ?? {}));
 }
 
-/**
- * `{entity_id: {column_id: value}}` for a paged table's rows; rows with nothing
- * are absent. One request per page of ids, so a page is fetched once as it
- * loads and earlier pages stay cached, however far the table scrolls.
- */
+/** `{entity_id: {column_id: value}}` for a paged table's rows; rows with no values are absent. One request per page of ids, so a page is fetched once as it loads and earlier pages stay cached, however far the table scrolls. */
 export function useContextValues(entityType: string, pages: string[][], enabled: boolean) {
   return useQueries({
     queries: pages.map((ids) => ({

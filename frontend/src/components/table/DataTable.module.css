@@ -234,8 +234,7 @@
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--text-primary);
-  /* !important to win against the global 16px input rule (iOS focus-zoom) —
-     these dense in-table filters need to match the table's 12px scale. */
+  /* !important to override the global 16px input rule (which prevents iOS focus zoom), because these dense in-table filters need to match the table's 12px scale. */
   font-size: var(--fs-sm) !important;
   min-height: 20px;
   outline: none;
@@ -317,8 +316,7 @@
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-primary));
 }
 
-/* A column pinned to the right edge of the scroller (the row actions cell), so
-   it stays reachable on tables wide enough to scroll horizontally. */
+/* A column pinned to the right edge of the scroller (the row actions cell), so it stays reachable on tables wide enough to scroll horizontally. */
 .stickyRight {
   position: sticky;
   right: 0;
@@ -392,8 +390,7 @@
   opacity: 1;
 }
 
-/* Touch devices never hover, so the reveal-on-hover affordance would leave the
-   checkboxes permanently invisible — show them outright. */
+/* Touch devices never hover, so reveal-on-hover would leave the checkboxes permanently invisible; show them always. */
 @media (hover: none) {
   .checkbox {
     opacity: 1;
@@ -444,11 +441,7 @@
 .ttp { color: var(--entity-ttp); }
 .cve { color: var(--entity-cve); }
 .cveHot {
-  /* The one DataTable tone that is NOT a fill/text pair — colour + a glow
-     derived from the same value — so converting it whole carries no
-     half-theme-reactive risk. The raw #dc2626 measured 3.92:1 on --bg-primary
-     at 12px/700 (AA needs 4.5); --danger measures 5.65:1 and is what the KEV
-     badge one component over already uses. */
+  /* The text color and the glow both derive from --danger, so the whole tone follows the theme. A raw #dc2626 measured 3.92:1 on --bg-primary at 12px/700 (AA needs 4.5); --danger measures 5.65:1 and is what the KEV badge already uses. */
   color: var(--danger);
   text-shadow: 0 0 8px color-mix(in srgb, var(--danger) 40%, transparent);
 }
@@ -539,10 +532,7 @@
 }
 
 @media (max-width: 767px) {
-  /* The table is flex:1 inside a scrolling page column, so tall page chrome
-     above it (a header + a recipe strip + the table bar) can squeeze the
-     scroller down to a couple of rows. Floor it: below this the page column
-     scrolls instead, which beats an unusable 40px-tall scroll region. */
+  /* The table is flex:1 inside a scrolling page column, so tall content above it (a header, a recipe strip and the table bar) can squeeze the scroller down to a couple of rows. With this minimum height the page column scrolls instead, which is better than an unusable 40px-tall scroll region. */
   .container {
     min-height: 260px;
   }

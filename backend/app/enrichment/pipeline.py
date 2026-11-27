@@ -170,7 +170,8 @@ async def get_cached_result(
     entity_id: uuid.UUID,
     source_type: str,
 ) -> EnrichmentResult | None:
-    """Get a cached enrichment result if it exists and hasn't expired."""
+    """The latest successful enrichment result for this entity and source, expired or not
+    (callers compare ``expires_at`` themselves)."""
     result = await db.execute(
         select(EnrichmentResult)
         .where(
@@ -294,9 +295,8 @@ async def enrich_entity(
     """Enrich an entity from all applicable enabled sources.
 
     Args:
-        entity_type: The entity type (ioc, cve, threat_actor, malware, ttp).
-                     For IOCs, pass the subtype (ioc_ipv4, ioc_domain, etc.)
-                     as the adapter_entity_type when checking supports_entity.
+        entity_type: The entity type slug (cve, observable, threat_actor, ...),
+                     checked against each adapter's ``applies_to``.
         entity_id: UUID of the entity.
         entity_value: The entity value to look up (IP, CVE ID, name, etc.).
         db: Database session.
@@ -322,12 +322,12 @@ async def enrich_entity(
         if source.source_type not in ADAPTER_REGISTRY:
             continue  # a catalog source: jobs only, no per-entity lookup
 
-        # Resolve API key (user override > global)
+        # Resolve API key (order in resolve_api_key)
         api_key = await resolve_api_key(source, user_id, db)
 
         adapter = adapter_for_source(source, api_key)
 
-        # Map base entity type to adapter entity type
+        # Skip sources whose adapter doesn't handle this entity type
         adapter_entity_type = entity_type
         if not adapter.supports_entity(adapter_entity_type):
             continue

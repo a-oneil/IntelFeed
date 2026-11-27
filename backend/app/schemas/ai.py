@@ -9,10 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 def _check_provider_config(config: dict | None) -> dict | None:
-    """Reject config the provider would choke on at call time instead of save time.
+    """Reject, at save time, config that would make the provider fail at call time.
 
-    ``extra_body`` is merged into every request with ``dict.update``: an array or
-    a string saves fine and then fails every completion on that provider.
+    ``extra_body`` and ``extra_headers`` (top level and per entry in
+    ``model_overrides``) must be JSON objects: ``extra_body`` is merged into every
+    request with ``dict.update``, so an array or a string saves fine and then
+    fails every completion on that provider.
     """
     if not config:
         return config

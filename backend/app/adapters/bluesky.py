@@ -38,8 +38,8 @@ SEARCH_PAGE_SIZE = 25
 
 
 def _stable_guid(cid: str) -> str:
-    """Truncated SHA-256 of the post CID. CIDs are content-addressed, so this
-    is stable across re-fetches even if the post is deleted."""
+    """Truncated SHA-256 of the post CID. CIDs are content-addressed, so the
+    GUID is the same on every re-fetch of the same post."""
     return hashlib.sha256(cid.encode()).hexdigest()[:32]
 
 
@@ -215,7 +215,7 @@ class BlueskyAdapter(ExtendedAdapter):
             if entry:
                 entries.append(entry)
 
-        # Track newest CID for next-poll short-circuit.
+        # Save the newest CID so the next poll stops paging when it reaches it.
         adapter_state: dict[str, Any] = {}
         if posts:
             for raw in posts:
@@ -462,7 +462,8 @@ class BlueskyAdapter(ExtendedAdapter):
 
         pds = (config.get("pds_url") or DEFAULT_PDS).rstrip("/")
         url = f"{pds}/xrpc/com.atproto.server.createSession"
-        # pds_url is the feed's adapter_config; the app password goes with it.
+        # pds_url comes from the feed's adapter_config and the request carries the app password, so
+        # it goes through safe_async_client, which refuses internal and private addresses.
         async with safe_async_client(
             timeout=30.0,
             headers={"User-Agent": USER_AGENT, "Content-Type": "application/json"},

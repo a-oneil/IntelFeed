@@ -1,10 +1,4 @@
-/**
- * Settings → Engine → Enrichment. Everything has one home: sources and their
- * limits, fields and jobs in Sources (a list with a side panel), fill rates
- * and AI research in Coverage, every API key in Keys, the queue and requests
- * in Activity. Problems sit on top, each with the one button that fixes it.
- * Color only marks what needs action.
- */
+/** Settings → Engine → Enrichment. Each thing lives in one view: sources and their limits, fields and jobs in Sources (a list with a side panel), fill rates and AI research in Coverage, every API key in Keys, the queue and requests in Activity. Problems are listed at the top, each with a button that fixes it where there is one. Color only marks what needs action. */
 import { useContext, useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -49,8 +43,7 @@ export function EnrichmentConsole({
   const highlight = useContext(SettingsHighlightContext);
   const data = consoleQ.data;
 
-  // A profile's "Add key": that source's key in Keys, or the source itself
-  // when what it lacks isn't a key.
+  // A profile's "Add key": that source's key in Keys, or the source itself when what it lacks isn't a key.
   const [keyForDone, setKeyForDone] = useState(false);
   useEffect(() => {
     if (!initialKeyFor || keyForDone || !data) return;
@@ -64,9 +57,7 @@ export function EnrichmentConsole({
     }
   }, [initialKeyFor, keyForDone, data]);
 
-  // A settings search that jumped here opens the setting's home: a key in
-  // Keys, a job setting on its source's Jobs tab. Each jump (nonce) is
-  // followed once, so a refetch doesn't pull the user back there.
+  // A settings search that jumped here opens the view that holds the setting: a key in Keys, a source setting on its Limits tab, a job setting on its source's Jobs tab. Each jump (nonce) is followed once, so a refetch doesn't pull the user back there.
   const [followedNonce, setFollowedNonce] = useState<number | null>(null);
   useEffect(() => {
     if (!highlight || !data || followedNonce === highlight.nonce) return;

@@ -1,6 +1,4 @@
-/** Ransomware group → CSS var color. Mirrors the backend `group_color_slug`
- * (app/schemas/ransomware.py): known groups get a CVD-validated categorical color,
- * everything else falls back to grey. Colour is always paired with the label. */
+/** Ransomware group → CSS var color. Mirrors the backend `group_color_slug` (app/schemas/ransomware.py): known groups get a CVD-validated categorical color, everything else falls back to gray. Color is always paired with the label. */
 
 const GROUP_SLUGS = new Set(["lockbit", "clop", "akira", "qilin", "play", "ransomhub"]);
 

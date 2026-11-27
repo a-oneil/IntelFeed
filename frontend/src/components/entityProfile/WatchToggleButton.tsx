@@ -1,12 +1,10 @@
-/** WatchToggleButton — one-click watch toggle for entity profiles.
- * Mute stays in the ⋯ menu (EntityActionsMenu) since it's a rarer action;
- * watching is common enough to deserve a one-click header button. */
+/** WatchToggleButton: one-click watch toggle in the entity profile header. Mute stays in the ⋯ menu (EntityActionsMenu) because it is used less often; watching is common enough to get its own button. */
 import { toast } from "sonner";
 import { useDeleteWatch, useUpsertWatch, useWatchlist } from "@/hooks/useWatchlist";
 import type { EntityType } from "@/stores/intelStore";
 import styles from "./entityProfile.module.css";
 
-// Mirrors WATCHABLE_ENTITY_TYPES in backend/app/api/watchlist.py.
+// The profile types from WATCHABLE_ENTITY_TYPES in backend/app/api/watchlist.py (the backend set also has ransomware_victim and observable, which have no entity profile header).
 const WATCHABLE_TYPES = new Set(["threat_actor", "malware", "cve", "cwe", "tool", "vendor", "product", "country", "sector"]);
 
 export function WatchToggleButton({
@@ -28,9 +26,7 @@ export function WatchToggleButton({
   const isWatching = mode === "watch";
   const isMuted = mode === "mute";
 
-  // Watch IS the Threats board's Track: one verb. Watching an actor, malware
-  // family or CVE boosts it in the Priority Queue AND pins it to the Threats
-  // board; unwatching clears the pin (handled/muted decisions survive).
+  // Watch and the Threats board's Track are the same action. Watching an actor, malware family or CVE boosts it in the Priority Queue and pins it to the Threats board; unwatching clears the pin (handled/muted decisions are kept).
   const onBoard = entityType === "threat_actor" || entityType === "malware" || entityType === "cve";
 
   const toggle = async () => {

@@ -65,15 +65,14 @@ class DateUtilsTest {
     @Test
     fun testRelativeTimeMicrosecondPrecision() {
         val now = 1711713600000L // 2024-03-29 12:00:00 UTC
-        // Microseconds used to be read as milliseconds (500000 ms = 8m20s), giving "7m ago".
+        // Six fraction digits are microseconds; reading them as milliseconds (500000 ms = 8m20s) gives "7m ago".
         assertEquals("15m ago", DateUtils.formatRelativeTime("2024-03-29T11:44:00.500000Z", now = now))
     }
 
     @Test
     fun testRelativeTimeFractionWithOffset() {
         val now = 1711713600000L // 2024-03-29 12:00:00 UTC
-        // 13:44 at +02:00 is 11:44 UTC. This used to fall through to the unzoned pattern and read
-        // the time as UTC, which is in the future ("Just now").
+        // 13:44 at +02:00 is 11:44 UTC. Falling through to the unzoned pattern would read the time as UTC, which is in the future ("Just now").
         assertEquals("15m ago", DateUtils.formatRelativeTime("2024-03-29T13:44:00.123456+02:00", now = now))
     }
 }

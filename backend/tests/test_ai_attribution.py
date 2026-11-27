@@ -1,10 +1,10 @@
 """Every AI result says who asked and who answered.
 
-The provider lookup is still instance-wide here; what these tests pin is
-the attribution record that per-user routing and per-user caps will later
-count on: ``caller_kind`` branches the cost dashboard, ``user_id`` is the
-person a user-kind call is billed to, and ``key_owner_id`` stays empty
-until a personal provider answers.
+These tests answer from an instance-wide provider and pin the attribution
+record that per-user routing and per-user allowances count on:
+``caller_kind`` branches the cost dashboard, ``user_id`` is the person a
+user-kind call is billed to, and ``key_owner_id`` stays empty because no
+personal provider answers.
 """
 
 import uuid

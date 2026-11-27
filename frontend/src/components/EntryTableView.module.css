@@ -1,6 +1,4 @@
-/* Entry-specific cell styling. Table chrome and the shared cell primitives
-   (.ellipsis, .strong, .zero, .count, tones, .dateCell) live in
-   components/table/DataTable.module.css. */
+/* Entry-specific cell styling. Table chrome and the shared cell primitives (.ellipsis, .strong, .zero, .count, tones, .dateCell) live in components/table/DataTable.module.css. */
 
 .statusCell {
   display: flex;
@@ -41,13 +39,7 @@
   font-weight: 500;
 }
 
-/* A story thread occupying an ordinary table row. The left accent is the one
-   ThreadRow wears in the compact list, so the same object reads the same way in
-   either view — no tint, because DataTable's .rowSelected / .rowChecked own the
-   row background and a second background here would fight them for it.
-   The class is doubled to out-specify .rowSelected's own inset shadow: a
-   selected thread keeps its accent colour and shows the selection through the
-   background instead. */
+/* A story thread shown in an ordinary table row. The left accent matches the one ThreadRow uses in the compact list, so a thread looks the same in either view. There is no background tint, because DataTable's .rowSelected / .rowChecked set the row background and a second background here would conflict with them. The class is doubled to out-specify .rowSelected's own inset shadow: a selected thread keeps its accent color and shows the selection through the background instead. */
 .threadRow.threadRow {
   box-shadow: inset 3px 0 0 var(--accent-intel);
 }
@@ -68,7 +60,7 @@
   color: var(--text-secondary);
 }
 
-/* Detection opportunity mini-badges (compact cousins of the intel-badge pills) */
+/* Detection opportunity mini-badges (smaller versions of the intel-badge pills) */
 .oppBadge {
   padding: 1px 7px;
   border-radius: var(--r-sm);

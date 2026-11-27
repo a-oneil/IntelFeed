@@ -8,8 +8,10 @@ import type {
   FeedPipeline,
   FeedSubscribersResponse,
   FeedValueDetail,
+  LinkPreview,
   PaginatedResponse,
   StarterPack,
+  StarterPackFeed,
   StarterPackImportResult,
   TitleFilterPreview,
 } from "@/api/types";
@@ -50,12 +52,71 @@ export function useAddFeed() {
       auto_extract_on_ingest?: boolean;
       extract_detection_rules?: boolean;
       extract_tools?: boolean;
+      exclude_shorts?: boolean;
     }) => {
-      const res = await api.post("/feeds", data);
+      const res = await api.post<Feed>("/feeds", data);
       return res.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["feeds"] });
+    },
+  });
+}
+
+/** What a pasted link is. Disabled while `url` is empty. */
+export function useLinkPreview(url: string) {
+  return useQuery({
+    queryKey: ["link-preview", url],
+    queryFn: async () => {
+      const res = await api.post<LinkPreview>("/feeds/preview", { url });
+      return res.data;
+    },
+    enabled: url !== "",
+    retry: false,
+    staleTime: 5 * 60_000,
+    // A failed preview is an answer ("no feed here"), not an app error.
+    meta: { silenceToast: true },
+  });
+}
+
+/** The folder feeds of this type mostly live in, for the add dialog to preselect. */
+export function useCategorySuggestion(feedType: string | null) {
+  return useQuery({
+    queryKey: ["category-suggestion", feedType],
+    queryFn: async () => {
+      const res = await api.get<{ category_id: string | null }>("/feeds/category-suggestion", {
+        params: { feed_type: feedType },
+      });
+      return res.data.category_id;
+    },
+    enabled: feedType !== null,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useStarterPackFeeds(packId: string | null) {
+  return useQuery({
+    queryKey: ["starter-pack-feeds", packId],
+    queryFn: async () => {
+      const res = await api.get<{ feeds: StarterPackFeed[] }>(`/opml/starter-packs/${packId}/feeds`);
+      return res.data.feeds;
+    },
+    enabled: packId !== null,
+  });
+}
+
+export function useImportStarterPackFeeds() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ packId, urls }: { packId: string; urls: string[] }) => {
+      const res = await api.post<StarterPackImportResult>(`/opml/starter-packs/${packId}/import`, { urls });
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["feeds"] });
+      queryClient.invalidateQueries({ queryKey: ["categories"] });
+      queryClient.invalidateQueries({ queryKey: ["starter-packs"] });
+      queryClient.invalidateQueries({ queryKey: ["starter-pack-feeds"] });
     },
   });
 }
@@ -140,9 +201,7 @@ export function useFullSyncFeed() {
 /**
  * One feed's intelligence value score, for the edit modal's Overview pane.
  *
- * Scoring is corpus-wide on the server (entity introductions only mean
- * anything against every feed), so this is deliberately not cheap — it is
- * fetched lazily, when the pane that shows it mounts.
+ * The server scores against the whole corpus (an entity introduction only means something compared with every other feed), so this request is expensive and is fetched only when the pane that shows it mounts.
  */
 export function useFeedValue(feedId: string | null) {
   return useQuery({
@@ -159,9 +218,7 @@ export function useFeedValue(feedId: string | null) {
 /**
  * Which stages actually run for this feed, and what decided each one.
  *
- * Resolution (legacy booleans -> global -> category -> feed plan) happens on
- * the server; re-implementing that merge in the client would drift the moment
- * either side changed.
+ * The server resolves this (legacy booleans -> global -> category -> feed plan); repeating that merge in the client would drift as soon as either side changed.
  */
 export function useFeedPipeline(feedId: string | null) {
   return useQuery({
@@ -188,11 +245,7 @@ export function useFeedAIUsage(feedId: string | null, enabled = true) {
   });
 }
 
-/**
- * How many of a feed's last 100 titles an exclude-title list would drop.
- * Keyed on the text, so callers should pass a debounced value. Silent: a bad
- * line is a 422 the pane shows inline, not a toast.
- */
+/** How many of a feed's last 100 titles an exclude-title list would drop. Keyed on the text, so callers should pass a debounced value. Errors raise no toast: a bad line is a 422 the pane shows inline. */
 export function useTitleFilterPreview(feedId: string | null, patterns: string) {
   return useQuery({
     queryKey: ["feed-title-filter", feedId, patterns],
@@ -206,33 +259,6 @@ export function useTitleFilterPreview(feedId: string | null, patterns: string) {
     retry: false,
     staleTime: 60_000,
     meta: { silenceToast: true },
-  });
-}
-
-export function useDiscoverFeed() {
-  return useMutation({
-    mutationFn: async (url: string) => {
-      const res = await api.post<{
-        url: string;
-        title: string | null;
-        feed_type: string;
-        description: string | null;
-      }>("/feeds/discover", { url });
-      return res.data;
-    },
-  });
-}
-
-export function useResolveBlueskyFeedUrl() {
-  return useMutation({
-    mutationFn: async (url: string) => {
-      const res = await api.post<{
-        feed_uri: string;
-        did: string;
-        handle: string;
-      }>("/feeds/bluesky/resolve-feed-url", { url });
-      return res.data;
-    },
   });
 }
 
@@ -351,27 +377,6 @@ export function useReorderCategories() {
   });
 }
 
-export function useBulkSetupGitHubRepos() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
-      const res = await api.post<{
-        created: { url: string; title: string; feed_id: string }[];
-        skipped: { url: string; title: string; reason: string }[];
-        total_created: number;
-        total_skipped: number;
-        category_id: string;
-        category_name: string;
-      }>("/feeds/github-repo/bulk-setup");
-      return res.data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["feeds"] });
-      queryClient.invalidateQueries({ queryKey: ["categories"] });
-    },
-  });
-}
-
 export function useBulkUpdateCategoryFeeds() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -429,10 +434,7 @@ export function useBulkSetIntelMode() {
 }
 
 /* ─── Subscribers (admin) ─────────────────────────────────────────────────
- * Who reads a feed, and admin-side control over that list. Only meaningful
- * with per-user subscriptions on (the response says which), but the rows are
- * maintained either way so a push survives a later flag flip.
- */
+Who reads a feed, and admin control over that list. It only matters while per-user subscriptions are on (the response says whether they are), but the rows are kept either way so a push survives the flag being turned on later. */
 
 export function useFeedSubscribers(feedId: string | null, enabled = true) {
   return useQuery({
@@ -483,9 +485,7 @@ export function useRemoveFeedSubscriber() {
 }
 
 /* ─── OPML import ─────────────────────────────────────────────────────────
- * Bulk subscription import. The backend creates categories from outline
- * groups, skips URLs already in the pool, and queues a first fetch for each
- * feed it adds. Bad files come back as 200 + {error}, not an HTTP error. */
+Bulk subscription import. The backend creates categories from outline groups, skips URLs already in the pool, and queues a first fetch for each feed it adds. Bad files come back as 200 + {error}, not an HTTP error. */
 
 export interface OpmlImportResult {
   feeds_added: number;

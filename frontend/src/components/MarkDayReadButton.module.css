@@ -48,8 +48,7 @@
 
 @media (max-width: 767px) {
   .btn {
-    /* Slightly larger tap target on touch, still an inline icon button next
-       to the entry count rather than a full-width row. */
+    /* Slightly larger tap target on touch, still an inline icon button next to the entry count rather than a full-width row. */
     width: 28px;
     height: 28px;
     min-height: 28px;

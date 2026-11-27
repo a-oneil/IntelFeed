@@ -1,21 +1,11 @@
 /**
- * Coverage Workspace — the Detection tab, as one answer and one list.
+ * Coverage Workspace: the Detection tab on an entity profile, shown as one verdict sentence and one list of behaviors.
  *
- * The question a profile's Detection tab exists to answer is "am I covered for
- * this threat?". The previous layout rendered the inputs to that question in
- * three columns — articles, behaviours, candidate rules — and never stated the
- * answer. This states it first, in a sentence computed from the same fields the
- * ribbon under it uses, so the two cannot disagree.
+ * The tab answers "am I covered for this threat?". It states the answer first, in a sentence computed from the same counts as the ribbon under it, so the two cannot disagree. Showing articles, behaviors and candidate rules side by side in columns left the reader to work out the answer.
  *
- * Everything else is one ladder of behaviours ordered by what you would do next.
- * A row opens onto its own evidence, its own candidates and its own actions;
- * nothing sits in a parallel column waiting to be correlated by eye. Articles
- * and the behaviours with no log source are provenance, so they fold away.
+ * Below the verdict is one list (the "ladder") of behaviors, ordered by the next action to take. Opening a row shows that behavior's evidence, candidate rules and actions in the row itself. Source articles and behaviors with no log source are supporting detail, so they sit in collapsed sections.
  *
- * The rule the UI still has to keep: a behaviour whose required channels match
- * nothing in the telemetry inventory is a sourcing item, never a detection gap.
- * A rule for it would not fire, so it cannot be counted as something you failed
- * to write.
+ * A behavior whose required channels match nothing in the telemetry inventory is a collection gap, never a detection gap: a rule for it would not fire, so it is not counted as a missing rule.
  */
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -26,7 +16,7 @@ import { useUIStore } from "@/stores/uiStore";
 import { Chip, Segmented } from "@/components/primitives";
 import { AsyncStateLoading } from "@/components/AsyncState";
 import {
-  useBehaviourRules,
+  useBehaviorRules,
   useCoverageWorkspace,
   useDeleteCoverageSet,
   useSaveCoverageSet,
@@ -35,7 +25,7 @@ import {
   type PriorRuleItem,
   type SetItem,
   type SetOp,
-  type WorkspaceBehaviour,
+  type WorkspaceBehavior,
 } from "@/hooks/useCoverageWorkspace";
 import styles from "./coverageWorkspace.module.css";
 
@@ -54,14 +44,11 @@ const OP_TINT: Record<SetOp, string> = {
   skip: "var(--text-muted)",
 };
 
-/** sessionStorage keys for the bench handoff. The seed rides out with the
-    navigation; the return rides back after a save. Working state, not truth —
-    the set itself persists through the sets endpoint. */
+/** sessionStorage keys for the handoff to the rule editor (the bench). The seed is written before navigating there; the return is written by the editor after a save. This is temporary working state; the set itself is saved through the sets endpoint. */
 const BENCH_SEED_KEY = "intelfeed-bench-seed";
 const BENCH_RETURN_KEY = "intelfeed-bench-return";
 
-/** entity_ids buckets the report generator reads. A campaign has no bucket, so
-    its set attaches the articles and the rules without the entity itself. */
+/** entity_ids buckets the report generator reads. A campaign has no bucket, so its set attaches the articles and the rules without the entity itself. */
 const ENTITY_ID_BUCKETS: Record<string, string> = {
   threat_actor: "actors",
   malware: "malware",
@@ -69,13 +56,10 @@ const ENTITY_ID_BUCKETS: Record<string, string> = {
   ttp: "ttps",
 };
 
-/** An all-time ladder on a long-lived actor runs to 200 rows. The ordering
-    already puts the work at the top, so the tail is paged rather than rendered. */
+/** Ladder rows rendered per page. An all-time ladder on a long-lived actor can reach 200 rows; the ordering already puts the actionable rows at the top, so the rest is paged instead of rendered at once. */
 const LADDER_PAGE = 40;
 
-/** Candidates shown inside an open row before the rest collapse to one line.
-    The ranking is only as good as the signals behind it, so this stays small:
-    three rows you are expected to read, not a page to scroll. */
+/** Candidates shown inside an open row before the rest collapse to one line. The ranking is only as good as the signals behind it, so this stays small: three rows to read, not a page to scroll. */
 const CANDIDATES_SHOWN = 3;
 
 type VerdictKey = "ok" | "warn" | "bad" | "inert";
@@ -87,19 +71,14 @@ interface Verdict {
   color: string;
 }
 
-/** What you would do about this behaviour, from stored fields only.
+/**
+ * The next action for this behavior, computed from stored fields only.
  *
- * Order matters: the below-line test comes first because it outranks every
- * other reading. A behaviour with 46 candidate rules and no log source is not
- * "well covered" — none of those rules can fire here.
+ * Order matters: the below-line test comes first because it outranks every other result. A behavior with 46 candidate rules and no log source is not "well covered", because none of those rules can fire here.
  *
- * The test is `tier` alone, deliberately. `tier` is the STRONGEST match any of
- * the technique's channels reached, and a technique lists every data source
- * ATT&CK knows of — no real inventory carries all of them, so `missing_channels`
- * is non-empty for essentially every behaviour. Folding it in collapsed the
- * adoptable bucket to zero on every entity we tried. Partial coverage of a
- * technique's channels is the normal case, not a caveat. */
-function verdictFor(b: WorkspaceBehaviour): Verdict {
+ * The tier test uses `tier` alone, on purpose. `tier` is the strongest match any of the technique's channels reached, and a technique lists every data source ATT&CK knows of. No real inventory has all of them, so `missing_channels` is non-empty for almost every behavior; including it put zero behaviors in the adoptable bucket on every entity tested. Partial coverage of a technique's channels is the normal case.
+ */
+function verdictFor(b: WorkspaceBehavior): Verdict {
   if (b.below_line) return { key: "inert", label: "No log source", color: "var(--text-muted)" };
   if (b.prior_rules === 0) return { key: "bad", label: "Nothing to adopt", color: "var(--danger, #f85149)" };
   if (b.tier !== "source") return { key: "warn", label: "Tune first", color: "var(--warning, #d29922)" };
@@ -169,7 +148,7 @@ function VerdictLine({
   return (
     <p className={styles.verdictLine}>
       <b className={styles.numOk}>{firable}</b> of {data.label}&rsquo;s <b>{total}</b>{" "}
-      {total === 1 ? "behaviour" : "behaviours"} {windowPhrase(data.window)} could fire against your telemetry.
+      {total === 1 ? "behavior" : "behaviors"} {windowPhrase(data.window)} could fire against your telemetry.
       {counts.inert > 0 && (
         <>
           {" "}
@@ -198,14 +177,14 @@ function VerdictLine({
   );
 }
 
-/** One behaviour: the verdict on the closed row, everything else inside it. */
+/** One behavior: the verdict on the closed row, everything else inside it. */
 function LadderRow({
   behaviour,
   open,
   onToggle,
   children,
 }: {
-  behaviour: WorkspaceBehaviour;
+  behaviour: WorkspaceBehavior;
   open: boolean;
   onToggle: () => void;
   children: React.ReactNode;
@@ -262,21 +241,18 @@ export function CoverageWorkspace({
   const [showAllCandidates, setShowAllCandidates] = useState(false);
   const navigate = useNavigate();
 
-  // Articles open in the workbench's docked reader — the tab stays put and acts
-  // as the entry list, the way the rest of the app pairs a list with the reader.
+  // Articles open in the workbench's docked reader, so the tab stays in place and works as the entry list, the same list-plus-reader pairing used elsewhere in the app.
   const onOpenArticle = (entryId: string) => {
     useIntelStore.getState().openWorkbenchReader(entryId);
   };
 
-  // A skip is a set item, not component state — it survives remounts and
-  // exports as a known gap. Skipped rules disappear from the candidate list.
+  // A skip is stored as a set item (op "skip"), so it is saved with the set and exported as a known gap. Skipped rules are removed from the candidate list.
   const skipped = useMemo(
     () => items.filter((i) => i.op === "skip" && i.rule_id).map((i) => i.rule_id as string),
     [items]
   );
 
-  // Returning from the bench: a rule drafted or extended over there joins the
-  // set here, exactly once.
+  // Returning from the rule editor: a rule drafted or extended there is added to the set once (the return key is removed after it is read, and a rule already in the set is not added again).
   useEffect(() => {
     const raw = sessionStorage.getItem(BENCH_RETURN_KEY);
     if (!raw) return;
@@ -306,16 +282,14 @@ export function CoverageWorkspace({
 
   const { data, isLoading } = useCoverageWorkspace(entityType, entityKey, window, true);
   const { data: sets } = useSavedSets(entityType, entityKey, true);
-  // Only the open row fetches candidates: one query for the row you are reading
-  // instead of a standing query for a column nobody asked about.
-  const { data: rules, isLoading: rulesLoading } = useBehaviourRules(entityType, entityKey, openId);
+  // Only the open row fetches candidates: one query for the row being read instead of a query for every row.
+  const { data: rules, isLoading: rulesLoading } = useBehaviorRules(entityType, entityKey, openId);
   const saveSet = useSaveCoverageSet(entityType, entityKey);
   const deleteSet = useDeleteCoverageSet(entityType, entityKey);
 
   const behaviours = useMemo(() => data?.behaviours ?? [], [data]);
 
-  // Ordered by what you would do next, not by technique number. Inside a
-  // verdict, the behaviour the window reported most leads.
+  // Ordered by next action (verdict rank), not by technique number. Within a verdict, the behavior with the most articles in the window comes first.
   const ladder = useMemo(
     () =>
       behaviours
@@ -360,8 +334,7 @@ export function CoverageWorkspace({
     ]);
   };
 
-  /** Stash the behaviour's evidence for the bench: technique, quotes with their
-      typed observables, and the entity link to attach on save. */
+  /** Store the behavior's evidence for the rule editor: technique, quotes with their typed observables, a suggested rule format, and the entity link to attach on save. */
   const stashSeed = (techniqueId: string | null) => {
     const behaviour = behaviours.find((b) => b.technique_id === techniqueId);
     const channels = behaviour?.channels.map((c) => c.source.toLowerCase()) ?? [];
@@ -387,9 +360,7 @@ export function CoverageWorkspace({
     );
   };
 
-  /** Draft new: land in the bench, loaded — technique, quotes as a cited
-      header, format from the telemetry tier. Saving returns here with the rule
-      joining the set. */
+  /** Draft new: open the rule editor preloaded with the technique, the quotes as a cited header, and a format suggested from the entity type and the behavior's log-source channels. Saving returns here and adds the rule to the set. */
   const draftNew = (techniqueId: string | null) => {
     stashSeed(techniqueId);
     const params = new URLSearchParams({ from_set: "1", entity_type: entityType, entity_key: entityKey });
@@ -398,8 +369,7 @@ export function CoverageWorkspace({
   };
 
   const [extending, setExtending] = useState<string | null>(null);
-  /** Extend: create the derived_from draft child server-side, record the item,
-      open the bench on the child with the upstream beside it. */
+  /** Extend: create the derived_from draft child server-side, add it to the set, and open the rule editor on the child with the upstream rule beside it. */
   const extendRule = async (rule: PriorRuleItem) => {
     if (extending) return;
     setExtending(rule.rule_id);
@@ -466,8 +436,7 @@ export function CoverageWorkspace({
     URL.revokeObjectURL(url);
   };
 
-  /** The ruleset: one file per rule grouped by format, attribution headers,
-      the research report as MANIFEST.md. */
+  /** Download the saved set as a zip: one file per rule grouped by format, with attribution headers, and the research report as MANIFEST.md. */
   const handleExportZip = async () => {
     const sid = requireSaved();
     if (!sid) return;
@@ -479,17 +448,11 @@ export function CoverageWorkspace({
     }
   };
 
-  /** Send to report — the one way into the reporting system, the same modal
-      every other surface opens.
+  /** Send to report: the one way from this tab into the reporting system, through the same modal every other page opens.
 
-      The set carries three things: the articles the behaviours were read from,
-      the entity itself, and the adopted rules, which land as a Detections
-      section with repo and licence intact. The skips ride along as the section
-      body, because a gap you decided not to close is a finding too.
+      The set sends three things: the articles the behaviors were read from, the entity itself, and the set's rules (adopted, extended or new), which land as a Detections section with repo and license intact. The skips go in the note, because a gap you decided not to close is a finding too.
 
-      This replaced a markdown download and a clipboard copy. Both produced
-      something that looked like a report and was not one — neither ever reached
-      an IntelReport you could version, publish or send. */
+      There is no markdown download or clipboard copy, because those produced something that looked like a report but never reached an IntelReport you could version, publish or send. */
   const sendToReport = () => {
     const adopted = items.filter((i) => i.op !== "skip" && i.rule_id).map((i) => i.rule_id as string);
     const skipped = items.filter((i) => i.op === "skip");
@@ -511,10 +474,7 @@ export function CoverageWorkspace({
       entityIds: Object.keys(entityIds).length > 0 ? entityIds : undefined,
       note: gaps,
       label: `${label}: ${adopted.length} rule${adopted.length === 1 ? "" : "s"}`,
-      // The wizard is entry-seeded and carries no entity evidence, so a set
-      // started this way arrives without its rules; sending again once the
-      // draft exists attaches them. Offered anyway because without it the modal
-      // is a dead end for anyone with no open drafts.
+      // The new-report wizard starts from entries and carries no entity evidence, so a report started this way does not get the set's rules; sending again once the draft exists attaches them. The wizard is still offered because without it the modal has no next step for someone with no open drafts.
       wizardState: entryIds.length > 0 ? { sourceType: "entries", entryIds, entryTitle: label } : undefined,
     });
   };
@@ -800,7 +760,7 @@ export function CoverageWorkspace({
           </summary>
           <div className={styles.foldBody}>
             <p>
-              {belowLine.length === 1 ? "This behaviour has" : "These behaviours have"} no{" "}
+              {belowLine.length === 1 ? "This behavior has" : "These behaviors have"} no{" "}
               {data.missing_categories.map(humanCategory).join(" or ") || "matching"} source ticked, so a rule for{" "}
               {belowLine.length === 1 ? "it" : "them"} could not fire here. That is a collection job, not a detection
               gap.

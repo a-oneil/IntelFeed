@@ -1055,7 +1055,7 @@ async def test_attention_names_the_action_for_each_problem(client, admin_headers
 
 async def test_a_key_problem_shared_by_several_sources_is_one_row(client, admin_headers, db_session):
     """Three abuse.ch sources missing their one Auth-Key are one problem,
-    labelled with the credential; other problems stay one row per source."""
+    labeled with the credential; other problems stay one row per source."""
     for source_type in ("threatfox", "urlhaus", "malwarebazaar"):
         await _source(db_session, source_type)
     for source_type in ("shodan", "rdap"):

@@ -14,21 +14,13 @@
 /* ── Filters ── */
 /* ── Shared states ── */
 /* ── Priority Queue ── */
-/* Bands + colors mirror SignalChip (utils/signalBand) so a score reads the
-   same in the entry list, reader, and this priority queue. */
 /* Score value + breakdown tooltip */
 /* Score bar */
 /* Reason tag color variants */
 /* ── Unified queue: inline correlation events ── */
 /* ── Unified queue: cluster cards ── */
 /* ── Convergence cluster badges + entity tags ── */
-/* Cluster priority chip — mirrors the entry score cell (badge over number) so a
-   cluster reads on the same scale as the entries it's ranked against. */
 /* Shared entity tags */
-/* These three previously hardcoded the WRONG entity's colour: actor rendered
-   in malware's purple, malware in CVE's red, TTP in tool's yellow. Colour is
-   the entity vocabulary across the rest of the app, so a dashboard chip in a
-   sibling type's colour is a misread waiting to happen. Now on the tokens. */
 /* Compact cluster entry rows */
 /* ── Tune Button ── */
 /* ── Settings Panel ── */

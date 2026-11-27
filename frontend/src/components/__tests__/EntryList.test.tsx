@@ -234,9 +234,7 @@ describe("EntryList", () => {
     inside.href = "/settings";
     document.body.append(outside, inside);
     try {
-      // fireEvent returns false when the keypress was default-prevented (i.e. the
-      // list's Enter shortcut took it). The outside link is exempt; the inside
-      // link keeps its previous behaviour.
+      // fireEvent returns false when the keypress was default-prevented (i.e. the list's Enter shortcut took it). The outside link is exempt; the inside link is still handled by the shortcut.
       expect(fireEvent.keyDown(outside, { key: "Enter" })).toBe(true);
       expect(fireEvent.keyDown(inside, { key: "Enter" })).toBe(false);
     } finally {
@@ -325,8 +323,7 @@ describe("EntryList", () => {
       isFetchingNextPage: false,
     } as unknown as ReturnType<typeof useEntries>);
 
-    // Component renders but entries are virtualized — only virtual items appear in DOM
-    // This test verifies the component mounts without errors when entries are provided
+    // Entries are virtualized, so only virtual items appear in the DOM; this test checks that the component mounts without errors when entries are provided.
     const { container } = renderEntryList();
     expect(container.firstChild).toBeTruthy();
   });
@@ -373,11 +370,7 @@ function mockQueue(items: PriorityQueueRow[]) {
   } as unknown as ReturnType<typeof usePriorityQueue>);
 }
 
-/**
- * The Priority Queue withholds every article a thread absorbed, so a magazine
- * grid built from the entry stream alone loses the story *and* its coverage —
- * a 23-article thread contributing nothing at all, with no gap to notice.
- */
+/* The Priority Queue leaves out every article a thread absorbed, so a magazine grid built from the entry rows alone would drop both the story and its articles: a 23-article thread would not appear at all, and nothing would show that it is missing. */
 describe("EntryList magazine view, Priority Queue", () => {
   const magazineQueue = { sortOverride: "radar" as const, withThreads: true, priorityMode: true };
 

@@ -129,8 +129,7 @@ fun MainNavigation(
                 backStack = viewModel.backStack,
                 onBack = { viewModel.goBack() },
                 modifier = modifier.fillMaxSize().background(SlateDark900),
-                // Gives every back-stack entry its own saved state and ViewModelStore, so two open
-                // articles (or profiles) each keep their own ViewModel.
+                // Gives every back-stack entry its own saved state and ViewModelStore, so two open articles (or profiles) each keep their own ViewModel.
                 entryDecorators = listOf(
                     rememberSaveableStateHolderNavEntryDecorator(),
                     rememberViewModelStoreNavEntryDecorator()
@@ -139,8 +138,7 @@ fun MainNavigation(
                     when (route) {
                         Route.Home -> NavEntry(route) { HomeShell(viewModel, uiState) }
                         is Route.Reader -> NavEntry(route) {
-                            // Next/previous walk the list the article was opened from; the feed list is
-                            // read live so paging keeps it going.
+                            // Next/previous walk the list the article was opened from; the feed list is read live so paging keeps it going.
                             val siblings = route.contextIds
                                 ?: uiState.entries.filterNot { it.isThread }.map { it.id }
                             EntryReaderScreen(
@@ -205,8 +203,7 @@ fun MainNavigation(
                                 onUseDefaultTheme = { viewModel.useDefaultTheme() },
                                 onRefreshThemes = { viewModel.refreshThemes() },
                                 onLogout = {
-                                    // Alerts name this account's articles; a tap after signing in
-                                    // as someone else would open an article they may not have.
+                                    // Alerts name this account's articles; a tap after signing in as someone else would open an article they may not have.
                                     androidx.core.app.NotificationManagerCompat.from(app).cancelAll()
                                     viewModel.logout()
                                 }
@@ -223,8 +220,7 @@ fun MainNavigation(
 /** The tabbed home screen: Feed, Workbench and Search share one bottom navigation bar (a side rail in landscape). */
 @Composable
 private fun HomeShell(viewModel: IntelFeedViewModel, uiState: IntelFeedUiState) {
-    // The feeds drawer covers the whole screen, bottom bar included, so it lives here rather than
-    // inside the Feed tab.
+    // The feeds drawer covers the whole screen, bottom bar included, so it lives here rather than inside the Feed tab.
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val tabStates = rememberSaveableStateHolder()
@@ -255,8 +251,7 @@ private fun HomeShell(viewModel: IntelFeedViewModel, uiState: IntelFeedUiState) 
             )
         }
     ) {
-    // A phone in landscape is only ~400 dp tall: the bottom bar plus each tab's top bar and chips
-    // left about a sixth of the screen for the list. Short windows get a side rail instead.
+    // A phone in landscape is only ~400 dp tall: the bottom bar plus each tab's top bar and chips would leave about a sixth of the screen for the list. Short windows get a side rail instead.
     val shortWindow = isShortWindow()
     val showRail = shortWindow && !uiState.isSelecting
     val railInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical + WindowInsetsSides.Start)
@@ -302,16 +297,14 @@ private fun HomeShell(viewModel: IntelFeedViewModel, uiState: IntelFeedUiState) 
         snackbarHost = { SnackbarHost(LocalSnackbarHostState.current) },
         containerColor = SlateDark900
     ) { innerPadding ->
-        // Each tab has its own Scaffold. Apply and consume this one's padding so tab content ends
-        // above the bottom bar instead of underneath it.
+        // Each tab has its own Scaffold. Apply and consume this one's padding so tab content ends above the bottom bar instead of underneath it.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
                 .consumeWindowInsets(innerPadding)
         ) {
-            // Each tab keeps its own saved state (scroll positions, open dialogs) while another tab
-            // is shown; switching Feed → Search → Feed used to start the feed at the top again.
+            // Each tab keeps its own saved state (scroll positions, open dialogs) while another tab is shown; switching Feed → Search → Feed returns to the same place in the feed.
             tabStates.SaveableStateProvider(uiState.currentTab.name) {
                 when (uiState.currentTab) {
                     AppTab.FEED -> FeedScreen(uiState = uiState, viewModel = viewModel, onOpenDrawer = { scope.launch { drawerState.open() } })
@@ -325,7 +318,7 @@ private fun HomeShell(viewModel: IntelFeedViewModel, uiState: IntelFeedUiState) 
     }
 }
 
-/** Label, icon and accent colour for a home tab, shared by the bottom bar and the side rail. */
+/** Label, icon and accent color for a home tab, shared by the bottom bar and the side rail. */
 private fun AppTab.presentation(strings: AppStrings): Triple<String, ImageVector, androidx.compose.ui.graphics.Color> = when (this) {
     AppTab.FEED -> Triple(strings.navFeed, Icons.Default.RssFeed, CyberBlue)
     AppTab.WORKBENCH -> Triple(strings.navWorkbench, Icons.Default.Hub, com.example.intelfeed.theme.ThemeEngine.domainAccentColor("dash"))

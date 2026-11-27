@@ -1,7 +1,4 @@
-/* Segmented control. Track and button radii must stay concentric: the track's
-   inner corner is (radius - 1px border - 3px padding), so an 8px track leaves
-   exactly --r-sm (4px) for the active segment's fill. Bucketing the track down
-   to --r-md left only 2px of inner radius against a 6px button. */
+/* Segmented control. Track and button radii must stay concentric: the track's inner corner is (radius - 1px border - 3px padding), so an 8px track (--r-md + --sp-1) leaves exactly --r-sm (4px) for the active segment's fill. A track at plain --r-md (6px) would leave only 2px of inner radius around a 4px segment. */
 .track {
   display: inline-flex;
   background: var(--bg-secondary);

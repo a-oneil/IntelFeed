@@ -1,6 +1,6 @@
 """Who sees which tag on an entry, and how that reaches the search index.
 
-The tag list is shared: one `Tag` row per name, with its colour, chip flag and
+The tag list is shared: one `Tag` row per name, with its color, chip flag and
 tooltip. Assignments are not. An `EntryTag` row belongs to the user who applied
 the tag (`user_id` set) and nobody else sees it — unless the tag is global, in
 which case there is one shared row per entry (`user_id` NULL) that everyone
@@ -9,7 +9,7 @@ sees. Every read of an entry's tags on behalf of a user goes through
 owner from the tag's scope.
 
 The search index keeps the two apart: `tags` holds the names of global tags on
-the document (searchable and faceted, as before) and `user_tags` holds
+the document (searchable and faceted) and `user_tags` holds
 `"<user_id>:<name>"` tokens for personal assignments, which the query planner
 only ever matches against the searcher's own id.
 """
@@ -198,7 +198,7 @@ async def sync_entry_tags_to_search(db: AsyncSession, entry_ids: Iterable[uuid.U
 # Flipping a tag between personal and global re-homes every assignment it has.
 # Both directions insert first and delete second, with ON CONFLICT, so a row
 # that already exists in the target shape (a user's own row alongside the
-# shared one, or a shared row left by a raced rule) is simply kept.
+# shared one, or a shared row left by a raced rule) is kept.
 #
 # The INSERT … SELECT statements pass `include_defaults=False`: otherwise
 # SQLAlchemy evaluates the model's Python-side `id` default once and stamps

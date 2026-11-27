@@ -161,8 +161,7 @@ function Readiness({
       {ref && !ref.ok && (
         <div className={`${styles.callout} ${styles.calloutWarn}`}>
           <b>Reference data is not seeded.</b> {ref.consequence} Run this once, then re-check:
-          {/* The whole line comes from the server, compose file included — the UI
-              has no way to know which compose file this instance runs under. */}
+          {/* The whole command comes from the server, compose file included, because the UI cannot know which compose file this instance runs under. */}
           <pre className={styles.code}>{ref.remedy}</pre>
         </div>
       )}
@@ -369,8 +368,7 @@ function AIStep() {
   const [choice, setChoice] = useState<string>("ollama");
   const [baseUrl, setBaseUrl] = useState("http://ollama:11434");
   const [apiKey, setApiKey] = useState("");
-  // openai_compatible only: its /models catalog mixes chat models with tts,
-  // whisper, dall-e and embeddings, so the admin names the one to use.
+  // openai_compatible only: its /models catalog mixes chat models with tts, whisper, dall-e and embeddings, so the admin names the one to use.
   const [model, setModel] = useState("");
   const [result, setResult] = useState<AIProviderCommissionResult | null>(null);
   const [error, setError] = useState("");
@@ -382,10 +380,8 @@ function AIStep() {
     setError("");
     setResult(null);
     try {
-      // Reuse a provider of this type if one is already registered, rather than
-      // minting a duplicate every time the step is revisited or the tour replayed.
-      // GET /ai/providers also lists the caller's personal keys (user_id set);
-      // one of those is never the instance's provider.
+      // Reuse a provider of this type if one is already registered, rather than creating a duplicate every time the step is revisited or the tour replayed.
+      // GET /ai/providers also lists the caller's personal keys (user_id set); one of those is never the instance's provider.
       const existing = providers?.find((p) => !p.user_id && p.provider_type === choice);
       const fields =
         choice === "ollama"
@@ -403,9 +399,7 @@ function AIStep() {
         ? await updateProvider.mutateAsync({ id: existing.id, ...fields, is_active: true })
         : await createProvider.mutateAsync(fields);
 
-      // Registering is not configuring: commission tests the provider for real and
-      // routes the AI tasks at it. take_over moves tasks the startup seeder parked
-      // on the CLI provider, which is the whole reason first-run AI never ran.
+      // Registering a provider routes no work to it: commission tests the provider and assigns the AI tasks to it. take_over also moves the tasks the startup seeder assigned to the CLI provider; left there, a fresh install runs no AI.
       const outcome = await commission.mutateAsync({ id: provider.id, takeOver: true });
       if (!outcome.success) {
         setError(
@@ -592,8 +586,7 @@ function Extras() {
 }
 
 function Verify() {
-  // Poll while this step is on screen: the whole point is watching a real fetch
-  // land rather than being told the configuration was saved.
+  // Poll while this step is on screen, so the checks show a real feed fetch completing rather than only that the configuration was saved.
   const { data: status } = useOnboardingStatus({ pollMs: 5000 });
   const feeds = status?.feeds;
   const entries = status?.entries;
@@ -639,8 +632,7 @@ function Verify() {
             <span className={styles.checkCount}>{feeds.errored}</span>
           </li>
         )}
-        {/* Only shown once a provider exists: an instance deliberately running
-            without AI shouldn't be told it's missing something. */}
+        {/* Shown only when an active provider other than the startup claude_code one exists: an instance deliberately running without AI shouldn't be told it is missing something. */}
         {!!status?.ai.active && status.ai.active !== "claude_code" && (
           <li
             className={`${styles.check} ${status.ai.tasks_assigned > 0 ? styles.checkOk : styles.checkBad}`}
@@ -897,7 +889,7 @@ function Help({ username }: { username: string | undefined }) {
             </>,
           ],
           ["Docs copilot", "Ask it a question about IntelFeed and it answers from those guides."],
-          ["Glossary", "Hover any term you don't recognise for a definition in place."],
+          ["Glossary", "Hover any term you don't recognize for a definition in place."],
         ]}
       />
       <div className={styles.callout}>

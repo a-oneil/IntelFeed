@@ -562,7 +562,7 @@ _VENDOR_LABEL_KEYS = ("verdict", "malware_family", "threat_name", "detection", "
 
 def _vendor_intel(value) -> list[dict]:
     """``{"ANY.RUN": [{"verdict": …}], "Triage": {"malware_family": …}}`` →
-    one row per vendor that labelled the sample."""
+    one row per vendor that labeled the sample."""
     rows = []
     for vendor, intel in (value or {}).items() if isinstance(value, dict) else ():
         first = intel[0] if isinstance(intel, list) and intel else intel
@@ -700,8 +700,9 @@ async def _previously_matched(db: AsyncSession, source_type: str) -> set[uuid.UU
 async def sync_export(db: AsyncSession, gateway: SourceGateway, api_key: str | None, cls: ExportSource) -> dict:
     """Download the source's export, match it against the ledger and apply
     each active match; withdraw what an earlier run gave an observable no
-    longer in the export (``_previously_matched``). Without a key nothing is sent; a refusal or an empty export stops
-    the run before anything changes; an error status raises."""
+    longer in the export (``_previously_matched``). Without a key nothing is
+    sent; a refusal or an empty export stops the run before anything
+    changes; an error status raises."""
     from app.enrichment.pipeline import apply_catalog_result
 
     stats = {"rows": 0, "matched": 0, "updated": 0, "withdrawn": 0, "stopped": None}

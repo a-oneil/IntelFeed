@@ -1,12 +1,6 @@
-/**
- * entityProfileConfig — the single source of truth for the unified entity profile.
- *
- * Each entity type declares which tabs it shows, which signal badges appear in the
- * header, which editable identity fields render in the Overview, which Overview
- * "signal panels" to surface, its external pivot links, cascade-delete type, and
- * which header/⋯ actions apply. Adding a field/type/tab is a config change here —
- * not an edit to a monolithic component.
- */
+/** entityProfileConfig — the single source of truth for the unified entity profile.
+
+Each entity type declares which tabs it shows, which signal badges appear in the header, which editable identity fields render in the Overview, which Overview "signal panels" to surface, its external pivot links, cascade-delete type, and which header/⋯ actions apply. Adding a field/type/tab is a config change here, not an edit to a large component. */
 import type { EntityType } from "@/stores/intelStore";
 import type { ProfileOverviewMode } from "@/stores/uiStore";
 import type { EntitySearchResult } from "@/api/types";
@@ -23,8 +17,7 @@ export type TabKey =
   | "detection"
   | "geography"
   | "victimology"
-  // Not in any tabs array — reachable only via the "Review gaps" next-action
-  // chip; ProfileTabs appends it as an ephemeral tab while active.
+  // Not in any tabs array — reachable only via the "Review gaps" next-action chip; ProfileTabs appends it as a temporary tab while active.
   | "detection_gaps";
 
 export const TAB_LABELS: Record<TabKey, string> = {
@@ -38,10 +31,7 @@ export const TAB_LABELS: Record<TabKey, string> = {
   detection_gaps: "Detection Gaps",
 };
 
-/**
- * Hover cards for the tabs whose name doesn't say what's behind it. Tabs absent
- * from this map get no card — "Overview" explains itself.
- */
+/** Hover cards for the tabs whose name doesn't say what's behind it. Tabs absent from this map get no card, since "Overview" explains itself. */
 export const TAB_HINTS: Partial<Record<TabKey, { title: string; body: string; aside?: string }>> = {
   relationships: {
     title: "Relationships",
@@ -74,23 +64,15 @@ export interface BadgeSpec {
   label: string;
   tone: BadgeTone;
   title?: string;
-  /** When set, the badge is click-to-edit for this entity field (it replaces
-   * the old identity-row editor). An empty label renders a ghost chip with the
-   * placeholder. `editKind: "country"` links to the country profile when the
-   * country id is resolvable, mirroring the old identity-field behavior. */
+  /** When set, the badge is click-to-edit for this entity field. An empty label renders a ghost chip with the placeholder. `editKind: "country"` links to the country profile when the country id is resolvable. */
   editKey?: string;
   editKind?: "text" | "country" | "sector";
   placeholder?: string;
-  /** Entity field this badge represents, for the "who says so" provenance
-   * marker. Defaults to `editKey`; set it explicitly on badges that display a
-   * field without editing it (targeted sectors), or leave both unset on badges
-   * that aren't a field at all. */
+  /** Entity field this badge represents, for the "who says so" provenance marker. Defaults to `editKey`; set it explicitly on badges that display a field without editing it (targeted sectors), or leave both unset on badges that aren't a field at all. */
   provenanceKey?: string;
-  /** Heading for the provenance popover, when the badge's own `title` is not a
-   *  clean field name (the sector badge's title carries the whole list). */
+  /** Heading for the provenance popover, when the badge's own `title` is not a clean field name (the sector badge's title carries the whole list). */
   provenanceLabel?: string;
-  /** Raw stored value when it differs from the display label (e.g. enum vs
-   * pretty label) — the inline editor edits this, not the label. */
+  /** Raw stored value when it differs from the display label (e.g. enum vs display label) — the inline editor edits this, not the label. */
   editValue?: string;
 }
 
@@ -109,9 +91,7 @@ export function severityTone(severity: string | null | undefined): BadgeTone {
   }
 }
 
-/** Manifest badges (GET …/context `badges[]`) as header chips, after the
- * hand-written ones. Quiet on purpose: only red/amber tones keep their color —
- * "benign" or "info" is not something to look at, so it renders neutral. */
+/** Manifest badges (GET …/context `badges[]`) as header chips, after the hand-written ones. Only red/amber tones keep their color; any other tone ("benign", "info") renders neutral so it does not draw attention. */
 export function contextBadgeSpecs(
   badges: EntityContextBadge[] | undefined,
   sources: Array<{ source_type: string; label: string }> = [],
@@ -133,9 +113,7 @@ export function contextBadgeSpecs(
   });
 }
 
-/** Product support lifecycle (endoflife.date) → a header badge. Quiet while
- * the product is maintained; amber once only security fixes ship or the end
- * is under 90 days off; red past end of life. */
+/** Product support lifecycle (endoflife.date) → a header badge. No badge while the product is maintained; amber once only security fixes ship or the end is under 90 days off; red past end of life. */
 export function supportBadge(
   e: { support_status?: string | null; next_eol?: string | null },
   today: Date = new Date(),
@@ -163,10 +141,7 @@ export function supportBadge(
   return null;
 }
 
-/** A CVE affecting an end-of-life product, or an end-of-life release of a
- * product still maintained (Windows Server 23H2, PAN-OS 10.1): the vendor
- * won't ship a fix for it, so the badge says so. Null when nothing affected
- * is past end of life. */
+/** A CVE affecting an end-of-life product, or an end-of-life release of a product still maintained (Windows Server 23H2, PAN-OS 10.1): the vendor won't ship a fix for it, so the badge says so. Null when nothing affected is past end of life. */
 export function noPatchBadge(
   rows:
     | Array<{
@@ -192,9 +167,7 @@ export function noPatchBadge(
   };
 }
 
-/** KEV = the CISA flag OR an exploit_status that already says known-exploited.
- * The retired KEVBadge honored both; keying on `is_kev` alone reads a CVE whose
- * enrichment wrote the status but never set the flag as "Not listed". */
+/** KEV = the CISA flag OR an exploit_status that already says known-exploited. Keying on `is_kev` alone would show "Not listed" for a CVE whose enrichment wrote the status but never set the flag. */
 export function isKnownExploited(e: {
   is_kev?: boolean | null;
   exploit_status?: string | null;
@@ -243,16 +216,7 @@ export type OverviewPanelKey =
   | "infrastructure";
 
 // ── Overview sections ─────────────────────────────────────────────────────
-/**
- * The Overview is one column of sections under the always-open brief
- * (assessment, key facts, what changed, next steps). Each section is a row that
- * opens in place; closed, its digest answers the usual question.
- * `overviewSections` is which rows a type has; the order is the same for every
- * type (OVERVIEW_SECTION_ORDER), so Context is always the first row under the
- * brief and Stories & reading, Activity and Workspace always close the page.
- * Every row starts closed; uiStore remembers per type which ones the analyst
- * opened.
- */
+/** The Overview is one column of sections under the always-open brief (assessment, key facts, what changed, next steps). Each section is a row that opens in place; when closed, it shows a one-line digest. `overviewSections` is which rows a type has; the order is the same for every type (OVERVIEW_SECTION_ORDER), so Context is always the first row under the brief and Stories & reading, Activity and Workspace are always the last rows on the page. Every row starts closed; uiStore remembers per type which ones the analyst opened. */
 export type OverviewSectionKey =
   | "hunts"
   | "victims"
@@ -268,11 +232,7 @@ export type OverviewSectionKey =
   | "activity"
   | "workspace";
 
-/**
- * One order for every type: Context first (every type has it), then the rows
- * that are the entity's own record or structure, then Hunts (what to go and
- * look for), then what is written about it.
- */
+/** One order for every type: Context first (every type has it), then the rows that are the entity's own record or structure, then Hunts (what to go and look for), then what is written about it. */
 export const OVERVIEW_SECTION_ORDER: OverviewSectionKey[] = [
   "context",
   "victims",
@@ -294,12 +254,7 @@ export function orderedOverviewSections(keys: OverviewSectionKey[]): OverviewSec
   return OVERVIEW_SECTION_ORDER.filter((k) => keys.includes(k));
 }
 
-/**
- * Which of a type's rows are open right now. "everything" opens them all.
- * Otherwise the rows the analyst left open, minus any id the page no longer
- * has (renamed, removed, or hidden from a visitor), so a stale id is never
- * shown or written back. Nothing stored: all closed.
- */
+/** Which of a type's rows are open right now. "everything" opens them all. Otherwise the rows the analyst left open, minus any id the page no longer has (renamed, removed, or hidden from a visitor), so a stale id is never shown or written back. Nothing stored: all closed. */
 export function resolveOpenSections(
   stored: string[] | undefined,
   sections: OverviewSectionKey[],
@@ -355,12 +310,9 @@ export interface EntityProfileConfig {
   identityFields: IdentityFieldDef[];
   hasAliases: boolean;
   hasDescription: boolean;
-  /** Whether the display name is user-editable (click-to-edit in the header).
-   * False for cve/cwe/ttp/mitigation whose identity is an external id, not a name. */
+  /** Whether the display name is user-editable (click-to-edit in the header). False for types whose identity is an external id or a fixed vocabulary rather than a name (cve, cwe, ttp, mitigation, observable, sector). */
   nameEditable: boolean;
-  /** Entity field holding an external catalog id that should render in mono
-   * ahead of the name ("T1059.001 Command and Scripting Interpreter",
-   * "CWE-416 Use After Free"). Set only for types whose identity IS the id. */
+  /** Entity field holding an external catalog id that should render in mono ahead of the name ("T1059.001 Command and Scripting Interpreter", "CWE-416 Use After Free"). Set only for types whose identity IS the id. */
   monoIdKey?: "technique_id" | "cwe_id" | "value";
   overviewPanels: OverviewPanelKey[];
   overviewSections: OverviewSectionKey[];
@@ -372,12 +324,8 @@ export interface EntityProfileConfig {
 
 
 /** Targeted sectors as read-only chips.
- *
- * Sectors are rolled up from the victim sectors on an entity's articles, so
- * they belong with the other observed signals rather than in an editable field.
- * Capped so a broadly-targeting actor doesn't push the identity badges off the
- * row; the full list stays in the title attribute.
- */
+
+Sectors are rolled up from the victim sectors on an entity's articles, so they belong with the other observed signals rather than in an editable field. Capped at four so a broadly-targeting actor doesn't push the identity badges off the row; the full list stays in the title attribute. */
 function sectorBadges(sectors: string[] | undefined): BadgeSpec[] {
   if (!sectors?.length) return [];
   const all = sectors.join(", ");
@@ -385,8 +333,7 @@ function sectorBadges(sectors: string[] | undefined): BadgeSpec[] {
     label: s,
     tone: "neutral" as BadgeTone,
     title: sectors.length > 4 ? `Targeted sectors: ${all}` : "Targeted sector",
-    // Not editable — the kind only tells SignalBadges to link the chip to the
-    // sector profile (resolved by display name).
+    // Not editable — the kind only tells SignalBadges to link the chip to the sector profile (resolved by display name).
     editKind: "sector" as const,
     // One marker for the whole group — the claim is about the list, not each chip.
     ...(i === 0 ? { provenanceKey: "targeted_sectors", provenanceLabel: "Targeted sectors" } : {}),
@@ -394,12 +341,7 @@ function sectorBadges(sectors: string[] | undefined): BadgeSpec[] {
 }
 
 export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
-  // A campaign is the one profile type nobody extracted — it is a curated case
-  // file. It still pivots (its articles are a seed like any other), so it earns
-  // the same four tabs the actors have, and the tabs it used to carry on its own
-  // page collapse into shell surfaces: Timeline into the activity readout,
-  // Entities into the associates strip, Searches and Suggestions into the
-  // Activity section's intake panel.
+  // A campaign is the one profile type that is never extracted: it is a curated case file. It still pivots (its articles are a seed like any other), so it gets the same tabs an actor has, and its timeline, entities, searches and suggestions show in the shared profile: the timeline in the activity readout, entities in the associates strip, searches and suggestions in the Activity section's intake panel.
   campaign: {
     tabs: ["overview", "relationships", "detection"],
     signalBadges: (e) => [
@@ -422,16 +364,13 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     overviewSections: ["infrastructure", "hunts", "reading", "activity", "workspace"],
     // Campaigns are internal objects; there is nothing to look them up in.
     externalLinks: () => [],
-    // No cascadeType: the preview counts extraction links that would be severed,
-    // and deleting a campaign severs nothing — the articles and entities it held
-    // all outlive it. Nothing to deny-list either; extraction never made it.
+    // No cascadeType: the preview counts extraction links that would be severed, and deleting a campaign severs nothing — the articles and entities it held all outlive it. Nothing to deny-list either; extraction never made it.
     cascadeType: undefined,
     actions: ["generate_report", "ai_summary", "delete"],
   },
   threat_actor: {
     tabs: ["overview", "relationships", "detection"],
-    // Badges are the single representation of motivation/origin — editable
-    // in place (the identity row keeps only fields with no badge twin).
+    // Badges are the single representation of motivation/origin — editable in place (the identity row keeps only fields with no matching badge).
     signalBadges: (e) => [
       { label: e.motivation || "", tone: "info", title: "Motivation", editKey: "motivation", editKind: "text", placeholder: "set motivation" },
       { label: e.country || "", tone: "neutral", title: "Origin country", editKey: "country", editKind: "country", placeholder: "set origin" },
@@ -444,8 +383,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasAliases: true,
     hasDescription: true,
     nameEditable: true,
-    // Techniques/attribution now live in the hero (associates strip, badges) —
-    // no overview panels repeat them.
+    // Techniques/attribution live in the hero (associates strip, badges), so no overview panels repeat them.
     overviewPanels: ["infrastructure"],
     overviewSections: ["context", "victims", "infrastructure", "hunts", "reading", "activity", "workspace"],
     externalLinks: (e) => getPivotLinks("threat_actor", e.name || ""),
@@ -483,8 +421,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
           title: `CISA Known Exploited Vulnerability${e.kev_date_added ? `. Added ${e.kev_date_added}` : ""}${e.kev_due_date ? `. Remediation due ${e.kev_due_date}` : ""}`,
         });
       }
-      // Qualitative headline only — the numbers (CVSS score, EPSS, PoC count)
-      // live in the Overview's Snapshot card, their single home.
+      // Qualitative label only — the numbers (CVSS score, EPSS, PoC count) live in the Overview's Snapshot card and are shown only there.
       out.push({
         label: e.severity ? e.severity.toUpperCase() : "",
         tone: severityTone(e.severity),
@@ -511,9 +448,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasAliases: false,
     hasDescription: true,
     nameEditable: false,
-    // Exploitation/EPSS/KEV numbers live in the key facts; PoC links in the
-    // Exploit & PoC section; references in Sources. Only the structured
-    // CPE affected-products list keeps a panel of its own.
+    // Exploitation/EPSS/KEV numbers live in the key facts; PoC links in the Exploit & PoC section; references in Sources. Only the structured CPE affected-products list keeps a panel of its own.
     overviewPanels: ["cve_affected"],
     overviewSections: ["context", "exploit", "affected", "hunts", "reading", "activity", "workspace"],
     externalLinks: (e) => getPivotLinks("cve", e.cve_id || ""),
@@ -522,9 +457,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
   },
 
   cwe: {
-    // TTP's tab set plus Vulnerabilities: unlike a technique, a weakness has an
-    // authoritative CVE list behind it, and a count with nothing to open is a
-    // dead end.
+    // TTP's tab set plus Vulnerabilities: unlike a technique, a weakness has an authoritative CVE list behind it, and a count with nothing to open is a dead end.
     tabs: ["overview", "vulnerabilities", "relationships", "detection"],
     signalBadges: (e) => {
       const out: BadgeSpec[] = [];
@@ -552,9 +485,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
           title: "CVEs carrying this weakness that are in CISA KEV",
         });
       }
-      // Mapping guidance is the quality signal that makes a count honest: a CVE
-      // tagged with a Discouraged or Prohibited id is imprecisely classified,
-      // and MITRE says so in the catalog.
+      // Mapping guidance is the quality signal for the CVE count: a CVE tagged with a Discouraged or Prohibited id is imprecisely classified, and MITRE says so in the catalog.
       if (e.mapping_usage && e.mapping_usage !== "Allowed") {
         out.push({
           label: e.mapping_usage,
@@ -574,8 +505,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
       return out;
     },
     identityFields: [],
-    // The catalog's alternate terms are shown in the Catalog panel, not as
-    // editable aliases: they come from MITRE and nothing should write them back.
+    // The catalog's alternate terms are shown in the Catalog panel, not as editable aliases: they come from MITRE and nothing should write them back.
     hasAliases: false,
     hasDescription: true,
     nameEditable: false,
@@ -585,18 +515,14 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     // The catalog page keys on the bare number.
     externalLinks: (e) => getPivotLinks("cwe", (e.cwe_id || "").replace(/^CWE-/i, "")),
     cascadeType: "cwe",
-    // No convert or merge — a weakness is catalog-keyed, so it is neither a
-    // mis-filed other type nor a duplicate of one. No delete either: rows come
-    // from the seeder and a re-seed would just bring them back.
+    // No convert or merge — a weakness is catalog-keyed, so it is neither a mis-filed other type nor a duplicate of one. No delete either: rows come from the seeder and a re-seed would bring them back.
     actions: ["add_to_campaign", "generate_report", "ai_summary", "rescan", "unlink_all", "clear_timeline"],
   },
 
   ttp: {
     tabs: ["overview", "relationships", "detection"],
     signalBadges: (e) => {
-      // Catalog techniques can span multiple tactics — the first one stays
-      // click-to-edit (it maps to the primary `tactic` field), the rest render
-      // as read-only chips.
+      // Catalog techniques can span multiple tactics — the first one stays click-to-edit (it maps to the primary `tactic` field), the rest render as read-only chips.
       const tactics = e.tactics?.length ? e.tactics : e.tactic ? [e.tactic] : [];
       const out: BadgeSpec[] = [
         { label: tactics[0] || "", tone: "info", title: "Tactic", editKey: "tactic", editKind: "text", placeholder: "set tactic" },
@@ -650,9 +576,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
   },
 
-  // A sector is a closed vocabulary, not an extracted entity: no create, merge,
-  // convert, delete, or rescan (sectors are never autolinked). Its name and
-  // slug are the vocabulary itself; aliases and description are editable.
+  // A sector is a closed vocabulary, not an extracted entity: no create, merge, convert, delete, or rescan (sectors are never autolinked). Its name and slug are the vocabulary itself; aliases and description are editable.
   sector: {
     tabs: ["overview", "victimology", "relationships"],
     signalBadges: (e) =>
@@ -685,10 +609,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
   },
 
-  // The IOC ledger's profile: the lightest in the app. Identity is the
-  // (kind, value) pair — value renders as the mono hero name via
-  // entityDisplayName's `e.value` fallback — and every badge is a lifecycle
-  // fact (kind, role, decayed confidence, state) rather than an editable field.
+  // The IOC ledger's profile: the lightest in the app. Identity is the (kind, value) pair — value renders as the mono hero name via entityDisplayName's `e.value` fallback — and every badge is a lifecycle fact (kind, role, decayed confidence, state, creation source) rather than an editable field.
   observable: {
     tabs: ["overview", "relationships"],
     signalBadges: (e) => [
@@ -718,9 +639,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
         ? observablePivotLinks(e.kind, e.value).map((l) => ({ platform: l.label, url: l.url }))
         : [],
     cascadeType: "observable",
-    // Delete drops the row outright; the delete popover's "never capture it
-    // again" option swaps in the deny tombstone instead, which keeps the row
-    // so every capture door can go on refusing the value.
+    // Delete drops the row outright; the delete popover's "never capture it again" option replaces it with a deny tombstone instead, which keeps the row so every capture path keeps refusing the value.
     actions: ["add_to_campaign", "generate_report", "ai_summary", "unlink_all", "delete"],
   },
 
@@ -793,8 +712,7 @@ export function entityProfilePath(type: EntityType, id: string): string {
 export function entityDisplayName(e: EntitySearchResult | undefined, fallback = ""): string {
   if (!e) return fallback;
   return (
-    // CWE carries both an id and a name and reads as one label, the same way a
-    // technique does — so it is checked before the bare-name fallback.
+    // CWE carries both an id and a name and reads as one label, the same way a technique does — so it is checked before the bare-name fallback.
     (e.cwe_id ? `${e.cwe_id}${e.name && e.name !== e.cwe_id ? ` ${e.name}` : ""}` : "") ||
     e.name ||
     e.cve_id ||
@@ -806,5 +724,3 @@ export function entityDisplayName(e: EntitySearchResult | undefined, fallback = 
     fallback
   );
 }
-
-// re-export for convenience

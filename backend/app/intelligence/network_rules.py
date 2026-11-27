@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 
 
 def _next_sid(base: int = 1000000) -> int:
-    """Generate a SID. In production, track used SIDs; here we use timestamp-based."""
+    """Generate a SID from the current timestamp. Used SIDs are not tracked, so calls in the same second collide."""
     return base + int(datetime.utcnow().timestamp()) % 999999
 
 

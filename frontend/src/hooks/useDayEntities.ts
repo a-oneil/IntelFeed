@@ -25,8 +25,7 @@ export interface DayTTP {
   first_seen_at: string | null;
 }
 
-/** Fields shared by every named-entity type — mirror the entry reader's
- *  popover so the daily-summary tooltip renders the same metadata. */
+/** Fields shared by every named-entity type. They mirror the entry reader's popover so the daily-summary tooltip renders the same metadata. */
 export interface DayNamedEntity {
   id: string;
   name: string;
@@ -36,8 +35,7 @@ export interface DayNamedEntity {
   first_seen_at: string | null;
   wikipedia_url: string | null;
   wikipedia_image_url: string | null;
-  /** Surface forms the autolinker actually found in source articles —
-   *  most likely to match the AI summary's wording verbatim. */
+  /** Names the autolinker found in the source articles; these are the most likely to match the AI summary's wording verbatim. */
   matched_names: string[];
 }
 
@@ -104,8 +102,7 @@ export interface DayEntitiesFilters {
   category_id?: string;
 }
 
-/** Distinct entities mentioned by all articles in a day window —
- * used to drive inline highlighting on the day's AI summary. */
+/** Distinct entities mentioned by the articles in a day window, used for inline highlighting on the day's AI summary. */
 export function useDayEntities(
   dayKey: string,
   since: string | null,

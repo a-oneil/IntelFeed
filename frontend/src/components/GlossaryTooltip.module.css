@@ -30,7 +30,7 @@
   color: var(--text-primary);
 }
 
-/* Additive only — colour, size and shape come from the Chip primitive. */
+/* Additive only — color, size and shape come from the Chip primitive. */
 .categoryBadge {
   letter-spacing: 0.05em;
 }

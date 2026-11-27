@@ -2,8 +2,8 @@
 
 Sectors are a small, closed vocabulary (21 canonical slugs) with an alias map
 that normalizes the free-form phrasing articles use ("banks", "hospitals",
-"power grid") onto a canonical slug. Since 2026-09 the vocabulary is also a
-first-class entity: the ``sectors`` table is seeded from ``CANONICAL_SECTORS``
+"power grid") onto a canonical slug. The vocabulary is also an entity type:
+the ``sectors`` table is seeded from ``CANONICAL_SECTORS``
 (one row per slug, ids minted deterministically by ``sector_uuid`` so every
 install shares them) and ``entry_sectors`` carries both the slug and the FK.
 
@@ -49,7 +49,8 @@ CANONICAL_SECTORS: dict[str, str] = {
 }
 
 # lowercase alias -> slug. Exact (whole-phrase) matches only — the extraction
-# prompt is instructed to emit canonical names, this map just absorbs drift.
+# prompt is instructed to emit canonical names; this map catches the variants
+# that still come through.
 SECTOR_ALIASES: dict[str, str] = {
     # healthcare
     "hospital": "healthcare",
@@ -322,8 +323,8 @@ def parse_sector_setting(raw: str | None) -> list[str]:
 # Entity rows
 # ---------------------------------------------------------------------------
 
-#: Namespace for the deterministic sector ids. A closed vocabulary gains
-#: nothing from random ids and loses a lot: with uuid5 every install (dev,
+#: Namespace for the deterministic sector ids. A closed vocabulary has no
+#: use for random ids: with uuid5 every install (dev,
 #: prod, the test schema, a fresh seed) agrees on which uuid "healthcare" is,
 #: so profile links survive a re-seed and fixtures never need a lookup.
 SECTOR_NAMESPACE = uuid.UUID("4e6a30ee-1eeb-5751-b76b-5c4de806fec1")

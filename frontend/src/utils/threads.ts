@@ -15,7 +15,7 @@ export interface ThreadItem {
 
 export type QueueItem = DisplayItemWithDividers | ThreadItem;
 
-/** "11 outlets · 23 articles · 6 new" — the row's one-line account of itself. */
+/** The row's one-line summary, e.g. "11 outlets · 23 articles · 6 new". */
 export function threadSummaryLine(thread: StoryThread): string {
   const parts = [
     `${thread.source_count} outlet${thread.source_count === 1 ? "" : "s"}`,
@@ -29,12 +29,7 @@ export function threadSummaryLine(thread: StoryThread): string {
 /**
  * Render the server's Priority Queue rows as list items, in the order they came.
  *
- * The ranking — where a thread sits, which entries it swallowed — is decided by
- * GET /api/entries/priority-queue, so nothing here reorders anything. The only
- * work left is presentational: consecutive CVE entries from one feed still
- * collapse into a group, and a thread row between them ends a run rather than
- * being grouped across. `flatIndex` stays an index into the entry-only stream,
- * which is what keyboard navigation and range selection count in.
+ * The ranking (where a thread sits, which entries it absorbed) is decided by GET /api/entries/priority-queue, so nothing here reorders anything. The only work left is presentational: consecutive CVE entries from one feed collapse into a group, and a thread row between them ends a run rather than being grouped across. `flatIndex` stays an index into the entry-only stream, which is what keyboard navigation and range selection count in.
  */
 export function queueItems(rows: PriorityQueueRow[]): QueueItem[] {
   const out: QueueItem[] = [];
@@ -76,18 +71,11 @@ export function queueItems(rows: PriorityQueueRow[]): QueueItem[] {
 export type MagazineItem = SingleItem | ThreadItem;
 
 /**
- * Render the server's Priority Queue rows as magazine cards, in the order they
- * came.
+ * Render the server's Priority Queue rows as magazine cards, in the order they came.
  *
- * A thread has to earn a card of its own here rather than a badge on someone
- * else's: the endpoint drops every article a thread absorbed, so a grid built
- * from the entry stream alone loses the thread *and* the coverage it stands
- * for — a 23-article story contributes no cards at all.
+ * A thread gets a card of its own here rather than a badge on another card: the endpoint drops every article a thread absorbed, so a grid built from the entry stream alone would lose the thread *and* its coverage — a 23-article story would contribute no cards at all.
  *
- * Deliberately not `queueItems()` with its groups flattened. Magazine has never
- * collapsed consecutive CVE entries (a card is a card), so borrowing that walk
- * would mean undoing the work it had just done. `flatIndex` still counts the
- * entry-only stream, which is what shift-range selection indexes into.
+ * Deliberately not `queueItems()` with its groups flattened. Magazine view does not collapse consecutive CVE entries (one card per entry), so reusing that loop would mean undoing the grouping it had just done. `flatIndex` still counts the entry-only stream, which is what shift-range selection indexes into.
  */
 export function magazineQueueItems(rows: PriorityQueueRow[]): MagazineItem[] {
   const out: MagazineItem[] = [];

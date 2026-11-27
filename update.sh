@@ -33,10 +33,10 @@ git fetch origin main --quiet
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse origin/main)
 
-# Set between pulling and a clean build+start. Without it a failed build left the
-# host on new code with old containers and nothing to retry: the next tick saw
-# HEAD == origin/main and skipped, so the stack stayed stale until someone
-# noticed. With it, every tick retries until the build succeeds.
+# Set between pulling and a clean build+start. Without it, a failed build would
+# leave the host on new code with old containers and nothing to retry: the next
+# tick would see HEAD == origin/main and skip, so the stack would stay stale
+# until someone noticed. With it, every tick retries until the build succeeds.
 PENDING_MARKER="$REPO_DIR/.update-pending"
 
 # The commit the running containers were last deployed from. This, not
@@ -71,9 +71,9 @@ HEAD_SHA=$(git rev-parse HEAD)
 # bind-mounted read-only into the containers, so new content there is live the
 # moment the pull lands; claude/ (the Claude skills and agents) runs on the
 # analyst's own machine against the API, so no container needs it at all.
-# Rebuilding and recreating the
-# stack for those is pure downtime: a cold `docker compose build` on the prod box
-# is minutes of CPU, and `up -d` drops every connection in flight.
+# Rebuilding and recreating the stack for those only causes downtime: a cold
+# `docker compose build` on the prod box is minutes of CPU, and `up -d` drops
+# every connection in flight.
 #
 # So classify instead, and act on the narrowest thing that works:
 #
@@ -94,8 +94,8 @@ if [ -f "$DEPLOYED_MARKER" ]; then
     fi
 fi
 if [ -z "$base" ] && [ "$was_pending" = false ]; then
-    # First tick after this script grew a marker, or the recorded commit was
-    # rewritten away. A clean (non-pending) tick means the containers match the
+    # No marker file yet (first run with this script), or the recorded commit no
+    # longer exists because history was rewritten. A clean (non-pending) tick means the containers match the
     # pre-pull HEAD, so that is a sound base.
     base="$LOCAL"
 fi

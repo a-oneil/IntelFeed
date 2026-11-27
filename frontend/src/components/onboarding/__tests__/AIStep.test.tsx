@@ -3,11 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { AIProvider, AIProviderCommissionResult } from "@/api/types";
 
-/**
- * The AI step used to call `POST /ai/providers` and say "Provider saved." That
- * was two lies in one: nothing had contacted the host, and a provider row runs
- * no AI on its own — work only happens once tasks are routed at it.
- */
+/* These tests guard against an AI step that only calls `POST /ai/providers` and reports "Provider saved." That message is wrong twice: nothing has contacted the host, and a provider row runs no AI on its own; work runs only once tasks are routed to it. */
 
 const createProvider = vi.fn();
 const updateProvider = vi.fn();
@@ -74,8 +70,7 @@ describe("the onboarding AI step", () => {
     expect(createProvider).toHaveBeenCalledWith(
       expect.objectContaining({ provider_type: "ollama", base_url: "http://ollama:11434" }),
     );
-    // take_over is the point: a fresh install's tasks are parked on the startup
-    // CLI provider, and leaving them there is why first-run AI never ran.
+    // take_over matters: a fresh install's tasks are assigned to the startup CLI provider, and if they stay there no AI runs.
     expect(commissionProvider).toHaveBeenCalledWith({ id: "p1", takeOver: true });
   });
 
@@ -87,7 +82,7 @@ describe("the onboarding AI step", () => {
     await waitFor(() => expect(screen.getByText(/AI tasks are assigned/i)).toBeInTheDocument());
     expect(screen.getByText(/28 tasks now run on/)).toBeInTheDocument();
     expect(screen.getByText("qwen3.5:9b")).toBeInTheDocument();
-    // Agentic tasks staying on the CLI is expected behaviour, so say so.
+    // Agentic tasks staying on the CLI is expected behavior, so say so.
     expect(screen.getByText(/2 agentic tasks stayed where they were/)).toBeInTheDocument();
   });
 
@@ -105,13 +100,13 @@ describe("the onboarding AI step", () => {
     renderAIStep();
     await user.click(screen.getByRole("button", { name: /^Connect$/ }));
 
-    // The old copy asserted a connection failure it had no way to know about.
+    // The error shows the provider's own message instead of a generic connection failure the UI cannot know about.
     await waitFor(() => expect(screen.getByText(/Connection refused/)).toBeInTheDocument());
     expect(screen.queryByText(/AI tasks are assigned/i)).not.toBeInTheDocument();
   });
 
   it("reuses a provider of the same type instead of minting duplicates", async () => {
-    // Revisiting the step, or replaying the tour, used to add another row each time.
+    // Without the reuse, revisiting the step or replaying the tour adds another provider row each time.
     providers = [{ id: "existing", provider_type: "ollama" } as AIProvider];
     const user = userEvent.setup();
     renderAIStep();
@@ -125,8 +120,7 @@ describe("the onboarding AI step", () => {
   });
 
   it("never mistakes the admin's own personal key for the instance provider", async () => {
-    // GET /ai/providers lists the caller's personal keys too; reusing one here
-    // would turn a private key into the provider every pipeline task runs on.
+    // GET /ai/providers lists the caller's personal keys too; reusing one here would make a private key the provider every pipeline task runs on.
     providers = [{ id: "mine", provider_type: "ollama", user_id: "u1" } as AIProvider];
     const user = userEvent.setup();
     renderAIStep();
@@ -138,8 +132,7 @@ describe("the onboarding AI step", () => {
   });
 
   it("makes an OpenAI-compatible endpoint name its model rather than guessing one", async () => {
-    // /v1/models on api.openai.com sorts babbage-002 first; guessing from it
-    // would move every task onto a model that can't chat.
+    // /v1/models on api.openai.com lists babbage-002 first; picking from that list would move every task onto a model that can't chat.
     const user = userEvent.setup();
     renderAIStep();
     await user.click(screen.getByRole("button", { name: /OpenAI-compatible/ }));

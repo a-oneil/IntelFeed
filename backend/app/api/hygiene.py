@@ -592,7 +592,7 @@ class FeedRow(BaseModel):
     links: list[FeedLink] = []  # affected entities/entries to deep-link from the row
     # Who proposed it: "adjudicator" (the post-analysis adjudicate stage,
     # with the article in hand; every link-log row), "merge_review" (the
-    # catalogue-wide duplicate review, two profiles side by side) or "scan"
+    # catalog-wide duplicate review, two profiles side by side) or "scan"
     # (the on-demand scans).
     origin: str | None = None
     # What applying it changes: links | entities | relationships (the Review
@@ -680,7 +680,7 @@ ADJUDICATOR_ALIAS_KIND = "adjudicator"
 PROPOSAL_ORIGINS = (ORIGIN_ADJUDICATOR, ORIGIN_MERGE_REVIEW, ORIGIN_SCAN)
 _ORIGIN_HELP = (
     "'adjudicator' = rows the post-analysis adjudicate stage filed with the article in hand (every link-log "
-    "row but a hand unlink, the retired link validator's included); 'merge_review' = the catalogue-wide "
+    "row but a hand unlink, the retired link validator's included); 'merge_review' = the catalog-wide "
     "duplicate review; 'scan' = the on-demand scans. Omit for all."
 )
 
@@ -1642,9 +1642,9 @@ async def hygiene_feed(
     fetch_cap = limit + offset + 1
 
     # When an action filter is set, skip the table it doesn't belong to entirely.
-    # The previous elif-chain failed to exclude one side when the action was
-    # valid on the OTHER side, leaking unfiltered rows through. Compute
-    # eligibility up-front so the queries are obviously scoped.
+    # Eligibility is computed up front, per table: an elif-chain here once
+    # failed to exclude one side when the action was valid on the OTHER side,
+    # which let unfiltered rows through.
     if not isinstance(domain, str):
         domain = None  # called directly (the curation tool), not through FastAPI
     if not isinstance(entity_type, str):
@@ -1823,7 +1823,7 @@ async def hygiene_feed(
     )
 
 
-# The catalogue types a maintenance-log row can be about, for a name search.
+# The catalog types a maintenance-log row can be about, for a name search.
 _NAME_SEARCH_TYPES = ("threat_actor", "malware", "tool", "vendor", "product", "country", "cve", "ttp", "observable")
 
 
@@ -2251,13 +2251,13 @@ async def apply_normalize_name(
 # Deterministic alias hygiene scan
 # ---------------------------------------------------------------------------
 #
-# Catches the duplicates the merge engine doesn't bother with: an alias that
-# is identical to (or only differs from) the canonical name, or matches the
-# canonical name of a sibling entity (likely missed merge).
+# Catches the duplicates the merge engine doesn't handle: an alias that is
+# identical to the canonical name or differs from it only in case, or matches
+# the canonical name of a sibling entity (likely missed merge).
 #
-# Pure SQL — no AI. Idempotent: re-running collapses to the same proposal
-# rows because we DELETE existing unapplied alias_collision rows before each
-# scan, then re-emit.
+# Deterministic, no AI. Idempotent: re-running collapses to the same proposal
+# rows because each scan deletes its own unapplied alias_collision rows (the
+# three scan kinds) before it re-emits.
 
 ALIAS_SCAN_TYPES = ["threat_actor", "malware", "vendor", "product", "tool"]
 
@@ -2443,8 +2443,8 @@ async def apply_alias_collision(
 # ---------------------------------------------------------------------------
 #
 # Products with vendor_id IS NULL whose name starts with a known vendor name
-# (or one of its aliases) followed by a space. Catches the obvious wins
-# without bothering Claude — "Cisco IOS", "Microsoft Exchange", "Palo Alto
+# (or one of its aliases) followed by a space. Catches the obvious cases
+# without an AI call — "Cisco IOS", "Microsoft Exchange", "Palo Alto
 # Networks Cortex" etc.
 
 
@@ -2716,9 +2716,11 @@ def _canonicalize_cve_id(raw: str | None) -> str | None:
     if not raw:
         return None
     s = raw.strip().upper().replace(" ", "")
-    # Common malformations: lowercase prefix, missing prefix, extra dashes.
+    # Common malformations: lowercase prefix, missing prefix, stray spaces, no
+    # dash after the prefix.
     if s.startswith("CVE"):
-        # Accept "CVE2024-1234", "CVE 2024 1234" already normalized.
+        # Add the missing dash: "CVE2024-1234" (or "CVE 2024-1234", whose
+        # space is already stripped) becomes "CVE-2024-1234".
         if not s.startswith("CVE-"):
             s = "CVE-" + s[3:]
     elif re.match(r"^\d{4}-\d+$", s):
@@ -2772,8 +2774,8 @@ async def scan_id_hygiene(
     ttps_scanned = int((await db.execute(select(func.count()).select_from(TTP))).scalar_one())
     # Pull only the bad ones. The canonical-form regex lives in `_TTP_ID_RE`
     # (`^T\d{4}(\.(?!000)\d{3})?$` — ".000" is a zero-padded parent, so it's
-    # malformed). Postgres regex is anchored by default with `~` and its ARE
-    # flavor supports the `(?!...)` lookahead.
+    # malformed). Postgres `~` is unanchored, so the pattern carries its own
+    # `^`/`$`; its ARE flavor supports the `(?!...)` lookahead.
     malformed_ttp_rows = (
         await db.execute(
             select(TTP.id, TTP.technique_id, TTP.technique_name).where(
@@ -3534,7 +3536,7 @@ async def _entity_labels(
 #
 # Pending proposals from both logs folded per entity: an entity the autolinker
 # over-matches collects one remove-link proposal per article, a mis-filed one
-# a reclassify per article. Rows about something other than a catalogue
+# a reclassify per article. Rows about something other than a catalog
 # entity (an edge, an observable candidate) stand alone; an article's
 # assessment groups under the article.
 #

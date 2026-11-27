@@ -18,12 +18,9 @@ import {
 import styles from "./CommandPalette.module.css";
 
 /**
- * ⌘K — the app's command launcher.
+ * ⌘K: the app's command launcher.
  *
- * Commands only: it fuzzy-matches the static vocabulary in
- * `components/search/commands.ts` and never queries the server. Looking things
- * *up* (entities, entries, feeds) belongs to the /search route, which the
- * palette's own "Search" command opens.
+ * Commands only: it fuzzy-matches the static command list in `components/search/commands.ts` and never queries the server. Looking up entities, entries and feeds is the job of the /search route, which the palette's own "Search" command opens.
  */
 
 interface CommandPaletteProps {

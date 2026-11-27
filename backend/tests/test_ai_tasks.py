@@ -558,9 +558,9 @@ async def test_assignment_is_shared_across_users(
 ):
     """A task has a single, platform-wide assignment; a later PUT replaces it.
 
-    Assignments used to be scoped per user. They are now platform-wide config
-    (written by admins, with ``created_by`` kept only as an audit trail), so
-    the second write wins and every user reads back the same row.
+    Assignments are platform-wide config (written by admins, with
+    ``created_by`` kept only as an audit trail), so the second write wins and
+    every user reads back the same row.
     """
     # Admin creates the assignment
     resp_create = await client.put(
@@ -607,7 +607,7 @@ async def test_get_assignment_nonexistent_task_id(client: AsyncClient, auth_head
     """GET assignment for a UUID that does not correspond to any task returns null.
 
     The endpoint does a join on AITask, so if the task_id doesn't match any
-    assignment rows, the result is simply None (200 with null body).
+    assignment rows, the result is None (200 with a null body).
     """
     fake_id = uuid.uuid4()
     resp = await client.get(f"/api/ai/tasks/{fake_id}/assignments", headers=auth_headers)

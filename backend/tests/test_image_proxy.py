@@ -18,7 +18,7 @@ async def test_proxy_missing_url_param(client: AsyncClient, auth_headers: dict):
 @pytest.mark.asyncio
 async def test_proxy_success(client: AsyncClient, auth_headers: dict):
     """Proxy should return the image content when the upstream returns an image."""
-    fake_image_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 200  # PNG-ish bytes, >100 to avoid tracking pixel check
+    fake_image_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 200  # PNG-like, >100 bytes to pass the tracking-pixel check
 
     target_url = "https://example.com/image.png"
 

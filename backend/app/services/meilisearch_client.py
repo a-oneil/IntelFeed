@@ -32,8 +32,8 @@ def _get_client() -> meilisearch.Client:
 
 # Attributes the query builder filters on. `id` is here because the entity join
 # constrains the entry search with `id IN [...]`; without it Meilisearch answers
-# 400 and execute_entry_search swallows the error, so every text term combined
-# with an entity filter silently returned zero articles.
+# 400, execute_entry_search swallows the error, and any text term combined with
+# an entity filter returns zero articles.
 FILTERABLE_ATTRIBUTES = [
     "id",
     "feed_id",
@@ -131,7 +131,7 @@ def _ensure_index():
             "exactness",
         ]
     )
-    # Default cap is 100 — too low for feed_id (one entry per feed). Raised so
+    # Default cap is 100, too low for feed_id (one facet value per feed). Raised so
     # facet-distribution queries can enumerate every feed_id in the index,
     # which the search-index reconcile script relies on.
     index.update_faceting_settings({"maxValuesPerFacet": 5000})
@@ -640,8 +640,8 @@ def get_facets(
         return {}
 
 
-# Everything about a rule except its body. Doubles as the `metadata` search
-# scope, so the box can be pointed at what a rule *is* rather than what it does.
+# Everything about a rule except its body. Also the `metadata` search scope,
+# which searches a rule's descriptive fields and not its query text.
 RULE_METADATA_ATTRS = [
     "title",
     "description",
@@ -669,9 +669,10 @@ RULE_FACETS = [
     "source_repo",
     "source_author",
     "mitre_tactics",
-    # The rail faces the full telemetry need, not just the declared
-    # `data_sources` — 8,479 of the corpus leave that column empty and would be
-    # untickable. `data_sources` stays filterable for the `data_source=` param.
+    # The facet rail uses the full telemetry a rule needs, not the declared
+    # `data_sources`: 8,479 rules in the corpus leave that column empty and
+    # could not be selected. `data_sources` stays filterable for the
+    # `data_source=` param.
     "telemetry_tokens",
     "severity",
     "license",
@@ -795,7 +796,7 @@ def bulk_index_entries(documents: list[dict], retries: int = 5):
             return
         except meilisearch.errors.MeilisearchCommunicationError as e:
             if attempt < retries - 1:
-                wait = 2**attempt  # 1, 2, 4, 8, 16s
+                wait = 2**attempt  # 1, 2, 4, 8s (the last attempt does not wait)
                 logger.warning(
                     "Meilisearch unavailable (attempt %d/%d), retrying in %ds",
                     attempt + 1,
@@ -893,10 +894,10 @@ ENTITY_INDEXES = {
         "sortable": ["first_seen_at", "article_count"],
     },
     "entities_cwe": {
-        # alternate_terms is searchable but never fed to the autolinker — a
-        # human typing "use after free" should land on CWE-416; the dictionary
-        # scanner matching that phrase in prose is what caused the 2026-07 FP
-        # epidemic, so the two paths stay separate on purpose.
+        # alternate_terms is searchable but never fed to the autolinker: a
+        # person typing "use after free" should land on CWE-416, but the
+        # dictionary scanner matching that phrase in prose caused the July 2026
+        # wave of false-positive links, so the two paths are kept separate.
         "searchable": ["cwe_id", "name", "alternate_terms", "description"],
         "filterable": ["abstraction", "kind", "mapping_usage", "is_deprecated", "first_seen_at"],
         "sortable": ["first_seen_at", "article_count"],
@@ -924,8 +925,8 @@ ENTITY_INDEXES = {
         "sortable": ["first_seen_at", "article_count"],
     },
     # The rule library reads its list AND its facet counts from this index, so
-    # every column the rail facets on has to be filterable here — a value that
-    # is missing from `filterable` simply returns no distribution, silently.
+    # every column the rail facets on has to be filterable here; an attribute
+    # missing from `filterable` returns no distribution and no error.
     # Timestamps are epoch ints, not ISO strings, so range filters and sorts
     # compare numerically.
     "rules": {
@@ -943,9 +944,9 @@ ENTITY_INDEXES = {
             "mitre_tactics",
             "data_sources",
             # Required telemetry across every rule format (see
-            # detection_coverage.telemetry_tokens_from_rule). Filterable, not
-            # faceted: the rail's "Data source" group stays on the declared
-            # data_sources, while this backs the telemetry feasibility filter.
+            # detection_coverage.telemetry_tokens_from_rule). The rail's data
+            # source facet reads this (RULE_FACETS) instead of the declared
+            # data_sources, and it backs the telemetry feasibility filter.
             "telemetry_tokens",
             "source_products",
             "source_cves",
@@ -976,10 +977,11 @@ ENTITY_INDEXES = {
         # otherwise the header under-reports and infinite scroll dead-ends.
         "max_total_hits": 100_000,
         # Facet values are truncated to maxValuesPerFacet (default 100) *before*
-        # the response is built, and `alpha` decides which survive — so the
-        # library's Technique facet stopped at T1068 and dropped T1078, its most
-        # common technique. Sort by count so truncation keeps the meaningful
-        # values, and raise the cap past the widest facet (tags: ~1.9k).
+        # the response is built, and the default `alpha` order decides which
+        # remain: the library's Technique facet stopped at T1068 and dropped
+        # T1078, its most common technique. Sort by count so truncation keeps
+        # the most common values, and raise the cap past the widest facet
+        # (tags: ~1.9k).
         "max_values_per_facet": 5000,
     },
 }

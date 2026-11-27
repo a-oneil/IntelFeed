@@ -1,9 +1,4 @@
-/**
- * ProfileTabs — config-driven tab bar. The tab list scrolls horizontally for
- * high-tab-count types; the trailing control sits outside the tablist and
- * sticks to the bar's right edge, so on a phone it stays in reach while the
- * tabs scroll under it.
- */
+/** ProfileTabs — config-driven tab bar. The tab list scrolls horizontally for high-tab-count types; the trailing control sits outside the tablist and sticks to the bar's right edge, so on a phone it stays in reach while the tabs scroll under it. */
 import type { ReactNode } from "react";
 import { TAB_HINTS, TAB_LABELS, type TabKey } from "./entityProfileConfig";
 import { Hint } from "@/components/primitives";

@@ -229,7 +229,7 @@ def _model_for(entity_type: str):
 
 
 async def _collect(db, since: datetime) -> list[dict]:
-    """Normalised rows from both logs: one dict per applied removal."""
+    """Normalized rows from both logs: one dict per applied removal."""
     rows: list[dict] = []
 
     restored_from = {

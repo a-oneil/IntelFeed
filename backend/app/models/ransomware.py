@@ -94,7 +94,7 @@ class VictimDisclosure(Base):
     sector: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     # Free-text claim, e.g. "180K records / 420GB".
     claimed_data: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # "ransomware.live" | "ecrime.ch" | ... — the source column earns its keep once
+    # "ransomware.live" | "ecrime.ch" | ... — the source column matters once
     # dedup spans multiple sources.
     source: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
     # Stable cross-run dedup id: sha256(source + group + victim + posted)[:32].

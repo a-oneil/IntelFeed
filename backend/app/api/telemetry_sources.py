@@ -25,7 +25,7 @@ router = APIRouter()
 
 
 def _canonical_log_types(log_types: list[str] | None) -> list[str]:
-    """Behaviour ids for the raw vendor strings a source declares.
+    """Behavior ids for the raw vendor strings a source declares.
 
     Written on every path that sets log_types so a source is matchable the
     moment it is saved, rather than after the next
@@ -199,7 +199,7 @@ async def get_telemetry_gaps(
 
     available = await get_available_telemetry(db)
 
-    # Get all rules with data sources for this user
+    # Get every rule that lists data sources (rules are not filtered by user)
     rules_result = await db.execute(
         select(DetectionRule).where(
             DetectionRule.data_sources != {},  # has data sources
@@ -334,7 +334,7 @@ DATA_SOURCE_TAXONOMY: dict[str, list[str]] = {
 # Comprehensive Data Source Catalog
 # ---------------------------------------------------------------------------
 # Each entry represents a real-world product/platform that generates security
-# telemetry.  Users checkbox the ones they have to build their telemetry
+# telemetry. Users check the ones they have to build their telemetry
 # inventory.
 # ---------------------------------------------------------------------------
 
@@ -4465,7 +4465,7 @@ async def sync_telemetry_sources(
     """
     selected_set = set(body.selected_names)
 
-    # Fetch all existing telemetry sources for this user
+    # Fetch every existing telemetry source (the inventory is not filtered by user)
     result = await db.execute(select(TelemetrySource))
     existing = {s.name: s for s in result.scalars().all()}
 

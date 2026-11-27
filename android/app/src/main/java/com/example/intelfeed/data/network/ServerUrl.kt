@@ -4,12 +4,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 object ServerUrl {
 
-    /**
-     * Normalizes a user-entered instance address to an http(s) base URL without a trailing
-     * slash, or returns null if it can't be used as a Retrofit base URL. A missing scheme
-     * defaults to https. Callers must validate before persisting: Retrofit throws on an
-     * invalid base URL, and a saved bad value would crash every launch.
-     */
+    /** Normalizes a user-entered instance address to an http(s) base URL without a trailing slash, or returns null if it can't be used as a Retrofit base URL. A missing scheme defaults to https. Callers must validate before persisting: Retrofit throws on an invalid base URL, and a saved bad value would crash every launch. */
     fun normalize(raw: String): String? {
         val trimmed = raw.trim()
         if (trimmed.isEmpty()) return null
@@ -25,9 +20,6 @@ object ServerUrl {
         return url.newBuilder().query(null).fragment(null).build().toString().trimEnd('/')
     }
 
-    /**
-     * True when [raw] is a usable address the app would reach without TLS (http://): the password
-     * and session tokens would then cross the network as plain text.
-     */
+    /** True when [raw] is a usable address the app would reach without TLS (http://): the password and session tokens would then cross the network as plain text. */
     fun isCleartext(raw: String): Boolean = normalize(raw)?.startsWith("http://") == true
 }

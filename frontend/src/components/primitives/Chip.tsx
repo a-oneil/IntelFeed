@@ -3,16 +3,9 @@ import { contrastText } from "@/utils/contrast";
 import styles from "./Chip.module.css";
 
 /**
- * A filled chip needs a foreground that contrasts with ITS OWN fill. The old
- * default — `--accent-text` — is derived from `--accent`, so it was only ever
- * right when the tint was the accent. That mismatch shipped three separate
- * unreadable-badge bugs (rule severities at 4.06:1, glossary categories, and
- * filled severity chips at 1.2:1), so `solid` now derives its own foreground
- * instead of trusting the call site to remember.
+ * A filled chip needs a foreground that contrasts with its own fill. The CSS fallback, `--accent-text`, is derived from `--accent`, so it is only right when the tint is the accent; relying on it caused three unreadable-badge bugs (rule severities at 4.06:1, glossary categories, and filled severity chips at 1.2:1). So `solid` derives its own foreground here instead of relying on each call site to pass one.
  *
- * Resolves `var(--token)` against :root, since every tint in this app is
- * either a literal or a root-level custom property. Anything it cannot parse
- * (color-mix, a nested var chain) falls through to the CSS default.
+ * Resolves `var(--token)` against :root, since every tint in this app is either a literal or a root-level custom property. Only 3- or 6-digit hex values are used; anything else (rgb(), color-mix, a nested var chain) falls through to the CSS default.
  */
 function autoContrast(tint: string | undefined): string | undefined {
   if (!tint) return undefined;
@@ -34,31 +27,20 @@ interface ChipProps {
   children: ReactNode;
   /** Any CSS color — pass an entity/severity token, e.g. `var(--entity-cve)`. */
   tint?: string;
-  /**
-   * Foreground override. For `tone="solid"` this is derived automatically from
-   * `tint` when omitted, so you only need it to force a specific colour.
-   */
+  /** Foreground override. For `tone="solid"` this is derived automatically from `tint` when omitted, so you only need it to force a specific color. */
   fg?: string;
   tone?: ChipTone;
   size?: "sm" | "md";
   pill?: boolean;
-  /** Show a small colour marker before the label. */
+  /** Show a small color marker before the label. */
   marker?: boolean;
   /** Status legends want a circular dot, not the default rounded square. */
   markerShape?: "square" | "dot";
   title?: string;
   className?: string;
-  /**
-   * Extra custom properties only (e.g. `--tag-scrim`). Chip's own `--chip-*`
-   * values are merged in last and always win. Do NOT set real CSS properties
-   * here — those belong in `className`, where the specificity is explicit.
-   */
+  /** Extra custom properties only (e.g. `--tag-scrim`). Chip's own `--chip-*` values are merged in last and always win. Do NOT set real CSS properties here — those belong in `className`, where the specificity is explicit. */
   style?: React.CSSProperties;
-  /**
-   * Allow the label to shrink and ellipsise. Chip is `flex:none; nowrap` by
-   * default, which is right for short labels but overflows its row when the
-   * content is long (country names, ATT&CK tactics, product types).
-   */
+  /** Allow the label to shrink and ellipsize. Chip is `flex:none; nowrap` by default, which is right for short labels but overflows its row when the content is long (country names, ATT&CK tactics, product types). */
   truncate?: boolean;
   onClick?: () => void;
   /** Only meaningful with `onClick` — renders a disabled button. */
@@ -67,11 +49,7 @@ interface ChipProps {
   "aria-pressed"?: boolean;
 }
 
-/**
- * The app's small-label primitive: severity badges, entity type tags, filter
- * chips, counts. `tint` drives colour through one custom property so a chip
- * can carry any entity or severity token without a bespoke class.
- */
+/** The app's small-label primitive: severity badges, entity type tags, filter chips, counts. `tint` drives color through one custom property so a chip can carry any entity or severity token without a bespoke class. */
 export function Chip({
   children,
   tint,
@@ -101,8 +79,7 @@ export function Chip({
     .filter(Boolean)
     .join(" ");
 
-  // Only `solid` paints text on the tint; the other tones sit on the page
-  // ground and must not be second-guessed.
+  // Only `solid` paints text on the tint; the other tones sit on the page background, so their foreground is left to the CSS.
   const resolvedFg = useMemo(
     () => fg ?? (tone === "solid" ? autoContrast(tint) : undefined),
     [fg, tone, tint],

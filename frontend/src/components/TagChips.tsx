@@ -33,16 +33,10 @@ interface ChipItemProps {
   onPivot?: (name: string) => void;
 }
 
-/**
- * One analyst-authored chip: a solid Chip in the tag's own colour (foreground
- * derived from that colour, so no choice of tint is unreadable), plus a
- * hover/focus × that takes the tag off this entry.
- */
+/** One analyst-authored chip: a solid Chip in the tag's own color (foreground derived from that color, so no choice of tint is unreadable), plus a hover/focus × that takes the tag off this entry. */
 function TagChipItem({ tag, entryId, onPivot }: ChipItemProps) {
   const remove = useRemoveTagFromEntry();
-  // A global tag's row is everyone's; taking it off the entry from a one-click
-  // × on a card is too easy a way to remove it for the whole team. That stays
-  // in the reader's Tags panel, which is a deliberate action.
+  // A global tag's row is everyone's; taking it off the entry from a one-click × on a card is too easy a way to remove it for the whole team. That stays in the reader's Tags panel, which is a deliberate action.
   const canRemove = !!entryId && !!tag.id && !tag.is_global;
 
   return (
@@ -86,11 +80,7 @@ interface TagChipsProps {
   entryId?: string;
 }
 
-/**
- * The analyst-authored lead of the badge row: tags promoted to chips. Capped at
- * TAG_CHIP_CAP with a `+N` popover for the rest, mirroring the PIR chip, so a
- * few enthusiastic rules can't wrap the scan-line.
- */
+/** The analyst-authored lead of the badge row: tags promoted to chips. Capped at TAG_CHIP_CAP with a `+N` popover for the rest, mirroring the PIR chip, so an entry carrying many tags can't wrap the badge row onto a second line. */
 export function TagChips({ tags, entryId }: TagChipsProps) {
   const chips = chipTags(tags);
   const [open, setOpen] = useState(false);

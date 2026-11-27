@@ -900,11 +900,12 @@ async def test_auto_detect_prefers_story_threads_and_seeds_from_them(
     user: User,
     feed: Feed,
 ):
-    """An actor carrying two stories outranks volume, and seeds from the stories only.
+    """An actor in two story threads is suggested from the threads, seeded with their articles only.
 
-    The volume pass sweeps up every entry that mentions the actor; seeding a
-    campaign with all of them is the noise the thread pass exists to avoid. The
-    wider count is reported so the analyst knows the rest are waiting.
+    The volume pass picks up every entry that mentions the actor; seeding a
+    campaign with all of them adds the unrelated mentions the thread pass is
+    there to leave out. The wider count is still reported so the analyst can see
+    how many other entries mention the actor.
     """
     from app.models.story_thread import StoryThread, StoryThreadEntry
 
@@ -964,7 +965,7 @@ async def test_auto_detect_ignores_a_single_burst_of_coverage(
     user: User,
     feed: Feed,
 ):
-    """One short story is today's news; a campaign has to show duration."""
+    """A single short story thread is not campaign evidence: a campaign has to span time."""
     from app.models.story_thread import StoryThread, StoryThreadEntry
 
     actor = ThreatActor(name="APT97", aliases=[], country="Unknown")
@@ -1001,7 +1002,7 @@ async def test_auto_detect_ignores_a_single_burst_of_coverage(
     resp = await client.post("/api/campaigns/auto-detect?min_entries=3&days=30", headers=headers)
     assert resp.status_code == 200
     candidate = next(c for c in resp.json() if c["pivot_entity"]["id"] == str(actor.id))
-    # The volume pass still offers it — one burst is just not thread-backed evidence.
+    # The volume pass still suggests it, but one short thread does not count as thread evidence.
     assert candidate["evidence"] == "entity_volume"
     assert candidate["thread_count"] == 0
 

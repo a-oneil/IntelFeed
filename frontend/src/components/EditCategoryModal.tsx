@@ -37,7 +37,7 @@ const PROCESSING = [
   { value: "selective", label: "Tag articles, skipping off-topic ones" },
   { value: "full", label: "Tag every article" },
   { value: "manual", label: "Do not tag articles" },
-  { value: "none", label: "Do not analyse these feeds at all" },
+  { value: "none", label: "Do not analyze these feeds at all" },
 ];
 
 const RELIABILITY = [
@@ -67,10 +67,7 @@ const ON_OFF = [
   { value: "off", label: "Off" },
 ];
 
-/**
- * The category's saved defaults as one sentence, in the same words the
- * controls use. Exported for the test.
- */
+/** The category's saved defaults as one sentence, in the same words the controls use. Exported for the test. */
 export function describeDefaults(defaults: CategoryFeedDefaults | undefined): string | null {
   const d = defaults ?? {};
   const parts: string[] = [];
@@ -89,22 +86,13 @@ export function describeDefaults(defaults: CategoryFeedDefaults | undefined): st
 }
 
 /**
- * Apply one setting to every feed in a category at once, and optionally keep
- * the pipeline settings as the category's defaults for feeds added later.
+ * Apply one setting to every feed in a category at once, and optionally keep the pipeline settings as the category's defaults for feeds added later.
  *
- * No analyst-notes field, deliberately: a single textarea here would replace
- * whatever every feed in the category already had, with nothing to undo it.
- * Notes are per-source judgement and belong in the feed modal.
+ * No analyst-notes field, deliberately: a single textarea here would replace whatever every feed in the category already had, with nothing to undo it. Notes are per-source judgment and belong in the feed modal.
  *
- * Deliberately not the feed modal's six-pane rail: there are nine controls, no
- * per-feed facts to show, and seeing everything you are about to apply in one
- * column is the point. What it does share is the shell, the field styles and —
- * importantly — `STAGE_COPY`, so the two modals cannot describe the same
- * setting differently again. That drift is what issue #60 was about.
+ * Deliberately not the feed modal's six-pane rail: there are ten controls, no per-feed facts to show, and seeing everything you are about to apply in one column is the point. What it does share is the shell, the field styles and — importantly — `STAGE_COPY`, so the two modals cannot describe the same setting differently again. That drift is what issue #60 was about.
  *
- * Every control is a select rather than a checkbox because across N feeds a
- * checkbox has no honest unchecked state: "off" and "leave as they are" look
- * identical and mean opposite things.
+ * Every control is a select rather than a checkbox because across N feeds a checkbox has no honest unchecked state: "off" and "leave as they are" look identical and mean opposite things.
  */
 export function EditCategoryModal({ category, feeds, onClose }: Props) {
   const [interval, setInterval] = useState(KEEP);
@@ -118,8 +106,7 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
   const [detectionRules, setDetectionRules] = useState(KEEP);
   const [toolEntities, setToolEntities] = useState(KEEP);
 
-  // Where the changes go: the feeds here now, and/or the category's defaults
-  // for feeds added later. Only the five pipeline settings can be defaults.
+  // Where the changes go: the feeds here now, and/or the category's defaults for feeds added later. Only the five pipeline settings can be defaults.
   const [applyNow, setApplyNow] = useState(true);
   const [saveDefault, setSaveDefault] = useState(false);
 
@@ -151,9 +138,7 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
       if (timeliness !== KEEP) data.timeliness_rating = timeliness;
       if (relevance !== KEEP) data.relevance_rating = relevance;
     }
-    // One field per stage, not a preset: the old five-way control mapped onto
-    // two columns and three of its labels described a pipeline that no longer
-    // exists. See frontend/src/components/feedModal/pipelineStages.ts.
+    // One field per stage, not a preset: the old five-way control mapped onto two columns and three of its labels described a pipeline that no longer exists. See frontend/src/components/feedModal/pipelineStages.ts.
     if (processing !== KEEP) data.intel_extraction_mode = processing;
     if (aiAnalysis !== KEEP) data.ai_analysis_enabled = aiAnalysis === "on";
     if (cveLookup !== KEEP) data.auto_extract_on_ingest = cveLookup === "on";
@@ -208,8 +193,7 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
   /**
    * What the feeds hold today, appended to the "leave as they are" option.
    *
-   * Without it a bulk editor is blind: you cannot tell whether you are about to
-   * change everything or nothing, and "mixed" is the case that matters most.
+   * Without it a bulk editor is blind: you cannot tell whether you are about to change everything or nothing, and "mixed" is the case that matters most.
    */
   const current = useMemo(() => {
     const summarize = <T,>(pick: (f: Feed) => T, render: (v: T) => string): string => {
@@ -379,7 +363,7 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
                 setProcessing,
                 PROCESSING,
                 current.processing,
-                "If a feed is not analysed, its articles stay searchable but nothing is extracted from them."
+                "If a feed is not analyzed, its articles stay searchable but nothing is extracted from them."
               )}
               {field(
                 "cat-ai",

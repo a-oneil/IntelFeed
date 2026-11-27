@@ -8,16 +8,12 @@ import com.example.intelfeed.util.ArticleHtml.TextKind
 import java.net.URI
 
 /**
- * Turns the server's Markdown (AI day briefings) into the same blocks the article reader renders
- * (ArticleHtml / ArticleContent): headings, paragraphs, bullet and numbered lists, quotes, code
- * blocks, rules, and bold/italic/code/strike/link spans.
- *
- * Only a subset of Markdown is needed; anything unrecognised stays as plain text, so nothing is
- * lost. Links are kept only when they resolve to http(s); relative links ("/?entry=<id>") are
- * resolved against [baseUrl] (the IntelFeed server) so InAppLinks can open them in the app.
- *
- * Plain Kotlin with no Android types, so it can be unit-tested on the JVM.
- */
+Turns the server's Markdown (AI day briefings) into the same blocks the article reader renders (ArticleHtml / ArticleContent): headings, paragraphs, bullet and numbered lists, quotes, code blocks, rules, and bold/italic/code/strike/link spans.
+
+Only a subset of Markdown is needed; anything unrecognized stays as plain text, so nothing is lost. Links are kept only when they resolve to http(s); relative links ("/?entry=<id>") are resolved against [baseUrl] (the IntelFeed server) so InAppLinks can open them in the app.
+
+Plain Kotlin with no Android types, so it can be unit-tested on the JVM.
+*/
 object MarkdownText {
 
     private val HEADING = Regex("^(#{1,6})\\s+(.*?)\\s*#*\\s*$")

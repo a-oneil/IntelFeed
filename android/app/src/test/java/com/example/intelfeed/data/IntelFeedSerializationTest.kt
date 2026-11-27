@@ -256,8 +256,7 @@ class IntelFeedSerializationTest {
 
     @Test
     fun unifiedSearchAsksForEveryEntityOfAType() {
-        // Same as the web's search page: 200 entities in all, no practical cap per type. With the
-        // old 25 per type, "Showing 25 of 200" was the most a search could list for one type.
+        // Same as the web's search page: 200 entities in all, no practical cap per type. A cap of 25 per type made "Showing 25 of 200" the most a search could list for one type.
         val body = json.parseToJsonElement(
             json.encodeToString(com.example.intelfeed.data.model.UnifiedSearchRequest.serializer(),
                 com.example.intelfeed.data.model.UnifiedSearchRequest(q = "cve.kev:true"))

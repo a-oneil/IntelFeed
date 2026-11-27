@@ -3,11 +3,7 @@ import { isValidElement, type ReactNode } from "react";
 /**
  * GitHub-compatible heading anchors for the in-app docs reader.
  *
- * The docs are written to be read on GitHub as well as here, so a link such as
- * `[Logging & Audit](#logging--audit)` has to land in both places. GitHub's rule
- * is: lowercase, drop everything except letters, digits, underscores, hyphens
- * and spaces, then turn each space into one hyphen — so "Logging & Audit" is
- * `logging--audit`, not `logging-audit` — and a repeated heading gets `-1`, `-2`.
+ * The docs are written to be read on GitHub as well as here, so a link such as `[Logging & Audit](#logging--audit)` has to land in both places. GitHub's rule is: lowercase, drop everything except letters, digits, underscores, hyphens and spaces, then turn each space into one hyphen — so "Logging & Audit" is `logging--audit`, not `logging-audit` — and a repeated heading gets `-1`, `-2`.
  */
 export function slugify(text: string): string {
   return text
@@ -35,13 +31,9 @@ function plainHeadingText(source: string): string {
 }
 
 /**
- * Anchor ids for every heading in a markdown document, keyed by the 1-based line
- * the heading starts on.
+ * Anchor ids for every heading in a markdown document, keyed by the 1-based line the heading starts on.
  *
- * Done from the source rather than per heading as it renders because a repeat
- * needs to know what came before it, and a renderer called one heading at a time
- * (twice, under StrictMode) cannot count. Fenced code is skipped so a `# comment`
- * inside a bash block is not mistaken for a heading.
+ * Done from the source rather than per heading as it renders because a repeat needs to know what came before it, and a renderer called one heading at a time (twice, under StrictMode) cannot count. Fenced code is skipped so a `# comment` inside a bash block is not mistaken for a heading.
  */
 export function headingIdsByLine(markdown: string): Map<number, string> {
   const ids = new Map<number, string>();

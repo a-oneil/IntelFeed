@@ -24,12 +24,11 @@ export interface ThreatBoardItem {
   facets: string[];
   /** Distinct source domains in the window. */
   attention: number;
-  /** Distinct stories behind those domains: one per story thread, plus one per
-      domain no thread claimed. Equals `attention` where nothing is threaded. */
+  /** Distinct stories behind those domains: one per story thread, plus one per domain no thread claimed. Equals `attention` where nothing is threaded. */
   stories: number;
   /** Window articles those stories folded as re-reports. */
   echoes_folded: number;
-  /** Waves of coverage on this row's thread — its spine length. */
+  /** Rounds of coverage on this row's thread (its spine length). */
   beats: number;
   /** Techniques first seen for this threat inside the window. */
   new_techniques: number;
@@ -47,8 +46,7 @@ export interface ThreatBoardItem {
   action: ThreatAction;
   /** Distinct window entries behind the attention count. */
   articles: number;
-  /** The window's lead article — a title that names the threat wins over a
-      technique-dense roundup that merely mentions it. */
+  /** The window's lead article: one whose title names the threat is preferred over a technique-dense roundup that only mentions it. */
   headline: ThreatHeadline | null;
   /** Distinct source hosts behind the attention count (top 6), for "why". */
   sources: string[];
@@ -57,12 +55,9 @@ export interface ThreatBoardItem {
   /** The story thread holding this row's window coverage, when one does. */
   thread_slug: string | null;
   thread_title: string | null;
-  /** True for a row backed only by a thread — no actor, malware or CVE
-      resolved, so `entity_key` is the thread slug. */
+  /** True for a row backed only by a thread: no actor, malware or CVE resolved, so `entity_key` is the thread slug. */
   is_story: boolean;
-  /** Rows folded into this one: threat rows a single thread holds together,
-      and on the All view the CVEs this row's articles claim (`entity_type`
-      "cve", with the exploitation chips the row needs to name them). */
+  /** Rows folded into this one: threat rows a single thread holds together, and on the All view the CVEs this row's articles claim (`entity_type` "cve", with the exploitation chips the row needs to name them). */
   merged_from: {
     entity_type: string;
     entity_key: string;
@@ -71,10 +66,9 @@ export interface ThreatBoardItem {
     product?: string | null;
     in_stack?: boolean;
   }[];
-  /** Nightly AI story line built only from the window's entries. Null until
-      generated — render the headline as fallback, never a template sentence. */
+  /** Nightly AI summary line built only from the window's entries. Null until generated; render the headline as the fallback, never a template sentence. */
   brief: string | null;
-  /** Entry ids the brief was built from — its audit trail. */
+  /** Entry ids the brief was built from. */
   brief_sources: string[];
   /** Vulnerability-row extras — null/false on actor and malware rows. */
   product: string | null;
@@ -87,8 +81,7 @@ export interface ThreatBoardItem {
   posture: string | null;
   /** Entity uuid for profile navigation on CVE rows. */
   profile_id: string | null;
-  /** False for CVE rows affecting nothing you run with no fireable rule.
-      Informational: it never changes the row's rank or visibility. */
+  /** False for CVE rows that affect nothing in the stack and have no rule that can fire. Informational: it never changes the row's rank or visibility. */
   on_surface: boolean;
 }
 
@@ -109,8 +102,7 @@ export function useThreatBoard(window: string, includeHandled: boolean, facet: B
       });
       return data;
     },
-    // The board is rebuilt on a schedule, not per request — a short stale window
-    // avoids refetching the same materialised ranking on every tab switch.
+    // The board is rebuilt on a schedule, not per request; a short stale time avoids refetching the same stored ranking on every tab switch.
     staleTime: 60_000,
   });
 }
@@ -123,8 +115,7 @@ export interface PrecedentStory {
   similarity: number;
 }
 
-/** Stories this row's story resembles — the "have we seen this before" line.
-    Answered from thread centroids, so it reaches back past the window. */
+/** Earlier stories similar to this row's story, for the "have we seen this before" line. Computed from thread centroids, so it reaches back past the window. */
 export function usePrecedent(threadSlug: string | null | undefined, enabled: boolean) {
   return useQuery({
     queryKey: ["threat-board-precedent", threadSlug],
@@ -136,7 +127,7 @@ export function usePrecedent(threadSlug: string | null | undefined, enabled: boo
       return data.items;
     },
     enabled: enabled && !!threadSlug,
-    // Centroids move only when the sweeper reshapes a thread.
+    // Centroids change only when the sweeper changes a thread.
     staleTime: 300_000,
   });
 }
@@ -148,8 +139,7 @@ export function useSetThreatState() {
       entityType: string;
       entityKey: string;
       state: ThreatState;
-      /** The board view's window — a row visible only at 30d must be
-          handleable from the 30d view. */
+      /** The board view's window, so a row visible only at 30d can be handled from the 30d view. */
       window: string;
       note?: string;
     }) => {
@@ -186,8 +176,7 @@ export interface BoardRulesResponse {
   weak: number;
 }
 
-/** Every library rule that resolves to one board row — the list behind the
-    caption's "N rules name it", fetched when the drawer opens. */
+/** Every library rule that resolves to one board row (the list behind the caption's "N rules name it"), fetched when the drawer opens. */
 export function useBoardRules(entityType: string, entityKey: string, enabled: boolean) {
   return useQuery({
     queryKey: ["threat-board-rules", entityType, entityKey],

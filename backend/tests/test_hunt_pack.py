@@ -172,12 +172,12 @@ class TestHuntFile:
         md = hp.render_athf_markdown(_pack(), hunter="a", articles=[], today=datetime(2026, 11, 17, tzinfo=UTC))
         for heading in ("## LEARN", "## OBSERVE", "## CHECK", "## KEEP"):
             assert heading in md
-        # Learn carries the hypotheses and ABLE table; Check the queries.
+        # LEARN holds the hypotheses and the ABLE table; CHECK holds the queries.
         assert "H1. **Help-desk reset followed by MFA enrollment**" in md
         assert "| H1 | Scattered Spider |" in md
         assert "```kql\nAuditLogs\n| where TimeGenerated > ago(7d)\n| take 100\n```" in md
         assert "**Telemetry not collected when exported:** auth.account, process.creation" in md
-        # Keep is the hunter's: counts at zero, tables empty.
+        # KEEP is left for the hunter to fill in: counts at zero, tables empty.
         keep = md.split("## KEEP")[1]
         assert "`confirmed` 0 · `suspected` 0" in keep
         assert "_Fill in after the hunt._" in keep

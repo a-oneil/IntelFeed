@@ -1,8 +1,4 @@
-/**
- * Preset slash commands for the global copilot. Selecting one fills the input
- * with its `prompt` template so the user can tweak before sending — it never
- * auto-sends. Triggered by typing "/" at the start of an otherwise-empty input.
- */
+/** Preset slash commands for the global copilot. Selecting one fills the input with its `prompt` template so the user can edit it before sending; it never sends on its own. The menu opens when the user types "/" at the start of an otherwise-empty input. */
 export interface CopilotCommand {
   /** Stable id used for React keys and equality. */
   id: string;
@@ -12,12 +8,7 @@ export interface CopilotCommand {
   hint: string;
   /** Template inserted into the input when the command is selected. */
   prompt: string;
-  /**
-   * Backend tool name (from TOOL_DEFINITIONS) this command needs to produce a
-   * useful answer. Omitted for commands the model can answer directly from
-   * context/conversation without a tool call. Used to hide the command when
-   * that tool isn't in the copilot's enabled allowlist (Ollama only).
-   */
+  /** Backend tool name (from TOOL_DEFINITIONS) this command needs to produce a useful answer. Omitted for commands the model can answer directly from context/conversation without a tool call. Used to hide the command when the copilot assignment's tool allowlist (`agent_tools`) is set and does not include that tool. */
   requiredTool?: string;
 }
 
@@ -77,13 +68,9 @@ export const COPILOT_COMMANDS: CopilotCommand[] = [
 ];
 
 /**
- * Returns the commands whose label matches the text typed after the leading
- * "/". An empty query returns all commands. Matching is case-insensitive and
- * substring-based against the label (sans slash).
+ * Returns the commands whose label matches the text typed after the leading "/". An empty query returns all commands. Matching is case-insensitive and substring-based against the label (without the slash).
  *
- * `enabledTools` is the copilot's effective tool allowlist (null/undefined
- * when the provider is unrestricted, e.g. non-Ollama) — commands whose
- * `requiredTool` isn't in that list are hidden rather than matched.
+ * `enabledTools` is the copilot assignment's tool allowlist (`agent_tools`), or null/undefined when the assignment sets none and every tool is available. Commands whose `requiredTool` isn't in that list are hidden rather than matched.
  */
 export function filterCopilotCommands(
   query: string,

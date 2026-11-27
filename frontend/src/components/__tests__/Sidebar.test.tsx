@@ -82,8 +82,7 @@ vi.mock("@/components/FeedTypeIcon", () => ({
   FeedTypeIcon: () => <span>📄</span>,
 }));
 
-// Stub the badge component, but keep deriveIntelLevel: it is a pure helper
-// the sidebar calls directly, not a rendering concern.
+// Stub the badge component, but keep deriveIntelLevel: it is a pure helper the sidebar calls directly, not a rendering concern.
 vi.mock("@/components/IntelLevelBadge", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/components/IntelLevelBadge")>()),
   IntelLevelBadge: () => null,
@@ -274,7 +273,7 @@ describe("Sidebar", () => {
 
   it("renders all navigation items", () => {
     renderSidebar();
-    // The old "All Items" link is now a hero tile showing the unread total.
+    // The unread total is shown as a hero tile in place of an "All Items" link.
     expect(screen.getByText("Unread articles")).toBeInTheDocument();
     expect(screen.getByText("Last 24h")).toBeInTheDocument();
     expect(screen.getByText("This Week")).toBeInTheDocument();
@@ -371,8 +370,7 @@ describe("Sidebar", () => {
     expect(stamp).toHaveAttribute("title", expect.stringContaining("Version"));
 
     if (__GIT_SHA__) {
-      // The SHA usually sits on a branch, so main's history is the wrong place
-      // to go looking for it — point straight at the commit.
+      // The SHA is usually on a branch rather than main, so link straight to the commit instead of main's history.
       expect(stamp).toHaveAttribute(
         "href",
         `https://github.com/a-oneil/IntelFeed/commit/${__GIT_SHA__}`

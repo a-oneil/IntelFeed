@@ -1,8 +1,4 @@
-/**
- * Co-mentions and unmatched names — the two parts of the Relationships tab
- * that are not relationships: entities named in the same articles (no
- * relationship stated), and names a source gave that no entity matches.
- */
+/** Co-mentions and unmatched names — the two parts of the Relationships tab that are not relationships: entities named in the same articles (no relationship stated), and names a source gave that no entity matches. */
 import { useMemo, useState } from "react";
 import type { EntityType } from "@/stores/intelStore";
 import type { RelationClaims } from "@/hooks/useRelationships";

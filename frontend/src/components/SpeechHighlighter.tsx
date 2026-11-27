@@ -12,10 +12,7 @@ interface SpeechHighlighterProps {
   contentRef: React.RefObject<HTMLDivElement | null>;
 }
 
-/**
- * Walk text nodes inside an element and find the node + local offset
- * for a given character offset within the element's full textContent.
- */
+/** Walk text nodes inside an element and find the node + local offset for a given character offset within the element's full textContent. */
 function findTextPosition(
   el: Element,
   charIndex: number,
@@ -98,8 +95,7 @@ export function SpeechHighlighter({
       return;
     }
 
-    // Map speechIndex to a DOM element
-    // Index 0 = title (in headerRef), indices 1+ = content blocks
+    // Map speechIndex to a DOM element: index 0 is the title (in headerRef), indices 1+ are content blocks
     let targetEl: Element | null = null;
 
     if (hasTitle && speechIndex === 0) {

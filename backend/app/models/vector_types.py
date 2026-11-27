@@ -27,7 +27,7 @@ class HalfVec(UserDefinedType):
 
     def bind_expression(self, bindvalue):
         # Renders CAST(:param AS halfvec(n)) with the parameter typed as text,
-        # which is the whole point — see the module docstring.
+        # so asyncpg needs no halfvec codec (see the module docstring).
         return cast(type_coerce(bindvalue, Text()), self)
 
     def bind_processor(self, dialect):

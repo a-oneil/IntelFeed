@@ -28,7 +28,7 @@
   max-width: 68ch;
 }
 
-/* Toggle — mirrors the Settings page switch so the card reads as native. */
+/* Toggle: matches the Settings page switch so the card looks like the rest of the page. */
 .toggle {
   position: relative;
   display: inline-block;
@@ -95,7 +95,7 @@
   margin-top: 16px;
   transition: opacity 0.15s ease;
 }
-/* Paused: the weights stay visible and auditable, just visibly not in force. */
+/* Paused: the weights stay visible for review, dimmed because they are not applied. */
 .inactive {
   opacity: 0.45;
 }
@@ -135,7 +135,7 @@
   color: var(--text-muted);
 }
 
-/* Divergence bar, centred on the shared weight. */
+/* Bar centered on the shared (house) weight. */
 .track {
   position: relative;
   height: 6px;
@@ -143,7 +143,7 @@
   background: var(--bg-tertiary);
   overflow: hidden;
 }
-.centre {
+.center {
   position: absolute;
   left: 50%;
   top: 0;

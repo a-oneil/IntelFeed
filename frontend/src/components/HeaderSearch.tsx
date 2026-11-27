@@ -19,21 +19,18 @@ interface Props {
 /**
  * The `in:` chip's three states, in Tab order.
  *
- * The chip no longer decides *where* results appear — /search is the only
- * surface that renders them — it decides *what that page contains*.
+ * The chip does not decide *where* results appear (/search is the only surface that renders them); it decides *what that page contains*.
  */
 const SCOPE_CYCLE: SearchScope[] = ["everything", "workbench", "feeds"];
 
-// The chip decides what the results page renders, so the placeholder should
-// name that — a field that says "entries & intelligence" while the chip reads
-// `in: feeds` is describing a search the user is not running.
+// The chip decides what the results page renders, so the placeholder names that: a field that says "entries & intelligence" while the chip reads `in: feeds` would describe a search the user is not running.
 const SCOPE_PLACEHOLDER: Record<SearchScope, string> = {
   everything: "Search entries & intelligence... ( / )",
   workbench: "Search intelligence: actors, malware, CVEs, TTPs... ( / )",
   feeds: "Search entries: articles, titles, content... ( / )",
 };
 
-/** The shape both completion dictionaries are normalised to. */
+/** The shape both completion dictionaries are normalized to. */
 interface HeaderSuggestion {
   insert: string;
   type?: string;
@@ -45,20 +42,9 @@ interface HeaderSuggestion {
 /**
  * Which dictionary the field completes against.
  *
- * The entries grammar is completed by `GET /search/autocomplete` (the backend
- * decides whether a token is a bare field prefix or a `field:value`, and answers
- * with field names or DB-backed values). The intelligence grammar is completed
- * from the local `INTEL_FILTER_FIELDS` dictionary, because `/intelligence/search`
- * has no autocomplete endpoint and knows fields the unified one does not
- * (`cve.severity`, `ttp.tactic`, ...).
+ * The entries grammar is completed by `GET /search/autocomplete` (the backend decides whether a token is a bare field prefix or a `field:value`, and answers with field names or DB-backed values). The intelligence grammar is completed from the local `INTEL_FILTER_FIELDS` dictionary, because `/intelligence/search` has no autocomplete endpoint and knows fields the unified one does not (`cve.severity`, `ttp.tactic`, ...).
  *
- * This is module state rather than a prop because `SuggestionSource` is a **hook**
- * with a fixed signature: the composite below has to call both underlying hooks
- * unconditionally and in a stable order, so it cannot receive the scope as an
- * argument, and swapping the whole source between renders would change the hook
- * sequence. Exactly one `HeaderSearch` is mounted at a time (MainLayout and
- * SidebarLayout are mutually exclusive), and the component assigns this during
- * its own render, immediately before the input renders.
+ * This is module state rather than a prop because `SuggestionSource` is a **hook** with a fixed signature: the composite below has to call both underlying hooks unconditionally and in a stable order, so it cannot receive the scope as an argument, and swapping the whole source between renders would change the hook sequence. Exactly one `HeaderSearch` is mounted at a time (MainLayout and SidebarLayout are mutually exclusive), and the component assigns this during its own render, immediately before the input renders.
  */
 let suggestionDictionary: "server" | "intel" = "server";
 
@@ -77,19 +63,15 @@ const useScopedSuggestions: SuggestionSource<HeaderSuggestion> = (token, enabled
         category: "entity",
       }));
     }
-    // Falls back to a module-level constant, not a fresh `[]`: the shared hook's
-    // selection reset effect keys off this identity, and a new array each render
-    // would loop — a frozen tab, not a failing test (R6).
+    // Falls back to a module-level constant, not a fresh `[]`: the shared hook's selection reset effect keys off this identity, and a new array each render would loop and freeze the tab without failing any test (R6).
     return data ?? NO_SUGGESTIONS;
   }, [mode, intel, data]);
 };
 
 /**
- * The one search field in the app — an input and nothing more.
+ * The one search field in the app: an input and nothing more.
  *
- * It used to render its own results dropdown, which answered the same query as
- * the in-page panel with different data and covered it. Now typing anything
- * routes to /search, which owns the answer, its facet rail, and its own reader.
+ * It has no results dropdown of its own, because one would answer the same query as the /search page with different data and cover it. Typing anything routes to /search, which owns the answer, its facet rail, and its own reader.
  */
 export function HeaderSearch({ inputRef }: Props) {
   const navigate = useNavigate();
@@ -102,17 +84,12 @@ export function HeaderSearch({ inputRef }: Props) {
 
   const onSearchPage = location.pathname === "/search";
 
-  // See `suggestionDictionary` — assigned during render, read by the composite
-  // suggestion hook when the input renders a moment later.
+  // See `suggestionDictionary`: assigned during render, read by the composite suggestion hook when the input renders a moment later.
   suggestionDictionary = scope === "workbench" ? "intel" : "server";
 
-  // Leaving /search abandons the query, so returning to the reader doesn't come
-  // back to a field still holding the last search.
+  // Leaving /search abandons the query, so returning to the reader doesn't come back to a field still holding the last search.
   //
-  // Keyed on the *transition* away, not on "not currently on /search": typing
-  // from the feed reader sets the query one render before `navigate` lands, and
-  // a plain `!onSearchPage` guard would clear every keystroke in that gap — the
-  // field could never accumulate a query anywhere but on the search page.
+  // Keyed on the *transition* away, not on "not currently on /search": typing from the feed reader sets the query one render before `navigate` lands, and a plain `!onSearchPage` guard would clear every keystroke in that gap, so the field could never hold a query anywhere but on the search page.
   const wasOnSearchPage = useRef(onSearchPage);
   useEffect(() => {
     if (wasOnSearchPage.current && !onSearchPage) setHeaderSearchQuery("");
@@ -122,21 +99,14 @@ export function HeaderSearch({ inputRef }: Props) {
   /**
    * Any typing sends the user to the surface that can answer.
    *
-   * The scope rides along unchanged: it is the user's setting, not the route's.
-   * Searching from the workbench used to seed `in: workbench` and from the
-   * reader `in: feeds`, which silently narrowed a search the user never asked
-   * to narrow. It stays wherever they last put it, defaulting to `everything`.
+   * The scope is left unchanged: it is the user's setting, not the route's. Seeding it from the route (`in: workbench` from the workbench, `in: feeds` from the reader) would silently narrow a search the user never asked to narrow. It stays wherever they last put it, defaulting to `everything`.
    */
   const openSearchPage = useCallback(() => {
     if (onSearchPage) return;
     navigate("/search");
   }, [onSearchPage, navigate]);
 
-  // Arriving at /search from the feed reader crosses a layout boundary
-  // (MainLayout → SidebarLayout), and each layout renders its own AppHeader —
-  // so this field unmounts and a fresh one mounts mid-word. The query itself
-  // lives in the store and survives; focus and the caret do not. Restore both
-  // on the frame after mount so the user keeps typing into the same word.
+  // Arriving at /search from the feed reader crosses a layout boundary (MainLayout → SidebarLayout), and each layout renders its own AppHeader, so this field unmounts and a fresh one mounts mid-word. The query lives in the store and survives; focus and the caret do not. Restore both right after mount so the user keeps typing into the same word.
   useEffect(() => {
     if (!onSearchPage || !headerSearchQuery) return;
     const el = inputRef.current;
@@ -158,9 +128,7 @@ export function HeaderSearch({ inputRef }: Props) {
     inputRef.current?.blur();
   };
 
-  // Keys the shared input doesn't claim. It handles the Escape ladder and the
-  // suggestion arrows/Tab/Enter first, so Tab only reaches the scope chip when
-  // no completion is on offer — completions keep their Tab.
+  // Keys the shared input doesn't claim. It handles the Escape ladder and the suggestion arrows/Tab/Enter first, so Tab only reaches the scope chip when no completion is offered.
   const handleExtraKeys = (e: React.KeyboardEvent) => {
     if (e.key === "Tab" && !e.shiftKey) {
       e.preventDefault();
@@ -174,8 +142,7 @@ export function HeaderSearch({ inputRef }: Props) {
     return false;
   };
 
-  // Escape ladder rung 2 (rung 1 — closing an open completion list — is the
-  // shared input's): clear the field.
+  // Second Escape step (the first, closing an open completion list, is handled by the shared input): clear the field.
   const handleEscape = () => {
     setHeaderSearchQuery("");
     inputRef.current?.blur();
@@ -183,8 +150,7 @@ export function HeaderSearch({ inputRef }: Props) {
 
   return (
     <div className={styles.wrapper}>
-      {/* Scope changes are silent to a screen reader otherwise — Tab moves the
-          chip without moving focus. */}
+      {/* Without this, scope changes are silent to a screen reader: Tab changes the chip without moving focus. */}
       <span className={styles.srOnly} aria-live="polite">Search scope: {scope}</span>
       <OmniSearchInput<HeaderSuggestion>
         inputRef={inputRef}
@@ -200,13 +166,9 @@ export function HeaderSearch({ inputRef }: Props) {
         // ArrowUp past the top deselects (-1 is a real state) and neither arrow wraps.
         wrap={false}
         allowDeselect
-        // The autocomplete query is already cheap and heavily cached (60s staleTime),
-        // and the token has to keep up with the caret, so it stays undebounced.
-        // The results page runs its own debounce.
+        // The autocomplete query is already cheap and heavily cached (60s staleTime), and the token has to keep up with the caret, so it stays undebounced. The results page runs its own debounce.
         debounceMs={0}
-        // The only claimant now that the field renders on every desktop route.
-        // The workbench's mobile overlay keeps its own, because "/" there has to
-        // *open* the overlay before there is an input to focus.
+        // This field is the only owner of the "/" key on desktop, since it renders on every desktop route. The workbench's mobile overlay keeps its own, because "/" there has to *open* the overlay before there is an input to focus.
         ownsSlashKey
         slashKeyOwnerLabel="HeaderSearch"
         onEscape={handleEscape}
@@ -253,9 +215,7 @@ export function HeaderSearch({ inputRef }: Props) {
             onMouseDown={(e) => { e.preventDefault(); ctx.select(); }}
             onMouseEnter={ctx.activate}
           >
-            {/* Coloured by the field's own namespace, from the same table the
-                query-language reference uses — a `cve:` completion is CVE red
-                on every theme. */}
+            {/* Colored by the field's namespace, from the same table the query-language reference uses, so a `cve:` completion is CVE red on every theme. */}
             <span
               className={styles.suggestionDot}
               style={{ backgroundColor: queryFieldColor(item.insert || item.text) }}

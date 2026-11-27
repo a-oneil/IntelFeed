@@ -309,7 +309,7 @@ async def run_automations_for_scored_entry(db: AsyncSession, entry: Entry) -> li
 
 
 async def _check_observable_capture_trigger(db: AsyncSession, entry: Entry, trigger_config: dict) -> bool:
-    """on_observable_captured fires when the entry carries a reporting-door
+    """on_observable_captured fires when the entry carries a captured
     observable matching ``trigger_config`` — the same shape as the
     ``has_observable`` condition (kinds, roles, min_confidence,
     exclude_infra_tagged, sources), so the trigger can be narrow ("C2 only")
@@ -320,12 +320,12 @@ async def _check_observable_capture_trigger(db: AsyncSession, entry: Entry, trig
 
 
 async def run_automations_for_observable_capture(db: AsyncSession, entry: Entry) -> list[AutomationLog]:
-    """Run on_observable_captured rules for an entry a judgment door just
-    wrote observables for (the one-pass AI, the publisher IOC file, an
-    analyst promote). Fires once per rule per entry: the AI door and the
-    publisher door can both land on the same article, and the second capture
-    must not re-notify, so a rule that already logged a run for this entry is
-    skipped."""
+    """Run on_observable_captured rules for an entry that just had observables
+    written by one of the capture paths (the one-pass AI analysis, a
+    publisher's IOC file, an analyst promoting a candidate). Fires once per
+    rule per entry: the AI path and the publisher path can both write to the
+    same article, and the second capture must not notify again, so a rule that
+    already logged a non-skipped run for this entry is skipped."""
     await _enrich_entry_feed_type(db, entry)
     result = await db.execute(
         select(AutomationRule).where(

@@ -158,7 +158,7 @@ const detail: EnrichmentSourceDetail = {
     },
     {
       key: "reenrich-cve-nvd",
-      description: "Ask again about CVEs NVD hadn't analysed",
+      description: "Ask again about CVEs NVD hadn't analyzed",
       settings_keys: ["cve_reenrich_batch_size"],
       schedule: "Daily at 3:05 AM",
       runs_30d: 29,

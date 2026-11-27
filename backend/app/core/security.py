@@ -153,10 +153,10 @@ ANONYMOUS_ROLE = "anonymous"
 class AnonymousViewer:
     """The read-only visitor a ``get_viewer`` route sees when nobody is signed in.
 
-    It walks like a ``User`` for the attributes read routes touch, with
-    ``id`` ``None``: every per-user filter (``UserEntryState.user_id == user.id``,
+    It has the ``User`` attributes that read routes use, with ``id``
+    ``None``: every per-user filter (``UserEntryState.user_id == user.id``,
     watches, stacks, personal weights, tag visibility) then matches no row,
-    which is exactly the "no user" answer — and a route that tried to *write*
+    which is the correct "no user" answer, and a route that tried to *write*
     a user-keyed row would fail on the NOT NULL column rather than store
     anything. Routes that must branch (hide feed URLs, skip a stamp) check
     ``user.is_anonymous``.

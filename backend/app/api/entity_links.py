@@ -1,9 +1,10 @@
-"""Autolinking admin API — entry→entity autolinks across the seven junction
+"""Autolinking admin API — entry→entity autolinks across the eight junction
 tables, unified for the Settings → Engine → Autolinking tab.
 
-The junction tables are heterogeneous: EntryTTP has ``source_text`` but no
+The junction tables have different columns: EntryTTP has ``source_text`` but no
 ``source``/``matched_names``; EntryCVE has neither ``source`` nor
-``confidence``; the other five carry the full autolinker column set. We
+``confidence``; EntryCWE has ``source`` and ``confidence`` but no
+``matched_names``; the other five carry the full autolinker column set. We
 normalize each into a common column shape and ``UNION ALL`` them so the tab can
 page/filter/sort across every entity type at once.
 

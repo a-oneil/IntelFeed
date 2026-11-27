@@ -47,11 +47,7 @@ interface ConsoleState {
   keyFor?: string;
 }
 
-// Deep links: ?view= opens one of the console's tabs (?view=entities;
-// ?view=review&lens=history opens one of Review's lenses, and
-// &lens=entities&show=dupe one status of its Entities lens). The old six-tab
-// layout (?tab=), the old per-status lenses (?lens=duplicates) and the even
-// older Settings sections (?section=) are mapped onto the console's states.
+// Deep links: ?view= opens one of the console's tabs (?view=entities; ?view=review&lens=history opens one of Review's lenses, and &lens=entities&show=dupe one status of its Entities lens). Older links still work: the six-tab layout (?tab=), the per-status lenses (?lens=duplicates) and the Settings sections (?section=) are mapped onto the console's states.
 function legacyState(params: URLSearchParams): ConsoleState {
   const view = params.get("view");
   if (view && (MATRIX_VIEWS as readonly string[]).includes(view)) {
@@ -97,10 +93,7 @@ function legacyState(params: URLSearchParams): ConsoleState {
   return {};
 }
 
-/** Workbench → Engine: single-surface console. Everything lives in the one
- *  table card (entries matrix, links, relationships, review queue, stage
- *  settings); only the browse views — Jobs, Plans, Enrichment, Publishing,
- *  Maintenance — open as separate screens with a back button. */
+/** Workbench → Engine console. Everything is in one table card (entries matrix, links, relationships, review queue, stage settings); only the browse views (Jobs, Plans, Enrichment, Publishing, Maintenance) open as separate screens with a back button. */
 export function EngineSection() {
   const [searchParams] = useSearchParams();
   const [browse, setBrowse] = useState<BrowseView | null>(null);
@@ -108,8 +101,7 @@ export function EngineSection() {
   const [enrichKeyFor, setEnrichKeyFor] = useState<string | null>(null);
   const [initial, setInitial] = useState<ConsoleState>({});
   const [nonce, setNonce] = useState(0);
-  // Setting the console's search jumped to — flashed wherever it renders, then
-  // dropped so the highlight doesn't linger on a panel reopened later.
+  // The setting picked in the console's search. It is highlighted wherever it renders, then cleared after 5 seconds so the highlight doesn't reappear on a panel reopened later.
   const [highlight, setHighlight] = useState<{ key: string; nonce: number } | null>(null);
   const hlTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -184,9 +176,7 @@ export function EngineSection() {
               <p className={styles.browseHint}>
                 These settings control actor refresh, assessment backfill and briefing themes.
               </p>
-              {/* Two blocks, not one call with both groups: the "Maintenance" group
-                  title would just repeat this view's own heading, so it stays
-                  hidden — while Retention needs its title to read as a section. */}
+              {/* Two blocks, not one call with both groups: the "Maintenance" group title would repeat this view's own heading, so it is hidden, while Retention needs its title to read as a separate section. */}
               <SystemSettings filterGroups={["maintenance"]} hideGroupTitle />
               <SystemSettings filterGroups={["retention"]} />
             </>

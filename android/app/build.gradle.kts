@@ -23,8 +23,7 @@ android {
 
     buildTypes {
         release {
-            // R8 shrinks and optimizes the release build (it was off). The app's own keep rules
-            // are in proguard-rules.pro; the libraries ship their own.
+            // R8 shrinks and optimizes the release build. The app's own keep rules are in proguard-rules.pro; the libraries ship their own.
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

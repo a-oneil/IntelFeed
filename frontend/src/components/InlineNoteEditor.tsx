@@ -1,12 +1,7 @@
 /**
- * InlineNoteEditor — the single note editor used everywhere (sidebar, entry
- * panel, entity profiles). Edits markdown source with a live rendered preview,
- * matching how notes are stored and read. Backend-agnostic: the parent supplies
- * the initial values and an onSubmit callback, so the same editor drives both
- * `Note` (entry/sidebar) and `EntityNote` (profile) content.
+ * InlineNoteEditor: the single note editor used everywhere (sidebar, entry panel, entity profiles). Edits markdown source with a live rendered preview, matching how notes are stored and read. Backend-agnostic: the parent supplies the initial values and an onSubmit callback, so the same editor drives both `Note` (entry/sidebar) and `EntityNote` (profile) content.
  *
- * Rendered inline inside a NoteCard. The preview reuses <NoteBody> so it matches
- * the saved read view exactly (entity scanning is disabled while typing).
+ * Rendered inline inside a NoteCard. The preview reuses <NoteBody> so it matches the saved read view exactly (entity scanning is disabled while typing).
  */
 import { useRef, useState } from "react";
 import { NoteBody } from "./NoteBody";

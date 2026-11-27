@@ -19,8 +19,7 @@ import com.example.intelfeed.data.model.Vendor
 import com.example.intelfeed.util.HtmlText
 import java.util.Locale
 
-// UI models shared by the Workbench lists and the entity profile. Every entity type maps onto the
-// same few shapes, so both screens render one layout instead of a branch per type.
+// UI models shared by the Workbench lists and the entity profile. Every entity type maps onto the same few shapes, so both screens render one layout instead of a branch per type.
 
 enum class Tone { NEUTRAL, INFO, SUCCESS, WARNING, DANGER, CRITICAL, ACCENT }
 
@@ -49,10 +48,7 @@ data class WorkbenchItem(
 data class EntityProfile(
     val ref: EntityRef,
     val title: String,
-    /**
-     * The row id the watchlist, relationships and entity notes use. Differs from ref.id for CVEs and
-     * techniques, which are opened by their public identifier (CVE-2024-1234, T1059).
-     */
+    /** The row id the watchlist, relationships and entity notes use. Differs from ref.id for CVEs and techniques, which are opened by their public identifier (CVE-2024-1234, T1059). */
     val serverId: String = ref.id,
     val monospaceTitle: Boolean = false,
     val subtitle: String? = null,
@@ -71,11 +67,7 @@ data class EntityProfile(
     val articleCount: Int = 0,
     /** Name used for the Articles tab search (the CVE id for CVEs, the ATT&CK id for techniques). */
     val searchName: String = title,
-    /**
-     * True when the server has no record for this entity (EntityViewModel's fallback). It has no
-     * server id, so only the overview and the Articles search are shown: watch/mute, notes,
-     * relationships and the timeline would read or write under a made-up id.
-     */
+    /** True when the server has no record for this entity (EntityViewModel's fallback). It has no server id, so only the overview and the Articles search are shown: watch/mute, notes, relationships and the timeline would read or write under a made-up id. */
     val placeholder: Boolean = false,
     /** Detection rules: the article the rule came from. */
     val sourceEntryId: String? = null
@@ -494,9 +486,7 @@ fun Campaign.toProfile() = EntityProfile(
 fun Cwe.toProfile() = EntityProfile(
     ref = EntityRef(EntityType.WEAKNESS, cweId, displayTitle),
     title = displayTitle,
-    // Opened by its public id (CWE-416), like CVEs: the timeline, relationships and notes take the
-    // row id (the website's profile route does too). The server rejected the timeline requests with
-    // "CWE-416" (400/422), and the Articles tab searched the display title and found nothing.
+    // Opened by its public id (CWE-416), like CVEs, but the timeline, relationships and notes take the row id (the website's profile route does too). The server rejects timeline requests made with "CWE-416" (400/422), and searching the display title in the Articles tab finds nothing, so searchName is the CWE id.
     serverId = id,
     subtitle = "Weakness (CWE)",
     description = HtmlText.cleanAiArtifacts(description ?: extendedDescription),

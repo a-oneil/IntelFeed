@@ -1,12 +1,8 @@
 import { IconPin } from "@tabler/icons-react";
 /**
- * NoteCard — the one note card used across the sidebar, entry panel and
- * entity profiles. Read state renders the note's saved content as formatted
- * markdown (via <NoteBody>) with an optional title, author/time and hover
- * actions. Clicking Edit flips the card into the shared markdown editor.
+ * NoteCard: the one note card used in the sidebar, entry panel and entity profiles. The read state renders the note's saved content as formatted text (via <NoteBody>) with an optional title, author/time and hover actions. Clicking Edit switches the card to the shared markdown editor.
  *
- * Backend-agnostic: callers pass the display fields plus an `onSave` that
- * persists to whichever store the note lives in (Note or EntityNote).
+ * Works with any note type: callers pass the display fields plus an `onSave` that saves to whichever table the note lives in (Note, EntityNote, or a telemetry source note).
  */
 import { useEffect, useRef, useState } from "react";
 import { InlineNoteEditor, type InlineNoteSubmit } from "./InlineNoteEditor";

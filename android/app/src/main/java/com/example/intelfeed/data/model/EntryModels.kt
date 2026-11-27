@@ -20,8 +20,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
-// Response shapes in this package were checked against the live server on 2026-09-22 (see
-// claude_changes.md). The server's docs are older than its responses in several places.
+// Response shapes in this package were checked against the live server on 2026-09-22. The server's docs are older than its responses in several places.
 
 @Serializable
 data class CursorPage<T>(
@@ -31,10 +30,7 @@ data class CursorPage<T>(
     val total: Int? = null
 )
 
-/**
- * Reads a string or a number as a String. Search hits send `published_at` as epoch seconds
- * (e.g. 1790094767.0) while the entry endpoints send ISO strings.
- */
+/** Reads a string or a number as a String. Search hits send `published_at` as epoch seconds (e.g. 1790094767.0) while the entry endpoints send ISO strings. */
 @OptIn(ExperimentalSerializationApi::class)
 object FlexibleStringSerializer : KSerializer<String?> {
     override val descriptor: SerialDescriptor =
@@ -53,10 +49,7 @@ object FlexibleStringSerializer : KSerializer<String?> {
     }
 }
 
-/**
- * Tags arrive as objects ({"name", "color"}) from the entry endpoints but as bare strings
- * (["morning-brief"]) in search hits. Accepts both.
- */
+/** Tags arrive as objects ({"name", "color"}) from the entry endpoints but as bare strings (["morning-brief"]) in search hits. Accepts both. */
 object FlexibleTagListSerializer : KSerializer<List<TagEntity>> {
     private val delegate = ListSerializer(TagEntity.serializer())
     override val descriptor: SerialDescriptor = delegate.descriptor
@@ -112,7 +105,7 @@ data class EntryItem(
     val tags: List<TagEntity> = emptyList(),
     // Top two ranking explanations; only set when the entry clears the Radar threshold.
     @SerialName("top_signals") val topSignals: List<Signal> = emptyList(),
-    // A re-report of an earlier article; the web list de-emphasises these.
+    // A re-report of an earlier article; the web list de-emphasizes these.
     @SerialName("is_echo") val isEcho: Boolean = false,
     // Client-side only: set on Priority Queue story rows (the id is then "thread:<slug>").
     @Transient val thread: StoryThread? = null
@@ -121,10 +114,7 @@ data class EntryItem(
     val displayTitle: String get() = translatedTitle?.takeIf { it.isNotBlank() } ?: title
 }
 
-/**
- * One entry's value from POST /api/entries/intel-counts (the web list's badges). Entries with
- * nothing extracted are absent from the response. Shape checked on the live server, 2026-09-23.
- */
+/** One entry's value from POST /api/entries/intel-counts (the web list's badges). Entries with nothing extracted are absent from the response. Shape checked on the live server, 2026-09-23. */
 @Serializable
 data class EntryIntelCounts(
     val ttps: Int = 0,
@@ -215,10 +205,7 @@ data class EchoOf(
     val total: Int = 0
 )
 
-/**
- * GET /api/entries/{id}. The live server does NOT include extracted entities here (the older docs
- * say it does): they come from /api/entries/{id}/threat-actors, /malware, /cves, … (see [EntryIntel]).
- */
+/** GET /api/entries/{id}. The live server does NOT include extracted entities here (the older docs say it does): they come from /api/entries/{id}/threat-actors, /malware, /cves, … (see [EntryIntel]). */
 @Serializable
 data class EntryDetail(
     val id: String,
@@ -356,10 +343,7 @@ data class FeedSource(
 ) {
     val displayTitle: String get() = customTitle ?: title
 
-    /**
-     * The web's curation label for the feed (its sidebar rail tooltip), from the extraction mode
-     * and auto-extract flag, or null when extraction is off.
-     */
+    /** The web's curation label for the feed (its sidebar rail tooltip), from the extraction mode and auto-extract flag, or null when extraction is off. */
     val curationLabel: String?
         get() {
             // Same rules as the web client: a missing mode counts as "selective".
@@ -397,10 +381,7 @@ data class IngestUrlResponse(
     val message: String? = null
 )
 
-/**
- * POST /api/feeds. Unset optional fields are left out of the JSON (the web client omits them too),
- * so the server applies its own defaults instead of receiving explicit nulls.
- */
+/** POST /api/feeds. Unset optional fields are left out of the JSON (the web client omits them too), so the server applies its own defaults instead of receiving explicit nulls. */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class CreateFeedRequest(
@@ -413,11 +394,7 @@ data class CreateFeedRequest(
     @SerialName("fetch_interval_minutes") val fetchIntervalMinutes: Int? = null
 )
 
-/**
- * A feed found by POST /api/feeds/discover. The live web client reads one object
- * ({url, title, description, feed_type}); the older docs describe {"feeds": [{url, title, type}]}.
- * IntelFeedRepository.discoverFeeds accepts both.
- */
+/** A feed found by POST /api/feeds/discover. The live web client reads one object ({url, title, description, feed_type}); the older docs describe {"feeds": [{url, title, type}]}. IntelFeedRepository.discoverFeeds accepts both. */
 @Serializable
 data class DiscoveredFeed(
     val url: String = "",

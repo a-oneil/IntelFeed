@@ -337,11 +337,11 @@ async def test_thread_outlets_answer_the_convergence_signal(db_session, reliable
 
 @pytest.mark.asyncio
 async def test_a_thread_beat_is_not_penalised_as_an_echo(db_session, reliable_feed):
-    """The behaviour that changes: shared entities used to be enough.
+    """Shared entities alone do not make an echo when the sweeper says otherwise.
 
     Two articles sharing four entities trip the overlap probe every time — see
-    test_feed_echo_and_convergence. When the sweeper has judged the later one a
-    distinct beat, that verdict stands: it compared the article against the
+    test_feed_echo_and_convergence. When the sweeper has given the later one the
+    `beat` role, that verdict wins: the sweeper compared the article against the
     whole story rather than counting junction rows.
     """
     other_feed = Feed(title="Aggregator", url="https://agg.example/feed", feed_type="rss")
@@ -423,7 +423,7 @@ async def test_thread_signals_can_be_switched_off(db_session, reliable_feed):
 
 @pytest.mark.asyncio
 async def test_rescore_covers_every_member_of_a_changed_thread(db_session, reliable_feed, monkeypatch):
-    """One more outlet on a story re-scores the whole story, not the newcomer."""
+    """One more outlet on a story re-scores the whole story, not only the newcomer."""
     from app.workers import signal_tasks
 
     members = [await _make_entry(db_session, reliable_feed, published_at=NOW) for _ in range(3)]
@@ -581,7 +581,7 @@ async def test_severity_and_under_reported(db_session, reliable_feed):
     hits = await compute_entry_signals(db_session, entry)
     types = {h.signal_type for h in hits}
     assert {"kev_added", "weaponized_poc", "epss_high", "critical_cvss", "under_reported"} <= types
-    assert "epss_jump" not in types  # no recorded jump — static percentile is epss_high now
+    assert "epss_jump" not in types  # no recorded jump; the high static percentile fires epss_high instead
     under = next(h for h in hits if h.signal_type == "under_reported")
     assert "CVE-2026-9999" in under.explanation
     assert under.payload["feeds_covering"] == 1
@@ -870,7 +870,7 @@ async def test_entries_list_chips_when_surfaced(client, auth_headers, db_session
     from app.config import settings as env_settings
     from app.workers.signal_tasks import score_entry
 
-    # Surfacing ships on; this test checks the switch both ways.
+    # Surfacing is on by default; this test checks the switch both ways.
     monkeypatch.setattr(env_settings, "signal_engine_surface", False)
     entry = await _make_entry(db_session, reliable_feed, title="Chip entry")
     await _link_actor(db_session, entry, "ChipActor", article_count=1)
@@ -882,7 +882,7 @@ async def test_entries_list_chips_when_surfaced(client, auth_headers, db_session
 
     monkeypatch.setattr("app.intelligence.signals.get_radar_threshold", fixed_threshold)
 
-    # Surface off (default): no chip fields populated
+    # Surface off: no chip fields populated
     resp = await client.get("/api/entries?limit=50", headers=auth_headers)
     assert resp.status_code == 200
     item = next(i for i in resp.json()["items"] if i["id"] == str(entry.id))
@@ -1047,7 +1047,7 @@ async def test_clear_check_engine_counts_only_newer_errors(
 
         body = (await client.get("/api/engine/pipeline", headers=auth_headers)).json()
         assert body["health_cleared_at"]
-        # The console still sees the stuck entry; the light doesn't.
+        # The 24h error count still includes the failure; new_error resets to 0.
         assert extract(body)["error"] == before["error"] and extract(body)["new_error"] == 0
 
         new = await _make_entry(db_session, reliable_feed, title="Fresh failure")

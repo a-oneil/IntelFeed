@@ -126,7 +126,7 @@ class EntityViewModel(
                 },
                 onFailure = { e ->
                     if (e is NoSuchElementException) {
-                        // Graceful fallback: construct minimal profile so user can view articles & mentions
+                        // No server record: build a minimal profile so the overview and the Articles search still work.
                         val fallback = fallbackProfile()
                         _state.update { it.copy(profile = fallback, loading = false, error = null) }
                         loadArticles(reset = true)
@@ -152,11 +152,7 @@ class EntityViewModel(
         )
     }
 
-    /**
-     * Fetches the detail by id. If there's no id (article pivots sometimes only carry a name) or
-     * the fetch fails, searches by name but only accepts an exact name/alias/id match: the first
-     * fuzzy hit could be the wrong actor.
-     */
+    /** Fetches the detail by id. If there's no id (article pivots sometimes only carry a name) or the fetch fails, searches by name but only accepts an exact name/alias/id match: the first fuzzy hit could be the wrong actor. */
     private suspend fun resolveProfile(): Result<EntityProfile> {
         val key = idOrName.trim()
         val label = name ?: key
@@ -223,8 +219,7 @@ class EntityViewModel(
         articlesJob?.cancel()
 
         if (type == EntityType.CAMPAIGN) {
-            // GET /api/entries?campaign_id= is cursor-paged. It used to always fetch page 1 and
-            // report the page size as the campaign's article count.
+            // GET /api/entries?campaign_id= is cursor-paged, so this pages by nextCursor; fetching only page 1 would report the page size as the campaign's article count.
             val cursor = if (reset) null else section.nextCursor
             _state.update { it.copy(articles = it.articles.copy(loading = true, error = null)) }
             articlesJob = viewModelScope.launch {

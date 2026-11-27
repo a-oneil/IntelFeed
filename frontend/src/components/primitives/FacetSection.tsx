@@ -26,14 +26,11 @@ interface Props {
 /**
  * One facet group: title, optional filter box, checkbox rows, "Show all" fold.
  *
- * The three behaviours that matter and are easy to get wrong:
+ * The three behaviors that matter and are easy to get wrong:
  *
- *  - the cap is a *fold*, not a truncation — a group that hides rows says so and
- *    can be opened, rather than silently ending at N;
- *  - a selected row stays visible even when it falls outside the cap or the
- *    filter box excludes it, or there'd be no way to untick it;
- *  - rows are checkboxes because groups are multi-select. A group that behaves
- *    like a radio should not use this component.
+ * - the cap is a *fold*, not a truncation — a group that hides rows says so and can be opened, rather than silently ending at N;
+ * - a selected row stays visible even when it falls outside the cap or the filter box excludes it, or there'd be no way to uncheck it;
+ * - rows are checkboxes because groups are multi-select. A group that behaves like a radio should not use this component.
  */
 export function FacetSection({ label, rows, active, onToggle, cap, searchable, titleAccessory }: Props) {
   const [expanded, setExpanded] = useState(false);

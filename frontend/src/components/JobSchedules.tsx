@@ -15,8 +15,7 @@ import { AsyncStateLoading } from "@/components/AsyncState";
 export default function JobSchedules({
   onOpenEnrichment,
 }: {
-  /** Enrichment jobs belong to their source: their rows here are read-only
-   *  and open the Enrichment console with that source expanded. */
+  /** Enrichment jobs belong to their source: their rows here are read-only and open the Enrichment console with that source expanded. */
   onOpenEnrichment: (source: string) => void;
 }) {
   const { data, isLoading } = useJobSchedules();
@@ -136,8 +135,7 @@ export default function JobSchedules({
   );
 }
 
-/** A job owned by an enrichment source: shown for the full picture, edited
- *  from the source's row in Engine → Enrichment. */
+/** A job owned by an enrichment source: listed here for completeness, edited from the source's row in Engine → Enrichment. */
 function SourceJobRow({
   job,
   source,

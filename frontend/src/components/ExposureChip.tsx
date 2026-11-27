@@ -1,11 +1,7 @@
 import { Chip } from "./primitives";
 import type { EntryExposure } from "@/api/types";
 
-/**
- * "Watching {vendor}" chip for radar entries about a vulnerability in a vendor
- * or product the analyst follows, plus a detection-library marker (does
- * IntelFeed have a rule for it) — a landscape property, not personal risk.
- */
+/** "Watching {vendor}" chip for radar entries about a vulnerability in a vendor or product the analyst follows, plus a detection-library marker (does IntelFeed have a rule for it), which describes the library, not personal risk. */
 export function ExposureChip({ exposure }: { exposure: EntryExposure }) {
   const vendor = exposure.asset_name;
   const cves = exposure.cve_ids.slice(0, 4).join(", ");

@@ -8,35 +8,22 @@ import styles from "./AskAgentPanel.module.css";
 interface AskAgentPanelProps {
   entryId?: string;
   onClose: () => void;
-  /**
-   * Ask function for shared (unauthenticated) pages — hits the share-token
-   * entry_qa endpoint. This panel only exists for that surface now; the
-   * authenticated app routes all article Q&A through the global copilot.
-   */
+  /** Ask function for shared (unauthenticated) pages; it calls the share-token entry_qa endpoint. This panel is used only on shared pages; the signed-in app sends all article Q&A through the global copilot. */
   askFn?: (
     question: string,
     history: AskAgentMessage[],
   ) => Promise<{ answer: string; remaining_today?: number | null }>;
-  /**
-   * Questions left on this link today, when the parent tracks it (a task run
-   * on the same link spends the same budget). Omit to let the panel keep its
-   * own count from the answers it gets.
-   */
+  /** Questions left on this link today, when the parent tracks it (a task run on the same link spends the same budget). Omit to let the panel keep its own count from the answers it gets. */
   remaining?: number | null;
   onRemaining?: (remaining: number) => void;
 }
 
-/**
- * Minimal article Q&A chat for shared entry pages. Non-streaming, no
- * persistence — the visitor has no account to persist to.
- */
+/** Minimal article Q&A chat for shared entry pages. Non-streaming and not saved, because the visitor has no account to save it to. */
 export function AskAgentPanel({ onClose, askFn, remaining: remainingProp, onRemaining }: AskAgentPanelProps) {
   const [messages, setMessages] = useState<AskAgentMessage[]>([]);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
-  // Questions left on this link today, from the last answer. The link has a
-  // daily budget of its own because it answers without a login. The parent's
-  // count wins when it has one, since task runs on the page spend it too.
+  // Questions left on this link today, from the last answer. The link has a daily budget of its own because it answers without a login. The parent's count wins when it has one, since task runs on the page spend it too.
   const [localRemaining, setLocalRemaining] = useState<number | null>(null);
   const remaining = remainingProp ?? localRemaining;
 

@@ -99,11 +99,7 @@ import androidx.compose.foundation.horizontalScroll
 /** One item in a card's overflow menu. */
 data class CardAction(val label: String, val icon: ImageVector? = null, val onClick: () -> Unit)
 
-/**
- * Priority score colour bands. Scores run 0–10, ranked against the last 30 days (9 ≈ top 5%,
- * 10 = top 1%), and the Radar threshold sits around 8. Red and orange match the web app's
- * high/medium bands (frontend/src/utils/signalBand.ts).
- */
+/** Priority score color bands. Scores run 0–10, ranked against the last 30 days (9 ≈ top 5%, 10 = top 1%), and the Radar threshold sits around 8. Red and orange match the web app's high/medium bands (frontend/src/utils/signalBand.ts). */
 fun scoreColor(score: Double): Color = when {
     score >= 9.5 -> CyberRed
     score >= 8.5 -> CyberOrange
@@ -177,10 +173,7 @@ fun familyOf(type: String): String? = when (type) {
     else -> null
 }
 
-/**
- * An article row. Tap opens it; long-press starts multi-select when [onLongClick] is set. In
- * [selectionMode] a tap toggles selection instead.
- */
+/** An article row. Tap opens it; long-press starts multi-select when [onLongClick] is set. In [selectionMode] a tap toggles selection instead. */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun EntryCard(
@@ -366,10 +359,7 @@ fun EntryCard(
 /** How a cue is drawn, following the web's intel-line chip classes. */
 enum class CueStyle { NORMAL, HIGH, STRONG, DASHED, DASHED_ITALIC }
 
-/**
- * One small cue on a card ("Qilin +1", "2 PIR", "3 TTPs", "KEV opportunity"); [description] is
- * read by screen readers. [pirs] is set on the PIR cue, which opens the matched requirements.
- */
+/** One small cue on a card ("Qilin +1", "2 PIR", "3 TTPs", "KEV opportunity"); [description] is read by screen readers. [pirs] is set on the PIR cue, which opens the matched requirements. */
 data class IntelCue(
     val text: String,
     val color: Color,
@@ -386,7 +376,7 @@ private val CriticalRed: Color
 private val WarningColor: Color
     get() = ThemeEngine.severityColor("medium")
 
-/** The web's PIR categories, in its order, with its --pir-* colours from `/api/themes/schema`. */
+/** The web's PIR categories, in its order, with its --pir-* colors from `/api/themes/schema`. */
 val PIR_CATEGORIES: List<Pair<String, Color>>
     get() = listOf(
         "tactical" to ThemeEngine.pirCategoryColor("tactical"),
@@ -395,12 +385,7 @@ val PIR_CATEGORIES: List<Pair<String, Color>>
         "strategic" to ThemeEngine.pirCategoryColor("strategic")
     )
 
-/**
- * The web list's intel line (IntelBadges), in its order: notes; the lead actor or malware (+ how
- * many more) and the PIR matches; then TTPs, CVEs (stronger when the worst is high or critical)
- * and rules; then the detection opportunity: "KEV opportunity" / "high-risk opportunity" when a
- * KEV or high-risk CVE has no rule, else "detection opportunity" or "telemetry gap".
- */
+/** The web list's intel line (IntelBadges), in its order: notes; the lead actor or malware (+ how many more) and the PIR matches; then TTPs, CVEs (stronger when the worst is high or critical) and rules; then the detection opportunity: "KEV opportunity" / "high-risk opportunity" when a KEV or high-risk CVE has no rule, else "detection opportunity" or "telemetry gap". */
 fun intelCues(c: EntryIntelCounts): List<IntelCue> = buildList {
     if (c.notes > 0) add(IntelCue(if (c.notes == 1) "1 note" else "${c.notes} notes", TextSecondary, "${c.notes} analyst note${if (c.notes == 1) "" else "s"}"))
     val lead = c.actors.firstOrNull() ?: c.malware.firstOrNull()
@@ -470,7 +455,7 @@ private fun IntelCueChip(cue: IntelCue, onClick: (() -> Unit)?) {
         CueStyle.STRONG -> if (c == CriticalRed) 0.22f to 0.58f else 0.20f to 0.55f
         CueStyle.DASHED, CueStyle.DASHED_ITALIC -> 0f to 0.5f
     }
-    // The web mixes the chip colour into the secondary text colour; strong and dashed chips use it pure.
+    // The web mixes the chip color into the secondary text color; strong and dashed chips use it pure.
     val textColor = when (cue.style) {
         CueStyle.NORMAL, CueStyle.HIGH -> androidx.compose.ui.graphics.lerp(c, TextSecondary, 0.45f)
         CueStyle.STRONG -> androidx.compose.ui.graphics.lerp(c, TextSecondary, 0.3f)
@@ -529,10 +514,7 @@ private fun PirCategoryBar(pirs: List<com.example.intelfeed.data.model.PirMatch>
     }
 }
 
-/**
- * The web's PIR popover: the matched requirements by category, each with why it matched; tapping
- * one searches `pir:"<title>"`. Uses [LocalIntelNavigation] for the search and the requirements page.
- */
+/** The web's PIR popover: the matched requirements by category, each with why it matched; tapping one searches `pir:"<title>"`. Uses [LocalIntelNavigation] for the search and the requirements page. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun PirMatchesSheet(pirs: List<com.example.intelfeed.data.model.PirMatch>, onDismiss: () -> Unit) {
@@ -585,10 +567,7 @@ class IntelNavigation(val searchQuery: (String) -> Unit = {}, val openRequiremen
 
 val LocalIntelNavigation = androidx.compose.runtime.staticCompositionLocalOf { IntelNavigation() }
 
-/**
- * A magazine/grid card for the 2-column feed view. Displays article thumbnail if available,
- * score badge, source, title, snippet, tags, and quick-action bar.
- */
+/** A magazine/grid card for the 2-column feed view. Displays article thumbnail if available, score badge, source, title, snippet, tags, and quick-action bar. */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun EntryGridCard(
@@ -633,7 +612,7 @@ fun EntryGridCard(
                 .fillMaxWidth()
                 .alpha(if (entry.isEcho && entry.isRead) 0.7f else 1f)
         ) {
-            // Hero Thumbnail or Subtle Gradient Header
+            // Thumbnail, or a gradient header when there is no image
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -953,11 +932,7 @@ private data class DayChip(
 /** The web shows at most this many chips per day. */
 private const val MAX_DAY_CHIPS = 5
 
-/**
- * The website's day chips, in its order: exploited count, newly tracked, technique, sector, CVE,
- * actor, malware, product, country (at most five). Each one filters the list to that day's
- * articles that mention it, like the web; tapping it again shows the whole list.
- */
+/** The website's day chips, in its order: exploited count, newly tracked, technique, sector, CVE, actor, malware, product, country (at most five). Each one filters the list to that day's articles that mention it, like the web; tapping it again shows the whole list. */
 private fun dayChips(intel: DayIntel, dayKey: String): List<DayChip> = buildList {
     fun times(count: Int) = if (count > 1) "×$count" else null
     fun focus(chip: String, label: String, vararg params: Pair<String, String?>): com.example.intelfeed.data.model.DayFocus? {
@@ -995,11 +970,7 @@ private fun dayChips(intel: DayIntel, dayKey: String): List<DayChip> = buildList
     }
 }.filter { it.name.isNotBlank() }.take(MAX_DAY_CHIPS)
 
-/**
- * Day divider for date-ordered lists: the day's most-mentioned entities (from the server's
- * day-intel, tap to open a profile) and the saved AI briefing, which only loads when asked for.
- * Reading a saved briefing doesn't generate anything or use AI tokens.
- */
+/** Day divider for date-ordered lists: the day's most-mentioned entities (from the server's day-intel, tap to open a profile) and the saved AI briefing, which only loads when asked for. Reading a saved briefing doesn't generate anything or use AI tokens. */
 @Composable
 fun DayHeader(
     label: String,
@@ -1023,8 +994,7 @@ fun DayHeader(
     onMarkDayRead: (() -> Unit)? = null
 ) {
     var expanded by rememberSaveable(dayKey) { mutableStateOf(false) }
-    // Runs when the divider scrolls into view (off-screen days cost nothing), and again after a
-    // refresh or scope change clears the day's data while the divider stays on screen.
+    // Runs when the divider scrolls into view (off-screen days cost nothing), and again after a refresh or scope change clears the day's data while the divider stays on screen.
     LaunchedEffect(dayKey, dayIntelKnown) { if (!dayIntelKnown) onLoadDayIntel() }
 
     val hasSummary = dailySummary?.summary?.isNotBlank() == true
@@ -1154,7 +1124,7 @@ private fun DayChipView(chip: DayChip, active: Boolean, onDayFocus: (com.example
     }
 }
 
-/** Tag colours come from the server as hex strings (#8B5CF6). Colours too dark for dark themes (or too light for light themes) fall back to secondary text. */
+/** Tag colors come from the server as hex strings (#8B5CF6). Colors too dark for dark themes (or too light for light themes) fall back to secondary text. */
 fun tagColor(hex: String?): Color {
     val parsed = hex?.removePrefix("#")?.takeIf { it.length == 6 }?.toLongOrNull(16) ?: return CyberBlue
     val color = Color(0xFF000000 or parsed)

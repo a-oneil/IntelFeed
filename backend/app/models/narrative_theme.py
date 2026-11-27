@@ -1,14 +1,14 @@
 """Narrative themes: the day-briefing's own grouping of the day's articles.
 
-The daily briefing already does something the engine pays an AI nowhere else to
-do — it reads a whole day of reporting and sorts it into `### Theme` sections,
-linking every article it cites back by entry id. That structure was rendered,
-shown to a reader, and thrown away.
+The daily briefing reads a whole day of reporting and sorts it into `### Theme`
+sections, linking every article it cites back by entry id. No other AI task
+groups a day's articles this way, so these two tables store that grouping
+instead of discarding it after rendering.
 
-These two tables keep it. `narrative_briefings` records that a day's briefing
-was parsed (so "no rows for this entry" can be told apart from "this day was
-never parsed"); `narrative_theme_members` records which articles the briefing
-placed under which heading.
+`narrative_briefings` records that a day's briefing was parsed (so "no rows for
+this entry" can be told apart from "this day was never parsed");
+`narrative_theme_members` records which articles the briefing placed under
+which heading.
 
 Parsing costs nothing — it reads markdown that was already generated and
 cached. See app/intelligence/narrative_themes.py.
@@ -24,9 +24,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
 #: Section of the briefing an article was cited in. Only `theme` rows carry a
-#: heading; the others are the briefing's own leftover buckets, which is itself
-#: worth knowing — an article the briefing could not place under any theme is
-#: not corroborating anything.
+#: heading; the others are the briefing's catch-all sections. They are recorded
+#: too, because an article the briefing could not place under any theme does not
+#: corroborate any theme.
 SECTION_THEME = "theme"
 SECTION_NOTABLE = "notable"
 SECTION_CLOSER = "closer"

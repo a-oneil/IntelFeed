@@ -8,7 +8,7 @@ interface Props {
   config: Record<string, unknown>;
 }
 
-/** Urgency color: overdue/imminent → danger, within a fortnight → warning. */
+/** Urgency color: 7 days or less (including overdue) → danger, 14 days or less → warning, otherwise success. */
 function urgencyColor(daysLeft: number): string {
   if (daysLeft <= 7) return "var(--danger)";
   if (daysLeft <= 14) return "var(--warning)";
@@ -36,7 +36,7 @@ export default function KEVDeadlinesWidget({ config }: Props) {
     <div className={styles.list}>
       {data.items.map((cve) => {
         const color = urgencyColor(cve.days_left);
-        // Fill shows elapsed share of a nominal 21-day remediation window.
+        // Fill shows how much of a nominal 21-day remediation window has elapsed.
         const elapsed = Math.min(100, Math.max(0, ((21 - cve.days_left) / 21) * 100));
         return (
           <button

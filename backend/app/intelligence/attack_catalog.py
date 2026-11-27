@@ -4,7 +4,7 @@ Hydrates the ttps/mitigations tables from the official attack-stix-data bundles
 (Enterprise + Mobile + ICS) and validates extracted technique IDs against the
 hydrated catalog:
 
-- unknown IDs are dropped (no more `technique_name == technique_id` stub rows),
+- unknown IDs are dropped (so no `technique_name == technique_id` stub rows are created),
 - revoked techniques map to their STIX-provided replacement,
 - ICS (T0xxx) techniques are only accepted when the entry context looks ICS/OT
   related (configurable keyword heuristic).
@@ -45,14 +45,13 @@ ATTACK_STIX_URLS: dict[str, str] = {
 _TECHNIQUE_ID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
 _MITIGATION_ID_RE = re.compile(r"^M\d{4}$")
 
-# ATT&CK v17 moved detection guidance off attack-pattern. `x_mitre_data_sources`
-# and `x_mitre_detection` no longer exist on technique objects; the same
-# information now lives in x-mitre-detection-strategy objects (linked to
-# techniques by `detects` relationships), each fanning out to x-mitre-analytic
-# objects that name their log sources as `x_mitre_log_source_references`.
-# Those names are channel-level ("WinEventLog:Sysmon", "auditd:SYSCALL"), which
-# is a far better join key for telemetry feasibility than the old coarse
-# "Process: Process Creation" data-source strings.
+# From ATT&CK v17 on, technique (attack-pattern) objects carry no
+# `x_mitre_data_sources` or `x_mitre_detection`. Detection guidance lives in
+# x-mitre-detection-strategy objects (linked to techniques by `detects`
+# relationships), each pointing to x-mitre-analytic objects that name their log
+# sources as `x_mitre_log_source_references`. Those names are channel-level
+# ("WinEventLog:Sysmon", "auditd:SYSCALL"), a better join key for telemetry
+# feasibility than the coarse pre-v17 "Process: Process Creation" data-source strings.
 _DETECTION_TEXT_LIMIT = 4000
 
 
@@ -441,7 +440,7 @@ async def sync_attack_relationships(db: AsyncSession, parsed_bundles: list[Parse
     from app.models.threat_actor import ThreatActor
     from app.models.tool import Tool
 
-    # STIX verb → our verb, per (source kind, target kind). Tools relate to
+    # STIX verb → IntelFeed verb, per (source kind, target kind). Tools relate to
     # techniques (the matrix reserves `uses` for operators), everything else
     # keeps MITRE's `uses`.
     verb_for = {
@@ -546,8 +545,8 @@ async def sync_attack_relationships(db: AsyncSession, parsed_bundles: list[Parse
             if not existing.description:
                 existing.description = "MITRE ATT&CK"
                 changed = True
-            # Authority supersedes the AI adjudicator: a MITRE-curated edge
-            # can't stay marked coincidental (contradictory provenance).
+            # MITRE's curation overrides the AI adjudicator: a MITRE-curated
+            # edge can't stay marked coincidental, so the verdict is cleared.
             if existing.adjudication_verdict is not None:
                 existing.adjudication_verdict = None
                 existing.adjudicated_at = None
@@ -627,7 +626,7 @@ async def resolve_technique_ids(
     - ICS-domain techniques resolve to None unless the context looks ICS/OT.
 
     Fallback: if the catalog has never been hydrated, every ID passes through
-    unchanged (pre-hydration installs keep the old behavior).
+    unchanged (validation needs the catalog).
     """
     if not technique_ids:
         return {}
@@ -676,12 +675,11 @@ async def hydrate_attack_entity_attributes(db: AsyncSession, parsed_bundles: lis
 
     The bundle carries a name, alias list, description, platform list and
     external ID for every intrusion-set, malware and tool object MITRE tracks.
-    Until now those objects were parsed only to resolve relationship edges
-    (:func:`sync_attack_relationships`), so none of it ever reached the profile
-    columns the workbench renders.
+    :func:`sync_attack_relationships` uses those objects to resolve relationship
+    edges; this copies their facts into the profile columns the workbench renders.
 
-    Matches EXISTING entities only — never creates one, so the entity-creation
-    gates stay the single door for new rows. Fill-blanks-only: an analyst- or
+    Matches EXISTING entities only — never creates one, so new rows only ever
+    come through the entity-creation gates. Fill-blanks-only: an analyst- or
     AI-written description, a curated alias list, or a manually set type all
     survive a re-run. Aliases are unioned rather than replaced.
     """

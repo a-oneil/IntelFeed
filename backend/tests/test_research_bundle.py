@@ -60,7 +60,7 @@ async def bundle_entries(db_session: AsyncSession, bundle_feed: Feed):
 
     # iocs.csv reads the observables ledger, so give entry1 judged rows: the
     # C2 IP and the payload hash. The private 192.168.1.100 in the prose must
-    # NOT appear — prose is never swept into the export any more.
+    # NOT appear — prose is never swept into the export.
     from app.intelligence.observables import get_or_create_observable, record_sighting
 
     c2 = await get_or_create_observable(

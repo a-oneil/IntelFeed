@@ -27,6 +27,8 @@ from app.schemas.feed import (
     FeedPushRequest,
     FeedResponse,
     FeedUpdateRequest,
+    LinkPreviewRequest,
+    LinkPreviewResponse,
     TitleFilterPreviewRequest,
     TitleFilterPreviewResponse,
     keep_stored_secrets,
@@ -53,8 +55,8 @@ from app.services.public_view import strip_feed_for_visitor
 from app.services.title_filter import matching_pattern, normalize_patterns, parse_patterns
 
 # Extended adapter feed types that skip URL discovery. Derived from the adapter
-# registry rather than hand-listed: the update endpoint's own copy of a feed-type
-# set had silently drifted from it, and this one would have gone the same way.
+# registry rather than hand-listed, because a hand-listed copy of a feed-type set
+# drifts out of sync with the registry without anyone noticing.
 _EXTENDED_FEED_TYPES = frozenset(_EXTENDED_ADAPTERS)
 _EXTENDED_FEED_DEFAULTS: dict[str, dict] = {
     "github_repo": {"interval": 1440},
@@ -329,8 +331,12 @@ async def create_feed(
         adapter_config = {}
         # Shorts are noise for an intel feed, so the per-user default is on
         # unless the user switched it off (Settings → Feeds).
-        if discovered.feed_type == "youtube" and (user.settings or {}).get("youtube_exclude_shorts_default", True):
-            adapter_config["exclude_shorts"] = True
+        if discovered.feed_type == "youtube":
+            skip_shorts = request.exclude_shorts
+            if skip_shorts is None:
+                skip_shorts = (user.settings or {}).get("youtube_exclude_shorts_default", True)
+            if skip_shorts:
+                adapter_config["exclude_shorts"] = True
 
         feed = Feed(
             title=discovered.title or request.url,
@@ -642,7 +648,7 @@ async def bulk_update_category_feeds(
         if assessed:
             feed.last_reviewed_at = datetime.now(UTC)
 
-        # Retention is now on Feed directly
+        # Retention is a column on Feed itself
         if request.clear_retention:
             if feed.retention_days is not None:
                 feed.retention_days = None
@@ -657,6 +663,20 @@ async def bulk_update_category_feeds(
 
     await db.flush()
     return {"updated": updated, "feed_defaults": clean_defaults(category.feed_defaults)}
+
+
+@router.get("/category-suggestion")
+async def suggest_category(
+    feed_type: str = Query(..., description="Feed type about to be created, e.g. nvd or bluesky"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The category feeds of this type are mostly filed under (what a create
+    without a category would use), for the Add Feed dialog to preselect."""
+    from app.services.feed_defaults import category_for_feed_type
+
+    category_id = await category_for_feed_type(db, feed_type)
+    return {"category_id": str(category_id) if category_id else None}
 
 
 @router.get("/health")
@@ -979,8 +999,8 @@ async def update_feed(
     if request.custom_title is not None:
         feed.custom_title = request.custom_title
     if "category_id" in sent:
-        # None = move to Uncategorized. The old `is not None` guard dropped it,
-        # so a feed could be filed but never unfiled from this endpoint.
+        # None = move to Uncategorized. Checking `sent` rather than `is not None`
+        # is what lets a feed be unfiled from this endpoint, not only filed.
         feed.category_id = request.category_id
     per_user_mute: bool | None = None
     per_user_paused: bool | None = None
@@ -1060,9 +1080,9 @@ async def update_feed(
             )
         feed.feed_type = request.feed_type
     if "retention_days" in sent:
-        # None or <= 0 = keep forever. Same bug as category_id: the previous
-        # guard meant a feed on a 90-day window could never be set back to
-        # unlimited, which is why the bulk-category path needed `clear_retention`.
+        # None or <= 0 = keep forever. Checked via `sent`, as with category_id, so
+        # a feed on a 90-day window can be set back to unlimited (the bulk-category
+        # path has `clear_retention` for the same reason).
         feed.retention_days = request.retention_days if (request.retention_days or 0) > 0 else None
 
     # Source reliability fields
@@ -1212,7 +1232,7 @@ async def _invalidate_unread_cache(user_id: uuid.UUID) -> None:
 # --------------------------------------------------------------------------- subscribers
 # Admin-side control over who reads what. Only meaningful with per-user
 # subscriptions on — with the flag off everyone sees every feed regardless — but
-# the rows are maintained either way, so pushing a feed now survives a later flip.
+# the rows are maintained either way, so a feed pushed today survives a later flip.
 
 
 @router.get("/{feed_id}/subscribers")
@@ -1349,6 +1369,31 @@ async def remove_feed_subscriber(
 
     if await _subscriber_count(db, feed_id) == 0:
         await archive_feed(db, feed)
+
+
+@router.post("/preview", response_model=LinkPreviewResponse)
+async def preview_link_endpoint(
+    request: LinkPreviewRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Say what a pasted link is before subscribing: a site's feeds, a YouTube
+    channel, a GitHub repo (and whether it holds detection rules), a Bluesky
+    account, feed or search, a Telegram channel, a Mastodon hashtag, or a page
+    with no feed that the web scraper can read. Also suggests a category and
+    the poll interval subscribing would use. Returns 422 when the link leads
+    nowhere usable."""
+    from dataclasses import asdict
+
+    from app.services.link_preview import PreviewError, preview_link
+
+    try:
+        preview = await preview_link(request.url, db)
+    except PreviewError as exc:
+        raise AppError(code="unprocessable", message=str(exc), status_code=422) from exc
+    data = asdict(preview)
+    data["feeds"] = preview.feeds
+    return data
 
 
 @router.post("/discover")

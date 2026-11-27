@@ -23,7 +23,7 @@ from app.workers.pipeline_logging import pipeline_stage
 logger = logging.getLogger(__name__)
 
 # Skip translation past this many characters of HTML — keeps the LibreTranslate
-# sidecar from being pinned by occasional novel-sized RSS articles. Telegram
+# sidecar from being tied up by the occasional very long RSS article. Telegram
 # messages are well under this; long RSS bodies fall through and stay original.
 _MAX_TRANSLATE_CHARS = 50_000
 
@@ -171,7 +171,7 @@ async def _translate_one(entry_id: str, target_lang: str, requeue_autolink: bool
     return "translated"
 
 
-# Backfill sweep. LibreTranslate runs off-by-default (the `translate` compose
+# Backfill sweep. In prod LibreTranslate is opt-in (the `translate` compose
 # profile), so on ingest an auto-translate feed's entries may be skipped while
 # the sidecar is down. This sweep re-queues those once it's back up.
 #
@@ -179,8 +179,8 @@ async def _translate_one(entry_id: str, target_lang: str, requeue_autolink: bool
 # whose language isn't already the target. translate_entry_task resolves every
 # candidate into a terminal state that removes it from the set — a real
 # translation sets translated_html; a same-language entry gets its language
-# persisted (see the already_target branch above). Genuinely un-translatable
-# ones (oversized/empty) simply age out of the lookback window.
+# persisted (see the already_target branch above). Entries that can't be
+# translated (oversized/empty) age out of the lookback window.
 _RETRY_LOOKBACK_DAYS = 14
 _RETRY_MAX_PER_SWEEP = 500  # global budget; drains over successive ticks
 

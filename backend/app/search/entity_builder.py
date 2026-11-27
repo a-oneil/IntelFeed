@@ -58,8 +58,8 @@ ENTITY_TABLE_MAP = {
     # junction table, so like victims they surface themselves, not articles.
     "intel_report": (IntelReport, None, None, None),
     "pir": (IntelligenceRequirement, RequirementMatch, RequirementMatch.requirement_id, RequirementMatch.entry_id),
-    # Notes span two tables, so `Note` here is only the map's admission ticket —
-    # `_execute_note_group` takes over before the generic query is built.
+    # Notes span two tables, so `Note` here only registers `note` in the map;
+    # `_execute_note_group` handles the query before the generic one is built.
     "note": (Note, None, None, None),
 }
 
@@ -176,9 +176,9 @@ FIELD_MAP = {
     "intel_report.tlp": ("tlp_marking", IntelReport),
 }
 
-# Catalogue attributes every entity carries. Generated so a new entity type
-# picks them up by being added to one tuple rather than eight map entries.
-_CATALOGUE_MODELS = {
+# Catalog attributes every entity carries. Generated so a new entity type
+# picks them up by being added to one dict below rather than to several map entries.
+_CATALOG_MODELS = {
     "ttp": TTP,
     "threat_actor": ThreatActor,
     "malware": MalwareFamily,
@@ -199,7 +199,7 @@ _PROVENANCE_MODELS = {
     "ttp": TTP,
     "tool": Tool,
 }
-for _root, _model in _CATALOGUE_MODELS.items():
+for _root, _model in _CATALOG_MODELS.items():
     FIELD_MAP[f"{_root}.articles"] = ("article_count", _model)
     FIELD_MAP[f"{_root}.seen"] = ("last_seen_at", _model)
     FIELD_MAP[f"{_root}.first_seen"] = ("first_seen_at", _model)
@@ -228,7 +228,7 @@ BOOLEAN_FIELDS = {
     "rule.draft",
 } | {f"{root}.review" for root in _PROVENANCE_MODELS}
 
-DATE_FIELDS = {f"{root}.{leaf}" for root in _CATALOGUE_MODELS for leaf in ("seen", "first_seen")}
+DATE_FIELDS = {f"{root}.{leaf}" for root in _CATALOG_MODELS for leaf in ("seen", "first_seen")}
 
 _TRUTHY = {"true", "yes", "1", "y"}
 _FALSY = {"false", "no", "0", "n"}
@@ -356,8 +356,8 @@ async def _execute_entity_group(
     entities = result.scalars().all()
 
     # Linked entries come from every match, not just the displayed page. Deriving
-    # them from an unordered `LIMIT 200` is what made the same query return a
-    # different number of entries on every run.
+    # them from an unordered, limited page makes the same query return a
+    # different number of entries on each run.
     entry_ids: set[str] = set()
     if entity_type == "rule":
         rows = await db.execute(select(DetectionRule.entry_id).where(DetectionRule.id.in_(matched_ids)))
@@ -457,7 +457,7 @@ async def _execute_note_group(
     if not note_conditions and not entity_note_conditions:
         return [], set()
 
-    # The value of a bare `note:` term is what the snippet centres on; a query
+    # The value of a bare `note:` term is what the snippet centers on; a query
     # made only of property filters has nothing to highlight.
     highlight = next((c.value.lower() for c in group.conditions if c.field == "note" and not c.negated), "")
     return await fetch_notes(db, note_conditions, entity_note_conditions, limit, highlight)
@@ -488,7 +488,7 @@ def _build_join_condition(field: str, cond: EntityCondition):
     """Fields answered by a related table rather than a column on the entity.
 
     Each returns an EXISTS-style `IN (subquery)` so the surrounding AND/OR and
-    negation machinery keeps working unchanged.
+    negation handling works unchanged.
     """
     value = cond.value
     pattern = value.replace("*", "%") if "*" in value else f"%{value}%"
@@ -625,8 +625,8 @@ def _build_condition(cond: EntityCondition, model, entity_type: str):
             return clause
 
     # Range operators (for numeric fields like cve.cvss). A non-numeric value
-    # filters nothing rather than raising: `cve.cvss:>bogus` used to reach
-    # `column > None` and come back as a 500.
+    # filters nothing rather than raising: otherwise `cve.cvss:>bogus` reaches
+    # `column > None` and comes back as a 500.
     if cond.op in ("gt", "gte", "lt", "lte"):
         bound = _numeric(value)
         if bound is None:
@@ -804,10 +804,10 @@ def _serialize_entity(entity_type: str, entity) -> dict:
                 "description": entity.description,
             }
         )
-    # Tools, vendors, products and reports were reachable in ENTITY_TABLE_MAP
-    # but had no branch here, so a filter query like `tool.platform:Windows`
-    # returned rows carrying only an id — and the UI, having no name to show,
-    # rendered the raw UUID.
+    # Every type in ENTITY_TABLE_MAP needs a branch here: without one, a filter
+    # query like `tool.platform:Windows` returns rows carrying only an id and the
+    # UI shows the raw UUID. The tool/vendor/product branches below never run,
+    # because the combined branch above matches those types first.
     elif entity_type == "tool":
         base.update(
             {

@@ -19,7 +19,7 @@ class VulnCheckAdapter(EnrichmentAdapter):
     quota = Quota(1000, 60, daily_budget=1000, ceiling_per_period=1000)
     egress = Egress.LOW
     # Free in open-source and commercial products with prominent attribution,
-    # labelled "VulnCheck KEV":
+    # labeled "VulnCheck KEV":
     # https://docs.vulncheck.com/community/vulncheck-kev/attribution/
     license = License("VulnCheck KEV community terms", attribution="VulnCheck KEV")
     outputs = (

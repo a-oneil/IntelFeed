@@ -69,10 +69,7 @@ export function EngineSwitch() {
   );
 }
 
-/** Turns the header's check-engine light green until a new error or retry
- *  comes in: for failures the admin knows about and has chosen to leave (a
- *  feed worth keeping, an entry that can't be retried). Greyed out while
- *  there is nothing to clear. */
+/** Turns the header's check-engine light green until a new error or retry comes in. It is for failures the admin knows about and has chosen to leave (a feed worth keeping, an entry that can't be retried). Disabled while there is nothing to clear. */
 export function ClearCheckEngine() {
   const health = useEngineHealth(true);
   const clear = useClearEngineHealth();
@@ -116,9 +113,7 @@ export function EngineStoppedBanner() {
   );
 }
 
-/** Says why the header's check-engine light is on, under the Engine top bar.
- *  Hidden while the light is green (or cleared), and while the engine is
- *  stopped: the stopped banner covers that. */
+/** Says why the header's check-engine light is on, under the Engine top bar. Hidden while the light is green (or cleared), and while the engine is stopped, since the stopped banner covers that case. */
 export function CheckEngineBanner() {
   const health = useEngineHealth(true);
   const retryErrors = useRetryPipelineErrors();

@@ -1033,9 +1033,9 @@ async def test_db_template_sections_are_honored(db_session: AsyncSession, test_u
 
 
 # ── Rules as report evidence ────────────────────────────────────────────────
-# A coverage set's whole output is the rules it adopted. Before this, attach
-# took entries and entities only, so sending a set dropped exactly the part
-# worth sending.
+# A coverage set's whole output is the rules it adopted, so attach takes
+# detection rules as well as entries and entities; without them, sending a set
+# would drop the part worth sending.
 
 
 @pytest_asyncio.fixture
@@ -1098,7 +1098,7 @@ async def test_attach_note_seeds_the_detections_body(
     test_report: IntelReport,
     attachable_rules: list[DetectionRule],
 ):
-    """A set's skipped rules ride along as known gaps."""
+    """A set's skipped rules are carried in the note as known gaps."""
     resp = await client.post(
         f"/api/intel-reports/{test_report.id}/attach",
         headers=auth_headers,
@@ -1151,7 +1151,7 @@ async def test_detections_render_as_an_attributed_table(
     attachable_rules: list[DetectionRule],
     db_session: AsyncSession,
 ):
-    """The markdown export names the repo and licence for every rule."""
+    """The markdown export names the repo and license for every rule."""
     await client.post(
         f"/api/intel-reports/{test_report.id}/attach",
         headers=auth_headers,
@@ -1161,10 +1161,10 @@ async def test_detections_render_as_an_attributed_table(
     md = render_markdown(test_report)
 
     assert "## Detections" in md
-    assert "| Rule | Format | Source | Licence | ATT&CK |" in md
+    assert "| Rule | Format | Source | License | ATT&CK |" in md
     assert "Azure\\-Sentinel" in md
     assert "MIT" in md
-    # A rule with no recorded licence says so rather than reading as unencumbered.
+    # A rule with no recorded license says so rather than reading as unencumbered.
     assert "unstated" in md
 
 

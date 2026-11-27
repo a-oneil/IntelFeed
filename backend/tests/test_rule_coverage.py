@@ -2,8 +2,8 @@
 
 The false-positive guards are the point of these tests, not an afterthought:
 rule bodies carry more English prose than an article does (``description:``,
-``falsepositives:``, comments), so the text writer is one loosened check away
-from re-creating the alias epidemic the autolinker already lived through.
+``falsepositives:``, comments), so loosening one check in the text writer would
+bring back the dictionary-word alias false positives the autolinker once had.
 """
 
 import uuid
@@ -300,8 +300,8 @@ async def test_resolve_all_since_only_touches_moved_rules(db_session, rule, voca
     )
     db_session.add(stale)
     await db_session.flush()
-    # updated_at defaults to now() on insert, and the incremental pass now reads
-    # it too so locally authored rules are not skipped — a genuinely untouched
+    # updated_at defaults to now() on insert, and the incremental pass reads it
+    # too so locally authored rules are not skipped — a genuinely untouched
     # row therefore has to be backdated on both columns.
     await db_session.execute(update(DetectionRule).where(DetectionRule.id == stale.id).values(updated_at=old_ts))
 
@@ -312,12 +312,12 @@ async def test_resolve_all_since_only_touches_moved_rules(db_session, rule, voca
     assert not await _coverage(db_session, stale.id)
 
 
-# ── the board reads the materialised table ──────────────────────────
+# ── the board reads the materialized table ──────────────────────────
 
 
 async def test_coverage_board_counts_actor_rules(db_session, client, auth_headers, test_feed, vocabulary):
-    """The actor branch counted zero forever: `source_actors` is written by
-    nothing, so the board could only ever read what the resolver now provides.
+    """Regression: the actor branch always counted zero, because nothing writes
+    `source_actors`. The board counts actor rules from the resolver's rule_coverage rows.
     """
     vocabulary()
     actor = ThreatActor(name="APT29")

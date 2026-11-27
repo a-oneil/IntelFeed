@@ -67,10 +67,7 @@ import com.example.intelfeed.theme.TextPrimary
 import com.example.intelfeed.theme.TextSecondary
 import com.example.intelfeed.ui.IntelFeedUiState
 
-/**
- * [onLogin] receives the raw instance URL. The ViewModel validates it and saves it only when
- * signing in. Saving on every keystroke let partial URLs crash the app.
- */
+/** [onLogin] receives the raw instance URL. The ViewModel validates it and saves it only when signing in, because saving on every keystroke lets partial URLs crash the app. */
 @Composable
 fun LoginScreen(
     uiState: IntelFeedUiState,

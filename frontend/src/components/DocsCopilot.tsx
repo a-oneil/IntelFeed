@@ -7,13 +7,7 @@ import { useUIStore, type DocsChatMessage } from "@/stores/uiStore";
 import { ToolTraceChip } from "@/components/ToolTraceChip";
 import styles from "./DocsCopilot.module.css";
 
-/**
- * The docs landing page's chat. A deliberately smaller surface than the global
- * copilot dock: no conversation history, slash commands, pinned context or
- * confirmable writes — this window exists to answer "how does IntelFeed do X"
- * from the documentation, and the backend puts it in docs mode off the
- * `/documentation` route it sends as context.
- */
+/** The docs landing page's chat. A deliberately smaller surface than the global copilot dock: no conversation history, slash commands, pinned context or confirmable writes — this window exists to answer "how does IntelFeed do X" from the documentation, and the backend puts it in docs mode off the `/documentation` route it sends as context. */
 const SUGGESTED_QUESTIONS = [
   "How do I add a new feed?",
   "What does the Priority Queue rank on?",
@@ -22,9 +16,7 @@ const SUGGESTED_QUESTIONS = [
 ];
 
 export function DocsCopilot({ docSlug }: { docSlug?: string }) {
-  // The thread lives in the store, not in this component: the docs page
-  // unmounts whenever you follow a link out of it, and a chat that restarted
-  // every time you went to read the page it just cited was useless.
+  // The thread lives in the store, not in this component: the docs page unmounts whenever you follow a link out of it, and a chat that restarted every time you went to read the page it just cited would be useless.
   const { conversationId, messages, streaming = false } = useUIStore((s) => s.docsChat);
   const setDocsChat = useUIStore((s) => s.setDocsChat);
   const resetDocsChat = useUIStore((s) => s.resetDocsChat);
@@ -48,8 +40,7 @@ export function DocsCopilot({ docSlug }: { docSlug?: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  // Docs answers cite pages as /documentation/<slug>; route those through the
-  // SPA router so following a citation doesn't reload the app.
+  // Docs answers cite pages as /documentation/<slug>; route those through the SPA router so following a citation doesn't reload the app.
   const markdownComponents: Components = {
     a: ({ href, children, ...props }) => {
       const internal = !!href && href.startsWith("/") && !href.startsWith("//");
@@ -130,8 +121,7 @@ export function DocsCopilot({ docSlug }: { docSlug?: string }) {
           onError: (message) => {
             setError(message);
             setStreaming(false);
-            // Drop the empty assistant placeholder so the error isn't shown
-            // under a blank bubble.
+            // Drop the empty assistant placeholder so the error isn't shown under a blank bubble.
             setMessages((prev) => {
               const last = prev[prev.length - 1];
               return last && last.role === "assistant" && !last.content ? prev.slice(0, -1) : prev;

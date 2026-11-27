@@ -23,7 +23,7 @@ def _article_columns(entity_type: str) -> tuple[Column, ...]:
         Column("wikipedia_content", f"{entity_type}.wikipedia_content", Policy.NEWER_WINS, follows=url),
         Column("wikipedia_image_url", f"{entity_type}.wikipedia_image_url", Policy.NEWER_WINS, follows=url),
         # Human-curated prose, so it ranks ahead of the security catalogs;
-        # a CVE's own record (NVD) is the exception.
+        # for a CVE, its own record (NVD, cvelistV5) ranks ahead.
         Column("first_paragraph", f"{entity_type}.description", Policy.RANK, rank=2 if entity_type == "cve" else 1),
     )
 
@@ -113,5 +113,5 @@ class WikipediaAdapter(EnrichmentAdapter):
 
     async def check_health(self) -> bool:
         """Verify Wikipedia API is reachable."""
-        # fetch_wikipedia answers None for anything but a gateway refusal.
+        # fetch_wikipedia returns None on any failure except a gateway refusal, which it raises.
         return await fetch_wikipedia("Computer security", "ttp", transport=self.http_transport()) is not None

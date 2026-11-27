@@ -10,10 +10,7 @@ import { useAuthStore } from "@/stores/authStore";
 
 import styles from "@/pages/SettingsPage.module.css";
 
-/** Feed subscription export (OPML), YouTube defaults, public RSS. OPML
- *  *import* lives on the Add Feed button, where new subscriptions start.
- *  Fetch-behavior settings (intervals, rate limiting, image proxy) live on the
- *  Engine pipeline's feeds/sanitize cards. */
+/** Feed subscription export (OPML), YouTube defaults, public RSS. OPML *import* lives on the Add Feed button, where new subscriptions start. Fetch-behavior settings (intervals, rate limiting, image proxy) live on the Engine pipeline's feeds/sanitize cards. */
 export function FeedsImportPanel() {
   const user = useAuthStore((s) => s.user);
   const updateProfile = useUpdateProfile();

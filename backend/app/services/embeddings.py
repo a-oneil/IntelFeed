@@ -1,16 +1,16 @@
-"""Entry embeddings — the vector substrate under Story Threads.
+"""Entry embeddings — the vectors Story Threads clusters on.
 
 Deliberately not routed through the AI task/assignment machinery. Embedding is
 a bulk, non-generative job with no prompt, no schema and no cost, and it has to
 keep running when every generative provider is paused, rate-limited or (as in
-dev) simply inactive. So it reads its own settings and builds its own client,
+dev) inactive. So it reads its own settings and builds its own client,
 borrowing only the Ollama provider row's base URL and bearer token when one is
 configured.
 
 Nothing here re-embeds an entry whose text has not changed: ``content_hash``
-covers the exact string that was sent, so a re-run is free. What makes that
-claim true rather than decorative is the third selector — once nothing is
-pending and no model has changed, the sweep walks the least-recently-verified
+covers the exact string that was sent, so a re-run is free. The third selector
+keeps the stored hashes current: once nothing is pending and no model has
+changed, the sweep walks the least-recently-verified
 slice of the corpus and re-hashes it, which is how a re-sanitized article, a
 re-fetched body or a change to ``build_text`` itself finds its way back through
 here without anyone running a backfill by hand.
@@ -42,7 +42,7 @@ BODY_CHARS = 1500
 # 119-character blurb, or the three-character stub 130 entries in this corpus
 # ship. 70% of embedded entries have a summary under 200 characters while
 # averaging 4,381 characters of body, so preferring the summary unconditionally
-# threw the article away and embedded the headline with noise attached.
+# would drop the article and embed little more than the headline.
 MIN_SUMMARY_CHARS = 300
 
 # No task prefix. nomic-embed-text documents "search_document: " / "clustering: "
@@ -111,7 +111,7 @@ async def resolve_provider(db: AsyncSession) -> tuple[AIProvider, str]:
     if not base_url and row is None:
         # Embeddings ship enabled, but a Claude/OpenAI-only install has no
         # Ollama host to embed with. Say so once per sweep rather than
-        # dialling http://ollama:11434 and logging a connection error.
+        # dialing http://ollama:11434 and logging a connection error.
         raise EmbeddingsNotConfigured(
             "No Ollama provider and no embedding_base_url is configured. Add an Ollama provider "
             "under Settings > AI Configuration (serving the embedding model), set "

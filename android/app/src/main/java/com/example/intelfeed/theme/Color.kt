@@ -12,12 +12,7 @@ import com.example.intelfeed.data.model.ThemeDto
 import com.example.intelfeed.data.model.UserProfile
 import kotlin.math.pow
 
-/**
- * Resolved theme + color-vocabulary state driven by the backend (`/api/themes`, `/api/themes/default`,
- * and `/api/themes/schema`). All top-level color properties in `Color.kt` delegate to [ThemeEngine],
- * so any Compose screen reading them recomposes automatically when the active theme or color schema
- * changes.
- */
+/** Resolved theme + color-vocabulary state driven by the backend (`/api/themes`, `/api/themes/default`, and `/api/themes/schema`). All top-level color properties in `Color.kt` delegate to [ThemeEngine], so any Compose screen reading them recomposes automatically when the active theme or color schema changes. */
 data class ResolvedThemeSelection(
     val theme: ThemeDto,
     val source: String // "user" or "default"
@@ -25,11 +20,7 @@ data class ResolvedThemeSelection(
 
 object ThemeEngine {
 
-    /**
-     * Default CSS variables matching the workbench's `:root` (`frontend/src/index.css`,
-     * `entityTheme.ts`, `colorSchemes.ts`, `ransomwareColors.ts`, `severity.ts`, and
-     * `backend/app/api/themes.py` `COLOR_SCHEMA`).
-     */
+    /** Default CSS variables matching the workbench's `:root` (`frontend/src/index.css`, `entityTheme.ts`, `colorSchemes.ts`, `ransomwareColors.ts`, `severity.ts`, and `backend/app/api/themes.py` `COLOR_SCHEMA`). */
     val DEFAULT_VARIABLES: Map<String, String> = mapOf(
         // Base theme variables (GitHub Dark)
         "bg-primary" to "#0d1117",
@@ -195,7 +186,7 @@ object ThemeEngine {
                 }
             }
         }
-        // Compute WCAG AA contrast foreground for accent when not explicitly provided by theme
+        // When the theme sets neither accent-fg nor accent-text, pick dark or white text for the accent by its relative luminance.
         val hasExplicitAccentFg = themeVariables.keys.any {
             val k = it.removePrefix("--").trim()
             k == "accent-fg" || k == "accent-text"
@@ -373,10 +364,7 @@ object ThemeEngine {
         return ResolvedThemeSelection(fallback, "default")
     }
 
-    /**
-     * Resolves whether a signed-out screen should apply the server's public default theme or keep
-     * the user's cached choice (`frontend/src/hooks/useThemes.ts`).
-     */
+    /** Resolves whether a signed-out screen should apply the server's public default theme or keep the user's cached choice (`frontend/src/hooks/useThemes.ts`). */
     fun shouldApplyPublicDefaultWhenSignedOut(
         publicDefault: ThemeDto?,
         cached: CachedThemeState?
@@ -562,10 +550,7 @@ object ThemeEngine {
         else -> color("text-primary")
     }
 
-    /**
-     * Picks dark (`#0d1117`) or white (`#ffffff`) foreground text for a filled chip or button
-     * background using WCAG relative luminance (matching `frontend/src/utils/contrast.ts`).
-     */
+    /** Picks dark (`#0d1117`) or white (`#ffffff`) foreground text for a filled chip or button background using WCAG relative luminance (matching `frontend/src/utils/contrast.ts`). */
     fun contrastTextColor(bg: Color): Color {
         return if (relativeLuminance(bg) >= 0.4f) Color(0xFF0D1117) else Color.White
     }

@@ -1,12 +1,10 @@
-/* Unified entity profile — shared styles for the page shell, header, tabs,
-   pivot trail, and tab content building blocks. Uses the app's CSS variables. */
+/* Unified entity profile — shared styles for the page shell, header, tabs, pivot trail, and tab content building blocks. Uses the app's CSS variables. */
 
 .page {
   height: 100%;
   display: flex;
   flex-direction: column;
-  /* The page is the scroll container: the hero scrolls away and the tab bar
-     sticks to the top (position: sticky on .tabBar). */
+  /* The page is the scroll container: the hero scrolls away and the tab bar sticks to the top (position: sticky on .tabBar). */
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--bg-primary);
@@ -34,10 +32,7 @@
   margin-bottom: var(--sp-3);
 }
 
-/* Residual styling for the hero type `Chip` (Chip supplies the box, the fill
-   and — critically — a foreground derived from the entity tint, replacing the
-   hardcoded #fff that fell to ~1.9:1 on the yellow/lime entity colors).
-   Doubled because `font-weight` is a property Chip also sets. */
+/* Residual styling for the hero type `Chip`. Chip supplies the box, the fill and a foreground color derived from the entity tint, which keeps text readable on the yellow/lime entity colors (a hardcoded #fff measured ~1.9:1 there). The selector is doubled because `font-weight` is a property Chip also sets. */
 .typeBadge.typeBadge {
   font-weight: 700;
   text-transform: uppercase;
@@ -67,10 +62,7 @@
   white-space: nowrap;
 }
 
-/* Tint percentages are measured, not copied: --danger is a lighter red than
-   the #dc2626 these fills used to hardcode, so the same 15% ground dropped
-   --danger text from 4.67:1 to 4.35:1 on a card. 12% restores 4.53:1 (5.01:1
-   on --bg-primary). The other tones keep 15% — all measure 5.3:1+. */
+/* Tint percentages are measured, not copied: --danger is a lighter red than #dc2626, so a 15% ground puts --danger text at 4.35:1 on a card. 12% gives 4.53:1 (5.01:1 on --bg-primary). The other tones use 15%; all measure 5.3:1 or higher. */
 .toneCritical { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
 .toneHigh { background: color-mix(in srgb, var(--severity-high) 15%, transparent); color: var(--severity-high); }
 .toneMedium { background: color-mix(in srgb, var(--warning) 15%, transparent); color: var(--warning); }
@@ -314,8 +306,7 @@
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
-  /* The active tab's -1px bottom margin otherwise overflows vertically and
-     spawns a scrollbar on the strip. */
+  /* The active tab's -1px bottom margin otherwise overflows vertically and spawns a scrollbar on the strip. */
   overflow-y: hidden;
   scrollbar-width: thin;
 }
@@ -405,8 +396,7 @@
   color: var(--text-primary);
   font-weight: 600;
   text-align: right;
-  /* Long unbroken values (Metasploit module paths, hashes) must wrap inside
-     the card, not overflow it — flex children need min-width: 0 to shrink. */
+  /* Long unbroken values (Metasploit module paths, hashes) must wrap inside the card, not overflow it — flex children need min-width: 0 to shrink. */
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -820,8 +810,7 @@
   .tabPanel { padding: var(--sp-4) 14px; }
   .relGroups { grid-template-columns: 1fr; }
 
-  /* Stack the metadata box below the label/badges instead of colliding with
-     it. The nowrap right-side box no longer squeezes the left section. */
+  /* Stack the metadata box below the label/badges instead of colliding with it, so the nowrap right-side box does not squeeze the left section. */
   .relRowLine { flex-wrap: wrap; }
   .relRowMain { flex-basis: 100%; }
   .evidenceToggle,
@@ -1057,9 +1046,7 @@
   filter: brightness(1.25);
 }
 
-/* Neutralize InlineEditField's own display chrome inside a chip: the chip is
- * the visual unit, so drop the inner hover box, padding offsets, and the
- * always-reserved pencil-icon space. */
+/* Neutralize InlineEditField's own display chrome inside a chip: the chip is the visual unit, so drop the inner hover box, padding offsets, and the always-reserved pencil-icon space. */
 .signalBadgeEditable > span {
   padding: 0;
   margin: 0;
@@ -1553,15 +1540,10 @@
 }
 
 
-/* Campaign intake — what feeds a campaign, and what it could take next.
-   Opens inside the Activity section at full width: a narrow column could say
-   that something would be added without room to say what, which is the whole
-   decision. */
+/* Campaign intake: what feeds a campaign, and what it could take next. Opens inside the Activity section at full width, because a narrow column has no room to show what would be added, and that is what the user decides on. */
 .intakePanel {
   padding: var(--sp-5);
-  /* The activity feed's filter bar follows immediately and its controls sat
-     flush against this panel's border; the column gap alone did not read as
-     separation between a bordered card and a bare toolbar. */
+  /* The activity feed's filter bar follows immediately; without this margin its controls sit flush against this panel's border, and the column gap alone does not separate a bordered card from a bare toolbar. */
   margin-bottom: var(--sp-4);
 }
 
@@ -1736,12 +1718,10 @@
   line-height: 1.5;
 }
 
-/* The trailing "N further articles…" line sits under the offers and needs to
-   clear the activity filter bar that follows the panel. */
+/* The trailing "N further articles…" line sits under the offers and needs to clear the activity filter bar that follows the panel. */
 .intakeFootnote { padding-top: var(--sp-3); }
 
-/* The panel title shares its line with "Add intake" — the one verb that opens
-   the composer, and the only affordance a brand-new campaign has. */
+/* The panel title shares its line with "Add intake", the button that opens the composer and the only control a brand-new campaign has. */
 .intakeHead {
   display: flex;
   align-items: baseline;
@@ -1749,8 +1729,7 @@
   gap: var(--sp-4);
 }
 
-/* A query source's label *is* its query, so it reads in mono like one, and it
-   wraps instead of truncating: half a query is not a name. */
+/* A query source's label *is* its query, so it is set in mono, and it wraps instead of truncating because a partial query is not a usable label. */
 .intakeLabelQuery {
   flex: 1;
   min-width: 0;
@@ -1828,8 +1807,7 @@
   border-color: var(--accent);
 }
 
-/* The dry run. Bordered off from the pickers above because it answers a
-   different question: not "which one" but "and then what arrives". */
+/* The dry run. Bordered off from the pickers above because it answers a different question: not "which source" but "what would arrive from it". */
 .intakeDryRun {
   display: flex;
   flex-direction: column;
@@ -1852,8 +1830,7 @@
   color: var(--text-primary);
 }
 
-/* An unknown field is not an error — the query still runs, as text — so it is
-   a caution rather than a refusal, and the Follow button stays live. */
+/* An unknown field is not an error — the query still runs, as text — so it is a caution rather than a refusal, and the Follow button stays live. */
 .intakeDryRunWarn {
   font-size: var(--fs-xs);
   color: var(--warning);
@@ -1867,8 +1844,7 @@
   overflow-wrap: anywhere;
 }
 
-/* Inside the composer the preview is already indented by the card, so it drops
-   the 52px gutter the offer previews use to clear their kind column. */
+/* Inside the composer the preview is already indented by the card, so it drops the 52px gutter the offer previews use to clear their kind column. */
 .intakeComposer .intakePreview { margin-left: 0; }
 
 /* ── Essential reading ────────────────────────────────────────────────── */
@@ -1964,11 +1940,9 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
-/* Click-to-edit display name: the h1 becomes a bare button that reveals a pencil
-   on hover, then swaps to an input matching the heading's typography. */
+/* Click-to-edit display name: the h1 becomes a bare button that reveals a pencil on hover, then swaps to an input matching the heading's typography. */
 .heroNameEditable {
-  /* A <button> resets font to the UA default, so restate the heading's
-     typography or the name renders small until the input takes over. */
+  /* A <button> resets font to the UA default, so restate the heading's typography or the name renders small until the input takes over. */
   font-family: var(--font-display);
   font-size: var(--fs-3xl);
   font-weight: 700;
@@ -1980,10 +1954,7 @@
   cursor: text;
   text-align: left;
   color: inherit;
-  /* Render as plain inline text (not inline-flex): a flex context changes how
-     the grid computes intrinsic size and, with overflow-wrap, collapses the
-     name to its widest word — stacking space-less names like "764". Inline
-     text wraps exactly like the non-editable h1. */
+  /* Render as plain inline text (not inline-flex): a flex context changes how the grid computes intrinsic size and, with overflow-wrap, collapses the name to its widest word — stacking space-less names like "764". Inline text wraps exactly like the non-editable h1. */
   display: inline;
   max-width: 100%;
 }
@@ -2376,14 +2347,13 @@
   text-decoration: none;
 }
 
-/* Links that leave IntelFeed take the theme accent; links to a profile keep
-   the entity colour. */
+/* Links that leave IntelFeed take the theme accent; links to a profile keep the entity color. */
 a.affVendorLink[href^="http"],
 a.affProdLink[href^="http"] {
   color: var(--accent);
 }
 
-/* A CWE link takes the CWE entity colour. */
+/* A CWE link takes the CWE entity color. */
 .cweLink {
   color: var(--entity-cwe);
 }
@@ -2548,15 +2518,14 @@ a.affProdLink[href^="http"] {
   color: var(--accent);
 }
 
-/* A header badge paired with its provenance marker — keeps the marker
-   outside the chip so the chip's own padding and tone stay untouched. */
+/* A header badge paired with its provenance marker — keeps the marker outside the chip so the chip's own padding and tone stay untouched. */
 .badgeWithSources {
   display: inline-flex;
   align-items: center;
 }
 
-/* ─── Evidence structure: story clustering over relationship evidence ────── *//* The shape phrase is the row's new information ("re-asserted in 2 separate
-   incidents"); the counts shrink to confirmation. */
+/* ─── Evidence structure: story clustering over relationship evidence ────── */
+/* The shape phrase is the row's new information ("re-asserted in 2 separate incidents"); the counts are shown smaller as confirmation. */
 
 /* Evidence panel grouped by story — incidents, not a flat list. */
 .evidenceStory {
@@ -2577,8 +2546,7 @@ a.affProdLink[href^="http"] {
   color: var(--text-primary);
 }
 
-/* Per-verb-group fold for claims whose evidence has no story behind it —
-   a full-width quiet band: caret + bold label — muted note, caption right. */
+/* Per-verb-group fold for claims whose evidence has no story behind it: a full-width quiet band with a caret and bold label, then a muted note, with the caption on the right. */
 .claimFold {
   display: flex;
   align-items: baseline;
@@ -2769,8 +2737,7 @@ a.affProdLink[href^="http"] {
   white-space: nowrap;
 }
 
-/* Graph toggle: a real control in the filter row, matching the segmented
-   and select chrome — not a bare text link. */
+/* Graph toggle: a real control in the filter row, matching the segmented and select chrome rather than a bare text link. */
 .graphToggleBtn {
   appearance: none;
   font: inherit;
@@ -2794,8 +2761,7 @@ a.affProdLink[href^="http"] {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
-/* Relationships control bar: mode segment → search → right-aligned view
-   controls. One row, wraps on narrow screens. */
+/* Relationships control bar: mode segment → search → right-aligned view controls. One row, wraps on narrow screens. */
 .relControls {
   display: flex;
   align-items: center;
@@ -2829,8 +2795,7 @@ a.affProdLink[href^="http"] {
 }
 
 /* ── Pulse line: collapsed header activity readout ─────────────────────
-   A bare sparkline + one quiet line of type. Deliberately chromeless — no
-   card, no well — so the header flows straight into the tab bar. */
+A bare sparkline and one line of muted text, with no card or background, so the header flows straight into the tab bar. */
 .pulseLine {
   display: flex;
   flex-direction: column;
@@ -3516,8 +3481,7 @@ a.affProdLink[href^="http"] {
 .railBtn:disabled { opacity: 0.5; cursor: default; }
 
 /* ── Relationships: enrichment-source claims ──
-   A quiet source tag on each claimed row, "via <source>" filter chips and an
-   "unresolved · N" toggle for names a source gave that matched no entity. */
+A quiet source tag on each claimed row, "via <source>" filter chips and an "unresolved · N" toggle for names a source gave that matched no entity. */
 .relSourceTag {
   flex: none;
   font-size: var(--fs-xs);
@@ -3609,8 +3573,7 @@ a.affProdLink[href^="http"] {
   flex: 1;
   min-width: 0;
 }
-/* Sticks to the strip's right edge while the tabs scroll beneath it, so the
-   Brief / Everything switch is in reach at phone width too. */
+/* Sticks to the strip's right edge while the tabs scroll beneath it, so the Brief / Everything switch is in reach at phone width too. */
 .tabBarTrailing {
   position: sticky;
   right: 0;
@@ -3648,8 +3611,7 @@ a.affProdLink[href^="http"] {
 }
 .assessmentFoldToggle:hover { text-decoration: underline; }
 
-/* Key facts: one labelled row per fact (SnapshotCard's numbers, the activity
-   verdict, KnownAssociates' claims by verb). */
+/* Key facts: one labeled row per fact (SnapshotCard's numbers, the activity verdict, KnownAssociates' claims by verb). */
 .keyFacts {
   display: flex;
   flex-direction: column;
@@ -3819,8 +3781,7 @@ a.affProdLink[href^="http"] {
 .verdict_steady::before { background: var(--accent-intel); }
 .verdict_cooling::before { background: var(--warning); }
 
-/* Section rows. The tab's own divider already separates the stack from the
-   brief, so the first row brings no border of its own. */
+/* Section rows. The tab's own divider already separates the stack from the brief, so the first row brings no border of its own. */
 .overviewRows {
   display: flex;
   flex-direction: column;
@@ -3862,8 +3823,7 @@ a.affProdLink[href^="http"] {
   outline-offset: -2px;
   border-radius: var(--r-sm);
 }
-/* A 20px chevron, drawn not typed, so it reads as a control and turns to
-   point down when the row is open. */
+/* A 20px chevron, drawn not typed, so it reads as a control and turns to point down when the row is open. */
 .overviewRowCaret {
   flex: none;
   width: 20px;
@@ -3929,9 +3889,7 @@ a.affProdLink[href^="http"] {
 }
 
 @media (max-width: 720px) {
-  /* A phone has no room for name and digest side by side, so the closed row
-     wraps: caret and name on the first line, the digest on its own line
-     under the name, still one truncated line. */
+  /* A phone has no room for name and digest side by side, so the closed row wraps: caret and name on the first line, the digest on its own line under the name, still one truncated line. */
   .overviewRowToggle {
     flex-wrap: wrap;
     row-gap: 0;
@@ -3944,8 +3902,7 @@ a.affProdLink[href^="http"] {
     padding-left: calc(20px + var(--sp-3));
   }
   .overviewRowBody { padding-left: 0; }
-  /* The pulse readout wraps instead of running off a phone screen: sparkline
-     and counts on the first line, trend, quality and the window picker below. */
+  /* The pulse readout wraps instead of running off a phone screen: sparkline and counts on the first line, trend, quality and the window picker below. */
   .pulseLine {
     flex-wrap: wrap;
     row-gap: var(--sp-2);

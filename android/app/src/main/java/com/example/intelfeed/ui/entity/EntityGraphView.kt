@@ -67,7 +67,7 @@ import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
 
-/** The web's node colour: the entity type's colour, grey for articles. */
+/** The web's node color: the entity type's color, gray for articles. */
 private fun graphColor(type: String): Color = if (type == "entry") TextMuted else EntityType.fromKey(type)?.color() ?: ThemeEngine.entityColor(type)
 
 
@@ -75,12 +75,7 @@ private fun graphTypeLabel(type: String): String = if (type == "entry") "Article
 
 private fun cut(s: String, max: Int) = if (s.length <= max) s else s.take(max - 1) + "…"
 
-/**
- * The web profile's relationship graph (Relationships tab): this entity in the middle, its linked
- * entities on a ring grouped by type (malware hexagons, techniques squares, CVEs triangles,
- * countries ringed circles), edges weighted by strength and dashed when only "possible". Tap a
- * node to open it, "+N" for more of that type; the legend hides types; the chips set the window.
- */
+/** The web profile's relationship graph (Relationships tab): this entity in the middle, its linked entities on a ring grouped by type (malware hexagons, techniques squares, CVEs triangles, countries ringed circles), edges weighted by strength and dashed when only "possible". Tap a node to open it, "+N" for more of that type; the legend hides types; the chips set the window. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EntityGraphView(
@@ -128,7 +123,7 @@ fun EntityGraphView(
                 }
                 val ringUnits = layout.ringRadius + 22f
                 fun scaleFor(side: Float) = ((side / 2f - maxLabelPx - 4f) / ringUnits).coerceAtLeast(side / 2f / (ringUnits * 3f))
-                // On a phone the web's node size overlaps its neighbours; keep a gap.
+                // On a phone the web's node size overlaps its neighbors; keep a gap.
                 val ringCount = (layout.placed.size - 1 + layout.overflow.size).coerceAtLeast(1)
                 val maxR = (2 * Math.PI.toFloat() * layout.ringRadius / ringCount) * 0.38f
                 Canvas(
@@ -154,8 +149,7 @@ fun EntityGraphView(
                     fun p(x: Float, y: Float) = Offset(c.x + x * scale, c.y + y * scale)
                     // Ring guide.
                     drawCircle(SlateDark700, layout.ringRadius * scale, c, style = Stroke(1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 4.dp.toPx()))))
-                    // Type labels just inside the ring, at the middle of each sector.
-                    // Alternating distances, so neighbouring labels don't overlap.
+                    // Type labels just inside the ring, at the middle of each sector. Alternating distances, so neighboring labels don't overlap.
                     layout.sectors.filter { it.end - it.start >= 0.45f }.forEachIndexed { i, s ->
                         val mid = (s.start + s.end) / 2
                         val r = layout.ringRadius * if (i % 2 == 0) 0.64f else 0.42f
@@ -187,8 +181,7 @@ fun EntityGraphView(
                             val t = measurer.measure(cut(pl.node.label, 22), seedStyle)
                             drawText(t, topLeft = Offset(at.x - t.size.width / 2, at.y + r + 8 * scale))
                         } else {
-                            // Along the spoke, outward from the node (flipped on the left so it reads
-                            // left to right), so neighbouring labels don't collide.
+                            // Along the spoke, outward from the node (flipped on the left so it reads left to right), so neighboring labels don't collide.
                             val t = measurer.measure(cut(pl.node.label, 16), labelStyle)
                             val d = kotlin.math.hypot(pl.x, pl.y) + units + 5f
                             val anchor = Offset(c.x + d * cos(pl.angle) * scale, c.y + d * sin(pl.angle) * scale)

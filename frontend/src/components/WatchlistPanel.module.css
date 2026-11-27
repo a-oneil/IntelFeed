@@ -1,5 +1,4 @@
-/* Watchlist is a DataTable like every other workbench list; only the two
-   inputs the table itself doesn't own live here. */
+/* Watchlist is a DataTable like every other workbench list; this file holds only the styles the table doesn't provide: the boost input, the empty-boost marker and the error state. */
 
 .boostInput {
   composes: filterSelect from "@/pages/WorkbenchPage.module.css";

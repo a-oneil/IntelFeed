@@ -35,8 +35,7 @@ const SIGNAL_DESCRIPTIONS: Record<string, string> = {
   research_depth: "Long-form research (1500+ words with TTPs, rules, or code)",
 };
 
-/** Signal engine tuning: family multipliers, radar threshold, self-tuning readout.
- *  Lives on the Engine console's score stage. */
+/** Signal engine tuning: family multipliers, radar threshold, self-tuning readout. Lives on the Engine console's score stage. */
 export function ScoreStageConfig() {
   const { data: stats, isLoading } = useSignalStats();
   const update = useUpdateSignalSettings();
@@ -74,9 +73,7 @@ export function ScoreStageConfig() {
       <h4 className={styles.heading}>Engine settings</h4>
       <SystemSettings filterGroups={["scoring"]} flat />
 
-      {/* Threads live under Score because they are read in the queue this stage
-          ranks: a thread takes the score of its best beat, read or not. Its own block
-          so fifteen clustering knobs don't swamp the scoring ones. */}
+      {/* Threads live under Score because they are read in the queue this stage ranks: a thread takes the score of its highest-scoring article, read or not. They get their own block so the clustering settings don't crowd out the scoring ones. */}
       <h4 className={styles.heading}>Story threads</h4>
       <SystemSettings filterGroups={["threads"]} flat hideGroupTitle />
 

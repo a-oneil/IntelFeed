@@ -547,9 +547,7 @@ export function useCountry(countryId: string | undefined) {
 }
 
 // --- Sectors ---
-// Sectors are never autolinked: an entry's sectors are the ones the one-pass
-// AI analysis judged *targeted*, so there is no extract-and-link mutation here
-// beyond the shared entry_analysis task.
+// Sectors are never autolinked: an entry's sectors are the ones the one-pass AI analysis judged *targeted*, so there is no extract-and-link mutation here beyond the shared entry_analysis task.
 
 export function useEntrySectors(entryId: string | undefined) {
   return useQuery({
@@ -743,8 +741,7 @@ export function useGenerateDetectionRules() {
   });
 }
 
-/** Entity-scoped rule generation — the profile Detection tab's "Generate rule"
- * CTA. The backend builds context from the entity + its recent linked articles. */
+/** Entity-scoped rule generation, behind the "Generate rule" button on the profile's Detection tab. The backend builds context from the entity and its recent linked articles. */
 export function useGenerateEntityRules() {
   const qc = useQueryClient();
   return useMutation({
@@ -994,9 +991,7 @@ export function useDenyObservable() {
   });
 }
 
-/** Hard-delete a ledger row: the sightings and relationships go with it and no
- *  tombstone is left, so a future capture door may create the value again.
- *  Use {@link useDenyObservable} when the value must stay out for good. */
+/** Hard-delete a ledger row: the sightings and relationships go with it and no tombstone is left, so a later capture path may create the value again. Use {@link useDenyObservable} when the value must stay out for good. */
 export function useDeleteObservable() {
   const qc = useQueryClient();
   return useMutation({
@@ -1133,7 +1128,7 @@ export function useEntityWeaknessProfile(
   });
 }
 
-// --- Offensive Tools ---
+// --- Tools ---
 
 export function useEntryTools(entryId: string | undefined) {
   return useQuery({

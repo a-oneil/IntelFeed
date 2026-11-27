@@ -82,8 +82,7 @@ export interface Feed {
   auto_extract_on_ingest: boolean;
   extract_detection_rules: boolean;
   extract_tools: boolean;
-  /** Phrases, one per line; an incoming article whose title contains one is
-   * dropped before it is saved. Null = no filter. */
+  /** Phrases, one per line; an incoming article whose title contains one is dropped before it is saved. Null = no filter. */
   exclude_title_patterns?: string | null;
   reliability_rating: string | null;
   timeliness_rating: string | null;
@@ -97,8 +96,7 @@ export interface Feed {
   visible_to_visitors?: boolean;
   retention_days: number | null;
   unread_count: number;
-  /** True when per-user subscriptions are on: is_muted is your own state and
-   * "unsubscribe" only affects you. */
+  /** True when per-user subscriptions are on: is_muted is your own state and "unsubscribe" only affects you. */
   per_user?: boolean;
   created_at: string;
 }
@@ -114,8 +112,7 @@ export interface Category {
   created_at: string;
   children: Category[];
   feed_count: number;
-  /** Pipeline settings a feed added to this category starts with. A key that
-   * is absent falls back to the global default. */
+  /** Pipeline settings a feed added to this category starts with. A key that is absent falls back to the global default. */
   feed_defaults?: CategoryFeedDefaults;
 }
 
@@ -161,21 +158,17 @@ export interface Entry {
   priority_score?: number | null;
   top_signals?: { type: string; explanation: string }[];
   is_echo?: boolean;
-  // Exposure (read-time, per-user; present only for radar-sorted entries
-  // whose CVEs affect the vendors/products the user runs)
+  // Exposure (read-time, per-user; present only for radar-sorted entries whose CVEs affect the vendors/products the user runs)
   exposure?: EntryExposure | null;
   personal?: EntryPersonalization | null;
-  // Information credibility 1–6 — the number half of an Admiralty grade (the
-  // letter is the feed's reliability_rating). Rated per article.
+  // Information credibility 1–6: the number half of an Admiralty grade (the letter is the feed's reliability_rating). Rated per article.
   info_rating?: number | null;
   info_rating_by?: "ai" | "analyst" | null;
 }
 
 export type ExposurePosture = "blind" | "no_rule" | "defended";
 
-/** Read-time lift from this analyst's own learned Radar weights, with the
- *  families that produced it. Only present when personalisation is active and
- *  the analyst's weights actually moved this entry. */
+/** Read-time lift from this analyst's own learned Radar weights, with the families that produced it. Only present when personalization is active and the analyst's weights moved this entry. */
 export interface EntryPersonalization {
   lift: number;
   families: { family: string; weight: number; delta: number }[];
@@ -195,8 +188,7 @@ export interface PrioritySignal {
   family: string;
   /** Raw signal strength, before rarity weighting. */
   score: number;
-  /** What this signal actually contributed to the score: raw × rarity weight ×
-   *  family multiplier. Negative for feed_echo. Absent on older payloads. */
+  /** What this signal contributed to the score: raw × rarity weight × family multiplier. Negative for feed_echo. Absent on older payloads. */
   weighted?: number;
   explanation: string;
 }
@@ -211,13 +203,11 @@ export interface EntryDetail extends Entry {
   translated_at: string | null;
   // Full signal breakdown for the reader's "Why it's ranked" card
   priority_signals?: PrioritySignal[];
-  // The raw signal sum priority_score (0–10) was scaled from — what the
-  // priority_signals' `weighted` values add up to
+  // The raw signal sum that priority_score (0–10) was scaled from: what the priority_signals' `weighted` values add up to
   priority_raw?: number | null;
   // When is_echo is true, the earlier entry this one echoes (near-duplicate of)
   echo_of?: EchoOf | null;
-  // The AI's score from the article alone (before corroboration), how close
-  // the author was to the events, and the AI's reason or the analyst's note.
+  // The AI's score from the article alone (before corroboration), how close the author was to the events, and the AI's reason or the analyst's note.
   info_rating_ai?: number | null;
   info_rating_access?: "firsthand" | "secondhand" | "unclear" | null;
   info_rating_note?: string | null;
@@ -325,12 +315,9 @@ export interface SearchResponse {
 }
 
 /**
- * The slice of the search UI a saved search restores alongside its query.
+ * The part of the search UI state a saved search restores alongside its query.
  *
- * Everything expressible in the query language lives in `query`; this carries
- * the state the rail owns but the query string cannot say — which halves of the
- * index are searched, and how the intelligence results are narrowed. `tags` is
- * the older structured form, still accepted and folded into `tag:` tokens.
+ * Everything expressible in the query language lives in `query`; this carries the state the facet rail owns that the query string cannot express: which halves of the index are searched, and how the intelligence results are narrowed. `tags` is the older structured form, still accepted and converted into `tag:` tokens.
  */
 export interface SavedSearchFilters {
   scope?: "feeds" | "workbench" | "everything";
@@ -365,18 +352,9 @@ export interface UnifiedSearchResponse {
   };
   query: string;
   parsed_filters: ParsedFilterResponse[];
-  /**
-   * A corrected query, when the submitted one looks like a multi-word value that
-   * split: `country:North Korea` proposes `country:"North Korea"`. Only set when
-   * the extended value is a real value for that field, so it stays absent on a
-   * deliberate filter-plus-search-term like `threat_actor:APT29 ransomware`.
-   */
+  /** A corrected query, when the submitted one looks like a multi-word value that split: `country:North Korea` proposes `country:"North Korea"`. Only set when the extended value is a real value for that field, so it stays absent on a deliberate filter-plus-search-term like `threat_actor:APT29 ransomware`. */
   did_you_mean?: string | null;
-  /**
-   * Names that parsed as `name:value` but are not fields — usually a typo like
-   * `titel:`. Their values were searched as free text; the UI says so, because
-   * a filter that silently is not a filter is worse than one that errors.
-   */
+  /** Names that parsed as `name:value` but are not fields, usually a typo like `titel:`. Their values were searched as free text; the UI says so, because a filter that silently does not filter is worse than one that errors. */
   unknown_fields?: string[];
   processingTimeMs: number;
 }
@@ -497,10 +475,7 @@ export interface Tag {
   display_as_chip: boolean;
   /** Chip tooltip. */
   description: string | null;
-  /**
-   * Global: one shared assignment per entry that everyone sees. Personal (the
-   * default): each user's assignments are their own and nobody else sees them.
-   */
+  /** Global: one shared assignment per entry that everyone sees. Personal (the default): each user's assignments are their own and nobody else sees them. */
   is_global: boolean;
   /** Entries carrying the tag as the viewer sees them: their own for a personal tag, everyone's for a global one. */
   entry_count: number;
@@ -558,7 +533,7 @@ export interface AITask {
   category: string | null;
   variables: string[];
   is_system: boolean;
-  /** Agentic task — only works on a tool-capable provider (Claude Code CLI). */
+  /** Agentic task: only works on a tool-capable provider (Claude Code CLI, Ollama, Claude API, or an OpenAI-compatible endpoint with tools enabled). */
   requires_tools: boolean;
   is_deprecated: boolean;
   show_in_entry_actions: boolean;
@@ -594,8 +569,7 @@ export interface AIPromptTemplate {
   created_by: string | null;
   name: string;
   template_text: string;
-  // Optional cacheable system block. Null/undefined = no system prompt
-  // (legacy flat-prompt mode).
+  // Optional cacheable system block. Null/undefined = no system prompt; the whole prompt is template_text.
   system_text: string | null;
   variables: string[];
   is_active: boolean;
@@ -696,8 +670,7 @@ export interface UserAIPromptRow {
 }
 
 export interface UserAIPolicyStatus extends UserAIPolicy {
-  // Whether this person has any routing set up. False means no personal key
-  // can touch a task, so a reader panel need not fetch the overview.
+  // Whether this person has any routing set up. False means no personal key can answer any task, so a reader panel does not need to fetch the overview.
   has_routes: boolean;
 }
 
@@ -784,10 +757,7 @@ export interface CVEReference {
   tags?: string[];
 }
 
-/**
- * KEV enrichment appends a record object; Metasploit enrichment appends a bare
- * slug string. Use `exploitSourceNames()` to render either shape.
- */
+/** KEV enrichment appends a record object; Metasploit enrichment appends a bare slug string. Use `exploitSourceNames()` to render either shape. */
 export type ExploitSource = string | { source?: string; name?: string; type?: string; [key: string]: unknown };
 
 export interface CVE {
@@ -1126,7 +1096,7 @@ export interface DetectionRule {
   source_campaigns: string[];
   /** Parent rule this one was converted or extended from. */
   derived_from: string | null;
-  // Provenance / reuse (research redesign, phase 1)
+  // Provenance / reuse
   license: string | null;
   upstream_updated_at: string | null;
   references: string[];
@@ -1191,9 +1161,7 @@ export interface DetectionRuleFacets {
   products: FacetBucket[];
 }
 
-/** Facet distribution from GET /detection-rules/search, keyed by index attribute.
- *  Counts are self-excluded per facet, so the group you filtered on still lists
- *  its other values. */
+/** Facet distribution from GET /detection-rules/search, keyed by index attribute. Each facet's counts ignore that facet's own filter, so the group you filtered on still lists its other values. */
 export interface RuleSearchFacets {
   rule_type?: FacetBucket[];
   source_repo?: FacetBucket[];
@@ -1201,7 +1169,7 @@ export interface RuleSearchFacets {
   mitre_tactics?: FacetBucket[];
   source_products?: FacetBucket[];
   data_sources?: FacetBucket[];
-  /** Required telemetry across every rule format — what the rail's group faces. */
+  /** Required telemetry across every rule format, which the rail's Telemetry group lists. */
   telemetry_tokens?: FacetBucket[];
   severity?: FacetBucket[];
   license?: FacetBucket[];
@@ -1364,8 +1332,7 @@ export interface WebhookPreset {
 
 // Sidebar customization
 
-// The sidebar's reorderable sections. A closed set — the sidebar used to also
-// accept user-made groups of external links, which are gone.
+// The sidebar's reorderable sections. A closed set: user-made groups of external links are no longer supported.
 export type SidebarSectionId = "nav" | "saved_searches" | "feeds";
 
 // Phase 6: Dashboards & Themes
@@ -1495,7 +1462,7 @@ export interface GroupedCorrelationEventListResponse {
 
 // Phase 8: Intelligence Correlation & Detection Engineering
 
-/** A row from /cwes — the MITRE weakness catalog plus this corpus's counts. */
+/** An observable (IOC ledger row) from /observables, identified by (kind, value). */
 export interface ObservableResponse {
   id: string;
   kind: string;
@@ -1587,15 +1554,13 @@ export interface CWEResponse {
   article_count: number;
   first_seen_at: string;
   last_seen_at: string;
-  /** Direct links only. `cve_count_rolled` includes every descendant, which is
-   * the number that means anything at Class/Pillar level. */
+  /** Direct links only. `cve_count_rolled` includes every descendant, which is the meaningful number at Class/Pillar level. */
   cve_count: number;
   cve_count_rolled: number | null;
   kev_count: number;
-  /** Rolled KEV, so it reads against cve_count_rolled rather than beside it. */
+  /** KEV count including every descendant, comparable with cve_count_rolled. */
   kev_count_rolled: number | null;
-  /** Vendor shipping the most CVEs with this weakness. Null is normal —
-   * cve_affected resolves only part of the corpus's CPE strings. */
+  /** Vendor shipping the most CVEs with this weakness. Null is normal: cve_affected resolves only part of the corpus's CPE strings. */
   top_vendor: string | null;
   top_vendor_count: number | null;
 }
@@ -1625,8 +1590,7 @@ export interface CWEFamilyResponse {
   replacement: CWEFamilyRef | null;
 }
 
-/** One NVD weakness assignment on a CVE. `cwe_id` is null for the
- * NVD-CWE-noinfo / NVD-CWE-Other sentinels, which are kept, not filtered. */
+/** One NVD weakness assignment on a CVE. `cwe_id` is null for the NVD-CWE-noinfo / NVD-CWE-Other sentinels, which are kept, not filtered. */
 export interface CVEWeaknessRow {
   cwe_ref: string;
   cwe_id: string | null;
@@ -1653,8 +1617,7 @@ export interface EntitySearchResult {
   id: string;
   type: string;
   match_field?: string;
-  /** "direct" = the query matched this entity's name/alias/identifier;
-   *  "mention" = it matched its prose, tags or type. Set by the backend. */
+  /** "direct" = the query matched this entity's name/alias/identifier; "mention" = it matched its prose, tags or type. Set by the backend. */
   match_kind?: "direct" | "mention";
   // TTP fields
   technique_id?: string;
@@ -1716,7 +1679,7 @@ export interface EntitySearchResult {
   // Country fields
   iso_code?: string;
   region?: string;
-  // OffensiveTool fields
+  // Tool fields
   tool_type?: string;
   malpedia_url?: string;
   github_url?: string;
@@ -1742,8 +1705,7 @@ export interface EntitySearchResult {
   // Entry fields
   url?: string;
   published_at?: string;
-  // Note fields. `note_source` says which of the two note tables the row came
-  // from, which is what decides where clicking it goes.
+  // Note fields. `note_source` says which of the two note tables the row came from, which decides where clicking it goes.
   note_source?: 'note' | 'entity_note';
   note_type?: string;
   entry_id?: string | null;
@@ -1809,12 +1771,7 @@ export interface EvidenceStory {
   title: string | null;
 }
 
-/**
- * Story clustering over a relationship's evidence entries — how the evidence
- * hangs together: recurring (2+ incidents), single_story (one reporting
- * wave), scattered (roundup co-mentions, no shared story), thin (1-2 loose
- * mentions). Absent when the feature is off or the evidence has no embeddings.
- */
+/** Story clustering over a relationship's evidence entries, classifying the evidence as recurring (2+ incidents), single_story (one reporting wave), scattered (roundup co-mentions, no shared story) or thin (1-2 loose mentions). Absent when the feature is off or the evidence has no embeddings. */
 export interface EvidenceStructure {
   shape: 'recurring' | 'single_story' | 'scattered' | 'thin';
   stories: EvidenceStory[];
@@ -1858,16 +1815,14 @@ export interface PivotResponse {
       rule_type: string;
       severity: string | null;
       created_at: string;
-      /** What the rule detects — powers the graph's coverage badges. */
+      /** What the rule detects; drives the graph's coverage badges. */
       source_ttps?: string[];
       source_cves?: string[];
     }>;
   };
-  // Pre-truncation totals per related key (e.g. { cves: 870 }); the related
-  // arrays themselves are ranked by strength and truncated server-side.
+  // Pre-truncation totals per related key (e.g. { cves: 870 }); the related arrays themselves are ranked by strength and truncated server-side.
   related_counts?: Record<string, number>;
-  /** Library-wide detection coverage over every related technique/CVE:
-   *  how many rules in the whole library reference each id. */
+  /** Library-wide detection coverage over every related technique/CVE: how many rules in the whole library reference each id. */
   rule_coverage?: { ttps?: Record<string, number>; cves?: Record<string, number> };
   entries: Array<{
     id: string;
@@ -1984,7 +1939,7 @@ export interface Campaign {
   entity_count: number;
   /** Publish date of the newest article — what "gone quiet" is measured from. */
   last_activity_at?: string | null;
-  /** Publish date of the oldest article — when the coverage actually begins. */
+  /** Publish date of the oldest article, when the coverage begins. */
   first_activity_at?: string | null;
 }
 
@@ -2388,8 +2343,7 @@ export interface EntityScanMatch {
   entity_id: string;
   canonical_name: string;
   surface_forms: string[];
-  /** Full entity payload — the same shape the entry-entity endpoints return —
-   *  so hover popovers can show description, facts, aliases and links. */
+  /** Full entity payload (the same shape the entry-entity endpoints return), so hover popovers can show description, facts, aliases and links. */
   entity?: Record<string, unknown> | null;
 }
 
@@ -2626,7 +2580,7 @@ export interface FeedHealthSummary {
   stale: number;
   erroring: number;
   disabled: number;
-  /** Auto-paused by the health check — distinct from switched off by hand. */
+  /** Auto-paused by the health check, as opposed to switched off by hand. */
   dead: number;
   /** Answering 200 but no longer delivering items. */
   empty?: number;
@@ -2687,7 +2641,6 @@ export interface FeedHealthResponse {
 
 // Feed Value Scoring
 
-/** Resolved ingest pipeline for one feed, from GET /feeds/{id}/pipeline. */
 /** GET /feeds/{id}/ai-usage */
 export interface FeedAIUsage {
   feed_id: string;
@@ -2707,6 +2660,7 @@ export interface TitleFilterPreview {
   examples: string[];
 }
 
+/** Resolved ingest pipeline for one feed, from GET /feeds/{id}/pipeline. */
 export interface FeedPipeline {
   engine_enabled: boolean;
   stages: Record<string, { enabled: boolean; config?: Record<string, unknown> }>;
@@ -3096,11 +3050,7 @@ export interface StoryThread {
   narrated_at: string | null;
 }
 
-/**
- * One row of the Priority Queue: a single entry, or a story thread standing in
- * for the articles it folded. Ordered and scored by the server so the reader,
- * the CLI and an agent all see the same queue.
- */
+/** One row of the Priority Queue: a single entry, or a story thread that replaces the articles it folded. Ordered and scored by the server so the reader, the CLI and an agent all see the same queue. */
 export interface PriorityQueueRow {
   kind: "entry" | "thread";
   score: number;
@@ -3132,11 +3082,7 @@ export interface ThreadListResponse {
 
 export type CampaignSourceKind = "entity" | "story" | "query";
 
-/**
- * Standing intake owned by the campaign: an entity it names, a story it holds
- * part of, or a query typed into it. A `query` source has no `ref_id` — unlike
- * a linked saved search it belongs to the campaign, not to one analyst.
- */
+/** A standing source of articles owned by the campaign: an entity it names, a story it holds part of, or a query typed into it. A `query` source has no `ref_id`: unlike a linked saved search, it belongs to the campaign, not to one analyst. */
 export interface CampaignSource {
   id: string;
   campaign_id: string;
@@ -3145,7 +3091,7 @@ export interface CampaignSource {
   ref_id: string | null;
   /** The query-language string, when kind is "query". */
   query: string | null;
-  /** The target's name at link time — stays readable if it is later renamed. */
+  /** The target's name at link time, so it stays readable if the target is later renamed. */
   label: string;
   auto_sync: boolean;
   last_synced_at: string | null;
@@ -3158,11 +3104,11 @@ export interface CampaignSourceSuggestion {
   entity_type: string | null;
   ref_id: string;
   label: string;
-  /** Why this is offered — "named as primary", "you hold 3 of 27 articles". */
+  /** Why this is offered, e.g. "named as primary", "you hold 3 of 27 articles". */
   why: string;
   /** Articles following it would pull in right now. */
   would_add: number;
-  /** The newest few of those, by name — what makes the click informed. */
+  /** The newest few of those, by title, so the user can see what following it adds. */
   preview: Array<{ entry_id: string; title: string; published_at: string | null }>;
 }
 
@@ -3175,16 +3121,12 @@ export interface CampaignSourcePreview {
   /** What the source would be called once created. */
   label: string;
   would_add: number;
-  /** Articles it claims that the campaign already has — overlap, not waste. */
+  /** Articles it matches that the campaign already has. */
   already_held: number;
   preview: Array<{ entry_id: string; title: string | null; published_at: string | null }>;
   /** Why the query could not be run, when it could not be parsed. */
   error: string | null;
-  /**
-   * Field names the query language does not have. Not fatal — they become text
-   * terms — but a standing source built on a typo'd field answers plausibly
-   * forever, so the composer says so before the follow is created.
-   */
+  /** Field names the query language does not have. Not fatal (they become text terms), but a standing source built on a mistyped field keeps returning plausible-looking results, so the composer warns before the source is created. */
   unknown_fields: string[];
 }
 
@@ -3270,9 +3212,65 @@ export interface StarterPack {
   title: string;
   description: string;
   feed_count: number;
+  /** How many of the pack's feeds the caller already has. */
+  followed_count?: number;
   recommended: boolean;
   /** Human-readable prerequisite (an API token, say) this pack needs to work. */
   requires: string | null;
+}
+
+/** One feed in a starter pack (GET /opml/starter-packs/{id}/feeds). */
+export interface StarterPackFeed {
+  url: string;
+  title: string;
+  feed_type: string;
+  followed: boolean;
+}
+
+export interface DiscoveredFeed {
+  url: string;
+  title: string | null;
+  feed_type: string;
+  description: string | null;
+}
+
+/** What a pasted link is, before subscribing (POST /feeds/preview). */
+export interface LinkPreview {
+  kind:
+    | "feed"
+    | "github"
+    | "bluesky"
+    | "bluesky_feed"
+    | "bluesky_search"
+    | "telegram"
+    | "mastodon_tag"
+    | "page";
+  title: string;
+  feed_type: string;
+  url: string;
+  feeds: DiscoveredFeed[];
+  github: {
+    owner: string;
+    repo: string;
+    default_branch: string;
+    has_releases: boolean | null;
+    description?: string | null;
+    rules: { label: string; paths: string[]; folders: string[]; branch: string } | null;
+  } | null;
+  bluesky: {
+    mode: "author" | "feed" | "search";
+    handle?: string;
+    display_name?: string | null;
+    feed_uri?: string;
+    query?: string;
+  } | null;
+  telegram: { channel: string } | null;
+  mastodon: { instance_url: string; hashtag: string } | null;
+  page: { article_links: number; label: string } | null;
+  /** Set when subscribing would not work yet. */
+  warning: string | null;
+  suggested_category_id: string | null;
+  fetch_interval_minutes: number;
 }
 
 export interface StarterPackImportResult {
@@ -3297,7 +3295,7 @@ export interface OnboardingStatus {
   entries: { total: number; last_24h: number };
   autolink: { entity_links: number };
   ai: { providers: number; active: string | null; tasks_assigned: number };
-  /** Seeded, polling and ingesting — the instance can demonstrate itself. */
+  /** Seeded, polling and ingesting: the instance has data to show. */
   ready: boolean;
 }
 
@@ -3311,6 +3309,6 @@ export interface AIProviderCommissionResult {
   model: string | null;
   tasks_assigned: number;
   tasks_reassigned: number;
-  /** Agentic tasks left on the CLI because this provider can't run tools. */
+  /** Agentic and web-research tasks left on their current provider because this provider can't run tools or web search. */
   tasks_skipped_agentic: string[];
 }

@@ -298,7 +298,7 @@ async def test_detection_coverage_endpoint_caps_input(client: AsyncClient, auth_
     assert resp.status_code == 400
 
 
-# ── canonical behaviour axis ─────────────────────────────────────────
+# ── canonical behavior axis ─────────────────────────────────────────
 
 
 def test_canonical_vocabulary_is_closed():
@@ -372,8 +372,8 @@ async def test_index_pattern_and_connector_id_resolve_to_the_ticked_product(db_s
     assert match_data_source("AzureActiveDirectory", profile) == TIER_SOURCE
 
 
-async def test_agent_datastream_falls_back_to_the_behaviour(db_session: AsyncSession):
-    """Elastic Defend is not ticked, but the behaviour its index carries is."""
+async def test_agent_datastream_falls_back_to_the_behavior(db_session: AsyncSession):
+    """Elastic Defend is not ticked, but the behavior its index carries is."""
     await _add_telemetry(db_session, "CrowdStrike Falcon", ["process_creation"], product="Falcon")
     profile = await get_available_telemetry(db_session)
 

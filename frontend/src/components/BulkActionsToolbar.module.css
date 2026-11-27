@@ -9,9 +9,7 @@
   min-height: 3rem;
   box-sizing: border-box;
   max-width: 100%;
-  /* Narrow pane: the whole bar pans horizontally (scrollbar hidden so it
-     can't eat into the bar's height) instead of clipping buttons. Dropdowns
-     are portaled to <body> so this overflow doesn't clip them. */
+  /* Narrow pane: the whole bar scrolls horizontally (scrollbar hidden so it doesn't take up the bar's height) instead of clipping buttons. Dropdowns are portaled to <body> so this overflow doesn't clip them. */
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -106,11 +104,7 @@
 
 .btnDanger:hover {
   background: var(--danger);
-  /* No --danger-text token exists, and --accent-text is derived from the
-     accent, not from this fill. --bg-primary is the ground every theme
-     already guarantees --danger is legible against, so inverting to it is
-     the only theme-safe foreground here: white on the default --danger is
-     3.36:1 and fails AA at this size. */
+  /* No --danger-text token exists, and --accent-text is derived from the accent, not from this fill. Every theme already guarantees --danger is legible against --bg-primary, so inverting to it is the only theme-safe foreground here: white on the default --danger is 3.36:1 and fails AA at this size. */
   color: var(--bg-primary);
   border-color: var(--danger);
 }
@@ -141,8 +135,7 @@
   position: relative;
 }
 
-/* Portaled to <body>; position/top/right come from inline style so the
-   scrollable toolbar can't clip the panel. */
+/* Portaled to <body>; position/top/right come from inline style so the scrollable toolbar can't clip the panel. */
 .tagDropdown {
   z-index: 100;
   min-width: 200px;

@@ -188,9 +188,9 @@ async def my_ai_overview(
         )
     ).all()
 
-    # What a click would do, by the lookup's own rule (``resolve_assignment``),
-    # so the row says "your key" only when the key can answer. A key is
-    # checked once however many tasks follow it.
+    # Where each task would run, decided by the same rule the lookup uses
+    # (``resolve_assignment``), so the row says "your key" only when the key can
+    # answer. Each key is checked once, however many tasks route to it.
     my_keys = {
         p.id: p for p in (await db.execute(select(AIProvider).where(AIProvider.user_id == user.id))).scalars().all()
     }
@@ -214,7 +214,7 @@ async def my_ai_overview(
             else:
                 route = None
         if route is not None and route.provider_id is None:
-            route = None  # the opt-out row: the instance answers by choice
+            route = None  # a route with no provider opts out: the instance's provider answers
         if policy.require_user_ai_provider or (route is not None and not fallback):
             return "refused", reason or "no_key"
         if reason is not None and not has_site:

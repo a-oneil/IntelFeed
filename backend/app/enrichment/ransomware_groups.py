@@ -40,7 +40,7 @@ GROUP_URL = "https://api.ransomware.live/v2/group/{}"
 SOURCE_TYPE = "ransomware_live"
 #: The disclosures' ``source`` for ransomware.live postings.
 DISCLOSURE_SOURCE = "ransomware.live"
-#: Groups looked up per run; six runs a day refresh about 300 groups a week.
+#: Groups looked up per run; six runs a day make up to 420 lookups a week.
 GROUPS_PER_RUN = 10
 #: A run stops starting lookups after this long, well inside its time limit.
 RUN_SECONDS = 600

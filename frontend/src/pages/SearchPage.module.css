@@ -4,9 +4,7 @@
   overflow: hidden;
 }
 
-/* The search page's own rail. Same weight and background derivation as the
-   workbench rail so the two read as the same kind of surface — a second
-   sidebar inside the content area, distinct from the app sidebar. */
+/* The search page's own rail. Same weight and background as the workbench rail so the two look like the same kind of surface: a second sidebar inside the content area, distinct from the app sidebar. */
 .facetRail {
   width: 232px;
   min-width: 232px;
@@ -25,8 +23,7 @@
   min-width: 0 !important;
   overflow: hidden;
   border-right: none;
-  /* Zero-width controls must stop being hit-test targets, or clicks aimed at
-     the stream land on collapsed rows underneath it. */
+  /* Zero-width controls must stop receiving clicks, or clicks aimed at the results stream land on the collapsed rows underneath it. */
   visibility: hidden;
   pointer-events: none;
 }
@@ -49,10 +46,7 @@
 }
 
 /* ── Mobile: the rail becomes a sheet ──────────────────────
-   A 232px column beside the results leaves neither usable on a phone, and the
-   desktop rail toggle is a hover affordance that does not exist on touch — so
-   the rail is opened deliberately from the toolbar's Filters button and closed
-   by the backdrop or Done. */
+   A 232px column beside the results leaves neither usable on a phone, and the desktop rail toggle is a thin strip meant for a mouse pointer that is hidden on mobile. So the rail opens from the toolbar's Filters button and closes from the backdrop or Done. */
 
 .sheetBackdrop {
   position: fixed;
@@ -71,8 +65,7 @@
   transition: transform 0.2s ease;
 }
 
-/* The sheet slides out rather than collapsing to zero width — a 0-width
-   transition on a fixed panel just snaps. */
+/* The sheet slides out rather than collapsing to zero width, because a width transition to 0 on a fixed panel jumps instead of animating. */
 .facetSheet.facetRailCollapsed {
   width: min(86vw, 320px) !important;
   min-width: 0 !important;

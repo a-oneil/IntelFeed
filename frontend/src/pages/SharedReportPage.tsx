@@ -42,7 +42,7 @@ async function downloadExport(token: string, title: string, format: string, ext:
     responseType: "blob",
   });
   const blob = resp.data as Blob;
-  // Without WeasyPrint the server answers a PDF request with HTML — name the file for what it is.
+  // Without WeasyPrint the server answers a PDF request with HTML, so name the file by its actual type.
   const actualExt = format === "pdf" && blob.type.startsWith("text/html") ? "html" : ext;
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -60,15 +60,11 @@ const DownloadIcon = (
   </svg>
 );
 
-/**
- * Public, read-only view of a shared intel report. No auth — the same
- * IntelFeed top bar as a shared article, then the report drawn as a document.
- */
+/** Public, read-only view of a shared intel report. No auth. It has the same IntelFeed top bar as a shared article, then renders the report as a document. */
 export function SharedReportPage() {
   const { token } = useParams<{ token: string }>();
   const { data: report, isLoading, error } = useSharedReport(token);
-  // The reader's column width, so a shared report and a shared article are
-  // the same width on the same screen.
+  // Use the reader's column width, so a shared report and a shared article are the same width on the same screen.
   const readerMaxWidth = useUIStore((s) => s.readerMaxWidth);
   const articlePaneStyle = useMemo<React.CSSProperties>(() => ({
     ["--reader-col-width" as string]: readerMaxWidth === 0 ? "none" : `${readerMaxWidth + 64}px`,
@@ -159,9 +155,7 @@ export function SharedReportPage() {
           <div className={`${readerStyles.content} ${styles.content}`}>
             {report.summary && <p className={styles.summary}>{report.summary}</p>}
 
-            {/* Free text (a Manual report's whole body, or a preamble) and the
-                sections go through one renderer, so code blocks, tables and
-                long lines are drawn the same way as in the builder. */}
+            {/* Free text (a Manual report's whole body, or a preamble) and the sections go through one renderer, so code blocks, tables and long lines render the same way as in the builder. */}
             {report.body || report.sections.length > 0 ? (
               <ReportDocument
                 sections={report.sections}

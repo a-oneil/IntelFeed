@@ -10,7 +10,7 @@ collision checks, EntryMedia creation, auto-attribution, autolink dispatch, and 
 broadcast. Reproducing all of that here would double the surface area and risk drift.
 
 Coexists with polling. Polling stays as the safety net — if the listener dies, entries
-still arrive on the normal 30-min cadence. The listener writes a Redis heartbeat so the
+still arrive on the feed's polling interval (30 minutes by default). The listener writes a Redis heartbeat so the
 UI can show its status.
 
 Operator opt-in: only feeds with `adapter_config.realtime = true` are subscribed.
@@ -65,7 +65,7 @@ class _ChannelDispatcher:
             from app.workers.feed_tasks import fetch_feed
 
             if await is_stopped_async():
-                # The feed's own poll picks the messages up after the start.
+                # The feed's own poll picks the messages up once the engine is started again.
                 logger.info("dispatch_skipped_engine_stopped", feed_id=feed_id)
                 return
             fetch_feed.delay(feed_id)
@@ -261,7 +261,7 @@ async def main() -> None:
     resync_task = asyncio.create_task(_resync_loop(state))
 
     if not state.clients:
-        # Nothing to listen to — just wait for either a feed to appear or shutdown
+        # Nothing to listen to yet: wait for shutdown while the resync loop subscribes any feed that appears
         logger.info("waiting_for_realtime_feeds")
         await state.shutdown.wait()
     else:

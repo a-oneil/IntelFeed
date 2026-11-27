@@ -201,7 +201,7 @@ class TestCollectCveFacts:
         assert facts["exploit_status"] == "weaponized"
 
     async def test_scores_are_json_plain_not_decimal(self, db_session):
-        """cvss_score is Numeric; a Decimal leaking into the variables is a trap."""
+        """cvss_score is Numeric; a Decimal must not leak into the prompt variables."""
         db_session.add(CVE(cve_id="CVE-2026-88888", cvss_score=7.5))
         await db_session.commit()
 
@@ -363,7 +363,7 @@ class TestFoldingByStory:
         wave = [r for r in rows if r.get("also_reported_by")]
         assert len(wave) == 1, "the wave is one article in the prompt"
         # Folding freed the rest of the budget for articles that say something
-        # else — before, the wave alone would have filled it.
+        # else; without folding, the re-reports alone would fill it.
         assert len(rows) > 1
 
     async def test_unthreaded_entries_pass_through_untouched(self, db_session, test_feed):

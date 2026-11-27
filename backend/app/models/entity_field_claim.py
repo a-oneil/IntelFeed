@@ -3,8 +3,8 @@
 The relationship trust ladder already answers "who says these two entities are
 connected, and how strongly" (``EntityRelationship.source`` /
 ``adjudication_verdict`` / ``evidence_entry_ids``). Profile *fields* had no
-such answer: an actor's motivation, origin country or targeted sectors simply
-appeared, with no way to tell an analyst's deliberate edit from a Wikipedia
+such answer: an actor's motivation, origin country or targeted sectors
+appeared with no way to tell an analyst's deliberate edit from a Wikipedia
 scrape, an AI gap-fill, or a reference-feed import — nor which article a claim
 came out of.
 
@@ -18,7 +18,7 @@ a "current" flag that could drift out of step with the column it describes.
 Repeat assertions collapse on ``claim_key`` — the same source re-scraping the
 same value nightly bumps ``last_asserted_at`` instead of growing the table —
 while two *different* sources asserting the same value stay two rows, because
-that is exactly the corroboration the UI needs to count.
+that is the corroboration the UI counts.
 """
 
 import uuid

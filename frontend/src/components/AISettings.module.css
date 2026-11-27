@@ -2,8 +2,7 @@
   max-width: 100%;
 }
 
-/* Card surface for the Providers / Cost tabs — the Prompts workspace renders
-   its own full-height panels instead (SettingsPage no longer card-wraps us). */
+/* Card surface for the Providers / Cost tabs. The Prompts workspace renders its own full-height panels instead, and SettingsPage does not wrap this component in a card. */
 .panelCard {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
@@ -189,8 +188,7 @@
   background: color-mix(in srgb, var(--warning) 8%, var(--bg-tertiary));
 }
 
-/* Chip's `toned` tone supplies the warning wash, border and pill; only the
-   12px face is local. Doubled for font-size, which Chip's size classes set. */
+/* Chip's `toned` tone supplies the warning background, border and pill shape; only the 12px font size is set here. The class is doubled so it outranks the font-size that Chip's size classes set. */
 .pausedBadge.pausedBadge {
   font-size: var(--fs-base);
 }
@@ -330,8 +328,7 @@
   height: 14px;
   left: 2px;
   bottom: 2px;
-  /* The knob rides both the off (--text-muted) and on (--accent) track, so it
-     is a fixed white puck rather than a token that only suits one of them. */
+  /* The knob sits on both the off (--text-muted) and on (--accent) track, so it is a fixed white rather than a theme token that only suits one of them. */
   background: #fff;
   border-radius: 50%;
   transition: transform 0.2s;
@@ -357,8 +354,7 @@
   color: var(--text-primary);
 }
 
-/* Chip supplies the box; the 12px face, the recessed ground and the uppercase
-   casing are local. Doubled for the properties Chip sets itself. */
+/* Chip supplies the box; the 12px font size, the darker background and the uppercase text are set here. The class is doubled so it outranks the properties Chip sets itself. */
 .providerType.providerType {
   font-size: var(--fs-base);
   background: var(--bg-primary);

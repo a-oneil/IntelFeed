@@ -1,9 +1,9 @@
-"""Dashboard board widgets — round-2 widget data endpoints.
+"""Dashboard board widget data endpoints.
 
 Everything here is a thin aggregate over data other subsystems already
 maintain: the signal engine, the ransomware tracker, the relationship trust
 ladder, KEV enrichment, per-user read state, campaigns, and the daily-summary
-AI pipeline. No new tables; no migrations.
+AI pipeline. These endpoints have no tables of their own.
 """
 
 import logging
@@ -77,7 +77,8 @@ def _week_grid(start: datetime, end: datetime) -> list[date]:
 # ── Overview ────────────────────────────────────────────────────────────────
 
 # Workbench entity types whose "new in window" is defined by first_seen_at.
-# Country is handled separately (a closed set — "new" means newly targeted).
+# Country is handled separately: it is a closed set, so its count is the
+# distinct countries linked to entries published in the window.
 _ENTITY_FIRST_SEEN: list[tuple[str, type]] = [
     ("threat_actor", ThreatActor),
     ("malware", MalwareFamily),
@@ -636,13 +637,13 @@ async def triage_flow(
     try:
         end = datetime.now(UTC)
         # Align to calendar-day boundaries: an unaligned start makes the leftmost
-        # column a partial day, which always reads as a phantom quiet day.
+        # column a partial day, which always looks like an unusually quiet day.
         start = (end - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
         feed_q = await _active_feed_ids(db, user.id)
 
-        # Arrival is when we fetched it, not when the author published it — most
-        # entries land with a backdated published_at, so publish dates undercount
-        # intake badly and can't be balanced against reads.
+        # Arrival is fetched_at, not published_at: most entries arrive with an
+        # earlier published_at, so counting by publish date badly undercounts
+        # intake and can't be compared against reads.
         day = cast(Entry.fetched_at, Date).label("day")
         arrived_rows = (
             await db.execute(

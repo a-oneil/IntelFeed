@@ -1,7 +1,4 @@
-/**
- * VendorPicker — searchable vendor selector for the Product profile. Extracted
- * from the legacy EntityProfilePanel.
- */
+/** VendorPicker: searchable vendor selector for the Product profile. */
 import { useState, useRef, useEffect } from "react";
 import { useVendors } from "@/hooks/useIntelligence";
 import styles from "./entityProfile.module.css";

@@ -4,12 +4,12 @@ Structurally mirrors nvd.py: an ``ExtendedAdapter`` that polls an external API a
 returns ``ParsedEntry`` objects carrying a rich ``metadata`` dict. Unlike NVD these
 entries are NOT persisted as ``Entry`` rows — the sync path
 (app/intelligence/ransomware_sync.py) reads ``metadata`` and upserts
-``RansomwareVictim`` + ``VictimDisclosure`` instead (Option A: dedicated worker path).
+``RansomwareVictim`` + ``VictimDisclosure`` instead, on its own worker path.
 
-Source-pluggable by design: each source is one ``ExtendedAdapter`` subclass with a
-distinct ``SOURCE`` string. ransomware.live is implemented and verified; additional
-sources (eCrime.ch, broker channels) slot in as sibling subclasses once their schema
-is confirmed, and the sync fn simply iterates over the enabled adapters.
+Each source is one ``ExtendedAdapter`` subclass with a distinct ``SOURCE`` string.
+ransomware.live is the only one implemented; other sources (eCrime.ch, broker
+channels) can be added as sibling subclasses once their schema is confirmed, and
+the sync function iterates over the enabled adapters.
 """
 
 import hashlib
@@ -46,7 +46,7 @@ def _parse_dt(value: str | None) -> datetime | None:
 
 
 def make_disclosure_guid(source: str, group: str, victim: str, discovered: str) -> str:
-    """Stable cross-run dedup id for a posting event (plan §5.1)."""
+    """Dedup id for one posting event, the same on every run."""
     key = f"{source}|{(group or '').lower()}|{(victim or '').lower()}|{discovered or ''}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
 

@@ -364,7 +364,7 @@ async def console(db: AsyncSession, entity_type: str | None = None) -> dict:
         needs = "key" if missing_key else None
         on = row.is_enabled
         credential = credential_for(source_type)
-        # A source that is off is off: its old job errors and breaker aren't
+        # A switched-off source's old job errors and open breaker aren't
         # something to act on, and they don't count toward "need attention".
         if on and state == "auth_failed":
             status = "key_rejected"
@@ -449,7 +449,7 @@ async def console(db: AsyncSession, entity_type: str | None = None) -> dict:
                 "commercial_ok": cls.license.commercial_ok,
                 "key": credential,
                 "key_status": key_status,
-                # A catalog source has no lookups to run on their own.
+                # A catalog source runs no per-entity lookups, so it has no trigger mode.
                 "trigger_mode": row.trigger_mode if cls.kind == "lookup" else None,
                 "used_today": used_today,
                 "daily_budget": row.daily_budget,
@@ -721,8 +721,8 @@ async def detail(db: AsyncSession, source_type: str) -> dict | None:
             "waiting": waiting,
             "by_lane": lanes,
             "retrying": retrying,
-            # Queued lookups by why they are waiting again: rate_limited is
-            # a 429 (or the bucket), breaker_open a back-off, and so on.
+            # Queued lookups by why they are waiting again: rate_limited is a
+            # 429 or an empty token bucket, breaker_open a back-off, and so on.
             "by_reason": {k: v for k, v in reasons.items() if v},
             "failed": failed,
         },

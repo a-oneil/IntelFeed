@@ -77,7 +77,7 @@ async def test_status_requires_authentication(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_status_is_open_to_non_admins(client: AsyncClient, auth_headers: dict):
-    """A non-admin hitting an unusable instance deserves to be told why."""
+    """A non-admin on an unusable instance can read the status and see why."""
     assert (await client.get("/api/onboarding/status", headers=auth_headers)).status_code == 200
 
 
@@ -107,14 +107,14 @@ async def test_status_prefers_configured_provider_over_startup_cli(
     response = await client.get("/api/onboarding/status", headers=auth_headers)
     assert response.status_code == 200
     # tasks_assigned is 0 throughout: these providers exist but nothing is routed
-    # at them, which is exactly the state that used to read as configured AI.
+    # at them, so the instance runs no AI work even though a provider is active.
     assert response.json()["ai"] == {"providers": 2, "active": expected, "tasks_assigned": 0}
 
 
 @pytest.mark.asyncio
 async def test_remedy_is_a_command_the_reader_can_paste(client: AsyncClient, auth_headers: dict):
-    """The UI used to wrap this in a hardcoded `-f docker-compose.prod.yml`, which was
-    wrong on every dev install. The whole line comes from the server now."""
+    """The server builds the whole command line, including the compose file, so a
+    dev install isn't told to run `-f docker-compose.prod.yml`."""
     data = (await client.get("/api/onboarding/status", headers=auth_headers)).json()
     remedy = data["reference_data"]["remedy"]
     assert remedy.startswith("docker compose -f docker-compose.")
@@ -125,8 +125,8 @@ async def test_remedy_is_a_command_the_reader_can_paste(client: AsyncClient, aut
 async def test_a_provider_with_no_tasks_routed_at_it_is_not_configured_ai(
     client: AsyncClient, admin_headers: dict, db_session: AsyncSession
 ):
-    """The gap the wizard's AI step used to leave: a provider row exists, the step
-    reads as done, and the instance runs nothing because no task points at it."""
+    """A provider row alone is not configured AI: with no task pointing at it the
+    instance runs nothing, so the wizard's AI step must not read as done."""
     db_session.add(AIProvider(name="Ollama", provider_type="ollama", is_active=True))
     await db_session.flush()
 

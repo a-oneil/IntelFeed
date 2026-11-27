@@ -45,7 +45,7 @@ export function AutomationPage() {
   const [showImport, setShowImport] = useState(false);
   const exportRules = useExportAutomationRules();
   const user = useAuthStore((s) => s.user);
-  // Run/toggle/edit/delete are owner-or-admin on the backend now.
+  // The backend allows run/toggle/edit/delete only for the rule's owner or an admin.
   const canManage = (rule: AutomationRule) =>
     user?.role === "admin" || rule.created_by === user?.id;
   const automationShowDisabled = useUIStore((s) => s.automationShowDisabled);
@@ -62,8 +62,7 @@ export function AutomationPage() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Enabled rules first, then alphabetical — disabled ones sink to the bottom
-  // (and are hidden entirely unless the toolbar toggle is on).
+  // Enabled rules first, then alphabetical; disabled rules go to the bottom (and are hidden entirely unless the toolbar toggle is on).
   const rules = [...(rulesData?.items ?? [])].sort(
     (a, b) =>
       Number(b.is_enabled) - Number(a.is_enabled) ||
@@ -89,8 +88,7 @@ export function AutomationPage() {
     setShowEditor(true);
   };
 
-  // Create a draft rule from a template (disabled), then drop straight into the
-  // builder so the user can review/tweak and save.
+  // Create a disabled draft rule from a template, then open it in the builder so the user can review, adjust and save it.
   const handleUseTemplate = async (template: AutomationTemplate) => {
     try {
       const created = await createRule.mutateAsync({

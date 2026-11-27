@@ -39,11 +39,7 @@
   border-bottom: 1px solid var(--border);
 }
 
-/* Node-kind badge (WHEN / IF / THEN / IF-ELSE). Chip supplies the box and the
-   per-kind colour arrives as `tint`; this keeps the uppercase tracking and the
-   borderless 20% wash the badges have always had. Doubled class so the
-   override beats Chip's own single-class `.toned` rule whichever order the two
-   stylesheets end up in. */
+/* Node-kind badge (WHEN / IF / THEN / IF-ELSE). Chip supplies the box and the per-kind color arrives as `tint`; this adds uppercase tracking, no border and a 20% tint background. The class is doubled so this beats Chip's single-class `.toned` rule whichever order the two stylesheets load in. */
 .badge.badge {
   padding: var(--sp-1) var(--sp-2);
   font-weight: 700;
@@ -179,10 +175,7 @@
   color: var(--accent);
 }
 
-/* Toggle chips sit on the node body (--bg-secondary) and have always read as
-   inset rather than raised, so they keep --bg-primary instead of Chip's
-   default --bg-tertiary. Doubled class for the same ordering reason as
-   .badge; the selected state is Chip's `toned` tone and carries no class. */
+/* Toggle chips sit on the node body (--bg-secondary) and should look inset rather than raised, so they use --bg-primary instead of Chip's default --bg-tertiary. The class is doubled for the same load-order reason as .badge; the selected state is Chip's `toned` tone and has no class of its own. */
 .filterChip.filterChip {
   background: var(--bg-primary);
 }

@@ -24,11 +24,7 @@ import org.junit.Test
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 
-/**
- * Checks the requests the app sends (method, path, JSON body) against the shapes the web client
- * sends, which were read from the live web bundle on 2026-09-22. Write endpoints were not exercised
- * against the live server, so these tests are the main guard on their contract.
- */
+/** Checks the requests the app sends (method, path, JSON body) against the shapes the web client sends, which were read from the live web bundle on 2026-09-22. Write endpoints were not exercised against the live server, so these tests are the main guard on their contract. */
 class ApiContractTest {
 
     private lateinit var server: MockWebServer

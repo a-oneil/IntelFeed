@@ -70,11 +70,10 @@ private val POLL_INTERVALS = listOf(
 
 /**
  * "Add" from the feeds drawer. Two explicit choices, like the website:
- * - Subscribe to a feed: find the feed at an address first (discover, which changes nothing),
- *   show what was found, then subscribe with a folder and polling interval.
+ * - Subscribe to a feed: find the feed at an address first (discover, which changes nothing), show what was found, then subscribe with a folder and polling interval.
  * - Add one article: fetch one page and add it as an article.
- * Nothing is added until the user confirms the preview. (The old dialog subscribed and, if that
- * failed for any reason, silently added the address as an article instead.)
+ *
+ * Nothing is added until the user confirms the preview, so a failed subscribe never adds the address as an article instead.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -95,7 +94,7 @@ fun AddFeedDialog(
     var searching by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    // The theme's secondary colour is green; the rest of the app uses blue for selection.
+    // The theme's secondary color is green; the rest of the app uses blue for selection.
     val chipColors = FilterChipDefaults.filterChipColors(selectedContainerColor = CyberBlue, selectedLabelColor = SlateDark900)
     val segmentColors = SegmentedButtonDefaults.colors(
         activeContainerColor = CyberBlue.copy(alpha = 0.2f),

@@ -2,10 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { EntityContext, EntityContextSource } from "@/hooks/useEntityContext";
 import { contextDigest, contextSourcesWithData } from "../ContextPanel";
 
-/**
- * The Context row's closed-state line, and the hide rule behind it: a null
- * digest means no source applies, and the Overview drops the row entirely.
- */
+/* The Context row's closed-state line, and the rule for hiding it: a null digest means no source applies, and the Overview drops the row entirely. */
 const source = (label: string, items: EntityContextSource["items"], stale = false): EntityContextSource =>
   ({ source_type: label.toLowerCase(), label, stale, items }) as EntityContextSource;
 

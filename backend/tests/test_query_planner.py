@@ -77,7 +77,7 @@ class TestMeiliFilterOr:
     def test_or_group_ands_with_outer_filters(self):
         # Normal form distributes the outer AND across the disjunction:
         # (a OR b) AND s  ≡  (a AND s) OR (b AND s). Both sides must carry the
-        # outer filter — dropping it from either is how an OR leaks rows.
+        # outer filter; dropping it from either side lets rows through that fail it.
         plan = plan_for("(tag:a OR tag:b) is:starred")
         assert plan.meili_filters == ['((tags = "a" AND is_starred = true) OR (tags = "b" AND is_starred = true))']
 
@@ -105,8 +105,8 @@ class TestNegatedText:
 
     def test_only_negated_text_searches_everything(self):
         # Meilisearch cannot negate a query term, so the term is dropped — but
-        # the query still asked for entries. Planning it as "no entry search"
-        # is what made `NOT phishing` return zero rows instead of everything.
+        # the query still asks for entries. Planning it as "no entry search"
+        # would make `NOT phishing` return zero rows instead of everything.
         plan = plan_for("NOT phishing")
         assert plan.meili_query == ""
         assert plan.has_entry_queries is True
@@ -204,7 +204,7 @@ class TestEntityOrExecution:
 
 class TestBranchExpansion:
     """`(a OR b) AND c` needs one search per disjunct — Meilisearch has no OR
-    inside a query string, and flattening it turned the AND into a union."""
+    inside a query string, and flattening it would turn the AND into a union."""
 
     def test_grouped_or_distributes_over_and(self):
         plan = plan_for("(APT28 OR APT29) AND ransomware")
@@ -273,7 +273,7 @@ class TestWildcards:
 
     def test_trailing_wildcard_stripped_from_free_text(self):
         # Meilisearch has no wildcard operator and treats `*` as a separator,
-        # which cancelled the automatic prefix match on the final term.
+        # which would cancel the automatic prefix match on the final term.
         assert plan_for("ransom*").branches[0].query == "ransom"
 
     def test_phrase_keeps_its_asterisk(self):
@@ -285,7 +285,7 @@ class TestWildcards:
         assert to_sql_pattern("*security*") == "%security%"
 
     def test_sql_pattern_escapes_sql_metacharacters(self):
-        # A CVE id or a URL must not be able to smuggle in a pattern of its own.
+        # A `%` or `_` in a CVE id or a URL matches literally, not as a wildcard.
         assert to_sql_pattern("100%") == r"%100\%%"
         assert to_sql_pattern("a_b") == r"%a\_b%"
 
@@ -341,9 +341,9 @@ def _bounds(plan) -> tuple[float, float]:
 
 class TestDeferredFilterBranches:
     """`feed:` and `category:` are answered from Postgres *after* planning, so
-    they hold a placeholder in the branch expansion. Without one they collapsed
-    onto every branch as a single AND, and `feed:A OR feed:B` — two feeds no
-    entry can both belong to — matched nothing."""
+    they hold a placeholder in the branch expansion. Without one they would
+    apply to every branch as a single AND, and `feed:A OR feed:B` (two feeds no
+    entry can both belong to) would match nothing."""
 
     def test_feed_or_stays_a_disjunction(self):
         plan = plan_for('feed:"Reddit Digest" OR feed:"Red Canary"')
@@ -399,11 +399,11 @@ class TestPendingSubstitution:
 class TestEntryIdOrGroups:
     """`signal:`, `url:` and `is:translated`/`is:image` resolve to
     sets of entry IDs rather than filter clauses. Combining those sets with the
-    operator the user typed — rather than always intersecting — is what stopped
+    operator the user typed, rather than always intersecting, keeps
     `signal:a OR signal:b` from meaning `signal:a AND signal:b`."""
 
     def _resolve(self, query, sets):
-        """Plan `query`, hand each pending filter a canned ID set, fold it in."""
+        """Plan `query`, give each pending filter a fixed ID set, and apply the sets to a new plan."""
         from app.search.query_planner import ExecutionPlan, _apply_entry_id_filters
 
         plan = plan_for(query)
@@ -429,7 +429,7 @@ class TestEntryIdOrGroups:
         assert p.db_entry_ids == {"1", "2", "3"}
 
     def test_or_group_intersects_with_an_ungrouped_filter(self):
-        # `(a OR b) AND c` — the group unions, then narrows by the loner.
+        # `(a OR b) AND c`: the group unions, then intersects with the ungrouped filter.
         p = self._resolve("(signal:a OR signal:b) url:c", [{"1", "2"}, {"3"}, {"2", "3", "4"}])
         assert p.db_entry_ids == {"2", "3"}
 
@@ -455,9 +455,9 @@ class TestEntryIdOrGroups:
 
 
 class TestIsFilterOr:
-    """`is:` used to be planned in the walk, outside the branch expansion, so it
-    could not be a side of an OR. `is:muted OR tag:x` returned the muted set
-    with the tag silently dropped."""
+    """`is:` is planned inside the branch expansion so it can be one side of an
+    OR. Planned outside it, `is:muted OR tag:x` returned the muted set with the
+    tag silently dropped."""
 
     def test_index_flags_or_into_one_clause(self):
         plan = plan_for("is:starred OR is:bookmarked")

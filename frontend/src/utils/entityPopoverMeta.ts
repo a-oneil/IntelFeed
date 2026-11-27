@@ -1,7 +1,4 @@
-// Build the generic popover metadata (description + key facts + links + Wikipedia
-// thumbnail) for each entity type. All fields come from entity payloads already
-// fetched for highlighting (entry-entity endpoints or the public shared-entry
-// response), so no extra request is made.
+// Build the generic popover metadata (description, key facts, links, Wikipedia thumbnail) for each entity type. All fields come from entity payloads already fetched for highlighting (entry-entity endpoints or the public shared-entry response), so no extra request is made.
 
 import { capturedByLabel, observableSourcesLabel } from "./observables";
 import type { ThreatActor, MalwareFamily, Vendor, Product, OffensiveTool, Country, Sector, Mitigation, CWEResponse } from "@/api/types";
@@ -58,8 +55,7 @@ export function toolMeta(t: OffensiveTool): HighlightEntityMeta {
   const links: MetaLink[] = [];
   if (t.github_url) links.push({ label: "GitHub", url: t.github_url });
   if (t.malpedia_url) links.push({ label: "Malpedia", url: t.malpedia_url });
-  // Flatten detection_artifacts (hashes, registry keys, network signatures) into
-  // a labelled list — directly actionable for a detection engineer.
+  // Flatten detection_artifacts (hashes, registry keys, network signatures) into a labeled list a detection engineer can act on.
   const artifacts: NonNullable<HighlightEntityMeta["artifacts"]> = [];
   for (const [key, raw] of Object.entries(t.detection_artifacts ?? {})) {
     const value = Array.isArray(raw) ? raw.join(", ") : String(raw ?? "");
@@ -94,7 +90,7 @@ export function cweMeta(c: CWEResponse): HighlightEntityMeta {
   const facts: NonNullable<HighlightEntityMeta["facts"]> = [];
   if (c.abstraction) facts.push({ label: "Abstraction", value: c.abstraction });
   if (c.parent_cwe_id) facts.push({ label: "Parent", value: c.parent_cwe_id });
-  // Only worth surfacing when it is a warning — "Allowed" is the silent default.
+  // Shown only when it is a warning; "Allowed" is the default and not worth a line.
   if (c.mapping_usage && c.mapping_usage !== "Allowed") {
     facts.push({ label: "MITRE mapping", value: c.mapping_usage });
   }
@@ -177,8 +173,7 @@ export function observableMeta(o: {
   if (o.created_via) facts.push({ label: "Captured by", value: capturedByLabel(o.created_via) });
   if (o.last_seen_at)
     facts.push({ label: "Last seen", value: new Date(o.last_seen_at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) });
-  // The evidence sentence is the "why does this exist" — show it where tools
-  // show their detection artifacts.
+  // The evidence sentence explains why the observable was recorded; show it in the artifacts slot, where tools show their detection artifacts.
   const artifacts: NonNullable<HighlightEntityMeta["artifacts"]> = [];
   if (o.evidence) artifacts.push({ label: "evidence", value: `“${o.evidence}”` });
   return {

@@ -14,9 +14,7 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() },
 }));
 
-// The workspace is four network reads of its own. These tests are about which
-// face the tab picks and about the no-workspace fallback, so the workspace
-// stands in as a marker — see CoverageWorkspace.test.tsx for its own coverage.
+// The workspace makes four network reads of its own. These tests are about which view the tab shows and about the no-workspace fallback, so the workspace is replaced by a marker; see CoverageWorkspace.test.tsx for its own tests.
 vi.mock("@/components/coverageWorkspace", () => ({
   CoverageWorkspace: ({ label }: { label: string }) => <div>workspace:{label}</div>,
 }));
@@ -58,7 +56,7 @@ describe("DetectionTab", () => {
   it("gives a threat the coverage workspace, with no segmented views to choose between", () => {
     renderTab();
     expect(screen.getByText("workspace:APT29")).toBeInTheDocument();
-    // The Build|Coverage pair is gone: one question, one answer.
+    // The tab has no Build/Coverage toggle; it shows a single view.
     expect(screen.queryByRole("button", { name: /^Coverage/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Build/ })).not.toBeInTheDocument();
   });
@@ -72,7 +70,7 @@ describe("DetectionTab", () => {
     expect(screen.getByText("workspace:CVE-2024-1111")).toBeInTheDocument();
   });
 
-  it("falls back to a rule list for an entity with no extracted behaviours", () => {
+  it("falls back to a rule list for an entity with no extracted behaviors", () => {
     renderTab({
       entityType: "cwe",
       entityId: "cwe-1",

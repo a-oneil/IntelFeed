@@ -125,11 +125,7 @@ describe("MainLayout", () => {
   it("does not own the live-events connection", () => {
     render(<MainLayout />);
 
-    // `useSSE` moved to App. Mounted here, every trip to a SidebarLayout route
-    // (search, settings, workbench) tore the connection down and rebuilt it —
-    // and the rebuild races its own unmount, leaking a permanently-CONNECTING
-    // EventSource each time until the browser's per-origin connection pool is
-    // exhausted and every request in the app hangs.
+    // `useSSE` is mounted in App, not here. Mounted in MainLayout, every trip to a SidebarLayout route (search, settings, workbench) tore the connection down and rebuilt it, and the rebuild races its own unmount, leaking an EventSource stuck in CONNECTING each time until the browser's per-origin connection pool is exhausted and every request in the app hangs.
     expect(mockUseSSE).not.toHaveBeenCalled();
   });
 

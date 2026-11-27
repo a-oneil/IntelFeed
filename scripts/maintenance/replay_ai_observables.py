@@ -38,7 +38,9 @@ from app.models.entry import Entry  # noqa: E402
 async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--since", type=lambda s: datetime.fromisoformat(s), default=None)
-    ap.add_argument("--mode", choices=["setting", "capture", "shadow"], default="setting")
+    ap.add_argument(
+        "--mode", choices=["setting", "capture", "shadow"], default="setting"
+    )
     ap.add_argument(
         "--kinds",
         default=None,
@@ -55,7 +57,9 @@ async def main() -> None:
     kinds = {k.strip() for k in args.kinds.split(",")} if args.kinds else None
 
     async with async_session() as db:
-        task_id = (await db.execute(select(AITask.id).where(AITask.name == "entry_analysis"))).scalar_one_or_none()
+        task_id = (
+            await db.execute(select(AITask.id).where(AITask.name == "entry_analysis"))
+        ).scalar_one_or_none()
         if task_id is None:
             raise SystemExit("no entry_analysis task")
         q = (
@@ -72,7 +76,8 @@ async def main() -> None:
         with_items = [
             r
             for r in rows
-            if isinstance(r.parsed_result, dict) and (r.parsed_result.get("iocs") or r.parsed_result.get("scripts"))
+            if isinstance(r.parsed_result, dict)
+            and (r.parsed_result.get("iocs") or r.parsed_result.get("scripts"))
         ]
         print(
             f"current analyses: {len(rows)}; with iocs/scripts: {len(with_items)}; "
@@ -92,11 +97,18 @@ async def main() -> None:
         for r in with_items:
             try:
                 counts = await apply_ai_observables(
-                    db, r.entry_id, r.parsed_result, mode=mode, capture_kinds=kinds, fire_automations=False
+                    db,
+                    r.entry_id,
+                    r.parsed_result,
+                    mode=mode,
+                    capture_kinds=kinds,
+                    fire_automations=False,
                 )
                 rels = r.parsed_result.get("relationships") or []
                 if rels:
-                    counts["relationships"] = await store_ai_relationships(db, rels, r.entry_id, r.parsed_result)
+                    counts["relationships"] = await store_ai_relationships(
+                        db, rels, r.entry_id, r.parsed_result
+                    )
                 await db.commit()
             except Exception as exc:
                 await db.rollback()

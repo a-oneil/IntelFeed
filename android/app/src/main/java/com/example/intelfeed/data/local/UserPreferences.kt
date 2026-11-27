@@ -15,10 +15,7 @@ import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 
-/**
- * Device-local reading preferences. Stored in the same DataStore file as the session (which is
- * excluded from backups), and deliberately kept on logout: they describe the device, not the account.
- */
+/** Device-local reading preferences. Stored in the same DataStore file as the session (which is excluded from backups), and deliberately kept on logout: they describe the device, not the account. */
 class UserPreferences(private val context: Context) {
 
     companion object {
@@ -44,14 +41,12 @@ class UserPreferences(private val context: Context) {
         private val LEGACY_KEYWORD_KEYS = listOf(stringPreferencesKey("tracked_keywords"), stringPreferencesKey("keyword_seen_ids"))
         private val KEY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
         private val KEY_LAST_NOTIFICATION_SYNC_MS = longPreferencesKey("last_notification_sync_ms")
-        // Campaign, saved-search and priority alerts already posted ("e:<entry id>", "t:<story slug>").
-        // A story records its articles too, so the cap leaves room for them.
+        // Campaign, saved-search and priority alerts already posted ("e:<entry id>", "t:<story slug>"). A story records its articles too, so the cap leaves room for them.
         private val KEY_NOTIFIED_ALERTS = stringPreferencesKey("notified_alert_keys")
         private const val MAX_NOTIFIED_ALERTS = 3000
         // "<server>|<username>" the alert state above belongs to (see claimAlertState).
         private val KEY_ALERT_STATE_OWNER = stringPreferencesKey("alert_state_owner")
-        // Lowest priority score that notifies (Settings), and the cut-off the queue was last
-        // recorded at without alerting (see IntelNotificationWorker).
+        // Lowest priority score that notifies (Settings), and the cut-off the queue was last recorded at without alerting (see IntelNotificationWorker).
         private val KEY_PRIORITY_ALERT_SCORE = floatPreferencesKey("priority_alert_score")
         private val KEY_PRIORITY_ALERT_BASELINE = floatPreferencesKey("priority_alert_baseline")
         // App update notices (AppUpdateWorker): on/off, and the version already announced.
@@ -149,10 +144,7 @@ class UserPreferences(private val context: Context) {
         context.dataStore.edit { it[KEY_FEED_HIDE_READ] = hide }
     }
 
-    /**
-     * The web toolbar's "Auto-read": articles scrolled off the top of the list are marked read.
-     * Off by default on the phone, since a fling can pass many articles at once.
-     */
+    /** The web toolbar's "Auto-read": articles scrolled off the top of the list are marked read. Off by default on the phone, since a fling can pass many articles at once. */
     val feedAutoRead: Flow<Boolean> = context.dataStore.data
         .map { it[KEY_FEED_AUTO_READ] ?: false }
         .distinctUntilChanged()
@@ -262,11 +254,7 @@ class UserPreferences(private val context: Context) {
         }
     }
 
-    /**
-     * Ties the background alert state (posted alerts, priority baseline, last check time) to
-     * [owner], the signed-in server and user. When the owner changes, that state is dropped, so a
-     * different account starts fresh. State saved before owners were recorded is kept and adopted.
-     */
+    /** Ties the background alert state (posted alerts, priority baseline, last check time) to [owner], the signed-in server and user. When the owner changes, that state is dropped, so a different account starts fresh. State saved before owners were recorded is kept and adopted. */
     suspend fun claimAlertState(owner: String) {
         context.dataStore.edit { prefs ->
             val previous = prefs[KEY_ALERT_STATE_OWNER]

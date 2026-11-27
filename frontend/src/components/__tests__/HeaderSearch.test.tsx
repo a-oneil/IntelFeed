@@ -95,8 +95,7 @@ describe("HeaderSearch scope placeholder", () => {
   });
 
   it("names only articles when the scope is feeds", () => {
-    // A field reading "entries & intelligence" under an `in: feeds` chip
-    // describes a search the user is not running.
+    // A field reading "entries & intelligence" under an `in: feeds` chip describes a search the user is not running.
     useUIStore.setState({ searchScope: "feeds" });
     renderSearch();
     const input = screen.getByPlaceholderText(/^Search /i);

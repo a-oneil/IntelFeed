@@ -6,14 +6,10 @@ import { AddAliasPanel } from "@/components/AddAliasPanel";
 import { useCreateNote } from "@/hooks/useNotes";
 import styles from "./SummarySelectionMenu.module.css";
 
-/**
- * Brings the entry-reader text-selection menu to entry-less contexts like the
- * daily AI summary. The summary spans a whole day (no single entry), so:
- *  - "Link to entity" is omitted (it attaches an entity to one article).
- *  - "Create note" produces a standalone note quoting the selection.
- *  - "Create entity" / "Add alias" work as in the reader, hosted here in a
- *    lightweight modal since this column has no reader side-panel.
- */
+/** Brings the entry-reader text-selection menu to contexts with no entry, such as the daily AI summary. The summary spans a whole day (no single entry), so:
+    - "Link to entity" is omitted (it attaches an entity to one article).
+    - "Create note" produces a standalone note quoting the selection.
+    - "Create entity" / "Add alias" work as in the reader, hosted here in a lightweight modal since this column has no reader side panel. */
 
 interface Props {
   containerRef: React.RefObject<HTMLElement | null>;

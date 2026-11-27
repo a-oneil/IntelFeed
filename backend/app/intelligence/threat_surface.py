@@ -3,7 +3,7 @@
 Given an intel profile's scope — regions (country ids) × verticals (canonical
 sector slugs) — find the actors and malware families the corpus says are
 active against that scope, each carrying *why it matched* so the analyst can
-curate with evidence instead of trusting a silent query.
+curate with evidence instead of trusting an unexplained query.
 
 Match sources, per entity:
 - co-occurrence: entries in the window that link the entity AND a scope
@@ -33,8 +33,9 @@ from app.models.ransomware import VictimDisclosure
 from app.models.sector import MalwareTargetSector, Sector, ThreatActorTargetSector
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 
-# Candidates with only one matched dimension still surface (ranked lower,
-# with the gap stated) — the analyst decides, not the query.
+# Upper bound on candidates returned per type. Candidates with only one matched
+# dimension still appear (ranked lower, flagged ``partial``) — the analyst
+# decides, not the query.
 _MAX_CANDIDATES_PER_TYPE = 200
 
 
@@ -332,7 +333,8 @@ async def collect_exposure_entries(
     limit: int = 200,
 ) -> list[uuid.UUID]:
     """Entries backing an exposure report: in-window entries linking a kept
-    entity AND touching the scope, newest first."""
+    entity AND touching the scope, newest first within each entity type (actors,
+    then malware)."""
     sectors = [s for s in (normalize_sector(v) for v in sectors) if s]
     cutoff = datetime.now(UTC) - timedelta(days=window_days)
     entry_ids: list[uuid.UUID] = []

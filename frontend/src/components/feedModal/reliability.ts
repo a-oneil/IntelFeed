@@ -1,14 +1,6 @@
 /**
  * What a feed's reliability rating does to the tags its articles get.
- *
- * Mirrors the backend exactly: `_reliability_to_weight` in
- * workers/intel_feed_tasks.py (A 1.0, B .85, C .7, D .5, E .3; F "cannot be
- * judged" and unrated .5) multiplies a catalog match's confidence (a canonical name 0.9, an alias
- * 0.5), and `_weighted_confidence` in intelligence/autolinker.py buckets the
- * product at ≥0.7 high, ≥0.4 medium, else low. So a canonical-name match
- * reaches "high" only from an A or B feed, stays "medium" from C, D, F or an
- * unrated feed, and drops to "low" from E; an alias match is one step
- * lower. The rating does not touch the AI's own tags.
+ * Mirrors the backend: `reliability_to_weight` in intelligence/autolinker.py (called through `_reliability_to_weight` in workers/intel_feed_tasks.py) maps the rating to a weight (A 1.0, B .85, C .7, D .5, E .3; F "cannot be judged" and unrated .5). `_weighted_confidence` in the same file multiplies a catalog match's confidence (a canonical name 0.9, an alias 0.5) by that weight and buckets the product at ≥0.7 high, ≥0.4 medium, else low. So a canonical-name match reaches "high" only from an A or B feed, stays "medium" from C, D, F or an unrated feed, and drops to "low" from E; an alias match is one step lower. The rating does not affect the AI's own tags.
  */
 const WEIGHTS: Record<string, number> = { A: 1.0, B: 0.85, C: 0.7, D: 0.5, E: 0.3 };
 const UNRATED_WEIGHT = 0.5;

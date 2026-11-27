@@ -48,7 +48,7 @@ class EntityLinkValidationLog(Base):
     original_matched_names: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     original_paragraph_indices: Mapped[list[int] | None] = mapped_column(ARRAY(SmallInteger), nullable=True)
     original_extracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # When action='needs_reclassification', the entity_type Claude recommends.
+    # When action='needs_reclassification', the entity_type the reviewer recommends.
     suggested_entity_type: Mapped[str | None] = mapped_column(String(20))
     # The verdict's own confidence (high / medium / low), as the reviewer
     # gave it — not the link's, which is original_confidence.

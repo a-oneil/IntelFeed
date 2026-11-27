@@ -186,8 +186,7 @@ describe("getTokenAtCursor", () => {
   });
 
   it("identifies potential field_name for alphanumeric words", () => {
-    // Pure alpha words could be field names or text — getTokenAtCursor reports field_name
-    // since it can't distinguish without context. Autocomplete uses this to suggest fields.
+    // Pure alpha words could be field names or text — getTokenAtCursor reports field_name since it can't distinguish without context. Autocomplete uses this to suggest fields.
     const result = getTokenAtCursor("ransomware", 5);
     expect(result.type).toBe("field_name");
     expect(result.partialValue).toBe("ransomware");

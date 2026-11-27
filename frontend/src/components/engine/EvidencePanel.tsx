@@ -211,15 +211,11 @@ function originLine(p: EvidenceProfile): string {
       ? "created by the analysis"
       : p.created_via
         ? `created by ${p.created_via.replace(/_/g, " ")}`
-        : "catalogue entry";
+        : "catalog entry";
   return p.first_seen ? `${origin} · first seen ${p.first_seen}` : origin;
 }
 
-/** The evidence behind one Review row: what the row cannot hold. The row
- * already says the reason, confidence, origin and merge target, so the panel
- * shows a merge's two profiles, the facts the chips don't, the article
- * paragraph with the AI's quote, an edge's articles and reviews, and what
- * was already decided about the same entity. */
+/** The evidence behind one Review row, beyond what the row itself shows. The row already gives the reason, confidence, origin and merge target, so the panel shows a merge's two profiles, the facts the chips don't show, the article paragraph with the AI's quote, an edge's articles and reviews, and what was already decided about the same entity. */
 export function RowEvidencePanel({
   id,
   names = [],

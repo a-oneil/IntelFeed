@@ -8,8 +8,7 @@ x-logging: &default-logging
 
 services:
   db:
-    # postgres:16-alpine + pgvector, built from ./db/Dockerfile. Same base image
-    # as before, so the existing pgdata volume needs no migration.
+    # postgres:16-alpine + pgvector, built from ./db/Dockerfile. It keeps the postgres:16-alpine base, so the existing pgdata volume needs no migration.
     build:
       context: ./db
     image: intelfeed-postgres:16
@@ -188,11 +187,10 @@ services:
       - ./ingest_files:/app/data/ingest_files
       # Global copilot (/api/ai/copilot/stream): the api does NOT run the `claude`
       # CLI. With copilot_worker_dispatch=true (default) it enqueues the CLI turn
-      # on the `ai` queue — celery-worker-ai owns the OAuth credentials
-      # volume and is the single credentials writer — and
-      # relays the streamed events back over Redis. So the api needs neither the
-      # CLI nor the credentials volume here. (This resolves the
-      # earlier "who holds the credentials" question: only the CLI worker does.)
+      # on the `ai` queue — celery-worker-ai owns the OAuth credentials volume and
+      # is the only service that writes credentials — and relays the streamed
+      # events back over Redis. So the api needs neither the CLI nor the
+      # credentials volume here.
     env_file:
       - .env
     environment:
@@ -319,8 +317,8 @@ services:
   # Serialized AI worker: one task at a time on the "ai" queue, whatever the
   # assigned provider (paces the Ollama GPU; also the only service mounting
   # the claude_code CLI credentials volume for CLI-provider tasks).
-  # Un-gated (no profile) since the CLI-credential era: update.sh now rebuilds
-  # it with the rest of the stack, so it can't run stale worker code.
+  # It has no compose profile, so update.sh rebuilds it with the rest of the
+  # stack and it can't run stale worker code.
   celery-worker-ai:
     build:
       context: ./backend

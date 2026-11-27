@@ -1,6 +1,4 @@
-/* NoteCard — the single note card used across sidebar, entry panel and
-   entity profiles. Read state shows rendered content; hovering reveals the
-   actions; Edit flips the card into the inline editor. */
+/* NoteCard: the one note card used in the sidebar, entry panel and entity profiles. The read state shows rendered content, hovering reveals the actions, and Edit switches the card to the inline editor. */
 .card {
   border: 1px solid var(--border);
   border-radius: var(--r-md);

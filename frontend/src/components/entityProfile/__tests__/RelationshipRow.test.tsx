@@ -1,8 +1,4 @@
-/**
- * RelationshipRow — evidence structure rendering: the shape phrase on the
- * evidence line, the chip economy (reported = unmarked default), and the
- * story-grouped evidence panel.
- */
+/* RelationshipRow evidence rendering: the structure phrase on the evidence line, no chip on reported rows, and the evidence panel grouped by story. */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 

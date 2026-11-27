@@ -8,8 +8,7 @@ import styles from "./InlineEditField.module.css";
 
 interface InlineEditFieldProps {
   value: string;
-  /** Shown when not editing, if it differs from the stored `value` (e.g. a
-   * pretty label for an enum). Editing always operates on `value`. */
+  /** Shown when not editing, if it differs from the stored `value` (e.g. a display label for an enum). Editing always operates on `value`. */
   displayValue?: string;
   onSave: (newValue: string) => Promise<void> | void;
   multiline?: boolean;
@@ -102,8 +101,7 @@ export function InlineEditField({ value, displayValue, onSave, multiline, placeh
     );
   }
 
-  // A visitor reads the value: no pencil, no "click to edit", no "Set …"
-  // placeholder inviting an edit they can't make.
+  // A visitor only reads the value: no pencil, no "click to edit", no "Set …" placeholder offering an edit they can't make.
   if (isVisitor) {
     if (renderMarkdown && value) {
       return (

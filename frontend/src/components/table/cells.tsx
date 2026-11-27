@@ -1,22 +1,19 @@
 /**
- * The shared cell vocabulary for every DataTable in the app.
+ * Shared cell components for every DataTable in the app.
  *
- * These lived as private helpers inside WorkbenchPage, so any table outside
- * that file (campaigns, glossary, watchlist) re-invented "muted text",
- * "a date", "a count" with its own markup — which is exactly how those pages
- * drifted out of the house style. Import from here instead.
+ * When these were private helpers inside WorkbenchPage, tables elsewhere (campaigns, glossary, watchlist) wrote their own markup for muted text, dates and counts, and drifted from the common style. Import from here instead.
  */
 import { formatDate } from "@/utils/formatDate";
 import table from "./DataTable.module.css";
 import styles from "./cells.module.css";
 
-/** Muted, ellipsised text — the default for secondary fields. */
+/** Muted text truncated with an ellipsis; the default for secondary fields. */
 export function MetaCell({ value }: { value: string | null | undefined }) {
   if (!value) return <span className={table.zero}>·</span>;
   return <span className={`${styles.meta} ${table.ellipsis}`} title={value}>{value}</span>;
 }
 
-/** Primary label of a row — the column you'd click to open the thing. */
+/** Primary label of a row: the column you'd click to open the item. */
 export function NameCell({ value, title }: { value: string; title?: string }) {
   return <span className={`${styles.name} ${table.ellipsis}`} title={title ?? value}>{value}</span>;
 }
@@ -35,7 +32,7 @@ export function NumCell({ value, tone }: { value: number | null | undefined; ton
   return <span className={`${table.count} ${tone ? table[tone] : ""}`}>{value}</span>;
 }
 
-/** External link cell — stops propagation so it doesn't also open the row. */
+/** External link cell; stops propagation so a click doesn't also open the row. */
 export function LinkCell({ href, label }: { href: string | null | undefined; label?: string }) {
   if (!href) return <span className={table.zero}>·</span>;
   let text = label;
@@ -60,10 +57,7 @@ export function LinkCell({ href, label }: { href: string | null | undefined; lab
   );
 }
 
-/**
- * Row actions pinned to a `sticky: "right"` column. Clicks never reach the row,
- * so an action can't also trigger the row's navigation.
- */
+/** Row actions pinned to a `sticky: "right"` column. Clicks never reach the row, so an action can't also trigger the row's navigation. */
 export function ActionsCell({ children }: { children: React.ReactNode }) {
   return (
     <span className={styles.actions} onClick={(e) => e.stopPropagation()}>
@@ -72,7 +66,7 @@ export function ActionsCell({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** The house row-action button. Quiet until hovered. */
+/** The shared row-action button. Muted until hovered. */
 export function RowActionButton({
   children,
   onClick,

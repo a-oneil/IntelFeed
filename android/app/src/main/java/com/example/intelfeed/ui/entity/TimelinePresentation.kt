@@ -17,11 +17,7 @@ object TimelinePresentation {
 
     fun windowLabel(window: String): String = WINDOWS.firstOrNull { it.first == window }?.second?.lowercase(Locale.US) ?: window
 
-    /**
-     * The events worth listing, newest first: relationships, correlations and the like. Articles
-     * are left out (the Articles tab lists them) and so are "Related to …" events, which the website
-     * also leaves off its timeline.
-     */
+    /** The events worth listing, newest first: relationships, correlations and the like. Articles are left out (the Articles tab lists them) and so are "Related to …" events, which the website also leaves off its timeline. */
     fun keyEvents(events: List<TimelineEvent>): List<TimelineEvent> =
         events.filter { it.eventType != null && it.eventType != "article" && !it.date.isNullOrBlank() && !it.title.startsWith("Related to ") }
             .sortedByDescending { DateUtils.parseIsoMillis(it.date) }
@@ -56,11 +52,7 @@ object TimelinePresentation {
         return Math.round((mentions.total - previous) * 100.0 / previous).toInt()
     }
 
-    /**
-     * The trend line under the mentions summary, as the web profile words it: nothing when there's
-     * no previous window, no change, or no mentions at all; "new" when the previous window had none.
-     * [up] is null for "new" (always a rise), else the direction.
-     */
+    /** The trend line under the mentions summary, as the web profile words it: nothing when there's no previous window, no change, or no mentions at all; "new" when the previous window had none. [up] is null for "new" (always a rise), else the direction. */
     fun trendLine(mentions: MentionsTimeseries, windowLabel: String): Trend? {
         val previous = mentions.previousTotal ?: return null
         if (previous <= 0) {

@@ -9,12 +9,7 @@ import styles from "./SearchFacetSidebar.module.css";
 
 export type MatchKind = "direct" | "mention";
 
-/**
- * A facet the sidebar drives by editing the query string rather than by holding
- * local state. `field` is the query-language field (`feed`, `tag`, `is`, ...),
- * so toggling a row produces `feed:"Bleeping Computer"` in the search box — the
- * user can see it, edit it by hand, and save it as a saved search.
- */
+/** A facet the sidebar drives by editing the query string rather than by holding local state. `field` is the query-language field (`feed`, `tag`, `is`, ...), so toggling a row puts `feed:"Bleeping Computer"` in the search box, where the user can see it, edit it by hand, and save it as a saved search. */
 interface EntryFacetGroup {
   /** Query-language field this group writes. */
   field: string;
@@ -25,7 +20,7 @@ interface EntryFacetGroup {
   fixed?: Array<{ value: string; label: string }>;
   /** Rows shown before "Show all"; only applies to distribution-backed groups. */
   cap?: number;
-  /** Render a filter box once the group exceeds this many rows. */
+  /** Render a filter box when the group has more rows than `cap`. */
   searchable?: boolean;
 }
 
@@ -43,11 +38,7 @@ const DATE_RANGES: Array<{ key: string; label: string; days: number }> = [
   { key: "1y", label: "Last year", days: 365 },
 ];
 
-/**
- * The query-language field each entity type filters through, so clicking a
- * threat actor in the rail writes `threat_actor:"LockBit"` — the same
- * mechanism the Feed facet uses, and equally hand-editable afterwards.
- */
+/** The query-language field each entity type filters through, so clicking a threat actor in the rail writes `threat_actor:"LockBit"`: the same mechanism the Feed facet uses, and just as editable by hand afterwards. */
 const ENTITY_FACET_FIELD: Record<string, string> = {
   threat_actor: "threat_actor",
   malware: "malware",
@@ -186,9 +177,7 @@ export function SearchFacetSidebar({
             {entityRows.length === 0 && <div className={styles.empty}>No entities matched</div>}
           </div>
 
-          {/* Entity value facets, one group per type present — the intelligence
-              equivalent of the Feed list below, so a broad search can be
-              narrowed to a specific actor or family without retyping it. */}
+          {/* Entity value facets, one group per type present: the entity equivalent of the Feed list below, so a broad search can be narrowed to a specific actor or malware family without retyping it. */}
           {entityRows.map(([type]) => (
             <EntityValueFacet
               key={type}
@@ -201,8 +190,7 @@ export function SearchFacetSidebar({
           ))}
 
           <div className={styles.group}>
-            {/* The API says which column matched; this turns that into the one
-                distinction that actually changes how a result should be read. */}
+            {/* The API says which column matched; this group splits results into name-or-alias matches and mentions. */}
             <div className={styles.groupTitle}>Matched on</div>
             <button
               className={`${styles.row} ${matchKinds.has("direct") ? styles.rowOn : ""}`}
@@ -306,9 +294,7 @@ function EntryFacetSection({
 /**
  * One entity type's matched values, as a filter list.
  *
- * Counts are the entity's linked-article count where it has one — the same
- * number the result row shows — so the rail reads consistently with the stream
- * rather than inventing its own tally.
+ * Counts are the entity's linked-article count where it has one (the same number the result row shows), so the rail agrees with the result list rather than computing its own count.
  */
 function EntityValueFacet({
   type,

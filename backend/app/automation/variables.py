@@ -4,7 +4,7 @@ The runtime injectors in ``actions.py`` build their payloads by selecting keys
 from the field lists below, and the builder UI reads the same definitions via
 ``GET /api/automation/variable-contexts``. Because both sides derive from here,
 the documented "available variables" can't drift from what is actually provided
-at runtime — the exact problem that made prompt-building confusing.
+at runtime.
 
 Two distinct variable systems exist, and they are easy to conflate:
 
@@ -35,8 +35,8 @@ PER_ENTRY_FIELDS: list[str] = [
     "published_at",
 ]
 # Batch prompts also see the story each article belongs to: the batch is folded
-# to one article per story before it reaches the model (see
-# _fold_batch_by_thread), and these carry what was folded away.
+# to one article per story before it reaches the model (see fold_by_thread in
+# app.intelligence.story_threads), and these carry what was folded away.
 BATCH_ENTRY_FIELDS: list[str] = [
     *PER_ENTRY_FIELDS,
     "feed_title",
@@ -114,8 +114,10 @@ def ai_prompt_variable_contexts() -> dict:
 
 # --- Notification/template variables (single-brace { }) ---------------------
 
-# Consumed by `_render_template` for send_notification / send_email / run_webhook /
-# create_note / create_intel_report message and payload templates.
+# Consumed by `_render_template` for send_notification / send_email / create_note /
+# create_intel_report message templates. run_webhook payloads go through
+# `_render_template_json_safe`, which fills only the first eight (not the
+# observables fields or entry_count).
 NOTIFICATION_TEMPLATE_FIELDS: list[str] = [
     "title",
     "url",

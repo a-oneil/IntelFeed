@@ -13,10 +13,7 @@
   min-width: 220px;
   padding: var(--sp-4) 0;
   border-right: 1px solid var(--border);
-  /* Nav panels sit a touch darker than the card surface but stay clear of
-     the page ground, so the sidebar still reads as a distinct panel.
-     Derived from two theme-managed tokens, so it moves with the theme
-     instead of clashing the way a fixed --sidebar-bg did. */
+  /* Nav panels are slightly darker than the card surface but distinct from the page background, so the sidebar still reads as a separate panel. Mixed from two theme tokens, so it follows the theme instead of clashing with it as a fixed --sidebar-bg color would. */
   background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
   display: flex;
   flex-direction: column;
@@ -154,14 +151,10 @@
   display: none;
 }
 
-/* Collapse strip between nav and content — same affordance as the
-   SidebarLayout / entry-list toggles. */
+/* Collapse strip between nav and content: the same control as the SidebarLayout and entry-list toggles. */
 
 
-/* Even 1.25rem inset and full-bleed content — the same geometry as the
-   Dashboard's .container. Settings used to run a 32px/40px well around a
-   1100px centred column, which made it the one route in the app whose
-   content neither started nor ended where every other page's does. */
+/* Even 1.25rem padding and full-width content, the same geometry as the Dashboard's .container, so settings content starts and ends where every other page's does (a 1100px centered column would not). */
 .content {
   flex: 1;
   overflow-y: auto;
@@ -174,13 +167,7 @@
   width: 100%;
 }
 
-/* Matches the workbench's .contentTitle exactly (16px / 600 / body face).
-   Settings uses real <h2> elements for document structure, so it inherits the
-   global `h1, h2, h3 { font-family: var(--font-display) }` monospace rule from
-   index.css — that, plus 22px/700, was the whole reason the two surfaces read
-   as different apps side by side. The class (0,1,0) outranks the element
-   selector (0,0,1), so the body face wins here without !important, and the
-   heading level stays intact for screen readers. */
+/* Matches the workbench's .contentTitle exactly (16px / 600 / body font). Settings uses real <h2> elements for document structure, so it would inherit the global `h1, h2, h3 { font-family: var(--font-display) }` monospace rule from index.css and look different from the workbench. The class (0,1,0) outranks the element selector (0,0,1), so the body font wins here without !important, and the heading level stays intact for screen readers. */
 .sectionTitle {
   font-family: var(--font-body);
   font-size: var(--fs-lg);
@@ -207,8 +194,7 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
-/* Panel-title step, on the body face for the same reason as .sectionTitle
-   above — these are <h3> and would otherwise pick up the display monospace. */
+/* Card titles, in the body font for the same reason as .sectionTitle above: these are <h3> and would otherwise pick up the monospace display font. */
 .cardTitle {
   font-family: var(--font-body);
   font-size: var(--fs-md);
@@ -419,9 +405,7 @@
 
 .toggle input:checked + .toggleSlider::after {
   transform: translateX(18px);
-  /* The knob sits ON the accent fill, so its colour must be derived from the
-     accent — #fff measured 2.53:1 against the default accent, under the 3:1
-     that WCAG 1.4.11 requires of a UI component. */
+  /* The knob sits on the accent fill, so its color must be derived from the accent: #fff measured 2.53:1 against the default accent, under the 3:1 that WCAG 1.4.11 requires of a UI component. */
   background: var(--accent-text);
 }
 
@@ -505,8 +489,7 @@
 
 /* ─── Misc ────────────────────────────────────────────── */
 
-/* Now a <Chip> — fill, border, radius, weight and padding come from the
-   primitive; only the capitalisation is local. */
+/* Rendered as a <Chip>: fill, border, radius, weight and padding come from the primitive; only the capitalization is local. */
 .badge {
   text-transform: capitalize;
 }
@@ -546,11 +529,7 @@
     height: auto;
   }
 
-  /* The nav no longer renders inline on mobile — it lives inside
-     MobileNavSheet, a vertical slide-over. The rules here used to lay it out as
-     a horizontal scrolling top bar, which inside a vertical sheet produced a
-     row you had to swipe sideways through. It is a plain list now; only the tap
-     targets change from desktop. */
+  /* On mobile the nav does not render inline; it is inside MobileNavSheet, a vertical slide-over, so it stays a plain vertical list (a horizontal scrolling bar would have to be swiped sideways inside the sheet). Only the tap targets differ from desktop. */
   .navItem {
     padding: var(--sp-3) var(--sp-5);
     min-height: 44px;
@@ -560,8 +539,7 @@
     padding: var(--sp-4);
   }
 
-  /* The desktop size is now 16px, so the old 18px mobile step would make the
-     title BIGGER on the small screen. Dropped — one size on both. */
+  /* .sectionTitle has no mobile size: the desktop size is already 16px, and a larger mobile size would make the title bigger on the small screen. */
 
   .card {
     padding: var(--sp-5);
@@ -936,9 +914,7 @@
   gap: var(--sp-2);
 }
 
-/* Now a clickable <Chip tone="toned">: layout, size, weight, radius, cursor
-   and the level colour all come from the primitive + its tint. Only the
-   monospace face and tracking are local. */
+/* Rendered as a clickable <Chip tone="toned">: layout, size, weight, radius, cursor and the level color all come from the primitive and its tint. Only the monospace font and letter spacing are local. */
 .logLevelPill {
   font-family: var(--font-mono, monospace);
   letter-spacing: 0.02em;
@@ -961,8 +937,7 @@
   white-space: nowrap;
 }
 
-/* Level colours moved to LEVEL_TINT in SettingsPage.tsx and are applied as a
-   Chip `tint` — the old .logLvl_* classes are gone. */
+/* Level colors are in LEVEL_TINT in SettingsPage.tsx and are applied as a Chip `tint`, so there are no per-level classes here. */
 
 /* ── Rows ── */
 
@@ -995,10 +970,7 @@
   font-size: var(--fs-sm);
 }
 
-/* Now a <Chip tone="toned">. The doubled selector is deliberate: font-weight
-   and padding are properties Chip also sets, so a single class would win only
-   by bundle order. 700 (not Chip's 600) and the tight 4px padding are kept so
-   the log rows keep their exact column rhythm. */
+/* Rendered as a <Chip tone="toned">. The doubled selector is deliberate: font-weight and padding are properties Chip also sets, so a single class would win only by bundle order. 700 (not Chip's 600) and the tight 4px padding keep the log rows' columns aligned. */
 .logBadge {
   min-width: 30px;
   justify-content: center;
@@ -1084,10 +1056,7 @@
   gap: var(--sp-2);
 }
 
-/* The three users-table badges are <Chip>s now. Colour comes from `tint`
-   (accent for "you", #8b5cf6 for admin, green/red for active/inactive), so
-   .roleAdmin / .statusActive / .statusInactive are gone — only the shared
-   uppercase treatment stays here. */
+/* The three users-table badges are <Chip>s. Color comes from `tint` (accent for "you", #8b5cf6 for admin, green/red for active/inactive), so only the shared uppercase styling is here. */
 .youBadge,
 .roleBadge,
 .statusBadge {
@@ -1321,8 +1290,7 @@
   transform: rotate(90deg);
 }
 
-/* .alStatus / .alStatus_* / .alActionStatus are <Chip>s now — see
-   AL_STATUS_TINT in SettingsPage.tsx. Nothing local was left to keep. */
+/* The run and action status badges are <Chip>s colored from AL_STATUS_TINT in SettingsPage.tsx, so they have no local styles. */
 
 .alTime {
   color: var(--text-muted);
@@ -1406,9 +1374,7 @@
   margin-top: var(--sp-4);
 }
 
-/* Matches the workbench nav's .sectionHeader exactly — same face, size,
-   tracking and inset. They sit in the same slot on adjacent routes, so any
-   divergence reads as two different apps. */
+/* Matches the workbench nav's .sectionHeader exactly: same font, size, letter spacing and padding. They sit in the same place on neighboring routes, so any difference would make them look like two different apps. */
 .navGroupLabel {
   font-size: var(--fs-xs);
   font-weight: 600;

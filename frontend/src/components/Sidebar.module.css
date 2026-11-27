@@ -2,8 +2,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  /* No bottom padding: .sidebarFooter is sticky to bottom: 0, and any padding
-     there would leave a strip below it for scrolled rows to show through. */
+  /* No bottom padding: .sidebarFooter is sticky to bottom: 0, and any padding there would leave a strip below it for scrolled rows to show through. */
   padding: 0;
   overflow-y: auto;
   overflow-x: hidden;
@@ -22,8 +21,7 @@
   margin-bottom: 0.5rem;
 }
 
-/* Appearance belongs to BrandButton, which the header uses too — all this row
-   contributes is the share of the width. */
+/* BrandButton sets the appearance (the header uses it too); this rule only gives it its share of the row width. */
 .brandName {
   flex: 1;
 }
@@ -61,10 +59,7 @@
 }
 
 /* ===== Workspace mode switch =====
-   The first control in the column, and the app's one statement that it is a
-   reader *and* a workbench. Sized like a real switch rather than a nav row:
-   users read the 14px shield in the old tool strip as a minor utility and
-   concluded the whole product was an RSS reader. */
+   The first control in the column, and the one place that shows the app is both a reader *and* a workbench. It is sized like a real switch rather than a nav row because users took the 14px shield icon that sat in the tool strip for a minor utility and concluded the whole product was an RSS reader. */
 
 .modeSwitch {
   display: grid;
@@ -157,14 +152,11 @@
 .modeCell:focus-within .modeHint {
   opacity: 1;
   visibility: visible;
-  /* Deliberate delay: instant cards on a control this prominent feel nagging. */
+  /* Delay on purpose: a card that appears instantly on a control this prominent gets in the way. */
   transition-delay: 0.4s;
 }
 
-/* Same rule the JS hover cards follow (useHoverCards): touch leaves :hover and
-   :focus-within stuck on the button it activated, so the card would sit over
-   the sidebar until you tapped something harmless — and at mobile width it
-   covers a third of the screen even with a mouse attached. */
+/* Same rule the JS hover cards follow (useHoverCards): touch leaves :hover and :focus-within stuck on the button it activated, so the card would stay over the sidebar until the user tapped somewhere else, and at mobile width it covers a third of the screen even with a mouse attached. */
 @media (hover: none), (max-width: 767px) {
   .modeHint {
     display: none;
@@ -181,7 +173,7 @@
   color: var(--text-muted);
 }
 
-/* Until Workbench has been visited once: a quiet pulsing dot, not a tour. */
+/* Shown until Workbench has been visited once: a small pulsing dot. */
 .modeBtnNudge {
   position: relative;
 }
@@ -208,8 +200,7 @@
   .modeHint { transition: none; }
 }
 
-/* Below ~200px the two labels can't both fit; the icons still carry the pair,
-   and each button keeps its title attribute. */
+/* Below ~200px the two labels can't both fit; the icons still identify both buttons, and each button keeps its title attribute. */
 @container sidebar (max-width: 200px) {
   .modeBtn {
     font-size: var(--fs-sm);
@@ -239,9 +230,7 @@
   color: var(--text-muted);
 }
 
-/* SAVED SEARCHES / FEEDS / MUTED are small all-caps: no x-height dip for a
-   chevron to sit against, so they take a fuller ratio than the sentence-case
-   category rows the same classes serve below. */
+/* SAVED SEARCHES / FEEDS / MUTED are small all-caps: no x-height dip for a chevron to sit against, so they take a fuller ratio than the sentence-case category rows the same classes serve below. */
 .sectionLabel svg,
 .mutedFoldHeader svg {
   width: 1em;
@@ -356,8 +345,7 @@
   cursor: pointer;
 }
 
-/* Add feed: the row's primary action wears the accent instead of disappearing
-   into the grey icon strip. */
+/* Add feed: the row's primary action uses the accent color so it stands out from the gray icon strip. */
 .newFeedBtn {
   display: inline-flex;
   align-items: center;
@@ -435,9 +423,7 @@
 }
 
 /* ===== Articles hero (C2) =====
-   The one dominant shape in the sidebar's top block: the unread total, with
-   the "since" delta sitting on the same baseline as the count rather than
-   claiming a third row. */
+   The largest element in the sidebar's top block: the unread total, with the "since" delta on the same baseline as the count instead of on a third row. */
 
 .articlesHero {
   display: flex;
@@ -450,9 +436,7 @@
   padding: 0.6rem 0.85rem;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  /* Transparent like .quickChip, so all three tile families read on the
-     sidebar's own surface. A fixed --bg-secondary fill is now LIGHTER
-     than the sidebar behind it, which made these buttons pop oddly. */
+  /* Transparent like .quickChip, so all three tile types sit on the sidebar's own surface. A fixed --bg-secondary fill is LIGHTER than the sidebar behind it and makes these buttons stand out oddly. */
   background: none;
   color: var(--text-primary);
   text-align: left;
@@ -514,16 +498,13 @@
 }
 
 /* ===== Quick-view filter grid =====
-   Six filters, one geometry: 3 across x 2 rows. Every chip is the same tile
-   (count over label), so nothing in the set claims priority over the rest.
-   Priority Queue rides in the grid as the sixth tile. */
+   Six filters in one layout: 3 across x 2 rows. Every chip is the same tile (count over label), so none looks more important than the rest. Priority Queue is the sixth tile. */
 
 .quickGrid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: var(--sp-2);
-  /* Bottom padding matches the grid gap so the tool strip below sits one
-     row-gap away, not a wider band. */
+  /* Bottom padding matches the grid gap so the tool strip below sits one row-gap away, not a wider band. */
   padding: 0 0.8rem var(--sp-2);
 }
 
@@ -559,9 +540,7 @@
 }
 
 .quickChipLabel {
-  /* Sentence case, not uppercase: at a third of the sidebar the longest label
-     ("Priority Queue") only fits untracked. Ellipsis is the narrow-sidebar
-     safety net; the button also carries a title. */
+  /* Sentence case, not uppercase: at a third of the sidebar the longest label ("Priority Queue") only fits untracked. Ellipsis is the narrow-sidebar safety net; the button also carries a title. */
   max-width: 100%;
   font-size: var(--fs-xs);
   line-height: 1;
@@ -581,10 +560,8 @@
   border-color: var(--accent);
 }
 
-/* ===== Tool strip (Automation / Notes / Workbench) =====
-   These are ROUTES, not filters. Deliberately a different shape from the
-   filter grid above: one low, borderless segmented bar of icon+label rows,
-   no counts, no tiles. */
+/* ===== Tool strip (Automation / Notes) =====
+   These are ROUTES, not filters, so they carry no counts: bordered tiles with the icon above the label, two across (.toolStripPair). */
 .toolStrip {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -605,9 +582,7 @@
   padding: var(--sp-3) var(--sp-2);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  /* Transparent like .quickChip, so all three tile families read on the
-     sidebar's own surface. A fixed --bg-secondary fill is now LIGHTER
-     than the sidebar behind it, which made these buttons pop oddly. */
+  /* Transparent like .quickChip, so all three tile types sit on the sidebar's own surface. A fixed --bg-secondary fill is LIGHTER than the sidebar behind it and makes these buttons stand out oddly. */
   background: none;
   color: var(--text-secondary);
   cursor: pointer;
@@ -753,8 +728,7 @@
   opacity: 0.55;
 }
 
-/* Intel-extraction level as a left-edge fill rail: taller than a glyph so the
-   quarter/half/full waterline reads, and out of the crowded name↔count zone. */
+/* Intel-extraction level as a left-edge fill rail: taller than a glyph so the quarter/half/full fill level is visible, and kept out of the crowded space between the name and the count. */
 .levelRail {
   position: absolute;
   left: 4px;
@@ -1164,9 +1138,7 @@
 }
 
 /* ===== Footer =====
-   A quiet link back to the repo, in both modes. `margin-top: auto` parks it at
-   the foot of a short column; `position: sticky` keeps it there once the
-   section list is long enough to scroll. */
+   A quiet link back to the repo, in both modes. `margin-top: auto` puts it at the bottom of a short column; `position: sticky` keeps it there once the section list is long enough to scroll. */
 
 .sidebarFooter {
   display: flex;
@@ -1175,8 +1147,7 @@
   margin-top: auto;
   position: sticky;
   bottom: 0;
-  /* Mirrors the panel ground the two layouts paint, so rows scroll underneath
-     it rather than through it. */
+  /* Matches the panel background both layouts paint, so rows scroll underneath it instead of showing through it. */
   background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
   border-top: 1px solid var(--border);
   padding: 0.375rem 1rem 0.5rem;
@@ -1186,8 +1157,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  /* Same muted-to-primary move as .iconBtn, whose contrast is already vetted
-     across the theme gallery. */
+  /* Same muted-to-primary move as .iconBtn, whose contrast is already vetted across the theme gallery. */
   color: var(--text-muted);
   font-size: var(--fs-sm);
   text-decoration: none;
@@ -1205,13 +1175,9 @@
   flex-shrink: 0;
 }
 
-/* The build stamp: the quietest thing in the column, and the fastest way to
-   tell whether what you are looking at is what you just deployed.
+/* The build stamp: the least prominent item in the column, and the quickest way to tell whether the running bundle is the one you just deployed.
 
-   Inherits the sidebar's body font on purpose. --font-mono aliases
-   --font-display (JetBrains Mono), which this app reserves for headings — a
-   SHA set in it reads louder than the link it sits beside, however small and
-   muted the rest of the rule makes it. */
+   Uses the sidebar's body font on purpose. --font-mono is an alias for --font-display (JetBrains Mono), which this app reserves for headings; a SHA set in it looks louder than the link beside it, however small and muted the rest of the rule makes it. */
 .version {
   margin-left: auto;
   color: var(--text-muted);
@@ -1225,8 +1191,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  /* It is a link to the commit, but it must not read as one at rest — the
-     underline and the brighter colour are held back for hover/focus. */
+  /* It is a link to the commit, but it should not look like one at rest: the underline and the brighter color appear only on hover/focus. */
   text-decoration: none;
 }
 
@@ -1236,9 +1201,7 @@
   text-decoration: underline;
 }
 
-/* The one thing in this row allowed to be loud, and only when a reload would
-   actually change what you are looking at. Pushed against the link so the
-   version stays anchored to the right edge. */
+/* The only prominent item in this row, shown only when a reload would change what is on screen. Its auto margin pushes it away from the link, and the version follows it at the right edge. */
 .stale {
   display: inline-flex;
   align-items: center;
@@ -1258,8 +1221,7 @@
   background: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
-/* With the reload button present it owns the auto margin, so the version
-   sits directly after it rather than being pushed off the row. */
+/* With the reload button present it owns the auto margin, so the version sits directly after it rather than being pushed off the row. */
 .stale ~ .version {
   margin-left: 0;
 }
@@ -1340,7 +1302,7 @@
     width: calc(100% - 1rem);
   }
 
-  /* No room for the word; the mark plus the title attribute carry it. */
+  /* No room for the word; the icon and the title attribute stand in for it. */
   .sidebarFooter {
     padding-left: 0.5rem;
     padding-right: 0.5rem;
@@ -1360,7 +1322,7 @@
     display: none;
   }
 
-  /* Too narrow for the word, but never hide the affordance itself. */
+  /* Too narrow for the word, but the reload button itself stays visible. */
   .stale {
     margin-left: 0;
     font-size: 0;
@@ -1459,8 +1421,7 @@
   }
 }
 
-/* Manual Uploads: a system feed shown as its own row above the category tree,
-   at category weight, with no "Uncategorized" label over it. */
+/* Manual Uploads: a system feed shown as its own row above the category tree, at category weight, with no "Uncategorized" label over it. */
 .pinnedFeed {
   margin-bottom: 0.125rem;
 }

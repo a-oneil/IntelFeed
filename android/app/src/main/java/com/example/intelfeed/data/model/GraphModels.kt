@@ -2,11 +2,7 @@ package com.example.intelfeed.data.model
 
 import kotlinx.serialization.Serializable
 
-/**
- * GET /api/intelligence/graph/{type}/{id}?depth=1 (window_days optional), the web profile's
- * relationship graph. Node ids are "<type>-<id>"; the first node is the entity itself. "entry"
- * nodes are articles.
- */
+/** GET /api/intelligence/graph/{type}/{id}?depth=1 (window_days optional), the web profile's relationship graph. Node ids are "<type>-<id>"; the first node is the entity itself. "entry" nodes are articles. */
 @Serializable
 data class EntityGraph(val nodes: List<GraphNode> = emptyList(), val edges: List<GraphEdge> = emptyList())
 

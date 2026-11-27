@@ -185,8 +185,7 @@
   color: var(--text-primary);
   cursor: pointer;
   padding: 0;
-  /* An observable's value (a URL, a command line) is one unbreakable word:
-     break it rather than let one row set the column's width. */
+  /* An observable's value (a URL, a command line) has no spaces to wrap at: break it anywhere rather than let one row set the column's width. */
   max-width: 260px;
   overflow-wrap: anywhere;
 }
@@ -207,9 +206,7 @@
   flex: none;
 }
 
-/* The Proposed column holds the change labels. A fixed width keeps every
-   row's labels wrapping at the same point, so their edges line up down the
-   table; without it the greedy Why column starves this one. */
+/* The Proposed column holds the change labels. A fixed width keeps every row's labels wrapping at the same point, so their edges line up down the table; without it the Why column takes the free width and squeezes this one. */
 .proposedCol {
   width: 180px;
   min-width: 180px;
@@ -225,8 +222,7 @@
   font-size: var(--fs-base);
   white-space: nowrap;
 }
-/* With no width set this is the column with the most text, so it is the
-   one that absorbs the table's free space; never narrower than a readable line. */
+/* With no width set, this column (the one with the most text) absorbs the table's free space; it is never narrower than a readable line. */
 .why {
   min-width: 200px;
   color: var(--text-primary);
@@ -263,8 +259,7 @@
   font-size: var(--fs-base);
 }
 
-/* ---- row actions: a fixed grid, so the buttons line up in columns ----
-   primary / Dismiss (or Restore) / the "⋯" menu. */
+/* ---- row actions: a fixed grid (primary / Dismiss or Restore / the "⋯" menu), so the buttons line up in columns ---- */
 .acts,
 .actsHist {
   display: grid;

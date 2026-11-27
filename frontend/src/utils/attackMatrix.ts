@@ -1,5 +1,4 @@
-// ATT&CK matrix view — shared types and pure helpers (heat ramp + Navigator
-// layer export). Kept out of the component so they can be unit tested.
+// ATT&CK matrix view — shared types and pure helpers (heat ramp + Navigator layer export). Kept out of the component so they can be unit tested.
 
 export type AttackDomain = "enterprise" | "mobile" | "ics";
 export type MatrixLayerMode = "heat" | "coverage" | "combined";
@@ -43,10 +42,7 @@ export interface AttackMatrixData {
   tactics: MatrixTactic[];
 }
 
-/**
- * Heat opacity for a cell (0 when unseen). Square-root ramp so low-volume
- * techniques stay visible next to the handful of very hot ones.
- */
+/** Heat opacity for a cell (0 when unseen). Square-root ramp so low-volume techniques stay visible next to the handful of very hot ones. */
 export function heatAlpha(count: number, max: number): number {
   if (count <= 0 || max <= 0) return 0;
   return Math.min(1, 0.15 + 0.75 * Math.sqrt(count / max));
@@ -73,10 +69,7 @@ const COVERAGE_LABELS: Record<CoverageStatus, string> = {
   no_rule: "no rule",
 };
 
-/**
- * Build an ATT&CK Navigator layer from matrix data (same shape as the
- * campaign attack-layer export; score = article count within the window).
- */
+/** Build an ATT&CK Navigator layer from matrix data (same shape as the campaign attack-layer export; score = article count within the window). */
 export function buildNavigatorLayer(matrix: AttackMatrixData): NavigatorLayer {
   const windowLabel = matrix.days ? `last ${matrix.days} days` : "all time";
   const techniques: NavigatorLayer["techniques"] = [];

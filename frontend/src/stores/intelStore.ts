@@ -26,8 +26,7 @@ export type WorkspaceSection =
   | "watchlist"
   | "ransomware";
 
-// "campaign" is a profile type, not an extraction type: it never comes out of
-// an article, but it pivots and renders through the same shell as the rest.
+// "campaign" is a profile type, not an extraction type: it never comes out of an article, but it pivots and renders through the same shell as the rest.
 export type EntityType =
   | "threat_actor"
   | "malware"
@@ -104,32 +103,18 @@ interface IntelState {
   preferredRuleFormats: string[];
   setPreferredRuleFormats: (formats: string[]) => void;
 
-  // Workbench sidebar collapsed (whole sidebar, persisted user preference).
-  // The auto flag records that a detail route (profile/rule/report) collapsed
-  // it, so returning to the workbench index restores it; a manual toggle
-  // clears the flag so the user's choice always wins.
-  /**
-   * Create-Entity modal state. It lives in the store because two surfaces open
-   * it and only one renders it: the entity table's header (desktop) and the
-   * mobile workbench toolbar. `createEntityType` preselects the type tab, so the
-   * button in the Malware table opens on Malware.
-   */
+  /** Create-Entity modal state. It lives in the store because two surfaces open it and only one renders it: the entity table's header (desktop) and the mobile workbench toolbar. `createEntityType` preselects the type tab, so the button in the Malware table opens on Malware. */
   createEntityOpen: boolean;
   createEntityType: EntityType | null;
   openCreateEntity: (type?: EntityType) => void;
   closeCreateEntity: () => void;
-  /** The rule library's whole filter set, kept so opening a rule and coming
-   *  back restores the list you were looking at rather than resetting it. */
+  /** The rule library's whole filter set, kept so opening a rule and coming back restores the list you were looking at rather than resetting it. */
   ruleLibrary: RuleLibraryState;
   setRuleLibrary: (patch: Partial<RuleLibraryState>) => void;
 
-  /** The workbench's docked reader: any workbench surface (workspace intel
-   *  column, board drawer) opens an entry on the right without leaving the
-   *  page — the workbench acts as the entry list, the way the rest of the app
-   *  pairs a list with the reader. Deliberately not persisted. */
+  /** The workbench's docked reader: any workbench surface (workspace intel column, board drawer) opens an entry on the right without leaving the page — the workbench acts as the entry list, the way the rest of the app pairs a list with the reader. Deliberately not persisted. */
   workbenchReaderEntryId: string | null;
-  /** A story thread can take the same dock — one occupant at a time, so
-   *  opening either clears the other. */
+  /** A story thread can take the same dock — one occupant at a time, so opening either clears the other. */
   workbenchReaderThreadSlug: string | null;
   openWorkbenchReader: (entryId: string) => void;
   openWorkbenchThread: (slug: string) => void;

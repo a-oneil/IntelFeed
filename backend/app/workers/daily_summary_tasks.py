@@ -14,7 +14,7 @@ first pays for the LLM call and the other reads the same cache row.
 
 Idempotent: skips if a fresh shared summary is already cached for that day, and
 skips gracefully when no AI provider is assigned to the ``daily_summary`` task.
-The job is enabled by default and can be turned off in Settings → Jobs.
+The job is enabled by default and can be turned off in Settings → Engine (Jobs view).
 """
 
 import logging
@@ -57,8 +57,8 @@ async def _generate_daily_summaries() -> dict:
         result = await ensure_daily_summary(db, yesterday_key())
         parsed_days = await _backfill_narrative_themes(db)
 
-    # The markdown itself is only useful to callers that push it somewhere; the
-    # job's job is to warm the cache, so keep the task result small.
+    # The markdown itself is only useful to callers that push it somewhere; this
+    # task exists to warm the cache, so keep the task result small.
     out = {k: v for k, v in result.items() if k != "summary"}
     if parsed_days:
         out["themes_backfilled"] = parsed_days
@@ -66,8 +66,8 @@ async def _generate_daily_summaries() -> dict:
 
 
 #: How far back the nightly run looks for briefings whose grouping was never
-#: parsed. Only matters for the first few nights after this ships (and after any
-#: stretch where the parse was switched off) — steady state finds nothing.
+#: parsed. It finds rows only on the first nights after the parse is turned on
+#: (or after a stretch where it was off); in steady state it finds nothing.
 _THEME_BACKFILL_DAYS = 14
 
 

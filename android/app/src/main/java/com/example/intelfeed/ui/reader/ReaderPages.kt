@@ -5,10 +5,7 @@ import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 
 /**
- * The reader pager's per-article state. Each article gets its own ViewModelStore, and only the
- * articles near the one on screen keep theirs (see [retainOnly]). All ReaderViewModels used to
- * share the reader's store, so swiping through a long list kept one for every article passed (the
- * full article, its panels and five live subscriptions) until the reader closed.
+ * The reader pager's per-article state. Each article gets its own ViewModelStore, and only the articles near the one on screen keep theirs (see [retainOnly]). Sharing one store across the reader would keep a ReaderViewModel for every article swiped past (the full article, its panels and five live subscriptions) until the reader closed.
  *
  * Scoped to the reader's back-stack entry, so the kept pages survive a configuration change.
  */
@@ -16,10 +13,7 @@ class ReaderPages : ViewModel() {
 
     private val owners = HashMap<String, ViewModelStoreOwner>()
 
-    /**
-     * Articles already auto-marked read in this reader. Shared by its pages, so an article you
-     * marked unread by hand isn't marked read again when you swipe back to it.
-     */
+    /** Articles already auto-marked read in this reader. Shared by its pages, so an article you marked unread by hand isn't marked read again when you swipe back to it. */
     val autoReadIds: MutableSet<String> = HashSet()
 
     fun owner(entryId: String): ViewModelStoreOwner = owners.getOrPut(entryId) {

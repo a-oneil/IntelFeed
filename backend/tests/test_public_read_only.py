@@ -525,7 +525,7 @@ async def test_visitor_gets_the_trimmed_builtin_dashboards(client: AsyncClient, 
 
 def test_visitor_boards_have_no_holes():
     """Hidden widgets leave no empty columns: nothing overlaps, every widget
-    starts at the left edge or right after a neighbour, and none sits beside
+    starts at the left edge or right after a neighbor, and none sits beside
     free space it could have widened into."""
     from app.services.public_view import _GRID_COLS, visitor_dashboards
 
@@ -859,14 +859,14 @@ async def canary(db_session: AsyncSession):
     # Two actors a visitor sees (on the visible article): the relationships
     # between them and Shared Actor below carry what a visitor must not get.
     partner = ThreatActor(name="Partner Actor", first_seen_at=now, last_seen_at=now)
-    rumoured = ThreatActor(name="Rumoured Actor", first_seen_at=now, last_seen_at=now)
-    db_session.add_all([shared, ghost, partner, rumoured])
+    rumored = ThreatActor(name="Rumored Actor", first_seen_at=now, last_seen_at=now)
+    db_session.add_all([shared, ghost, partner, rumored])
     await db_session.flush()
     db_session.add_all(
         [
             EntryThreatActor(entry_id=shown.id, threat_actor_id=shared.id, matched_names=["Shared Actor"]),
             EntryThreatActor(entry_id=shown.id, threat_actor_id=partner.id, matched_names=["Partner Actor"]),
-            EntryThreatActor(entry_id=shown.id, threat_actor_id=rumoured.id, matched_names=["Rumoured Actor"]),
+            EntryThreatActor(entry_id=shown.id, threat_actor_id=rumored.id, matched_names=["Rumored Actor"]),
             EntryThreatActor(entry_id=hidden.id, threat_actor_id=shared.id, matched_names=[f"{_CANARY} alias"]),
             EntryThreatActor(entry_id=hidden.id, threat_actor_id=ghost.id, matched_names=[f"{_CANARY} Ghost"]),
         ]
@@ -914,7 +914,7 @@ async def canary(db_session: AsyncSession):
         source_type="threat_actor",
         source_id=shared.id,
         target_type="threat_actor",
-        target_id=rumoured.id,
+        target_id=rumored.id,
         relationship_type="related-to",
         confidence="likely",
         source="ai_extracted",
@@ -1088,7 +1088,7 @@ async def test_nothing_from_a_hidden_feed_reaches_a_visitor(
     await _canary_walk(client, overrides, headers=auth_headers)  # fills caches the way an analyst would
     leaks = await _canary_walk(client, overrides)
     # The article and entity routes are also walked from the visible article,
-    # whose neighbours, threads and counts include the hidden one.
+    # whose neighbors, threads and counts include the hidden one.
     leaks |= await _canary_walk(client, {**overrides, "entry_id": str(canary["shown"])})
     assert leaks == {}, "\n".join(f"{k}: {v}" for k, v in sorted(leaks.items()))
 
@@ -1309,13 +1309,13 @@ def test_visitor_pages_are_capped():
 async def test_timeline_relationships_follow_the_visitor_rule(
     client: AsyncClient, public_mode, canary, auth_headers, no_rate_limit
 ):
-    """Rumoured Actor is visible, but its edge to Shared Actor rests on the hidden article alone."""
+    """Rumored Actor is visible, but its edge to Shared Actor rests on the hidden article alone."""
     url = f"/api/intelligence/timeline/threat_actor/{canary['shared']}"
     analyst = await client.get(url, headers=auth_headers)
-    assert "Rumoured Actor" in analyst.text  # the event exists
+    assert "Rumored Actor" in analyst.text  # the event exists
     visitor = await client.get(url)
     assert visitor.status_code == 200, visitor.text
-    assert "Rumoured Actor" not in visitor.text
+    assert "Rumored Actor" not in visitor.text
     assert "Partner Actor" in visitor.text  # an edge with visible evidence stays
 
 

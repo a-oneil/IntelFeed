@@ -39,8 +39,7 @@ function makeRow(): RelRow {
 
 describe("RelationshipRow", () => {
   it("renders evidence facts with no chip on reported rows — the unmarked default", () => {
-    // probable → reported is the unmarked default (chip economy: a chip on
-    // most rows carries no information); strength tier words never render.
+    // Probable confidence maps to the reported tier, which gets no chip (a chip on most rows carries no information); strength tier words never render.
     render(<RelationshipRow row={makeRow()} viewedLabel="Germany" onOpen={vi.fn()} />);
     expect(screen.queryByText("reported")).not.toBeInTheDocument();
     expect(screen.queryByText("strong")).not.toBeInTheDocument();
@@ -54,7 +53,7 @@ describe("RelationshipRow", () => {
     row.item.relationship_description = "MITRE ATT&CK";
     render(<RelationshipRow row={row} viewedLabel="Germany" onOpen={vi.fn()} />);
     expect(screen.getByText(/corroborated · MITRE/)).toBeInTheDocument();
-    // Corroborated rows are settled — no pin/reject moderation buttons.
+    // Corroborated rows get no pin/reject moderation buttons.
     expect(screen.queryByTitle("Pin: mark as corroborated by you")).not.toBeInTheDocument();
   });
 

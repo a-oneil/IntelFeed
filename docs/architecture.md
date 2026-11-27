@@ -225,7 +225,7 @@ The word list is rebuilt every 30 minutes (job `refresh-autolinker-vocabulary`).
 
 ### Ambiguity Detection
 
-A short one-word name made only of letters, such as "Maze", is *ambiguous*: it could be an ordinary word. Such names must appear capitalised in the article to match. The length limit is `autolinker_ambiguous_name_max_length`.
+A short one-word name made only of letters, such as "Maze", is *ambiguous*: it could be an ordinary word. Such names must appear capitalized in the article to match. The length limit is `autolinker_ambiguous_name_max_length`.
 
 ### The Scanning Process
 

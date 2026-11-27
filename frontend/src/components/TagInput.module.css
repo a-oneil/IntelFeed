@@ -37,9 +37,7 @@
   gap: var(--sp-2);
 }
 
-/* Toggle tag: Chip supplies the pill, the marker dot and the focus ring; this
-   keeps the picker's roomier 12px face and its unfilled ground. Doubled so it
-   beats Chip's own single-class rules whichever order the sheets land in. */
+/* Toggle tag: Chip supplies the pill, the marker dot and the focus ring; this keeps the picker's roomier 12px face and its unfilled ground. Doubled so it beats Chip's own single-class rules whichever order the sheets land in. */
 .tag.tag {
   padding: var(--sp-2) 10px;
   font-size: var(--fs-base);

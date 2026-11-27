@@ -64,8 +64,9 @@ def _clean_xml_text(text: str | None) -> str:
 def _deproxy_image_urls(html_text: str) -> str:
     """Replace `/api/proxy/image?url=...` image sources with their original upstream URL.
 
-    The proxy endpoint requires an authenticated user, so external RSS readers can't
-    fetch through it. For public feeds we point images at the upstream origin directly.
+    The proxy endpoint requires a signed-in user (or, in public read-only mode, a
+    visitor naming the entry that shows the image), so external RSS readers can't
+    fetch through it. Public feeds point images at the upstream origin directly.
     """
     if not html_text or "/api/proxy/image" not in html_text:
         return html_text
@@ -188,9 +189,9 @@ async def _fetch_entries(
     stmt = (
         select(Entry, Feed)
         .join(Feed, Feed.id == Entry.feed_id)
-        # The global mute column, deliberately (see services/feed_visibility.py):
-        # the proxy has no reader, so a feed an admin muted for the instance
-        # stays out of what it re-publishes.
+        # Uses the global mute column on purpose (see services/feed_visibility.py):
+        # the public feed has no signed-in reader whose mutes could apply, so a feed
+        # an admin muted for the instance stays out of what it re-publishes.
         .where(Feed.is_active.is_(True), Feed.is_muted.is_(False))
         .order_by(Entry.published_at.desc().nulls_last(), Entry.fetched_at.desc())
         .limit(limit)

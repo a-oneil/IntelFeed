@@ -1,4 +1,4 @@
-"""Registry tools that work the ledger: promote / update / deny, the
+"""Registry tools that manage the observables ledger: promote / update / deny, the
 actor→infrastructure pivot, and the filtered export."""
 
 import json
@@ -96,7 +96,7 @@ async def test_promote_update_deny_round_trip(db_session, test_user):
         await db_session.execute(select(Observable).where(Observable.value == "benign.example-corp.com"))
     ).scalar_one()
     assert row.is_denied and row.description == "our own"
-    # A denied value refuses every later door.
+    # A denied value is refused by every later write path.
     assert await get_or_create_observable(db_session, "domain", "benign.example-corp.com", via="ai_extraction") is None
 
 

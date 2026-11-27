@@ -68,7 +68,7 @@ def normalize_motivation(raw: str | None) -> str | None:
     `coerce_motivation` drops anything it can't place, which is right when a
     reference feed offers a value and wrong when an analyst types one — a
     motivation of "terrorism" is information, and silently discarding it on save
-    would be a worse bug than the one this fixes. So an unrecognized value
+    would lose what the analyst entered. So an unrecognized value
     survives, lowercased: the facet still collapses `Financial Extortion` and
     `financial extortion` onto one row, and genuinely new phrasings stay
     visible for someone to fold deliberately.
@@ -91,7 +91,7 @@ def normalize_country(raw: str | None) -> str | None:
 
     Attribution is often genuinely unknown, but recording that as the string
     "Unknown" puts it in the `threat_actor.country` facet beside real countries
-    — and it was stored both capitalised and not, so it appeared twice. An
+    — and it was stored both capitalized and not, so it appeared twice. An
     absent country already carries the meaning.
     """
     if raw is None:

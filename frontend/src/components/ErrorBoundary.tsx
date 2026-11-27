@@ -11,8 +11,7 @@ const CHUNK_ERROR =
 const RELOAD_KEY = "intelfeed-chunk-reload-at";
 const RELOAD_GUARD_MS = 10_000;
 
-// After a deploy the old hashed chunks are gone; one reload picks up the new
-// build. The timestamp guard stops a loop if the chunk is genuinely missing.
+// After a deploy the old hashed chunks are gone; one reload picks up the new build. The timestamp guard stops a reload loop if the chunk is genuinely missing.
 function reloadForStaleChunk(error: Error): boolean {
   if (!CHUNK_ERROR.test(error.message)) return false;
   try {
@@ -57,8 +56,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <p style={{ color: "var(--text-secondary)", marginTop: "0.5rem" }}>
               {this.state.error?.message}
             </p>
-            {/* Reload rather than reset: after a deploy the old chunk is gone and
-                React.lazy caches the rejected import, so a reset re-throws at once. */}
+            {/* Reload rather than reset: after a deploy the old chunk is gone and React.lazy caches the rejected import, so a reset re-throws at once. */}
             <button
               onClick={() => window.location.reload()}
               style={{

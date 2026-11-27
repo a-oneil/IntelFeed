@@ -46,13 +46,10 @@ import styles from "./ProcessingTab.module.css";
 import { confirmDialog } from "@/utils/dialog";
 
 export type BrowseView = "jobs" | "plans" | "enrichment" | "maintenance" | "publishing";
-/** The card's data views — all engine data lives in the one table card. */
+/** The card's data views. All engine data is shown in the one table card. */
 export const MATRIX_VIEWS = ["entries", "entities", "links", "relationships", "review", "feeds"] as const;
 export type MatrixView = (typeof MATRIX_VIEWS)[number];
-/** The Review tab's lenses: the proposals queue, the AI-created entities
- *  waiting on a person (unconfirmed, duplicates and orphans, as a status
- *  switch inside the lens), the machine-made edges nobody has judged, and
- *  the applied history. */
+/** The Review tab's lenses: the proposals queue, the AI-created entities waiting on a person (unconfirmed, duplicates and orphans, as a status switch inside the lens), the machine-made edges nobody has judged, and the history of applied changes. */
 export const REVIEW_LENSES = ["queue", "entities", "relationships", "history"] as const;
 export type ReviewLens = (typeof REVIEW_LENSES)[number];
 /** Old lens links (?lens=duplicates) land on the Entities lens at that status. */
@@ -67,7 +64,7 @@ const REVIEW_LENS_LABELS: Record<ReviewLens, string> = {
   relationships: "Relationships",
   history: "History",
 };
-// Each lens explains itself on its button's hover card.
+// Text for each lens button's hover card.
 const REVIEW_LENS_HINTS: Record<ReviewLens, { body: string; aside?: string }> = {
   queue: {
     body: "This list holds everything the adjudicator, the duplicate review and the scans want changed, one row per entity. A row's buttons act on every article's proposal at once.",
@@ -90,7 +87,7 @@ const REVIEW_LENS_HINTS: Record<ReviewLens, { body: string; aside?: string }> = 
 // Tabs that show a snapshot rather than a window of activity: the picker hides on them.
 const NO_WINDOW_VIEWS = new Set<MatrixView>(["review", "feeds"]);
 
-// Stages whose enabled flag is plan-layerable (same set as the old Plans tab).
+// Stages whose enabled flag a pipeline plan can override.
 const TOGGLEABLE_STAGES = new Set([
   "autolink",
   "observables",
@@ -103,8 +100,7 @@ const TOGGLEABLE_STAGES = new Set([
   "adjudicate",
 ]);
 
-// Stage → column group. Order matches the backend's PROCESSING_STAGE_ORDER, so
-// consecutive stages sharing a group key collapse into one header span.
+// Stage → column group. Order matches the backend's PROCESSING_STAGE_ORDER, so consecutive stages sharing a group key collapse into one header span.
 const STAGE_GROUP: Record<string, { key: string; label: string; cls: string }> = {
   translate: { key: "pre", label: "pre", cls: styles.gpre },
   autolink: { key: "par", label: "parallel", cls: styles.gpar },
@@ -171,10 +167,7 @@ function Sparkline({ series, className }: { series: number[]; className?: string
   );
 }
 
-/**
- * Hover cards for the stages people hesitate over. Everything else keeps its
- * native tooltip — a card on all nine columns is a wall, not an explanation.
- */
+/** Hover cards for the stages that are most often misunderstood. The other stages keep their native tooltip, because a hover card on every column would be too much text. */
 const STAGE_HINTS: Record<string, { title: string; body: string; aside?: string }> = {
   extract: {
     title: "Extract",
@@ -193,8 +186,7 @@ const STAGE_HINTS: Record<string, { title: string; body: string; aside?: string 
   },
 };
 
-/** A synthetic or real cell's skip code, if any: `status: "skipped"` carries
- *  it in `detail.skipped`; a success run that bailed carries the same key. */
+/** A synthetic or real cell's skip code, if any: a `status: "skipped"` cell carries it in `detail.skipped`; a success run that exited early carries the same key. */
 function cellSkipCode(cell: ProcessingStageCell | undefined): string | null {
   if (!cell || cell.status === "error" || cell.status === "retry" || cell.status === "queued") return null;
   const code = (cell.detail as { skipped?: unknown } | null | undefined)?.skipped;
@@ -202,8 +194,7 @@ function cellSkipCode(cell: ProcessingStageCell | undefined): string | null {
   return cell.status === "skipped" ? "skipped" : null;
 }
 
-/** Verdict glyphs for the adjudicate stage's Output cell. Keys match the
- *  `detail.verdicts` counters the task returns (see pipeline_logging). */
+/** Verdict glyphs for the adjudicate stage's Output cell. Keys match the `detail.verdicts` counters the task returns (see pipeline_logging). */
 const VERDICT_GLYPHS: { key: string; glyph: ReactNode; title: string }[] = [
   { key: "remove", glyph: <IconScissors size="1em" stroke={1.75} aria-hidden />, title: "links removed" },
   { key: "reclassify", glyph: "↷", title: "links flagged for reclassification" },
@@ -213,8 +204,7 @@ const VERDICT_GLYPHS: { key: string; glyph: ReactNode; title: string }[] = [
   { key: "drop", glyph: "✕", title: "observables dropped" },
 ];
 
-/** Output-lens cell for the adjudicate stage: what the review decided. Reads
- *  the run's detail (verdict counters, mode, skip reason). */
+/** Output-lens cell for the adjudicate stage: what the review decided. Reads the run's detail (verdict counters, mode, skip reason). */
 function AdjudicateOutputCell({ cell }: { cell: ProcessingStageCell | undefined }) {
   const detail = cell?.detail as
     | { mode?: string; items?: number; verdicts?: Record<string, number>; skipped?: string; breaker?: boolean }
@@ -264,8 +254,7 @@ function AdjudicateOutputCell({ cell }: { cell: ProcessingStageCell | undefined 
   );
 }
 
-/** Output-lens cell: what the stage produced for this entry. Only the stages
- *  with per-entry output metrics render counts; the rest show a dot. */
+/** Output-lens cell: what the stage produced for this entry. Only the stages with per-entry output metrics render counts; the rest show a dot. */
 function OutputCell({ stage, outputs }: { stage: string; outputs: ProcessingOutputs | undefined }) {
   if (!outputs) return <span className={`${m.outCell} ${m.outZero}`}>·</span>;
   let parts: { n: number; cls: string; glyph: ReactNode; title: string }[] = [];
@@ -284,7 +273,7 @@ function OutputCell({ stage, outputs }: { stage: string; outputs: ProcessingOutp
       { n: outputs.links_ai, cls: m.outLinks, glyph: <IconLink size="1em" stroke={1.75} aria-hidden />, title: "AI-validated links" },
     ];
   } else if (stage === "observables") {
-    // The funnel, per entry: judged sightings over staged candidates.
+    // Per entry: judged sightings recorded, and candidates staged but not yet judged.
     parts = [
       { n: outputs.observables ?? 0, cls: m.outEnts, glyph: "◎", title: "observable sightings recorded" },
       { n: outputs.observable_candidates ?? 0, cls: m.outLinks, glyph: "cand", title: "candidates staged (not yet judged)" },
@@ -310,9 +299,7 @@ function OutputCell({ stage, outputs }: { stage: string; outputs: ProcessingOutp
   );
 }
 
-/** The Engine console matrix: healthline, attention chips, live stage headers
- *  with peek popovers, and the per-entry pipeline table with Timing/Output
- *  lenses and an output-management drawer. */
+/** The Engine console matrix: health line, attention chips, live stage headers with peek popovers, and the per-entry pipeline table with Timing/Output lenses and an output-management drawer. */
 export function EngineMatrix({
   initialStage,
   initialStatus,
@@ -332,7 +319,7 @@ export function EngineMatrix({
   initialEntityStatus?: ReviewEntityStatus;
   initialOpenStage?: string | null;
   onBrowse: (view: BrowseView) => void;
-  /** Flash a setting once its host surface is open. */
+  /** Highlight a setting once the panel or screen that holds it is open. */
   onHighlightSetting: (key: string) => void;
 }) {
   const [window_, setWindow] = useState<EngineWindow>("24h");
@@ -353,10 +340,7 @@ export function EngineMatrix({
   const [peek, setPeek] = useState<{ stage: string; left: number; top: number } | null>(null);
   const popWrapRef = useRef<HTMLDivElement>(null);
 
-  // The open tab lives in the URL (?view=, and ?lens= on Review), so
-  // Back from a page the console links to lands on the same tab. It is
-  // written in place, outside the router: the console already shows it, and
-  // a navigation here would remount the console for nothing.
+  // The open tab is kept in the URL (?view=, and ?lens= on Review), so Back from a page the console links to returns to the same tab. It is written with history.replaceState, outside the router: the console already shows the tab, and a router navigation would remount the console for no reason.
   useEffect(() => {
     const url = new URL(window.location.href);
     if (url.searchParams.get("section") !== "engine") return;
@@ -375,8 +359,7 @@ export function EngineMatrix({
     setOpenId(null);
     setPeek(null);
   };
-  // Explicit helper (not a view-effect) so attention chips can switch view
-  // AND land on a lens in one click without the reset racing them.
+  // An explicit helper rather than an effect on `view`, so an attention chip can switch the view and open a lens in one click without the lens reset overriding it.
   const switchView = (v: MatrixView) => {
     if (v !== view) closePanels();
     setView(v);
@@ -386,11 +369,9 @@ export function EngineMatrix({
     }
   };
 
-  // "Find a setting" result → open whichever surface owns it, then flash the
-  // row. Browse views live a level up, so those hand off to EngineSection.
+  // "Find a setting" result → open the panel or screen that holds it, then highlight the row. Browse views are rendered one level up, so those are handed to EngineSection.
   const gotoSetting = (dest: EngineDest, key: string) => {
-    // No flash for the few settings that live outside the console — this page
-    // unmounts on the way there, so the highlight would only fire on return.
+    // No highlight for the few settings outside the console: this page unmounts on the way there, so the highlight would only show on return.
     if (key && dest.kind !== "settings") onHighlightSetting(key);
     switch (dest.kind) {
       case "stage":
@@ -418,8 +399,7 @@ export function EngineMatrix({
   const query = useEngineProcessing({ window: window_, status, stage, feedId, search });
   const { data: overview } = usePipelineOverview();
   const { data: plans } = usePipelinePlans();
-  // Every count the console shows from it is all-time, and "all" is the key
-  // Review's entity lenses ask for too, so they share one request.
+  // Every count the console shows from it is all-time, and "all" is the key Review's entity lenses request too, so they share one request.
   const { data: extractionStats } = useExtractionStats("all");
   const { data: linkStats } = useEntityLinkStats();
   const { data: hygieneStats } = useHygieneStats();
@@ -480,22 +460,16 @@ export function EngineMatrix({
     }
   };
 
-  // ---- stage enablement via the global plan (old Plans tab semantics) ------
+  // ---- stage enablement via the global plan ------
   const planState = (st: string): boolean | undefined => globalPlan?.stages[st]?.enabled;
-  // Header dot: while pipeline plans are inactive the legacy per-feed toggles
-  // drive behavior, so reflect observed activity instead of the dormant plan
-  // (extract's plan default is off yet it runs via feed flags — an "off" dot
-  // over hundreds of green runs would lie).
+  // The "inherit (on/off)" state shown in the stage popover. While pipeline plans are inactive the per-feed toggles decide what runs, so this reflects observed activity instead of the inactive plan (extract's plan default is off, yet it runs via feed flags; showing "off" over hundreds of successful runs would be wrong).
   const effectiveOn = (st: string): boolean => {
     if (overview?.pipeline_engine_enabled) return planState(st) ?? overviewByStage[st]?.default_enabled ?? true;
     const runs = overviewByStage[st]?.runs_24h;
     return runs ? runs.success + runs.error + runs.retry > 0 : true;
   };
 
-  // The header dot reports stage HEALTH in the window, never configuration.
-  // Whether a stage can be toggled says nothing about whether it is working:
-  // automate is not plan-gated yet runs on every entry, so gating the dot on
-  // toggleability rendered a healthy stage identically to a dead one.
+  // The header dot reports stage health in the window, never configuration. Whether a stage can be toggled says nothing about whether it is working: automate is not plan-gated yet runs on every entry, so basing the dot on toggleability would draw a healthy stage the same as a dead one.
   const dotHealth = (st: string): "ok" | "warn" | "err" | "idle" => {
     const r = overviewByStage[st]?.runs_24h;
     if (!r) return "idle";
@@ -518,8 +492,7 @@ export function EngineMatrix({
     }
   };
 
-  // Cycle inherit -> forced off -> forced on -> inherit, at GLOBAL scope, with
-  // an impact confirm — identical plan semantics to the old Plans tab.
+  // Cycle inherit -> forced off -> forced on -> inherit, at global scope, after a confirm dialog that states how many entries the stage ran on.
   const cycleStage = async (st: string) => {
     const current = planState(st);
     const next: boolean | undefined = current === undefined ? false : current === false ? true : undefined;
@@ -580,8 +553,7 @@ export function EngineMatrix({
     setPeek({ stage: st, left, top });
   };
 
-  // The entries table's own filter, in words, for the "showing …" readout.
-  // A stage alone means "errored at that stage" (the API's default).
+  // The entries table's own filter, in words, for the "showing …" readout. A stage alone means "errored at that stage" (the API's default).
   const entriesFilter = !status && !stage
     ? undefined
     : status === "in_flight"
@@ -596,8 +568,7 @@ export function EngineMatrix({
     setStage(undefined);
   };
 
-  // One click for the whole error column (or every column): the same
-  // re-dispatch the per-cell retry does, for every entry still stuck.
+  // Retries the whole error column (or every column) in one click: the same re-dispatch the per-cell retry does, for every entry still failing.
   const retryAllErrors = async () => {
     const where = stage ? `at ${labelByStage[stage] ?? stage}` : "at any stage";
     if (
@@ -625,10 +596,7 @@ export function EngineMatrix({
 
   const failingFeeds = feedHealth?.erroring_feeds?.length ?? 0;
 
-  // What each Review lens is waiting on. The tab's badge and the "to review"
-  // chip count the queue, the duplicates and the orphans; unconfirmed
-  // entities and unjudged edges show on their lens only — backlogs to
-  // browse, not a queue that has to reach zero.
+  // What each Review lens is waiting on. The tab's badge and the "to review" chip count the queue, the duplicates and the orphans; unconfirmed entities and unjudged edges are counted on their lens only, because they are backlogs to browse, not a queue that has to reach zero.
   const byStatus = extractionStats?.by_status ?? {};
   const entityCounts: Partial<Record<ReviewEntityStatus, number>> = {
     review: byStatus.review,
@@ -647,9 +615,7 @@ export function EngineMatrix({
           : undefined;
   const reviewTotal = (hygieneStats?.pending_total ?? 0) + (byStatus.dupe ?? 0) + (byStatus.orphan ?? 0);
 
-  // The queues that need a person. Each chip is a filter on the table: the
-  // ones with `active` light up while their view+filter is showing and clear
-  // it on a second click; the rest just jump (`away` leaves the console).
+  // The queues that need a person. Each chip is a filter on the table: the ones with `active` are highlighted while their view and filter are showing and clear it on a second click; the rest switch to another view (`away` leaves the console).
   const attention: {
     key: string;
     n: number | undefined;
@@ -703,15 +669,14 @@ export function EngineMatrix({
     },
   ];
   const activeAttention = attention.filter((a) => (a.n ?? 0) > 0);
-  // The adjudicate stage's rolling circuit breaker: not a count, a state —
-  // dispatch is paused until the timestamp lifts.
+  // The adjudicate stage's rolling circuit breaker. It is a state, not a count: dispatch is paused until the timestamp passes.
   const breakerUntil = hygieneStats?.adjudication_breaker_until
     ? new Date(hygieneStats.adjudication_breaker_until)
     : null;
   const breakerActive = !!breakerUntil && !Number.isNaN(breakerUntil.getTime()) && breakerUntil.getTime() > Date.now();
 
   const peekInfo = peek ? overviewByStage[peek.stage] : undefined;
-  // The top-bar dot is the header light in small: same level, same words.
+  // The top-bar dot mirrors the header's check-engine light: same level, same labels.
   const health = useEngineHealth(true);
   const dotCls = { err: m.hdotErr, warn: m.hdotWarn, stopped: m.hdotStopped, ok: "" }[health?.level ?? "ok"];
   const lightLabel = {
@@ -723,9 +688,7 @@ export function EngineMatrix({
 
   return (
     <div className={styles.wrap}>
-      {/* top bar — the pulse (is anything stuck, is ingest flowing), the
-          browse views, the window and the setting finder. The counts
-          themselves live on the table card, next to what they count. */}
+      {/* top bar: the status dot and ingest sparkline (is anything stuck, is ingest flowing), the browse views, the time window and the setting finder. The counts are on the table card, next to what they count. */}
       <div className={m.topbar}>
         <span
           className={`${m.hdot} ${dotCls}`}
@@ -886,7 +849,7 @@ export function EngineMatrix({
         )}
 
         <div className={`${styles.tablecard} ${m.card}`}>
-          {/* toolbar — lives inside the card, mock-E style */}
+          {/* toolbar, inside the card */}
           <div className={m.mhead}>
             <div className={m.viewSeg}>
               <button className={view === "feeds" ? m.viewOn : ""} onClick={() => switchView("feeds")}>
@@ -1354,8 +1317,7 @@ function StatusCell({
         copy
       </span>
     );
-  // A gate skipped the stage, or the run bailed before reviewing anything —
-  // never a green "ok", the reason lives in the tooltip.
+  // A gate skipped the stage, or the run exited before reviewing anything. Never shown as a green "ok"; the reason is in the tooltip.
   const skip = cellSkipCode(cell);
   if (skip)
     return (

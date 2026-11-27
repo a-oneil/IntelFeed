@@ -1,11 +1,11 @@
 """One-pass entry_analysis batch orchestration (engine phase 4).
 
-submit_analysis_batches (hourly beat):
+submit_analysis_batches (every 30 minutes):
   self-heal missed enqueues → budget check → priority-ordered pending slice →
   Anthropic Message Batches submission (50% discount) or per-entry sequential
   fallback when the provider can't use Batches (OAuth token / disabled).
 
-poll_analysis_batches (10-min beat):
+poll_analysis_batches (every 10 minutes):
   ingest ended batches via ai.engine.store_external_result + the
   store_entry_analysis fan-out. Idempotent: jobs are claimed by flipping
   status to 'ingesting' before streaming results.
@@ -152,14 +152,14 @@ async def _submit_analysis_batches() -> dict | None:
         )
         for eid in missed:
             await enqueue_entry_analysis(db, eid)
-        # Matches held on articles that were analysed before the hold (a
+        # Matches held on articles that were analyzed before the hold (a
         # re-scan): the stored analysis settles them, and the article's
         # review is reopened so the adjudicator checks the result.
         try:
-            from app.intelligence.autolink_reconcile import settle_held_on_analysed_entries
+            from app.intelligence.autolink_reconcile import settle_held_on_analyzed_entries
 
             async with db.begin_nested():
-                await settle_held_on_analysed_entries(db)
+                await settle_held_on_analyzed_entries(db)
         except Exception:
             logger.warning("held-match settle failed", exc_info=True)
         # Reviewed articles still carrying candidates no review judged.
@@ -184,7 +184,7 @@ async def _submit_analysis_batches() -> dict | None:
         # article counts, and those row locks must not wait on the provider call.
         await db.commit()
 
-        # Budget clamp (backstop, not a gate — pending rows simply wait)
+        # Budget clamp (backstop, not a gate — pending rows wait for the next run)
         budget = float(await get_setting("ai_daily_budget_usd", db) or 2.0)
         spent = await _spent_today(db, task.id)
         remaining = max(0.0, budget - spent)
@@ -196,7 +196,7 @@ async def _submit_analysis_batches() -> dict | None:
             return {"submitted": 0, "reason": "budget_exhausted", "spent_today": spent}
 
         # Priority-ordered pending slice (score read at submit time so late
-        # KEV/EPSS signals reorder the queue for free). Eager-load the feed so
+        # KEV/EPSS signals reorder the queue without a separate rescore). Eager-load the feed so
         # _prepare_request can read entry.feed.title without triggering a lazy
         # load outside the async greenlet (MissingGreenlet).
         from sqlalchemy.orm import selectinload
@@ -252,7 +252,8 @@ async def _submit_via_batches_api(db, task, assignment, provider_model, user_id,
     client = provider._build_client()
     output_config = provider._build_output_config(task.effective_output_schema)
     merged_config = {**(provider_model.config or {}), **(assignment.config or {})}
-    # Fallback matches run_task's default (engine.py) — at 2048 the payload's
+    # Fallback when no max_tokens is configured. It is lower than run_task's
+    # entry_analysis default of 16384 (engine.py); at 2048 the payload's
     # trailing relationships key gets truncated off.
     max_tokens = int(merged_config.get("max_tokens", 4096))
 
@@ -468,9 +469,9 @@ async def _ingest_batch_results(db, client, job, task, provider_model) -> dict:
     name="app.workers.ai_batch_tasks.run_entry_analysis_task",
     bind=True,
     max_retries=2,
-    # Long research write-ups now reach the model with their indicator
-    # appendix and a 16k-token output budget; the provider timeout is 900 s,
-    # so the worker limit must not cut the run first.
+    # Long research write-ups reach the model with their indicator appendix
+    # and a 16k-token output budget; the Ollama provider timeout defaults to
+    # 900 s, so the worker limit must not cut the run first.
     soft_time_limit=900,
     time_limit=960,
 )

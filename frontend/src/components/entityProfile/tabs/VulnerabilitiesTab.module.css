@@ -8,8 +8,7 @@
   color: var(--text-primary);
 }
 
-/* The KEV count in the summary line is a `Chip`; this only carries the gap to
-   the preceding sentence, which Chip never sets. */
+/* The KEV count in the summary line is a `Chip`; this only adds the gap to the preceding sentence, which Chip never sets. */
 .kevChipGap {
   margin-left: var(--sp-3);
 }
@@ -22,18 +21,14 @@
   margin-bottom: 6px;
 }
 
-/* Active state for the `Chip`-based filter buttons. Doubled: `color`,
-   `border-color` and `background` are all properties Chip itself sets, so a
-   single class would only win by bundle order. */
+/* Active state for the `Chip`-based filter buttons. The class is doubled for specificity: `color`, `border-color` and `background` are all properties Chip itself sets, so a single class would only win by bundle order. */
 .fchipActive.fchipActive {
   border-color: var(--accent);
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
-/* --text-muted here measured 1.84:1 against Chip's --bg-tertiary ground (it was
-   already only 2.20:1 on the old transparent chip). --text-secondary is 4.95:1;
-   the count still reads as secondary because of its position and tabular figures. */
+/* --text-muted measures 1.84:1 against Chip's --bg-tertiary background; --text-secondary is 4.95:1. The count still reads as secondary because of its position and tabular figures. */
 .fchipCount {
   font-size: var(--fs-xs);
   color: var(--text-secondary);
@@ -96,9 +91,7 @@
   background: color-mix(in srgb, var(--accent) 6%, var(--bg-primary));
 }
 
-/* Deliberately NOT the --severity-* ramp: these are text/1px-stripe colours on
-   the dark row ground, and the ramp's fills (#dc2626 critical) drop to ~3.4:1
-   as text. The lighter tints below are the user-tuned values for this surface. */
+/* Critical, medium and low deliberately do not use the --severity-* ramp (high does): these are text and 1px-stripe colors on the dark row background, and the ramp's fills (#dc2626 for critical) drop to about 3.4:1 as text. The lighter tints below are the user-tuned values for this surface. */
 .sevCritical { border-left-color: #f87171; }
 .sevCritical .cvss { color: #f87171; }
 .sevHigh { border-left-color: var(--severity-high); }
@@ -132,9 +125,7 @@
   color: var(--accent);
 }
 
-/* Kept off `Chip` on purpose: `tone="outline"` paints a full-strength tinted
-   border, and this row is deliberately calm — the status marker is a hairline
-   at 35% alpha. */
+/* Not a `Chip` on purpose: `tone="outline"` paints a full-strength tinted border, and this row keeps its styling low-contrast, so the status marker is a 1px border at 35% alpha. */
 .statusChip {
   font-size: var(--fs-2xs);
   font-weight: 700;

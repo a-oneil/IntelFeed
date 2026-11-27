@@ -253,7 +253,7 @@ async def test_seed_defaults_creates_the_default_board_set(client: AsyncClient, 
 async def test_seed_defaults_leaves_an_existing_board_set_alone(
     client: AsyncClient, auth_headers: dict
 ):
-    """A user who already customized their boards never gets defaults poured on top."""
+    """A user who already customized their boards never has the default boards added on top."""
     await client.post("/api/dashboards", json={"name": "__triage__/Just Mine"}, headers=auth_headers)
 
     resp = await client.post("/api/dashboards/seed-defaults", headers=auth_headers)

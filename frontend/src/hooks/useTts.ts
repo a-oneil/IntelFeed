@@ -7,13 +7,9 @@ import { selectIsVisitor, useAuthStore } from "@/stores/authStore";
 import { usePlayerStore, type QueueItem } from "@/stores/playerStore";
 
 /**
- * Server-side read-aloud (Piper). Enqueues synthesis, polls until the MP3 is
- * ready, then plays it through the shared audio player. Returns false on any
- * failure so callers can fall back to the browser Web Speech voice. Cancellation
- * returns null: callers must not start fallback speech in that case.
+ * Server-side read-aloud (Piper). Enqueues synthesis, polls until the MP3 is ready, then plays it through the shared audio player. Returns false on any failure so callers can fall back to the browser Web Speech voice. Cancellation returns null: callers must not start fallback speech in that case.
  *
- * Works both authenticated (default) and on the public share page — pass the
- * share token to route through the token-gated public endpoints (no JWT).
+ * Works both authenticated (default) and on the public share page: pass the share token to route through the token-gated public endpoints (no JWT).
  */
 
 interface TrackMeta {
@@ -26,8 +22,7 @@ interface TrackMeta {
 interface StartArgs {
   source: "entry" | "summary" | "entity";
   id: string;
-  // For source="summary": filter context so the server resolves the same cached
-  // summary (and thus the same pre-generated audio). Ignored for entries.
+  // For source="summary": filter context so the server resolves the same cached summary (and thus the same pre-generated audio). Ignored for entries.
   filters?: Record<string, unknown>;
   // For source="entity": which workbench entity type the id refers to.
   entityType?: string;
@@ -51,7 +46,7 @@ function buildFileUrl(cacheKey: string, shareToken?: string): string {
   if (shareToken) {
     return `/api/shared/${shareToken}/tts/file/${cacheKey}.mp3`;
   }
-  // Bare <audio> can't send a bearer header — sign the URL like telegram media.
+  // A plain <audio> element can't send a bearer header, so put the token in the URL as Telegram media does.
   const token = useAuthStore.getState().accessToken;
   const base = `/api/tts/file/${cacheKey}.mp3`;
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
@@ -61,30 +56,25 @@ export function useTts(opts?: { shareToken?: string }) {
   const shareToken = opts?.shareToken;
   const play = usePlayerStore((s) => s.play);
   const [isPreparing, setIsPreparing] = useState(false);
-  // The in-flight request; cancel() or a newer start() replaces it. Unmounting
-  // deliberately does not cancel: the player is global, so audio asked for from
-  // a day divider or the reader still plays after that view scrolls away or closes.
+  // The in-flight request; cancel() or a newer start() replaces it. Unmounting deliberately does not cancel: the player is global, so audio requested from a day divider or the reader still plays after that view scrolls away or closes.
   const requestRef = useRef<symbol | null>(null);
 
   const start = useCallback(
     async (args: StartArgs): Promise<boolean | null> => {
       const request = Symbol();
       requestRef.current = request;
-      const cancelled = () => requestRef.current !== request;
+      const canceled = () => requestRef.current !== request;
       setIsPreparing(true);
       let toastId: string | number | undefined;
       try {
         const url = shareToken ? `/shared/${shareToken}/tts/prepare` : `/tts/prepare`;
-        // The public route resolves text from the share; authed sends source/id/text.
+        // The public route resolves the text from the share; the authenticated route sends source/id/filters/entity_type.
         const body = shareToken
           ? {}
           : { source: args.source, id: args.id, filters: args.filters, entity_type: args.entityType };
-        // Generous per-request timeout: the summary prepare renders markdown
-        // server-side and the box can be briefly loaded — 15s (client default)
-        // is too tight and surfaces as a spurious "timeout exceeded".
+        // Generous per-request timeout: the summary prepare renders markdown server-side and the server can be briefly loaded, so the 15s client default is too tight and shows up as a spurious "timeout exceeded".
         const cfg = { timeout: 45_000 };
-        // A visitor (public read-only mode) only plays audio that already
-        // exists: GET /tts/existing never synthesizes, and 404s on a miss.
+        // A visitor (public read-only mode) only plays audio that already exists: GET /tts/existing never synthesizes, and returns 404 on a miss.
         const visitor = !shareToken && selectIsVisitor(useAuthStore.getState());
         const post = () =>
           (visitor
@@ -97,8 +87,8 @@ export function useTts(opts?: { shareToken?: string }) {
           ).then((r) => r.data);
 
         let resp = await post();
-        if (cancelled()) return null;
-        // Only toast when we actually have to wait — a cache hit plays instantly.
+        if (canceled()) return null;
+        // Only toast when there is a wait; a cache hit plays instantly.
         if (resp.status === "pending") {
           toastId = toast.loading("Generating audio…", {
             description: "Audio for this article is being generated.",
@@ -106,13 +96,13 @@ export function useTts(opts?: { shareToken?: string }) {
         }
         const startedAt = Date.now();
         while (resp.status === "pending" && Date.now() - startedAt < POLL_TIMEOUT_MS) {
-          if (cancelled()) return null;
+          if (canceled()) return null;
           await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-          if (cancelled()) return null;
+          if (canceled()) return null;
           resp = await post(); // prepare is idempotent — re-POST returns current status
         }
 
-        if (cancelled()) return null;
+        if (canceled()) return null;
         if (resp.status !== "ready" || !resp.cache_key) return false;
 
         const item: QueueItem = {
@@ -132,10 +122,10 @@ export function useTts(opts?: { shareToken?: string }) {
         }
         return true;
       } catch {
-        return cancelled() ? null : false;
+        return canceled() ? null : false;
       } finally {
         if (toastId !== undefined) toast.dismiss(toastId);
-        if (!cancelled()) {
+        if (!canceled()) {
           requestRef.current = null;
           setIsPreparing(false);
         }
@@ -152,10 +142,7 @@ export function useTts(opts?: { shareToken?: string }) {
   return { start, cancel, isPreparing };
 }
 
-/**
- * Whether read-aloud audio already exists for an entry (visitors only: they
- * can play what was made, never make new). Signed-in readers don't ask.
- */
+/** Whether read-aloud audio already exists for an entry. For visitors only, who can play existing audio but never generate new audio; signed-in readers don't call it. */
 export function useExistingTts(entryId: string | undefined, enabled: boolean) {
   return useQuery({
     queryKey: ["tts-existing", "entry", entryId],

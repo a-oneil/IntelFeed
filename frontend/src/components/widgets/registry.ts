@@ -80,19 +80,11 @@ export interface WidgetDefinition {
   defaultH: number;
   /** React component that renders the widget body. */
   component: ComponentType<WidgetComponentProps>;
-  /**
-   * Optional config patch merged into the resolved config before rendering.
-   * Used to specialize a generic component (e.g. TrendingEntitiesWidget) for a
-   * specific widget type without needing a dedicated component file.
-   * Acts as a default layer: the user's saved config overrides it.
-   */
+  /** Optional config patch merged into the resolved config before rendering. Used to specialize a generic component (e.g. TrendingEntitiesWidget) for a specific widget type without a dedicated component file. Acts as a default layer: the user's saved config overrides it. */
   configPatch?: WidgetConfig;
   /** User-editable config fields; presence enables the settings gear. */
   configFields?: WidgetConfigField[];
-  /**
-   * Hidden widgets don't appear in the picker but still render for dashboards
-   * that already persist them (retired types keep working, new adds stop).
-   */
+  /** Hidden widgets don't appear in the picker but still render for dashboards that already persist them (retired types keep working, but can't be added again). */
   hidden?: boolean;
 }
 
@@ -105,11 +97,7 @@ const limitField = (max: number, label = "Rows"): WidgetConfigField => ({
   max,
 });
 
-// NOTE: `vendors_trending` / `products_trending` use noun-first ordering while
-// `trending_actors` / `trending_cves` / `trending_ttps` / `trending_malware` use
-// verb-first ordering. This is intentionally NOT renamed for consistency —
-// these ids are persisted in user dashboard configs and a rename would break
-// existing dashboards.
+// `vendors_trending` / `products_trending` put the noun first while `trending_actors` / `trending_cves` / `trending_ttps` / `trending_malware` put "trending" first. They are deliberately not renamed for consistency: these ids are persisted in user dashboard configs and a rename would break existing dashboards.
 export const WIDGET_REGISTRY: WidgetDefinition[] = [
   {
     type: "active_campaigns",

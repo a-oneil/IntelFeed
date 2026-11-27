@@ -9,8 +9,7 @@ import type {
   RuleImportResponse,
 } from "@/api/types";
 
-/** Template variables each automation action injects, for builder hints.
- *  Static metadata — cache indefinitely. */
+/** Template variables each automation action injects, for builder hints. Static metadata, so it is cached indefinitely. */
 export function useAutomationVariableContexts() {
   return useQuery({
     queryKey: ["automation-variable-contexts"],
@@ -154,9 +153,7 @@ export function useRunAutomationRule() {
       const res = await api.post<AutomationRunResult>(
         `/automation/rules/${ruleId}/run`,
         null,
-        // Batch rules run their AI task inline — a briefing over a few
-        // hundred entries takes well over the client's 15s default, and
-        // aborting client-side reports a failure for a run that succeeds.
+        // Batch rules run their AI task inline: a briefing over a few hundred entries takes well over the client's 15s default, and aborting client-side reports a failure for a run that succeeds.
         { params: { limit, hours }, timeout: 300000 }
       );
       return res.data;

@@ -204,9 +204,9 @@ async def test_global_scope_blocks_vendor_names_too(
     client: AsyncClient, auth_headers: dict, db_session: AsyncSession, fp_entry: Entry, inline_rebuild: list
 ):
     """Regression: vendor/product/tool bypass the curated FP-name list
-    (their real names are common brand words), so a global report used to write a
-    setting that could never take effect — the toast claimed success and matching
-    carried on. Analyst blocks land in a separate all-types list now."""
+    (their real names are common brand words), so a global report written to that
+    list never takes effect — the toast claims success and matching carries on.
+    Analyst blocks therefore go to a separate all-types list."""
     from app.intelligence.autolinker import scan_text
     from app.models.vendor import EntryVendor, Vendor
 

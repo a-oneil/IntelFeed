@@ -1,6 +1,7 @@
 """Celery tasks for the enrichment sources' scheduled jobs — EPSS, MITRE ATT&CK,
-MISP Galaxy, Malpedia, Metasploit, NVD, GitHub PoC, Wikipedia, cvelistV5, Wikidata, endoflife.date,
-Tranco, CAPEC, CTID control mappings, D3FEND, abuse.ch ThreatFox and URLhaus."""
+MISP Galaxy, Malpedia, Metasploit, NVD, GitHub PoC, GitHub repos, Wikipedia, cvelistV5, Wikidata,
+endoflife.date, CAPEC, CTID control mappings, D3FEND, ETDA, ransomware.live, Tranco, Team Cymru,
+abuse.ch ThreatFox and URLhaus, and OSV."""
 
 import asyncio
 import csv
@@ -110,9 +111,9 @@ EPSS_CSV_URL = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
 _EPSS_CHUNK_SIZE = 5000
 
 
-#: How long a stored EPSS answer stands. A score that hasn't changed isn't
+#: How long a stored EPSS result stays valid. A score that hasn't changed isn't
 #: rewritten; its rows are renewed in bulk once they come within EPSS_RENEW
-#: of expiring, so a day's sync touches only what changed plus a sliver.
+#: of expiring, so a day's sync touches only what changed plus the rows due for renewal.
 EPSS_TTL = timedelta(days=30)
 #: The percentile move that rewrites a CVE whose score didn't change: one point.
 EPSS_PERCENTILE_STEP = 0.01
@@ -290,7 +291,7 @@ async def _run_epss_bulk_sync():
             for cve_uuid in increased:
                 dispatch_cve_rescore(cve_uuid)
 
-        # Answers that didn't change stand: renew the rows about to expire.
+        # Unchanged results stay valid: extend the rows about to expire.
         await db.execute(renew_results, renew)
         await db.execute(renew_context, renew)
 
@@ -364,7 +365,7 @@ async def _run_mitre_attack_sync():
                 if name:
                     alias_map_items.append((name, [a for a in obj.get("aliases", []) if isinstance(a, str)]))
 
-        # Refresh the reference alias knowledge (guardrails Phase 4) from the
+        # Refresh the reference alias map (entity-creation guardrails) from the
         # same intrusion sets — the resolver uses these synonym clusters to
         # resolve vendor names to existing profiles without an AI call.
         from app.intelligence.entity_resolution import upsert_known_aliases
@@ -373,7 +374,7 @@ async def _run_mitre_attack_sync():
 
         # Import MITRE's curated `uses` relationships (group→software/technique,
         # software→technique) as confirmed external_feed edges onto entities
-        # that already exist — the authority layer of the trust ladder.
+        # that already exist; MITRE's curation is the most trusted relationship source.
         from app.intelligence.attack_catalog import sync_attack_relationships
 
         stats["relationships"] = await sync_attack_relationships(db, parsed)
@@ -413,8 +414,7 @@ def parse_misp_galaxy_attributes(data: dict) -> dict[str, dict]:
 
     The cluster file we already download weekly carries origin country on ~480
     clusters, target sectors on ~190, and a motive on the rest — the same three
-    fields the actor profile leaves blank most of the time. Only `meta.synonyms`
-    was ever read.
+    fields the actor profile leaves blank most of the time.
 
     Returns {canonical_name: {"country", "sectors", "motivation", "description"}}
     with only the keys that actually had a value.
@@ -501,8 +501,8 @@ async def _run_misp_galaxy_sync():
     async with _get_worker_session() as db:
         rows = await upsert_known_aliases(db, "misp_galaxy", items)
 
-        # The synonym clusters stay resolution-only knowledge (guardrails Phase
-        # 4). The rest of the cluster metadata is ordinary profile data, applied
+        # The synonym clusters stay resolution-only knowledge (entity-creation
+        # guardrails). The rest of the cluster metadata is ordinary profile data, applied
         # through the field map to actors we already track: it fills blanks
         # only (MISPGalaxySource's outputs), with a claim naming MISP Galaxy.
         from app import entity_types
@@ -834,10 +834,9 @@ async def _run_malpedia_sync():
     stats = {"fetched": 0, "changed": 0, "written": 0, "families_updated": 0, "tools_updated": 0}
     stats.update({"actors_updated": 0, "families_seen": 0, "stopped": None})
 
-    # `get/families` returns the full {family_key: {...}} payload. The
-    # `list/families` endpoint this used to call returns a bare list of keys,
-    # so the isinstance guard discarded every row and the sync had been a
-    # silent no-op — which is why no malware profile carried a malpedia_url.
+    # `get/families` returns the full {family_key: {...}} payload. Don't use
+    # `list/families`: it returns a bare list of keys, which _malpedia_get's
+    # isinstance guard discards, so the sync would silently write nothing.
     families: dict = {}
     actors: dict = {}
     gateway, _ = await _job_gateway("malpedia")
@@ -1016,11 +1015,10 @@ async def _run_github_poc_scan():
         # actually have; the source's bucket paces the requests.
         batch_limit = int(settings.get("github_poc_batch_limit") or (300 if api_key else 40))
 
-        # Backfill-aware candidate selection. The old query took the 50 CVEs
-        # first seen in the last 7 days, which meant the other 60k+ rows were
-        # never eligible and the scan could never catch up. Rank instead by how
-        # much a PoC answer matters — KEV first, then EPSS, then how many
-        # articles reference it — and skip anything scanned recently.
+        # Candidates come from the whole CVE table, not just recently seen
+        # CVEs, so the older backlog is eventually scanned too. Rank by how much
+        # a PoC result matters — KEV first, then EPSS >= 0.1, then whether any
+        # article references it — and skip anything scanned recently.
         rescan_cutoff = datetime.now(UTC) - timedelta(days=int(settings.get("github_poc_rescan_days") or 30))
         # NOT EXISTS rather than NOT IN — a NULL entity_id in the subquery would
         # make NOT IN return nothing at all and silently starve the scan.
@@ -1443,10 +1441,9 @@ def run_metasploit_sync():
 async def _run_metasploit_sync():
     """Populate CVE.metasploit_module and escalate exploit_availability.
 
-    Nothing in the codebase had ever written `metasploit_module`, which left the
-    column, the workbench MSF column, and the `weaponized` branch of the exploit
-    escalation permanently inert. Rapid7 publishes the module index as a single
-    JSON file, so this needs no API key and no per-CVE requests.
+    `metasploit_module` feeds the workbench MSF column and the `weaponized`
+    branch of the exploit escalation. Rapid7 publishes the module index as a
+    single JSON file, so this needs no API key and no per-CVE requests.
     """
     from app.models.cve import CVE
 
@@ -1729,7 +1726,7 @@ async def _run_cvelist_backfill():
 
         finished = True
         # Each record is found in a thread: skipping the zip's other records
-        # inflates them, which would otherwise block the loop.
+        # still decompresses them, which would otherwise block the event loop.
         records = _baseline_records(path, lambda c: c in due)
         i = 0
         while (found := await asyncio.to_thread(next, records, None)) is not None:

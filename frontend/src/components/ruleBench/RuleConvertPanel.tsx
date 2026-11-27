@@ -18,14 +18,13 @@ export interface RuleConversion {
   cost?: number;
 }
 
-/** What a convert button asks for: the stored format, and the exact language
-    where one format holds several (elastic_ql is ES|QL and EQL). */
+/** What a convert button asks for: the stored format, and the exact language where one format holds several (elastic_ql is ES|QL and EQL). */
 export interface ConvertTarget {
   type: string;
   dialect: string | null;
 }
 
-/** A converted rule, now a real row of its own hanging off `derived_from`. */
+/** A converted rule: a rule row of its own, linked to its source through `derived_from`. */
 interface ConversionSibling {
   id: string;
   rule_type: string;
@@ -40,13 +39,11 @@ interface RuleConvertPanelProps {
   ruleId?: string;
   ruleType: string;
   typeLabels: Record<string, string>;
-  /** Legacy `metadata.rule_conversions` blob — read-only fallback, see below. */
+  /** Legacy `metadata.rule_conversions` blob, read as a fallback for conversions not yet promoted to sibling rules; see below. */
   conversions: Record<string, RuleConversion>;
   /** The selected conversion: a sibling's id, or `legacy:<type>` for a blob entry. */
   activeKey: string | null;
-  /** The target currently converting, or null. Only that button reads
-      "Converting…" — the rest stay labelled (though disabled) so the panel
-      doesn't look like it's converting to every format at once. */
+  /** The target currently converting, or null. Only that button reads "Converting…"; the rest keep their labels (though disabled) so the panel doesn't look like it's converting to every format at once. */
   converting: ConvertTarget | null;
   onSelect: (key: string | null) => void;
   onConvert: (target: ConvertTarget, notes: string) => void;
@@ -71,13 +68,9 @@ function conversionMeta(sibling: ConversionSibling): (RuleConversion & { dialect
 const LEGACY = "legacy:";
 
 /**
- * Conversions are sibling rules, not a blob on the parent — searchable,
- * versioned, exportable and no longer deleted along with what they came from.
+ * Conversions are sibling rules, not a blob on the parent, so they are searchable, versioned, exportable and not deleted along with the rule they came from.
  *
- * The old `metadata.rule_conversions` blob is still read for anything the
- * backfill has not promoted yet, and a sibling always wins over a blob entry of
- * the same format. Blob entries stay editable through the parent's autosave
- * (the props below); siblings save as themselves.
+ * The legacy `metadata.rule_conversions` blob is still read for anything the backfill has not promoted yet, and a sibling always wins over a blob entry of the same format. Blob entries stay editable through the parent's autosave (the props below); siblings save as themselves.
  */
 export function RuleConvertPanel({
   ruleId,
@@ -105,16 +98,14 @@ export function RuleConvertPanel({
     },
   });
 
-  // Every query language from Settings › Reading is a target, except the one
-  // this rule already is. Formats the library stores but no SIEM queries in
-  // (Snort, YARA, Nuclei) are listed separately.
+  // Every query language from Settings › Reading is a target, except the one this rule already is. Formats the library stores but no SIEM queries in (Snort, YARA, Nuclei) are listed separately.
   const languageTargets = QUERY_LANGUAGES.filter((q) => q.ruleType && q.ruleType !== ruleType);
   const languageTypes = new Set(QUERY_LANGUAGES.map((q) => q.ruleType));
   const formatTargets = Object.entries(typeLabels).filter(([k]) => k !== ruleType && !languageTypes.has(k));
 
   const siblingRows = siblings.data ?? [];
   const siblingTypes = new Set(siblingRows.map((s) => s.rule_type));
-  // Blob entries the backfill has not reached; siblings shadow their own format.
+  // Blob entries the backfill has not promoted; a sibling hides the blob entry of its own format.
   const legacyTypes = Object.keys(conversions).filter((t) => !siblingTypes.has(t));
 
   const labelFor = (type: string, dialect: string | null) =>
@@ -125,8 +116,7 @@ export function RuleConvertPanel({
     ...legacyTypes.map((t) => ({ key: `${LEGACY}${t}`, label: typeLabels[t] || t, legacy: true })),
   ].sort((a, b) => a.label.localeCompare(b.label));
 
-  // A conversion writes a new sibling server-side, so the list is stale the
-  // moment the mutation the parent owns settles.
+  // A conversion writes a new sibling server-side, so refetch the list as soon as the parent's convert mutation settles.
   useEffect(() => {
     if (converting === null && ruleId) qc.invalidateQueries({ queryKey: siblingsKey });
     // eslint-disable-next-line react-hooks/exhaustive-deps

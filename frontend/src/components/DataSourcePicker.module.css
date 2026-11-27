@@ -10,9 +10,7 @@
   padding: var(--sp-2) 0;
 }
 
-/* Removable data-source tag: Chip supplies the box, this keeps the picker's
-   roomier, capitalised face and its accent wash. Doubled so it beats Chip's
-   own single-class rules whichever order the two stylesheets land in. */
+/* Removable data-source tag: Chip supplies the box, this keeps the picker's roomier, capitalized face and its accent wash. Doubled so it beats Chip's own single-class rules whichever order the two stylesheets land in. */
 .chip.chip {
   gap: var(--sp-1);
   padding: var(--sp-1) var(--sp-3);

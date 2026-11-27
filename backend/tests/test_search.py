@@ -255,9 +255,9 @@ class TestHideReadPostgresPath:
 class TestAutocompleteCoverage:
     """A field the grammar offers should also complete its values.
 
-    The header suggested `signal:` and `sector:` for months and then went blank
-    after the colon, which reads as "this instance has none" rather than "the
-    autocomplete was never taught this field".
+    The header suggested `signal:` and `sector:` but offered nothing after the
+    colon, which reads as "this instance has none" rather than "autocomplete
+    has no source for this field".
     """
 
     # Values are free text or a range — `title:ransomware`, `words:>1500`,

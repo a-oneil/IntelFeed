@@ -2,9 +2,7 @@ import { useEffect, useRef } from "react";
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/**
- * Traps focus within the referenced element and restores focus on unmount.
- */
+/** Traps focus within the referenced element and restores focus on unmount. */
 export function useFocusTrap<T extends HTMLElement>() {
   const ref = useRef<T>(null);
 

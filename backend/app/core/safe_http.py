@@ -2,7 +2,7 @@
 
 A feed URL, a link inside a feed, a podcast's transcript URL, a manual-ingest
 URL, an image to proxy, a Mastodon instance: any of them can name, or redirect
-to, the cloud metadata service, the api's own /metrics, Redis's neighbours on
+to, the cloud metadata service, the api's own /metrics, Redis's neighbors on
 the compose network, or a LAN admin page. ``outbound.outbound_problem`` checks a
 URL before a call; this module enforces the same rule *at connect time*, for
 every connection a client opens, including each redirect hop.

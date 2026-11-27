@@ -4,9 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Entry, PriorityQueueRow, StoryThread } from "@/api/types";
 import { useUIStore } from "@/stores/uiStore";
 
-// jsdom gives the scroller no height, so the real virtualizer renders no body
-// rows at all. Hand back every row instead — this suite is about what the cells
-// of a thread row say, which is only observable once they exist.
+// jsdom gives the scroller no height, so the real virtualizer renders no body rows at all. Hand back every row instead — this suite is about what the cells of a thread row say, which is only observable once they exist.
 vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: ({
     count,

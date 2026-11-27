@@ -2,9 +2,7 @@
   border-bottom: 1px solid var(--border);
   border-left: 3px solid var(--accent-intel);
   background: color-mix(in srgb, var(--accent-intel) 5%, var(--bg-primary));
-  /* The entry list is resizable and docks to ~300px beside an open reader.
-     Sized against the row, not the viewport: a desktop-width media query left
-     the title crushed to "U." while the chips and counts kept their width. */
+  /* The entry list is resizable and docks to ~300px beside an open reader. Sized against the row, not the viewport, because a desktop-width media query squeezed the title down to "U." while the chips and counts kept their width. */
   container-type: inline-size;
 }
 
@@ -74,7 +72,7 @@
 }
 
 .title {
-  /* Grows before the chips do and shrinks last: the story's name is the row. */
+  /* Grows before the chips do and shrinks last, because the story's name is the most important part of the row. */
   flex: 1 1 auto;
   min-width: 0;
   font-size: var(--fs-base);
@@ -241,9 +239,7 @@
   text-decoration: underline;
 }
 
-/* Docked next to an open reader there is room for the name and the counts but
-   not the entity chips; narrower still, only the name and the mark-read control
-   survive. Both are in the spine one click away. */
+/* Docked next to an open reader there is room for the name and the counts but not the entity chips; narrower still, only the name and the mark-read control remain. The hidden details are in the spine, one click away. */
 @container (max-width: 620px) {
   .chips {
     display: none;

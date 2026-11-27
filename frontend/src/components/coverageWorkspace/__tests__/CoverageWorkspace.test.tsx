@@ -139,7 +139,7 @@ vi.mock("@/hooks/useCoverageWorkspace", async (importOriginal) => {
   return {
     ...actual,
     useCoverageWorkspace: () => ({ data: workspace, isLoading: false }),
-    useBehaviourRules: () => ({ data: rules, isLoading: false }),
+    useBehaviorRules: () => ({ data: rules, isLoading: false }),
     useSavedSets: () => ({ data: { items: [], total: 0 } }),
     useSaveCoverageSet: () => ({ mutate: saveMutate, isPending: false }),
     useDeleteCoverageSet: () => ({ mutate: vi.fn(), isPending: false }),
@@ -147,8 +147,7 @@ vi.mock("@/hooks/useCoverageWorkspace", async (importOriginal) => {
 });
 
 function renderWorkspace() {
-  // The workspace navigates (draft-new and extend open the bench), so it
-  // needs a router around it.
+  // The workspace navigates (draft-new and extend open the rule editor), so it needs a router around it.
   return render(
     <MemoryRouter>
       <CoverageWorkspace entityType="threat_actor" entityKey="actor-1" label="APT29" onNavigateRule={vi.fn()} />
@@ -156,30 +155,30 @@ function renderWorkspace() {
   );
 }
 
-/** Opens the one above-the-line behaviour and returns its drawer contents. */
-function openBehaviour(techniqueId = "T1078.004") {
+/** Clicks the closed ladder row for the technique, opening its drawer. */
+function openBehavior(techniqueId = "T1078.004") {
   fireEvent.click(screen.getByRole("button", { expanded: false, name: new RegExp(techniqueId) }));
 }
 
 describe("CoverageWorkspace", () => {
   it("answers the coverage question in a sentence before showing any input to it", () => {
     renderWorkspace();
-    // 2 behaviours, 1 of which has no log source.
+    // 2 behaviors, 1 of which has no log source.
     expect(screen.getByText(/of APT29’s/)).toHaveTextContent(
-      /1 of APT29’s 2 behaviours in this window could fire against your telemetry/,
+      /1 of APT29’s 2 behaviors in this window could fire against your telemetry/,
     );
     expect(screen.getByText(/of APT29’s/)).toHaveTextContent(/1 cannot: you collect no windows events source/);
   });
 
   it("promotes 'nothing names this threat' out of a tooltip and into the verdict", () => {
     renderWorkspace();
-    // 47 + 3 candidate rules across the two behaviours, none scoped to the threat.
+    // 47 + 3 candidate rules across the two behaviors, none scoped to the threat.
     expect(screen.getByText(/of APT29’s/)).toHaveTextContent(/Of the 50 library rules.*none were written for APT29/);
   });
 
-  it("keeps the unsourced behaviour out of the ladder and calls it a collection job", () => {
+  it("keeps the unsourced behavior out of the ladder and calls it a collection job", () => {
     renderWorkspace();
-    // The ladder holds only the behaviour a rule could fire for.
+    // The ladder holds only the behavior a rule could fire for.
     const ladderRows = screen.getAllByRole("button", { expanded: false });
     expect(ladderRows.map((r) => r.textContent).join(" ")).not.toContain("T1574.002");
 
@@ -195,14 +194,14 @@ describe("CoverageWorkspace", () => {
   it("opens a row onto its own evidence and candidates", () => {
     renderWorkspace();
     expect(screen.queryByText(/device-code flow/)).not.toBeInTheDocument();
-    openBehaviour();
+    openBehavior();
     expect(screen.getByText(/device-code flow/)).toBeInTheDocument();
     expect(screen.getByText("Device Code Authentication Flow")).toBeInTheDocument();
   });
 
   it("marks a low-confidence candidate as a weak match and says it cannot fire", () => {
     renderWorkspace();
-    openBehaviour();
+    openBehavior();
     expect(screen.getByText("partial match")).toBeInTheDocument();
     expect(screen.getByText(/no matching source, cannot fire here/)).toBeInTheDocument();
   });
@@ -212,9 +211,9 @@ describe("CoverageWorkspace", () => {
     expect(screen.getByText(/1 of 2 articles in this window carried a technique/)).toBeInTheDocument();
   });
 
-  it("adopting a rule carries its repo and licence into the set tray", () => {
+  it("adopting a rule carries its repo and license into the set tray", () => {
     renderWorkspace();
-    openBehaviour();
+    openBehavior();
     fireEvent.click(screen.getAllByRole("button", { name: "Adopt" })[0]);
     const tray = screen.getByText("Set").parentElement as HTMLElement;
     expect(within(tray).getByText("adopt")).toBeInTheDocument();
@@ -223,7 +222,7 @@ describe("CoverageWorkspace", () => {
 
   it("saves the assembled set", () => {
     renderWorkspace();
-    openBehaviour();
+    openBehavior();
     fireEvent.click(screen.getAllByRole("button", { name: "Adopt" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "Save set" }));
     expect(saveMutate).toHaveBeenCalledWith(
@@ -237,13 +236,13 @@ describe("CoverageWorkspace", () => {
 
   it("sends the set into the reporting system, rules and gaps included", () => {
     renderWorkspace();
-    openBehaviour();
+    openBehavior();
     fireEvent.click(screen.getAllByRole("button", { name: "Adopt" })[0]);
     fireEvent.click(screen.getAllByRole("button", { name: "Skip" })[1]);
     fireEvent.click(screen.getByRole("button", { name: "Send to report" }));
 
     const payload = useUIStore.getState().sendToReportState?.payload;
-    // The adopted rule rides as report evidence; the skip rides as prose.
+    // The adopted rule is sent as report evidence; the skip is sent as text in the note.
     expect(payload?.entityIds?.detection_rules).toEqual(["r1"]);
     expect(payload?.entityIds?.actors).toEqual(["actor-1"]);
     expect(payload?.note).toContain("APT29 CozyDuke Loader");
@@ -256,7 +255,7 @@ describe("CoverageWorkspace", () => {
     renderWorkspace();
     expect(screen.queryByRole("button", { name: "Report .md" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy payload" })).not.toBeInTheDocument();
-    // The one genuine take-away stays: rule files, not a report.
+    // The zip download stays: rule files, not a report.
     expect(screen.getByRole("button", { name: "Bundle .zip" })).toBeInTheDocument();
   });
 

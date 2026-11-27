@@ -4,9 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import ThreatBoard from "../ThreatBoard";
 import type { ThreatBoardItem } from "@/hooks/useThreatBoard";
 
-/** The quiet briefing row: story first, one caption line, no chip band; the
-    detail lives in the drawer. The story is the brief when cached, the lead
-    headline otherwise — never a template sentence over three integers. */
+/* The briefing row: the story first, one caption line, no chip band; the details are in the drawer. The story is the AI brief when one is cached and the lead headline otherwise, never a template sentence built from the counts. */
 
 function makeItem(overrides: Partial<ThreatBoardItem> = {}): ThreatBoardItem {
   return {
@@ -85,8 +83,7 @@ const setStateMutate = vi.fn();
 const draftMutate = vi.fn();
 const downloadSpy = vi.fn();
 const packageSpy = vi.fn();
-// The hunt pack the drawer shows: none until a test sets one. The profile's
-// all-reporting pack stays none, so the drawer offers no profile link.
+// The hunt pack the drawer shows: none until a test sets one. The profile's all-reporting pack stays none, so the drawer offers no profile link.
 const NO_PACK = {
   status: "none" as const,
   language: "kql" as const,
@@ -128,8 +125,7 @@ vi.mock("@/hooks/useThreatBoard", async (importOriginal) => {
 });
 
 const workspaceSpy = vi.fn();
-// Undefined keeps the drawer in its loading state; a test that needs the
-// drawer's body sets a (minimal) workspace.
+// Undefined keeps the drawer in its loading state; a test that needs the drawer's body sets a (minimal) workspace.
 let workspace: Record<string, unknown> | undefined;
 vi.mock("@/hooks/useCoverageWorkspace", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/useCoverageWorkspace")>();
@@ -173,7 +169,7 @@ describe("ThreatBoard briefing rows", () => {
     expect(
       screen.getByText(/Session-cookie theft and MFA modification documented/)
     ).toBeInTheDocument();
-    // The retired template phrasing never appears.
+    // The template phrasing the brief replaced never appears.
     expect(screen.queryByText(/no new tradecraft/)).not.toBeInTheDocument();
   });
 
@@ -226,9 +222,7 @@ describe("ThreatBoard briefing rows", () => {
 });
 
 
-/** The hunt pack at the drawer's foot: drafted on request, copied to the SIEM,
-    downloaded one ATHF file per hunt or as the whole package. Nothing here
-    tracks a hunt. */
+/* The hunt pack at the bottom of the drawer: drafted on request, copied to the SIEM, and downloaded as one ATHF file per hunt or as the whole package. Nothing here tracks a hunt. */
 describe("ThreatBoard hunt pack", () => {
   function openDrawer() {
     renderBoard();
@@ -306,9 +300,7 @@ describe("ThreatBoard hunt pack", () => {
   });
 });
 
-/** Story threads on the board: what the counts mean once one story can be told
-    apart from eleven re-reports of it, and the row that only a thread can
-    carry. */
+/* Story threads on the board: what the counts mean when one story is counted separately from its re-reports, and the story row, which only a thread produces. */
 describe("ThreatBoard with story threads", () => {
   const storyRow = makeItem({
     entity_type: "story",
@@ -415,7 +407,7 @@ describe("ThreatBoard with story threads", () => {
     fireEvent.click(screen.getByText(/Fortinet confirms FortiWeb attacks/));
     expect(workspaceSpy).not.toHaveBeenCalledWith("story", "fortiweb-preauth-rce", "14d", true);
     expect(screen.getByText("Coverage · 3 updates, 5 outlets")).toBeInTheDocument();
-    // The precedent line is the one thing keyword search could never answer.
+    // The precedent line lists similar earlier stories, which keyword search cannot find.
     expect(screen.getByText("Akira via Cisco ASA")).toBeInTheDocument();
     expect(screen.getByText(/83% similar/)).toBeInTheDocument();
     precedent = [];

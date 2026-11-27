@@ -1,7 +1,10 @@
 """BE-16: Entity profile editing API.
 
-Allows updating editable fields on threat actors, malware families, CVEs, and TTPs.
-Includes entity merge and duplicate detection.
+Create, update and delete endpoints for the profile entity types (threat actors,
+malware, tools, vendors, products, CVEs, TTPs, countries, sectors, mitigations),
+plus merge, duplicate detection and merge suggestions, type conversion, target
+sectors, provenance, rescans, Wikipedia content, and the profile's timeline,
+ATT&CK and story-thread views.
 """
 
 import logging
@@ -75,7 +78,7 @@ async def _unlink_entries_for_removed_aliases(
     """When aliases are removed from an entity, unlink entries that were linked only via those aliases.
 
     Compares old and new alias lists (case-insensitive). A junction row is deleted
-    iff every value in its matched_names array is a removed alias — i.e. no remaining
+    only when every value in its matched_names array is a removed alias — i.e. no remaining
     matched form would still trigger the link. When anything was unlinked, the
     entity's stored article_count is recounted from the junction (a junk alias can
     be most of an entity's links; leaving the old count shows thousands of
@@ -491,7 +494,7 @@ async def _apply_fields(db: AsyncSession, entity_type: str, entity, body, fields
 
     Only fields whose value actually moves are recorded: a profile save that
     re-submits unchanged values must not re-stamp every field as freshly
-    asserted by whoever hit save, or genuine provenance drowns in no-ops.
+    asserted by whoever hit save, or real provenance is lost among no-op claims.
     """
     from app.services.claim_provenance import record_claims, render_value
 
@@ -543,8 +546,8 @@ async def create_threat_actor_manual(
     db: AsyncSession = Depends(get_db),
 ):
     """Manually create a threat actor and optionally link it to an entry."""
-    # Resolver: case/normalized-insensitive upsert against name + aliases, plus
-    # the creation gates (manual keeps a logged "create anyway" override).
+    # Resolver: upsert matched case-insensitively on the normalized name and aliases,
+    # plus the creation gates (manual keeps a logged "create anyway" override).
     actor = await _resolve_manual(db, "threat_actor", body.name, body.aliases, body.force)
     is_new = actor is None
 
@@ -600,8 +603,8 @@ async def create_malware_manual(
     db: AsyncSession = Depends(get_db),
 ):
     """Manually create a malware family and optionally link it to an entry."""
-    # Resolver: case/normalized-insensitive upsert against name + aliases, plus
-    # the creation gates (manual keeps a logged "create anyway" override).
+    # Resolver: upsert matched case-insensitively on the normalized name and aliases,
+    # plus the creation gates (manual keeps a logged "create anyway" override).
     malware = await _resolve_manual(db, "malware", body.name, body.aliases, body.force)
     is_new = malware is None
 
@@ -1329,7 +1332,7 @@ async def unlink_all_entries(
     result = await db.execute(delete(junction).where(fk_col == entity_id).returning(junction.entry_id))
     deleted_ids = result.scalars().all()
 
-    # Reset article_count if the entity has one
+    # Reset article_count and sighting_count where the entity has them
     model = ENTITY_CONFIG[entity_type][0]
     entity = await db.scalar(select(model).where(model.id == entity_id))
     if entity and hasattr(entity, "article_count"):
@@ -1936,10 +1939,9 @@ async def merge_entities(
         # Delete remaining (conflicting) links
         await db.execute(delete(junction_cls).where(fk_col == target.id))
 
-        # 2. Reassign entity relationships
-        # Simply delete all of the target's relationships — the keeper already
-        # has its own set and duplicating relationship rows adds little value
-        # vs. risking unique-constraint violations during reassignment.
+        # 2. Drop the target's entity relationships instead of reassigning them —
+        # the keeper already has its own set, and reassigning adds little value
+        # while risking unique-constraint violations.
         await db.execute(
             delete(EntityRelationship).where(
                 or_(
@@ -2325,8 +2327,8 @@ async def get_entity_field_provenance(
 # assessment-backfill worker can share it without importing the API layer.
 
 # link_entity_to_existing_entries() also supports "mitigation" (M-ID search,
-# catalog rows only) — ENTITY_MODEL_MAP above omits it because it's scoped to
-# Wikipedia-relevant types, not because rescan doesn't apply.
+# catalog rows only) — ENTITY_MODEL_MAP above omits it because it lists the
+# summarizable types, not because rescan doesn't apply.
 # Sectors are summarizable (ENTITY_MODEL_MAP) but never autolinked, so there is
 # nothing to rescan for one — the gate below returns 400 rather than handing the
 # autolinker a type it has no match surface for.
@@ -2769,7 +2771,8 @@ async def get_entity_mentions_timeseries(
 
     # Trend context for the header pulse line: total mentions in the window
     # immediately before this one (None for the unbounded "all" window), and
-    # the busiest feed's share of the window — a newsletter-echo proxy.
+    # the busiest feed's share of the window — a high share suggests one feed
+    # (often a newsletter) repeating the same story.
     previous_total: int | None = None
     top_feed_share: float | None = None
     if start is not None:
@@ -3220,9 +3223,8 @@ async def clear_wikipedia_content(
 
 # One adapter per convertible type, keyed by the frontend slug (the vocabulary
 # the profile UI, EntityRelationship, EntityNote and CampaignEntity all use).
-# `canonical` is the slug the reclassify-tombstone + creation resolver use — only
-# malware differs (`malware_families`). cve/ttp carry an external-id identity
-# (cve_id / technique_id) instead of a free-text name and have no aliases.
+# cve/ttp carry an external-id identity (cve_id / technique_id) instead of a
+# free-text name and have no aliases.
 CONVERT_ADAPTERS: dict[str, dict] = {
     "threat_actor": {
         "model": ThreatActor,

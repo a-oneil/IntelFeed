@@ -48,8 +48,8 @@ class GitHubPoCAdapter(EnrichmentAdapter):
     @staticmethod
     def search_query(cve_id: str) -> str:
         """The repository search for one CVE's PoCs. The id is matched as a
-        phrase in name or description: a bare "<cve> poc exploit" ANDs all three
-        words, so a repo literally named CVE-2024-3400 scored zero hits."""
+        phrase in name or description: a bare "<cve> poc exploit" query ANDs all
+        three words, so it misses a repo named only CVE-2024-3400."""
         return f'"{cve_id}" in:name,description'
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:

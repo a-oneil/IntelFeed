@@ -1,5 +1,4 @@
-/* The shell (page, top bar, brand, error states) comes from SharedEntryPage.module.css
-   so a shared report and a shared article are the same page to a reader. */
+/* The shell (page, top bar, brand, error states) comes from SharedEntryPage.module.css so a shared report and a shared article look the same to a reader. */
 
 .meta {
   align-items: center;

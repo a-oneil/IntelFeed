@@ -279,8 +279,8 @@ async def test_key(db: AsyncSession, key_id: str) -> dict:
         return {"status": "missing", "message": None}
     from app.enrichment.gateway import AuthFailed, GatewayError
 
-    # The person testing has usually just replaced the key: the members'
-    # recorded rejection goes, so the probe actually goes out.
+    # The person testing has usually just replaced the key: clear the members'
+    # recorded rejection first, or the gateway would refuse to send the probe.
     await _forget_auth_failures(db, rows)
     adapter = adapter_for_source(row, api_key)
     try:

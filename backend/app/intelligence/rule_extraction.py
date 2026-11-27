@@ -643,7 +643,7 @@ async def store_extracted_rules(
         rule_type = rule_data["rule_type"]
 
         # Dedup is on the rule body, never the title: query titles repeat
-        # across articles, and a title match used to let each new SPL query
+        # across articles, and matching on title would let each new SPL query
         # overwrite the last one. Any auto-extracted copy counts, whoever ran
         # the extraction, so a pipeline run and a manual one don't fork it.
         existing = await db.execute(

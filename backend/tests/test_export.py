@@ -56,7 +56,7 @@ async def test_export_entry_with_typographic_title_downloads(
     client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_feed: Feed
 ):
     # News titles carry ’ and —; header values go out as latin-1, so a raw
-    # title in Content-Disposition used to turn the download into a 500.
+    # title in Content-Disposition would turn the download into a 500.
     entry = Entry(feed_id=test_feed.id, title='Microsoft’s patch — 漏洞 "fix"', guid="typo-guid", content_text="x")
     db_session.add(entry)
     await db_session.flush()

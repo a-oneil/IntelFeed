@@ -1,6 +1,4 @@
-/* Settings → Engine → Enrichment. Quiet by design: text is neutral, and only
-   things that need action (failing, a rejected key, at the cap, paused) get
-   color. */
+/* Settings → Engine → Enrichment. Text is neutral; only things that need action (failing, a rejected key, at the cap, paused) get color. */
 
 .page {
   display: flex;

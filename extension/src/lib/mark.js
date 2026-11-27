@@ -1,15 +1,10 @@
-// The IntelFeed mark: a hexagon with the hexagram of network lines inside it,
-// nodes where the lines cross, and a feed signal whose dot sits on the
-// bottom-left crossing, on a 24x24 grid. The same drawing
-// scripts/dev/render_icons.cjs and the app (frontend/src/utils/brandMark.ts)
-// use. SMALL is the weight for 32px and below, where thinner lines blur.
+// The IntelFeed mark: a hexagon with the hexagram of network lines inside it, nodes where the lines cross, and a feed signal whose dot sits on the bottom-left crossing, on a 24x24 grid. The same drawing scripts/dev/render_icons.cjs and the app (frontend/src/utils/brandMark.ts) use. SMALL is the weight for 32px and below, where thinner lines blur.
 
 const SMALL = { hex: 1.7, net: 0.85, netOpacity: 0.65, node: 0.95, feed: 1.5, wave: 1.65 };
 
 const HEXAGON = "M12 2L21.2 7.5V16.5L12 22L2.8 16.5V7.5Z";
 const HEXAGRAM = ["M12 2L21.2 16.5L2.8 16.5Z", "M21.2 7.5L12 22L2.8 7.5Z"];
-// Crossings that carry a node. Bottom-left is the feed dot; left and
-// bottom-right are left bare, where they would crowd the feed signal.
+// Crossings that carry a node. Bottom-left is the feed dot; left and bottom-right are left bare, where they would crowd the feed signal.
 const NODES = [[8.5, 7.5], [15.5, 7.5], [18.3, 12]];
 const FEED_DOT = [8.5, 16.5];
 const WAVES = ["M8.5 13.5C10.16 13.5 11.5 14.84 11.5 16.5", "M8.5 10.8C11.65 10.8 14.2 13.35 14.2 16.5"];

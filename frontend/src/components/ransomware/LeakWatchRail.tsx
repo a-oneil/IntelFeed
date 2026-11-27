@@ -18,10 +18,7 @@ function toggleInSet(set: string[], v: string): string[] {
 /**
  * The leak-watch facet rail.
  *
- * Split out of the feed so it can sit beside the page header as a full-height
- * column — the same shape as the search page's facet rail and the rule
- * library's — rather than as a sticky card inside the feed's own scroll area.
- * Its state lives in RansomwareSection, which owns both this and the feed.
+ * Split out of the feed so it can sit beside the page header as a full-height column — the same shape as the search page's facet rail and the rule library's — rather than as a sticky card inside the feed's own scroll area. Its state lives in RansomwareSection, which owns both this and the feed.
  */
 export function LeakWatchRail({
   filters,

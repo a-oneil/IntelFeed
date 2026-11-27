@@ -21,12 +21,7 @@ function readNodeColors(): string[] {
   return COLOR_VARS.map((name, i) => style.getPropertyValue(name).trim() || FALLBACK_COLORS[i]);
 }
 
-/**
- * Ambient, decorative entity-graph animation for auth screens.
- * Node positions are stored as fractions (0-1) of the canvas size rather
- * than absolute pixels, so they redistribute correctly regardless of the
- * canvas size at first measurement or after a later resize.
- */
+/** Decorative background animation of an entity graph for the auth screens. Node positions are stored as fractions (0-1) of the canvas size rather than absolute pixels, so they redistribute correctly whatever the canvas size is at first measurement or after a later resize. */
 export function AuthGraphBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const reduceMotion = useMediaQuery("(prefers-reduced-motion: reduce)");

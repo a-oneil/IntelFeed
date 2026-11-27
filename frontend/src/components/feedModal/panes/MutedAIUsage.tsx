@@ -12,13 +12,8 @@ export function formatTokens(n: number): string {
 }
 
 /**
- * What a muted feed still costs.
- *
- * Mute only hides a feed from reading views; every article is still tagged,
- * analysed and scored. That is deliberate — once subscriptions are per-user,
- * one reader muting a feed must not switch the AI off for everyone — so this
- * shows the cost instead and leaves turning the AI off as a separate,
- * explicit admin decision.
+ * Shows the AI usage a muted feed still incurs.
+ * Muting only hides a feed from reading views; every article is still tagged, analyzed and scored. This is deliberate: with per-user subscriptions, one reader muting a feed must not turn the AI off for everyone. So this shows the cost and leaves turning the AI off as a separate admin action.
  */
 export function MutedAIUsage({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }) {
   const usage = useFeedAIUsage(feed.id, feed.is_muted);
@@ -45,10 +40,10 @@ export function MutedAIUsage({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }
       <p className={styles.note}>
         {aiOn
           ? u.runs > 0
-            ? `Muted, but still analysed: ${u.runs} AI ${u.runs === 1 ? "run" : "runs"} and ${formatTokens(
+            ? `Muted, but still analyzed: ${u.runs} AI ${u.runs === 1 ? "run" : "runs"} and ${formatTokens(
                 u.tokens_input + u.tokens_output
               )} tokens in the last ${u.days} days.`
-            : `Muted, and no AI runs in the last ${u.days} days, but new articles are still analysed.`
+            : `Muted, and no AI runs in the last ${u.days} days, but new articles are still analyzed.`
           : `Muted, and AI analysis is off for this feed. ${
               u.runs > 0 ? `${u.runs} AI runs in the last ${u.days} days.` : ""
             }`.trim()}{" "}

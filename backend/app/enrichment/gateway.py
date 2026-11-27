@@ -15,7 +15,7 @@ Adapters open clients with ``self.http(...)``; the client's transport
    nothing, so a refused request costs nothing;
 4. a wait for a free slot when one is about to open, else ``RateLimited``: up
    to ``MAX_TOKEN_WAIT`` for a per-entity lookup, ``JOB_TOKEN_WAIT`` for a
-   scheduled job, which the window paces through its backlog;
+   scheduled job, so a job waits for the window instead of stopping early;
 5. the enrichment User-Agent;
 6. the response check. A 401, or a 403 that means the key is bad, records an
    auth failure: the credential sends nothing more until its key changes or
@@ -305,7 +305,7 @@ class GatewayUnavailable(GatewayError):
 
 
 class Paused(GatewayError):
-    """An admin paused enrichment: no request leaves the box."""
+    """An admin paused enrichment: no request is sent to any outside source."""
 
     status = "paused"
 
@@ -396,7 +396,7 @@ def _sent_key(hour: datetime) -> str:
 
 async def record_ioc_sent(value: str) -> None:
     """Count an indicator a lookup sent to an outside source (one HyperLogLog
-    per UTC hour), so the console can say how many distinct ones left the box.
+    per UTC hour), so the console can say how many distinct ones were sent out.
     A Redis failure only loses the count."""
     key = _sent_key(datetime.now(UTC))
     try:
@@ -408,7 +408,7 @@ async def record_ioc_sent(value: str) -> None:
 
 
 async def iocs_sent(hours: int = 24) -> int:
-    """Distinct indicators sent off the box in the last ``hours`` UTC hours.
+    """Distinct indicators sent to outside sources in the last ``hours`` UTC hours.
     Raises GatewayUnavailable when Redis can't answer."""
     now = datetime.now(UTC)
     keys = [_sent_key(now - timedelta(hours=h)) for h in range(hours)]

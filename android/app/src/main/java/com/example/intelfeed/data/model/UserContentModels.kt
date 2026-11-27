@@ -4,11 +4,7 @@ import com.example.intelfeed.util.HtmlText
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/**
- * Article note (GET /api/notes/entry/{id}). The body lives in content_markdown / content_html; there
- * is no "content" field (the app used to read one, so notes showed up blank). Notes are visible to
- * everyone on the instance; only the author or an admin can edit or delete one.
- */
+/** Article note (GET /api/notes/entry/{id}). The body lives in content_markdown / content_html; there is no "content" field (reading one shows every note as blank). Notes are visible to everyone on the instance; only the author or an admin can edit or delete one. */
 @Serializable
 data class EntryNote(
     val id: String = "",
@@ -89,10 +85,7 @@ data class DailySummary(
     @SerialName("generated_at") val generatedAt: String? = null
 )
 
-/**
- * GET /api/entries/day-intel: the day's most-mentioned entity of each type, for the chips under a
- * day divider (the website's day header). Every field can be null on a quiet day.
- */
+/** GET /api/entries/day-intel: the day's most-mentioned entity of each type, for the chips under a day divider (the website's day header). Every field can be null on a quiet day. */
 @Serializable
 data class DayIntel(
     @SerialName("threat_actor") val threatActor: DayTopEntity? = null,
@@ -167,13 +160,7 @@ data class RequirementMatch(
     @SerialName("entry_published_at") val entryPublishedAt: String? = null
 )
 
-/**
- * A day chip's filter (the web's day "focus"): articles narrowed by [params] (e.g.
- * exploited_cves=true, entity_type/entity_id, sector). [chip] identifies the chip on day
- * [dayKey]; [label] reads "articles mentioning …" for the "Showing only …" bar. [window] is the
- * time range searched: the web only has DAY; the app defaults to the open view's range (Last 24
- * hours → 24h, This week → 7 days) and the bar lets you change it.
- */
+/** A day chip's filter (the web's day "focus"): articles narrowed by [params] (e.g. exploited_cves=true, entity_type/entity_id, sector). [chip] identifies the chip on day [dayKey]; [label] reads "articles mentioning …" for the "Showing only …" bar. [window] is the time range searched: the web only has DAY; the app defaults to the open view's range (Last 24 hours → 24h, This week → 7 days) and the bar lets you change it. */
 data class DayFocus(
     val dayKey: String,
     val chip: String,

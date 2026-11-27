@@ -12,8 +12,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const dist = join(root, "dist");
 const base = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
 
-// Firefox runs MV3 background code as an event page, not a service worker,
-// and needs a fixed add-on id for signing and for storage to survive updates.
+// Firefox runs MV3 background code as an event page, not a service worker, and needs a fixed add-on id for signing and for storage to survive updates.
 const GECKO_ID = "intelfeed@a-oneil.github.io";
 
 const manifests = {
@@ -25,8 +24,7 @@ const manifests = {
       gecko: {
         id: GECKO_ID,
         strict_min_version: "142.0",
-        // Data sent to the server: sign-in details, the content of pages you send,
-        // and, when the page features are on, the address and visible text of each page you open.
+        // Data sent to the server: sign-in details, the content of pages you send, and, when the page features are on, the address and visible text of each page you open.
         data_collection_permissions: { required: ["authenticationInfo", "websiteContent", "browsingActivity"] },
       },
     };

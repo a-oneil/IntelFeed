@@ -6,11 +6,7 @@ import { useUIStore } from "@/stores/uiStore";
 const CVE_SECTIONS: OverviewSectionKey[] = ["context", "exploit", "affected", "reading", "activity", "workspace"];
 const TTP_SECTIONS: OverviewSectionKey[] = ["context", "catalog", "reading", "activity", "workspace"];
 
-/**
- * The entity profile Overview remembers which section rows are open per
- * entity type, and the Brief / Everything switch sits on top of that: closing
- * a row while everything is open has to land on a real set, in Brief.
- */
+/* The entity profile Overview remembers which section rows are open per entity type, and the Brief / Everything switch sits on top of that: closing a row while Everything is open has to switch to Brief with a concrete set of open rows. */
 describe("uiStore profile Overview sections", () => {
   beforeEach(() => {
     useUIStore.setState({ profileOpenSections: {}, profileOverviewMode: "brief" });

@@ -252,7 +252,7 @@ def auto_approve_tools() -> frozenset[str]:
 
 # Shared record types an id in a staged call may name, for the confirm card.
 # Notes are left out: they are personal, and a model could name someone else's.
-_LABELLED_TYPES = (
+_LABELED_TYPES = (
     "threat_actor",
     "malware",
     "tool",
@@ -272,7 +272,7 @@ _LABELLED_TYPES = (
     "intel_report",
     "tag",
 )
-_MAX_LABELLED_IDS = 10
+_MAX_LABELED_IDS = 10
 
 
 def _ids_in(value) -> list[uuid.UUID]:
@@ -301,10 +301,10 @@ async def name_targets(db: AsyncSession, args: dict) -> dict[str, str]:
     for key, value in (args or {}).items():
         names: list[str] = []
         for eid in _ids_in(value):
-            if seen >= _MAX_LABELLED_IDS:
+            if seen >= _MAX_LABELED_IDS:
                 break
             seen += 1
-            for etype in _LABELLED_TYPES:
+            for etype in _LABELED_TYPES:
                 model_path, display_name, _ = _DELETABLE_ENTITIES[etype]
                 Model = _load_model(model_path)
                 row = (await db.execute(select(Model).where(Model.id == eid))).scalar_one_or_none()

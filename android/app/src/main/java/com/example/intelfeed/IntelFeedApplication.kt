@@ -17,16 +17,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
-/**
- * Holds the process-wide singletons. There must be one repository per process: it owns the OkHttp
- * client and the token-refresh lock, and the server rotates refresh tokens, so two instances
- * refreshing at once would log the user out. (MainActivity used to build a new one per
- * configuration change.)
- */
+/** Holds the process-wide singletons. There must be one repository per process: it owns the OkHttp client and the token-refresh lock, and the server rotates refresh tokens, so two instances refreshing at once would log the user out. That is why MainActivity does not build its own on a configuration change. */
 class IntelFeedApplication : Application(), ImageLoaderFactory {
 
-    // Set only by the non-exported notification target; MainActivity clears it on the main thread
-    // once the route is handled. Untrusted apps can launch MainActivity but cannot supply a route.
+    // Set only by the non-exported notification target; MainActivity clears it on the main thread once the route is handled. Untrusted apps can launch MainActivity but cannot supply a route.
     internal var pendingNotificationRoute: IntelNotificationHelper.Route? = null
 
     val authPreferences: AuthPreferences by lazy { AuthPreferences(this) }
@@ -42,8 +36,7 @@ class IntelFeedApplication : Application(), ImageLoaderFactory {
         // Protect a session saved by an older version (plain-text tokens) without signing out.
         appScope.launch { runCatching { authPreferences.encryptStoredTokens() } }
         IntelNotificationHelper.createNotificationChannel(this)
-        // The 15-minute background check runs only while someone is signed in with alerts on.
-        // It used to be scheduled always, waking the app every 15 minutes just to find nothing to do.
+        // The 15-minute background check runs only while someone is signed in with alerts on, so the app is not woken every 15 minutes with nothing to do.
         appScope.launch {
             combine(authPreferences.isLoggedIn, userPreferences.notificationsEnabled) { signedIn, alertsOn -> signedIn && alertsOn }
                 .distinctUntilChanged()

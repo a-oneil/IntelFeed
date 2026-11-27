@@ -2,7 +2,7 @@
 
 The problem this replaces: the same story arrives twenty-three times, and the
 only thing the platform could do about it was subtract score. ``feed_echo``
-penalises the repeats and ``temporal_clusters`` recomputes a throwaway
+penalizes the repeats and ``temporal_clusters`` recomputes a throwaway
 entity-overlap cluster per request; neither leaves anything you can read, name,
 follow, or come back to.
 
@@ -10,21 +10,22 @@ The algorithm is deliberately incremental and cheap. It never clusters the
 corpus: it walks the entries that arrived since the last pass, oldest first, and
 asks one question per entry — *does this continue a story we already have?*
 
-    join    cosine to an open thread's centroid clears ``thread_join_similarity``
-            AND the article shares an extracted entity with that thread. Without
-            a shared entity the bar rises to ``thread_join_similarity_no_entity``,
-            because embeddings alone will happily merge every ransomware article
-            ever written into one thread.
-    seed    otherwise, look at the article's unthreaded neighbours in the window.
-            ``thread_min_entries`` of them above ``thread_seed_similarity``, from
-            ``thread_min_sources`` distinct outlets, is a story breaking. Two
-            articles from one outlet is not.
+    join    cosine to the closest article in an open thread clears
+            ``thread_join_similarity`` (and cosine to the thread's centroid clears
+            it less ``CENTROID_MARGIN``) AND the article shares an extracted
+            entity with that thread. Without a shared entity the bar rises to
+            ``thread_join_similarity_no_entity``, because embeddings alone would
+            merge every ransomware article ever written into one thread.
+    seed    otherwise, look at the article's unthreaded neighbors in the window.
+            At least ``thread_min_entries`` articles (this one included) above
+            ``thread_seed_similarity``, from ``thread_min_sources`` distinct
+            outlets, is a new story. Two articles from one outlet is not.
     echo    a joining article that is ``thread_duplicate_similarity`` close to an
             earlier member and introduces no entity the thread lacks is a
             re-report. It is kept, attributed to the article it echoes, and
-            folded out of the way.
+            folded under that article.
 
-Everything vector lives in Postgres (pgvector); nothing is loaded into Python
+All vector math runs in Postgres (pgvector); nothing is loaded into Python
 except the few hundred floats of a centroid.
 """
 
@@ -45,7 +46,8 @@ logger = logging.getLogger(__name__)
 
 # Entity types that carry story identity. Countries and mitigations are too
 # broad to distinguish one story from another; TTPs sit in between and are
-# included because a technique shift is exactly what a new beat looks like.
+# included because a change of technique is often what a new development in a
+# story looks like.
 IDENTITY_JUNCTIONS: list[tuple[str, str, str]] = [
     ("threat_actor", "entry_threat_actors", "threat_actor_id"),
     ("malware", "entry_malware", "malware_family_id"),
@@ -55,7 +57,7 @@ IDENTITY_JUNCTIONS: list[tuple[str, str, str]] = [
     ("ttp", "entry_ttps", "ttp_id"),
 ]
 
-# Neighbours pulled per seed probe. Wide enough for a big first wave, small
+# Neighbors pulled per seed probe. Wide enough for a big first wave, small
 # enough that the HNSW scan stays trivial.
 SEED_FANOUT = 30
 
@@ -63,14 +65,13 @@ SEED_FANOUT = 30
 # top few are the only ones that can clear the threshold.
 THREAD_FANOUT = 5
 
-# Articles one outlet may contribute to a thread, full stop. One newsroom filing
+# Maximum articles one outlet may contribute to a thread. One newsroom filing
 # three times is a story it is following; a fourth, fifth and sixth is a bulletin
 # series, and AusCERT's package advisories chain into any thread at 0.9+ cosine
-# to each other if allowed to. The cap once exempted echoes, on the theory that a
-# re-report should still be folded — but "0.9 cosine and no new entity" is
-# exactly what two unrelated Red Hat errata look like to an embedding, so the
-# exemption was the hole the whole series climbed through. Past the cap the
-# outlet contributes nothing further, in any role.
+# to each other if allowed to. The cap applies to echoes too: "0.9 cosine and no
+# new entity" is exactly what two unrelated Red Hat errata look like to an
+# embedding, so exempting echoes let a whole errata series into one thread. Past
+# the cap the outlet contributes nothing further, in any role.
 SAME_SOURCE_LIMIT = 3
 
 # The join test is deliberately two-sided. Nearest-member alone is single-link
@@ -110,18 +111,18 @@ AMBIENT_MIN_WINDOW = 200
 ENTITY_REQUIRED_ABOVE = 12
 
 # A recurring roundup — "CISA adds ownCloud, Linux Kernel and JFrog flaws to
-# KEV" — is entity-dense and entity-disjoint: each instalment carries half a
+# KEV" — is entity-dense and entity-disjoint: each installment carries half a
 # dozen CVEs and products, and almost none of them are the ones the last
-# instalment carried. One incidental overlap is enough to clear the shared-
-# entity bar, so the format kept assembling itself into a "story" that was
-# really ownCloud, PaperCut, Cisco, Citrix, Fortinet and RouterOS at once.
+# installment carried. One incidental overlap is enough to clear the shared-
+# entity bar, so without this check the installments joined into one "story"
+# that was really ownCloud, PaperCut, Cisco, Citrix, Fortinet and RouterOS.
 # Density is what makes the test safe: a thread whose articles name nothing
 # extractable (a breach with no named actor) never trips it.
 ROUNDUP_MIN_ENTITIES = 4
 ROUNDUP_MIN_OVERLAP = 0.25
 # At seed time the same shape is measured across the whole candidate set: if
 # the members are entity-dense and no single entity reaches this share of them,
-# they are instalments of a format rather than coverage of one event.
+# they are installments of a format rather than coverage of one event.
 ROUNDUP_SEED_SHARE = 0.4
 
 # Publisher advisory rows. AusCERT files one "package: CVSS (Max): 7.5" bulletin
@@ -322,7 +323,7 @@ async def _nearest_threads(
 
     ``same_source_members`` is how many of the thread's articles come from the
     same outlet as this one: a publisher restating its own house format is the
-    single loudest false positive in the corpus (a fortnight of ZDI advisories
+    single loudest false positive in the corpus (two weeks of ZDI advisories
     sit at 0.81 cosine to each other while describing unrelated bugs).
     """
     rows = await db.execute(
@@ -356,7 +357,7 @@ async def _nearest_threads(
 async def _nearest_unthreaded(
     db: AsyncSession, entry_id: uuid.UUID, cutoff: datetime, ceiling: datetime, min_body: int
 ) -> list[dict]:
-    """Unthreaded neighbours within a gap window either side of the anchor.
+    """Unthreaded neighbors within a gap window either side of the anchor.
 
     Bounded in both directions, not just the past: a story is bursty, and the
     same burstiness that stops an article joining a three-week-old thread has to
@@ -401,7 +402,7 @@ async def _closest_member(db: AsyncSession, thread_id: uuid.UUID, entry_id: uuid
     This — not the centroid — is what decides a join. A centroid is an average,
     and the average of a twenty-article thread is a vector for "vulnerability
     news", which then attracts every vulnerability article in the corpus. On the
-    first pass one thread ate 103 articles across three weeks that way. Asking
+    first pass one thread absorbed 103 articles across three weeks that way. Asking
     "is this article close to a specific article already in the story" is a
     claim that survives the thread getting bigger; the centroid is kept only to
     retrieve candidates cheaply.
@@ -564,10 +565,10 @@ def _is_roundup_join(entry_ents: set, thread_ents: set) -> bool:
     """True when both sides name plenty of things and agree on almost none.
 
     The shared-entity bar asks "is there one thing in common", which a KEV
-    roundup clears by accident: two instalments a week apart happen to list the
+    roundup clears by accident: two installments a week apart happen to list the
     same Citrix flaw among six unrelated ones each. Judging the overlap as a
     *proportion* separates "the same subject, described twice" from "two
-    catalogues that intersect once".
+    catalogs that intersect once".
     """
     if len(entry_ents) < ROUNDUP_MIN_ENTITIES or len(thread_ents) < ROUNDUP_MIN_ENTITIES:
         return False
@@ -594,21 +595,21 @@ def _is_roundup_seed(member_entities: list[set]) -> bool:
     return best / len(member_entities) < ROUNDUP_SEED_SHARE
 
 
-def _cap_by_source(anchor: dict, neighbours: list[dict]) -> list[dict]:
-    """Drop neighbours past ``SAME_SOURCE_LIMIT`` articles from one outlet.
+def _cap_by_source(anchor: dict, neighbors: list[dict]) -> list[dict]:
+    """Drop neighbors past ``SAME_SOURCE_LIMIT`` articles from one outlet.
 
     The dominance ratio alone lets a four-and-six split seed a ten-article
-    "story" from two mirrors of the same advisory feed. Neighbours arrive in
+    "story" from two mirrors of the same advisory feed. Neighbors arrive in
     similarity order, so the ones kept are the closest the outlet filed.
     """
     seen: Counter = Counter({_source_key(anchor.get("url"), anchor.get("feed_id")): 1})
     kept: list[dict] = []
-    for neighbour in neighbours:
-        key = _source_key(neighbour.get("url"), neighbour.get("feed_id"))
+    for neighbor in neighbors:
+        key = _source_key(neighbor.get("url"), neighbor.get("feed_id"))
         if seen[key] >= SAME_SOURCE_LIMIT:
             continue
         seen[key] += 1
-        kept.append(neighbour)
+        kept.append(neighbor)
     return kept
 
 
@@ -644,11 +645,12 @@ async def merge_overlapping(
     Merging requires overlapping (or adjacent) time ranges as well as centroid
     similarity: the same subject a month apart is a sequel, not a continuation.
 
-    The bar sits below the join bars' no-entity level on purpose. The join
-    rules refuse an entity-less article once a thread is large, and the wave
-    that article belongs to then seeds beside the thread it continues; the two
-    centroids land around 0.91 (the fridge-sabotage story's CISA-warning wave
-    against its first wave), which a 0.92 bar left split for good.
+    The bar sits at the join rules' no-entity level (0.90), not above it, on
+    purpose. The join rules refuse an entity-less article once a thread is
+    large, and the wave that article belongs to then seeds beside the thread it
+    continues; the two centroids land around 0.91 (the fridge-sabotage story's
+    CISA-warning wave against its first wave), which a 0.92 bar would leave
+    split for good.
 
     A chapter-sized thread that shares two identity entities with a bigger one
     gets the lower bar, ``thread_merge_similarity_shared_entity``, the way an
@@ -664,14 +666,14 @@ async def merge_overlapping(
     of production articles. Only actors, malware and CVEs count as shared
     (``MERGE_SHARED_IDENTITY_TYPES``): products let one AI-abuse thread
     swallow thirteen unrelated stories through "Microsoft 365" and "Telegram",
-    which sit under the ambient cutoff but are identity of nothing. Two shared
+    which sit under the ambient cutoff but identify no particular story. Two shared
     entities are required (``MERGE_SHARED_ENTITIES``): one CVE in common is a
     mention, and it let a PHP thread absorb the Node.js security release that
     mentioned it. And the thread being folded must still be under
     ``ENTITY_REQUIRED_ABOVE`` articles: past that it is a story in its own
-    right, and two stories that drifted together over weeks are not a chapter
-    and its book. Ambient entities do not count, for the reason they do not
-    count at join time.
+    right, and two stories that drifted together over weeks stay separate.
+    Ambient entities do not count, for the reason they do not count at join
+    time.
     """
     threshold = _knob("thread_merge_similarity", 0.90)
     shared_threshold = _knob("thread_merge_similarity_shared_entity", 0.85)
@@ -860,7 +862,7 @@ async def assign_entries(db: AsyncSession, limit: int = 500) -> dict:
     }
 
     for entry in candidates:
-        # A neighbour processed earlier in this same pass may already have taken
+        # A neighbor processed earlier in this same pass may already have taken
         # this entry into a seeded thread.
         if entry["id"] in claimed_in_pass:
             continue
@@ -878,18 +880,18 @@ async def assign_entries(db: AsyncSession, limit: int = 500) -> dict:
                 (e.get("entity_type"), e.get("entity_id")) for e in (thread.get("key_entities") or [])
             } - ambient
             shares_entity = bool(entry_ents & thread_ents)
-            # Past this size a thread's pull is mostly its own gravity: it has
-            # accumulated enough vocabulary to look like every article in its
-            # field. Growth has to be evidenced by a shared entity from here on.
+            # Past this size a thread has accumulated enough vocabulary to look
+            # similar to every article in its field, so similarity alone is not
+            # enough: from here on a joining article must share an entity.
             if not shares_entity and int(thread["entry_count"] or 0) >= ENTITY_REQUIRED_ABOVE:
                 continue
-            # Entity-dense on both sides but barely overlapping: a catalogue,
+            # Entity-dense on both sides but barely overlapping: a catalog,
             # not a continuation.
             if _is_roundup_join(entry_ents, thread_ents):
                 continue
-            # One outlet's own back catalogue. Past the cap it contributes
-            # nothing further — not even as an echo, which is the exemption six
-            # unrelated Red Hat errata used to chain themselves into one story.
+            # One outlet's own back catalog. Past the cap it contributes
+            # nothing further, not even as an echo: an echo exemption let six
+            # unrelated Red Hat errata chain into one story.
             if int(thread["same_source_members"] or 0) >= SAME_SOURCE_LIMIT:
                 continue
             closest = await _closest_member(db, thread["id"], entry["id"])
@@ -918,11 +920,11 @@ async def assign_entries(db: AsyncSession, limit: int = 500) -> dict:
         seed_floor = anchor_at - timedelta(days=gap_days)
         seed_ceiling = anchor_at + timedelta(days=gap_days)
         nearby = await _nearest_unthreaded(db, entry["id"], max(cutoff, seed_floor), seed_ceiling, min_body)
-        neighbours = _cap_by_source(
+        neighbors = _cap_by_source(
             entry,
             [n for n in nearby if n["id"] not in claimed_in_pass and float(n["similarity"] or 0) >= seed_sim],
         )
-        members = [entry, *neighbours]
+        members = [entry, *neighbors]
         source_counts = Counter(_source_key(m.get("url"), m.get("feed_id")) for m in members)
         # A publisher's own series clears every similarity bar there is, so the
         # seed gate is about independence, not closeness: enough distinct
@@ -934,29 +936,29 @@ async def assign_entries(db: AsyncSession, limit: int = 500) -> dict:
 
         member_ents = {
             entry_id: ents - ambient
-            for entry_id, ents in (await entry_entities(db, [n["id"] for n in neighbours])).items()
+            for entry_id, ents in (await entry_entities(db, [n["id"] for n in neighbors])).items()
         }
-        # Entity-dense, entity-disjoint: instalments of a format rather than
+        # Entity-dense, entity-disjoint: installments of a format rather than
         # coverage of one event.
-        if _is_roundup_seed([entry_ents, *(member_ents.get(n["id"], set()) for n in neighbours)]):
+        if _is_roundup_seed([entry_ents, *(member_ents.get(n["id"], set()) for n in neighbors)]):
             stats["unthreaded"] += 1
             continue
 
         thread_id = await _create_thread(db, entry)
         await _add_member(db, thread_id, entry, 1.0, "origin")
         claimed_in_pass.add(entry["id"])
-        for neighbour in neighbours:
-            similarity = float(neighbour["similarity"] or 0)
-            is_echo = similarity >= dup_sim and not (member_ents.get(neighbour["id"], set()) - entry_ents)
+        for neighbor in neighbors:
+            similarity = float(neighbor["similarity"] or 0)
+            is_echo = similarity >= dup_sim and not (member_ents.get(neighbor["id"], set()) - entry_ents)
             await _add_member(
                 db,
                 thread_id,
-                neighbour,
+                neighbor,
                 similarity,
                 "echo" if is_echo else "beat",
                 entry["id"] if is_echo else None,
             )
-            claimed_in_pass.add(neighbour["id"])
+            claimed_in_pass.add(neighbor["id"])
             stats["echoed" if is_echo else "joined"] += 1
         # Give the new thread its centroid now, not at the end of the pass.
         # ``_nearest_threads`` and ``merge_overlapping`` both skip threads
@@ -1063,7 +1065,7 @@ async def fold_by_thread(db: AsyncSession, entries: list) -> tuple[list, dict]:
         kept.append(representative)
         row = by_entry.get(representative.id)
         if row is None:
-            continue  # no thread holds it; it is simply itself
+            continue  # no thread holds it, so it has no coverage entry
         coverage[representative.id] = {
             "thread_title": row["title"] or "",
             "outlet_count": int(row["source_count"] or 0),
@@ -1348,10 +1350,10 @@ async def nearest_threads(db: AsyncSession, thread_id: uuid.UUID, limit: int = 3
     return [dict(r) for r in rows.mappings().all()]
 
 
-# A neighbour below this cosine is not "more like this", it is merely the
-# closest thing in the index — every entry has eight nearest neighbours whether
-# or not any of them is related. The keyword path it replaced at least required
-# a term in common; this is the equivalent bar.
+# A neighbor below this cosine is not "more like this", it is merely the
+# closest thing in the index — every entry has eight nearest neighbors whether
+# or not any of them is related. The keyword search this replaced required a
+# term in common; this is the equivalent bar.
 SIMILAR_FLOOR = 0.7
 
 
@@ -1362,7 +1364,7 @@ async def similar_entries(
     min_similarity: float = SIMILAR_FLOOR,
     exclude_ids: list[uuid.UUID] | None = None,
 ) -> list[dict]:
-    """ "More like this" — nearest neighbours across the whole embedded corpus.
+    """ "More like this" — nearest neighbors across the whole embedded corpus.
 
     Not window-limited on purpose: the useful answer to "have we seen this
     before" is frequently a year old. ``exclude_ids`` carries the entry's own
@@ -1372,7 +1374,7 @@ async def similar_entries(
     from app.core.public_access import viewer_is_anonymous
     from app.services.public_view import VISIBLE_FEED_SQL
 
-    # Raw SQL, outside the visitor filter: a visitor's neighbours come from
+    # Raw SQL, outside the visitor filter: a visitor's neighbors come from
     # the feeds they can see.
     visible = f"AND {VISIBLE_FEED_SQL}" if viewer_is_anonymous() else ""
     rows = await db.execute(

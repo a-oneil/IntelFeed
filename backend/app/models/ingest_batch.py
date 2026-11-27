@@ -62,7 +62,7 @@ class IngestBatch(Base):
     __tablename__ = "ingest_batches"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    # Who dropped the pile. Entries have no owner column, so this is the only
+    # Who created the batch. Entries have no owner column, so this is the only
     # place "uploaded by" lives.
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True

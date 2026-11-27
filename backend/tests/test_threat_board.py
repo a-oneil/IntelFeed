@@ -47,7 +47,7 @@ def _row(**kw) -> ThreatRow:
     return ThreatRow(**{**base, **kw})
 
 
-class TestNameNormalisation:
+class TestNameNormalization:
     @pytest.mark.parametrize(
         "a,b",
         [
@@ -75,7 +75,7 @@ class TestNameNormalisation:
         assert _normalize_name("The Com") != _normalize_name("Com Loader")
 
     def test_bare_collective_noun_survives(self):
-        # "Ransomware" alone must not normalise to the empty string and collide
+        # "Ransomware" alone must not normalize to the empty string and collide
         # with every other single-word name.
         assert _normalize_name("Ransomware") == "ransomware"
 
@@ -151,7 +151,7 @@ class TestBuildThreatBoard:
                 db_session.add(EntryThreatActor(entry_id=e.id, threat_actor_id=ent.id))
             else:
                 db_session.add(EntryMalware(entry_id=e.id, malware_family_id=ent.id))
-            # Techniques ride the first entry so their min(published_at) — the
+            # The techniques go on the first entry so their min(published_at) — the
             # first-seen date the `new` count reads — lands inside the window.
             if i == 0:
                 for t in range(techniques):
@@ -216,7 +216,7 @@ class TestBuildThreatBoard:
         assert next(r for r in rows if r.label == "Quiet").state == "handled"
 
     async def test_handled_threat_reopens_when_new_tradecraft_arrives(self, db_session, test_feed):
-        """The reason no snooze date is needed: new tradecraft reopens the row.
+        """The reason no snooze date is needed: new techniques reopen the row.
 
         Decided at zero, then two techniques land in the window, so the live
         `new` count exceeds the count recorded at the decision.
@@ -332,8 +332,8 @@ class TestVulnFacet:
         assert by_key["CVE-2026-22222"].on_surface is False
         # on_surface is a chip, not a sort key: the stack match earns the
         # exposure multiplier (2 stories x 1.5) but the louder KEV (5 stories)
-        # still ranks first. Nothing sinks below a divider any more — that is
-        # how CVEs used to vanish from the All view.
+        # still ranks first. No row is moved below a divider; doing that hid
+        # CVEs from the All view.
         assert by_key["CVE-2026-11111"].score < by_key["CVE-2026-22222"].score
         keys = [r.entity_key for r in rows]
         assert keys.index("CVE-2026-22222") < keys.index("CVE-2026-11111")
@@ -359,8 +359,8 @@ class TestVulnFacet:
 @pytest.mark.asyncio
 class TestClaimedCveFold:
     """A CVE the window already tells through an actor or malware row is one
-    story: it rides on that row instead of getting its own line — and instead
-    of vanishing, which is what dropping it did."""
+    story: it is shown on that row instead of getting its own line, and it is
+    not dropped from the board either."""
 
     async def _seed(self, db_session, test_feed, *, actor="Fold Crew", cve_id="CVE-2026-44444", shared=2, extra=1):
         from app.models.cve import CVE, EntryCVE
@@ -588,7 +588,7 @@ async def _entries(db_session, feed, *, prefix: str, count: int, days_ago: int =
 
 @pytest.mark.asyncio
 class TestStoryAwareRanking:
-    """Stories, not outlets. One wave carried by eleven outlets is one thing."""
+    """Ranking counts stories, not outlets: one story carried by eleven outlets counts once."""
 
     async def _link(self, db_session, entity, entries, kind="actor"):
         for entry in entries:
@@ -637,7 +637,7 @@ class TestStoryAwareRanking:
             for r in await build_threat_board(db_session, window="14d", min_attention=1, limit=20)
             if r.label == "Unthreaded"
         )
-        # The whole safety property: an un-embedded corpus ranks as it always did.
+        # Without threads each outlet counts as one story, so a corpus with no embeddings ranks on outlets alone.
         assert row.stories == row.attention == 4
         assert row.echoes_folded == 0
 
@@ -664,8 +664,8 @@ class TestStoryAwareRanking:
         await db_session.flush()
         entries = await _entries(db_session, test_feed, prefix="origin", count=3, days_ago=3)
         entries[0].title = "Originator hits regional banks"
-        # The last article is the technique-dense one the old heuristic picks,
-        # and it names the threat in its title as well.
+        # The last article is the technique-dense one that picking by density
+        # would choose, and it names the threat in its title as well.
         entries[2].title = "Originator technique roundup"
         entries[2].published_at = datetime.now(UTC) - timedelta(hours=2)
         await self._link(db_session, actor, entries)
@@ -796,15 +796,15 @@ class TestNoThreadsAtAll:
         row = next(r for r in rows if r.label == "Threadless")
         assert (row.stories, row.attention, row.echoes_folded) == (5, 5, 0)
         assert row.thread_slug is None and row.beats == 0
-        # The old ranking, exactly: outlets + 2.5 x new tradecraft, and the
-        # corroboration bump that is the only new term.
+        # With no threads the score is outlets + 2.5 x new techniques, plus the
+        # capped outlet corroboration bonus.
         assert row.score == pytest.approx(5 + min(0.25 * 5, 2.0))
         assert await build_story_rows(db_session, window="14d", min_attention=1, limit=20) == []
 
 
 @pytest.mark.asyncio
 class TestStoryRows:
-    """The row the board could never show: a story nothing has named yet."""
+    """A story that no entity names yet still gets its own row."""
 
     async def test_thread_with_no_entity_becomes_a_row(self, db_session, test_feed):
         entries = await _entries(db_session, test_feed, prefix="unnamed", count=4)
@@ -948,7 +948,7 @@ class TestMergedRowDecisions:
 
 @pytest.mark.asyncio
 class TestPrecedent:
-    """Have we seen this shape before — answered from the thread centroids."""
+    """Precedent: earlier stories whose thread centroid is close to this one's."""
 
     async def _thread_with_centroid(self, db_session, *, slug: str, title: str, vec: list[float]):
         from app.models.vector_types import to_literal

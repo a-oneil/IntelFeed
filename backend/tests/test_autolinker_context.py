@@ -270,7 +270,7 @@ def test_hyphenated_compound_is_a_different_name():
 # ── 8. Title-case common words; lower-case packages ────────────────────────
 
 
-def test_common_word_product_inside_a_capitalised_phrase_is_dropped():
+def test_common_word_product_inside_a_capitalized_phrase_is_dropped():
     _activate(products=[_entity("Microsoft Teams", ["Teams"])])
     assert _state("Most SOC Teams lack the staff.", "Microsoft Teams") is None
     assert _state("The lure arrived over Teams chat.", "Microsoft Teams") == "linked"
@@ -283,7 +283,7 @@ def test_lowercase_package_name_matches_lowercase_text_only(tier_off):
     assert _state("The story was first reported by Axios on Monday.", "axios") is None
 
 
-def test_lowercase_package_capitalised_mid_sentence_is_held(tier_on):
+def test_lowercase_package_capitalized_mid_sentence_is_held(tier_on):
     _activate(tools=[_entity("axios")])
     assert _state("The story was first reported by Axios on Monday.", "axios") == "held"
     # One clean lower-case mention elsewhere links it.

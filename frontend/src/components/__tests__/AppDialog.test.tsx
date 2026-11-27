@@ -25,7 +25,7 @@ describe("app dialogs", () => {
     expect(await answer).toBe(true);
   });
 
-  it("resolves false when a confirm is cancelled", async () => {
+  it("resolves false when a confirm is canceled", async () => {
     mountHost();
     const answer = confirmDialog("Delete the thing?");
     await screen.findByText("Delete the thing?");
@@ -77,7 +77,7 @@ describe("app dialogs", () => {
     expect(await answer).toBe("new name");
   });
 
-  it("returns null when a prompt is cancelled", async () => {
+  it("returns null when a prompt is canceled", async () => {
     mountHost();
     const answer = promptDialog({ message: "Rename to:", defaultValue: "old" });
     await screen.findByRole("textbox");
@@ -111,7 +111,7 @@ describe("app dialogs", () => {
     expect(await answer).toBe("APT99");
   });
 
-  it("an alert has only an acknowledgement", async () => {
+  it("an alert has only an acknowledgment", async () => {
     mountHost();
     const done = alertDialog({ title: "Import finished", message: "Imported: 3, Skipped: 0" });
     await screen.findByText("Imported: 3, Skipped: 0");
@@ -137,8 +137,7 @@ describe("app dialogs", () => {
   });
 
   it("denies instead of hanging when no host is mounted", async () => {
-    // A component rendered in isolation in a unit test has no DialogHost, and a
-    // promise that never settles would wedge the caller.
+    // A component rendered in isolation in a unit test has no DialogHost, and a promise that never settles would leave the caller waiting forever.
     expect(await confirmDialog("Anything?")).toBe(false);
     expect(await promptDialog("Anything?")).toBeNull();
   });

@@ -390,8 +390,8 @@ async def _get_similar_entries(db: AsyncSession, user_id: uuid.UUID, entry_id: s
 
     from app.intelligence.story_threads import similar_entries as vector_similar
 
-    neighbours = await vector_similar(db, entry.id, limit=limit, exclude_ids=duplicate_ids)
-    if neighbours:
+    neighbors = await vector_similar(db, entry.id, limit=limit, exclude_ids=duplicate_ids)
+    if neighbors:
         return {
             "items": [
                 {
@@ -403,9 +403,9 @@ async def _get_similar_entries(db: AsyncSession, user_id: uuid.UUID, entry_id: s
                     "similarity": round(float(n["similarity"] or 0), 3),
                     "thread_id": str(n["thread_id"]) if n["thread_id"] else None,
                 }
-                for n in neighbours
+                for n in neighbors
             ],
-            "total": len(neighbours),
+            "total": len(neighbors),
             "query_keywords": [],
             "method": "embedding",
         }
@@ -590,7 +590,7 @@ async def _translate_entry(db: AsyncSession, user_id: uuid.UUID, entry_id: str, 
             translated_title, _ = await translation.translate_text(entry.title, source=title_source, target=target_lang)
         except translation.TranslationError:
             translated_title = None
-        # Auto-detect on short titles can no-op; retry with the body's detected language.
+        # Auto-detection can return a short title unchanged; retry with the body's detected language.
         if (
             translated_title is not None
             and translated_title.strip() == entry.title.strip()
@@ -741,8 +741,8 @@ async def _ingest_url(db: AsyncSession, user_id: uuid.UUID, url: str, title: str
         entry.title = title.strip()
     await db.flush()
 
-    # Dispatch the full intelligence pipeline (worker retries cover the window
-    # until the executor commits this transaction).
+    # Dispatch the full intelligence pipeline (the worker's retries cover the gap
+    # until the tool executor commits this transaction).
     from app.workers.feed_tasks import dispatch_entry_pipeline
 
     dispatch_entry_pipeline(str(entry.id), run_extraction=True)
@@ -985,8 +985,8 @@ async def _get_ingest_batch(db: AsyncSession, user_id: uuid.UUID, batch_id: str)
     if batch is None:
         return {"error": "Batch not found"}
     items = list(batch.items)
-    # Same as GET /api/ingest/batches/{id}: the manual feed is shared (no owner
-    # check), and a poll is what flips a dead worker's `parsing` items so retry lights up.
+    # Same as GET /api/ingest/batches/{id}: the manual feed is shared (no owner check), and
+    # reading the batch is what marks a dead worker's stale `parsing` items failed so they can be retried.
     if await batches.mark_stale_parsing(db, items):
         await db.commit()
     return _ingest_batch_dict(batch, items)
@@ -1035,9 +1035,9 @@ async def _create_share_link(
         return err
 
     # Shares are per-(entry, creator): another analyst sharing the same entry
-    # holds their own row, so this must match on the caller — both to avoid
-    # handing back someone else's token and because an entry-wide lookup now
-    # legitimately returns more than one row.
+    # holds their own row, so this must match on the caller, both to avoid
+    # handing back someone else's token and because an entry-wide lookup can
+    # return more than one row.
     existing = await db.execute(
         select(SharedEntry).where(
             SharedEntry.entry_id == entry.id,
@@ -1116,8 +1116,8 @@ async def _revoke_share_link(db: AsyncSession, user_id: uuid.UUID, entry_id: str
     entry, err = await _get_entry(db, entry_id)
     if err:
         return err
-    # Only the caller's own share — revoking someone else's link is exactly the
-    # cross-user write the per-creator share model exists to prevent.
+    # Only the caller's own share: revoking someone else's link is the cross-user
+    # write the per-creator share model exists to prevent.
     result = await db.execute(
         select(SharedEntry).where(
             SharedEntry.entry_id == entry.id,

@@ -13,26 +13,18 @@ export type IntelMode = "full" | "selective" | "manual" | "none";
 
 /**
  * Every editable field on a feed, flat, in one object.
- *
- * The previous modal held these in 30 separate useState calls, which is why
- * nothing could tell whether the form was dirty, which section a change
- * belonged to, or which keys were safe for a non-admin to send. One object
- * compared against its initial value answers all three.
- *
- * Everything that lives in `adapter_config` — including `auto_translate` and
- * youtube's `exclude_shorts` — goes in `adapter` rather than getting its own
- * field: the PUT merges `adapter_config` server-side, so there is no reason for
- * the per-type keys to be spelled out here.
+ * Keeping them in one object compared against its initial value tells the form whether it is dirty, which pane a change belongs to, and which keys are safe for a non-admin to send.
+ * Everything that lives in `adapter_config`, including `auto_translate` and YouTube's `exclude_shorts`, goes in `adapter` instead of getting its own field: the PUT merges `adapter_config` server-side, so the per-type keys do not need to be listed here.
  */
 export interface FeedFormValues {
   custom_title: string;
-  /** "" = Uncategorized. Sent as null, which the API now honours. */
+  /** "" = Uncategorized. Sent as null, which the API honors. */
   category_id: string;
   is_muted: boolean;
   url: string;
   feed_type: string;
   fetch_interval_minutes: number;
-  /** "" = keep forever. Sent as null, which the API now honours. */
+  /** "" = keep forever. Sent as null, which the API honors. */
   retention_days: string;
   is_active: boolean;
   intel_extraction_mode: IntelMode;
@@ -76,14 +68,8 @@ const FIELD_PANE: Record<keyof FeedFormValues, PaneId> = {
 };
 
 /**
- * Curation is anyone's to change; everything else is shared plumbing the API
- * only accepts from an admin. A non-admin must not send the other keys at all
- * — the endpoint 403s on their mere presence, explicit nulls included.
- *
- * `is_active` is in neither list because it moves between them: with per-user
- * subscriptions on it writes the caller's own subscription row and is personal,
- * and with the flag off it is the one shared switch and admin-only. The server
- * gates it the same way.
+ * Curation fields can be changed by anyone; every other field is shared configuration the API only accepts from an admin. A non-admin must not send the other keys at all: the endpoint returns 403 if any of them is present, explicit nulls included.
+ * `is_active` is not in this list because its gate depends on a flag: with per-user subscriptions on it writes the caller's own subscription row and anyone may change it, and with the flag off it is one shared switch and admin-only. The server gates it the same way.
  */
 const CURATION_FIELDS = [
   "custom_title",
@@ -97,8 +83,7 @@ const CURATION_FIELDS = [
 
 const CURATION = new Set<string>(CURATION_FIELDS);
 
-/** The response masks stored credentials (Bluesky app password, GitHub token,
- *  NVD API key); never echo the placeholder back. */
+/** The response masks stored credentials (Bluesky app password, GitHub token, NVD API key); never echo the placeholder back. */
 const MASKED = /^•+$/;
 
 function initialValues(feed: Feed): FeedFormValues {
@@ -230,8 +215,7 @@ export function useFeedForm(feed: Feed): FeedForm {
         }
       }
 
-      // A new app password rides along in adapter_config even when nothing else
-      // in it changed. Blank means "keep the stored one", which the API honours.
+      // A new app password is sent in adapter_config even when nothing else in it changed. Blank means "keep the stored one", which the API honors.
       if (isAdmin && newAppPassword !== "") {
         const config = (payload.adapter_config as Record<string, unknown>) ?? buildAdapterConfig(values);
         config.app_password = newAppPassword;
@@ -258,12 +242,7 @@ export function useFeedForm(feed: Feed): FeedForm {
   };
 }
 
-/**
- * Bluesky is rebuilt rather than merged: its three modes use different keys
- * (handle / feed_uri / query), and merging would leave the previous mode's keys
- * behind for the adapter to trip over. Every other type merges, because its
- * config holds fetch state (watermarks, last_commit_sha) we must not drop.
- */
+/** Bluesky config is rebuilt instead of merged: its three modes use different keys (handle / feed_uri / query), and merging would leave the previous mode's keys behind for the adapter to misread. Every other type merges, because its config holds fetch state (watermarks, last_commit_sha) that must not be dropped. */
 function buildAdapterConfig(values: FeedFormValues): Record<string, unknown> {
   const adapter = values.adapter;
   if (values.feed_type !== "bluesky") {

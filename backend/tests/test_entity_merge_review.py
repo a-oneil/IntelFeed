@@ -1,4 +1,4 @@
-"""The catalogue-wide duplicate review.
+"""The catalog-wide duplicate review.
 
 - Candidate pairs come from a similar name or a shared alias (shared articles
   are context and a tie-breaker, never a signal on their own), minus pairs an
@@ -78,7 +78,8 @@ async def test_candidates_score_name_alias_and_shared_articles(db_session, test_
 
 
 async def test_each_side_shows_its_own_recent_articles(db_session, test_feed):
-    """A count of false matches (a common-word name) has to be visible as such."""
+    """Each side lists its own recent article titles, so a name that matches unrelated articles (a common word) is
+    visible in the prompt."""
     a, b, _far = await _seed_pair(db_session, test_feed, shared=0)
     e = Entry(feed_id=test_feed.id, title="Linux Kernel: CVSS (Max): 9.8", url="https://x/k", guid=str(uuid.uuid4()))
     db_session.add(e)
@@ -112,7 +113,7 @@ async def test_shared_articles_alone_never_make_a_pair(db_session, test_feed):
     await db_session.flush()
     cands = await _find(db_session)
     assert {far.id, other.id} not in [{c.a_id, c.b_id} for c in cands]
-    # The look-alike pair is still found, and its (zero) shared count is reported honestly.
+    # The look-alike pair is still found, and its shared count of zero is left out of the prompt.
     assert len(cands) == 1 and cands[0].shared_entries == 0 and "shared article" not in pairs_block(cands)
 
 
@@ -128,7 +129,7 @@ async def test_same_verdict_files_a_merge_the_queue_can_apply(client, admin_head
     row = (
         await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == ACTION_MERGE))
     ).scalar_one()
-    # No keep given: the catalogue entry with more articles survives, the AI one goes.
+    # No keep given: the catalog entry with more articles survives, the AI one goes.
     assert row.entity_id == b.id and row.after["target_id"] == str(a.id)
     assert row.after["merge_into"] == "APT29" and row.after["origin"] == ORIGIN and row.applied is False
     assert row.before["entity"]["name"] == "APT 29" and "entry_id" not in row.before
@@ -280,7 +281,7 @@ async def test_analyst_not_duplicate_keeps_the_pair_out(db_session, test_feed):
 
 
 async def test_different_mitre_ids_never_make_a_pair(db_session, test_feed):
-    """MITRE filing two entries is the catalogue saying they are two things."""
+    """Two different MITRE IDs mean MITRE lists them as separate groups, so the pair is skipped."""
     a = ThreatActor(name="Earth Lusca", aliases=["ControlX"], mitre_id="G1006", article_count=18)
     b = ThreatActor(name="Aquatic Panda", aliases=["ControlX"], mitre_id="G0143", article_count=12)
     db_session.add_all([a, b])
@@ -318,7 +319,7 @@ async def test_shared_names_say_where_each_alias_came_from(db_session, test_feed
 
 
 async def _seed_cluster(db_session):
-    """Three entries sharing one alias, the Charcoal Typhoon shape."""
+    """Three actors sharing one alias (ControlX), as Charcoal Typhoon, Earth Lusca and Aquatic Panda do."""
     names = ("Charcoal Typhoon", "Earth Lusca", "Aquatic Panda")
     actors = {n: ThreatActor(name=n, aliases=["ControlX"], article_count=5) for n in names}
     db_session.add_all(actors.values())

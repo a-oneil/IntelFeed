@@ -72,8 +72,7 @@ describe("default table layouts", () => {
     const { container } = renderTable();
     const labels = headerLabels(container);
 
-    // `description` and `top_link` are defaultHidden in the column defs; the
-    // preset shows them. `last_seen_at` ships visible; the preset hides it.
+    // `description` and `top_link` are defaultHidden in the column defs; the preset shows them. `last_seen_at` is visible by default; the preset hides it.
     expect(labels).toContain("Description");
     expect(labels).toContain("Top link");
     expect(labels).not.toContain("Last Seen");

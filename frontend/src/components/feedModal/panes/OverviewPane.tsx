@@ -22,12 +22,8 @@ function ago(iso: string | null): string {
 }
 
 /**
- * What this feed has actually done, before any of the knobs.
- *
- * The old modal showed one fact about a feed's behaviour — `last_error` — and
- * nothing else, so "is this source worth keeping?" was unanswerable from the
- * place you went to change it. The value score and reach already existed on
- * the Engine's feed tables; this brings the one row that concerns this feed.
+ * Shows what this feed has done (fetch status, errors, value score and output), ahead of the panes that change its settings.
+ * The aim is to answer "is this source worth keeping?" in the same place you change it. The value score comes from the same data as the Engine's feed tables, limited to this feed's row.
  */
 export function OverviewPane({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }) {
   const value = useFeedValue(feed.id);
@@ -136,7 +132,7 @@ export function OverviewPane({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }
             {feed.is_active ? "Pause feed" : "Resume feed"}
           </button>
         )}
-        {/* Full sync is a GitHub-repo-only endpoint; it 400s on anything else. */}
+        {/* Full sync only works for GitHub repo feeds; the endpoint returns 400 for any other type. */}
         {isAdmin && feed.feed_type === "github_repo" && (
           <button
             type="button"

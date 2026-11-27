@@ -5,15 +5,13 @@ import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { destLabel, searchEngineSettings, type EngineDest } from "./engineSettingsIndex";
 import s from "./EngineSettingsSearch.module.css";
 
-/** "Where do I change X?" for the Engine console. Its settings are spread
- *  across stage panels, table views and browse screens by design — this finds
- *  one by name and opens the surface that owns it, flashing the row. */
+/** Setting finder for the Engine console. Engine settings are spread across stage panels, table views and browse screens; this searches them by name and opens the panel or screen that holds the picked one, highlighting its row. */
 export function EngineSettingsSearch({
   onPick,
   className,
 }: {
   onPick: (dest: EngineDest, settingKey: string) => void;
-  /** Extra class on the field wrapper — lets a toolbar flex it. */
+  /** Extra class on the field wrapper, so a toolbar can size it with flex. */
   className?: string;
 }) {
   const { data } = useSystemSettings();
@@ -26,7 +24,7 @@ export function EngineSettingsSearch({
 
   useEffect(() => setActive(0), [q]);
 
-  // Click-away — the dropdown outlives blur so a click on a row still lands.
+  // Close on a click outside. The dropdown is not closed on blur, so a click on a row still registers.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {

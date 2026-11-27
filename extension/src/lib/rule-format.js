@@ -1,6 +1,4 @@
-// Guessing which rule language a block of text is written in, so the "save as
-// detection rule" window can preselect it. The user can always change it, and
-// the server's validator has the last word.
+// Guessing which rule language a block of text is written in, so the "save as detection rule" window can preselect it. The user can always change it, and the server's validator has the last word.
 
 // The formats IntelFeed stores (RULE_TYPE_PATTERN in backend/app/schemas/intelligence.py).
 export const RULE_TYPES = [

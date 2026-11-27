@@ -15,13 +15,7 @@ import { useGenerateExposureReport } from "@/hooks/useIntelReports";
 import type { Country, PaginatedResponse, ThreatSurfaceItem } from "@/api/types";
 import styles from "./ExposureBuilderPage.module.css";
 
-/**
- * Threat Exposure Report builder: pick (or create) an intel profile — a named
- * regions × verticals scope — then curate the matched threat surface with
- * keep/drop before the report draft is generated. The platform is
- * enterprise-agnostic: profiles are plural (per customer, portfolio, or watch
- * area), never "the org".
- */
+/** Threat Exposure Report builder: pick (or create) an intel profile (a named regions × verticals scope), then curate the matched threat surface with keep/drop before the report draft is generated. Profiles are plural (per customer, portfolio, or watch area), never a single "the org". */
 export function ExposureBuilderPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -129,7 +123,7 @@ function ProfileForm({ onCreated, onCancel }: { onCreated: (id: string) => void;
       toast.success(`Profile "${profile.name}" saved`);
       onCreated(profile.id);
     } catch {
-      /* interceptor toasts */
+      /* The query client's MutationCache onError shows the error toast. */
     }
   };
 
@@ -242,8 +236,7 @@ function SurfaceStep({
 }) {
   const { data: surface, isLoading } = useProfileThreatSurface(profileId);
   const generate = useGenerateExposureReport();
-  // id -> kept? Everything matched starts kept except what the profile's
-  // remembered curation dropped last issue.
+  // Ids of dropped items. Everything matched starts kept except what the profile's saved curation dropped in the last report.
   const [dropped, setDropped] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -276,7 +269,7 @@ function SurfaceStep({
       toast.success("Exposure report drafted");
       onDone(report.id);
     } catch {
-      /* interceptor toasts */
+      /* The query client's MutationCache onError shows the error toast. */
     }
   };
 

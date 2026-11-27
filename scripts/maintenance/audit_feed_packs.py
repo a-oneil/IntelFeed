@@ -1,6 +1,6 @@
 """Re-audit the shipped starter feed packs: is every source still alive?
 
-A committed feed list rots. Sources move their RSS path, get absorbed by an
+A committed feed list goes stale. Sources move their RSS path, get absorbed by an
 acquirer, or just stop publishing, and shipping a dead URL to every new install
 is worse than shipping nothing — the user sees a feed with a red error count on
 their first day and concludes the platform is broken.
@@ -20,7 +20,7 @@ What it checks, per feed type:
   web_scraper                     the blog page responds
   nvd                             the NVD API responds
 
-Caveats worth knowing before you delete anything:
+Caveats to check before you delete anything:
 
   * Cloudflare-fronted sources answer a plain GET with 403 while IntelFeed's own
     fetcher gets through, and some date their items in a tag this script doesn't

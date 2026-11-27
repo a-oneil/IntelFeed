@@ -52,8 +52,8 @@ async def _run_search_plan(
 
     # Feed-name lookups and the Postgres-backed entry filters (category:, signal:,
     # sector:, url:, feed.*, is:muted/translated/image). Without this the filters
-    # parse and are then silently dropped, so `signal:under_reported` answers with
-    # every entry. Both resolvers together, per resolve_deferred_filters.
+    # parse and are then silently dropped, so `signal:under_reported` returns
+    # every entry. resolve_deferred_filters runs both resolvers.
     await resolve_deferred_filters(db, plan)
 
     entity_results: list[dict] = []
@@ -82,9 +82,9 @@ async def _run_search_plan(
             entry_result = await _fetch_entries_by_ids(
                 db, entry_id_constraint, limit=limit, offset=offset, sort="radar"
             )
-        # Nothing for the index to search: entity-only, or a Postgres-backed
-        # filter with no text term. Passing tens of thousands of IDs as a
-        # Meilisearch filter string silently returns zero.
+        # Fetch from Postgres when there is nothing for the index to search (entity-only,
+        # or a Postgres-backed filter with no text term) or the ID list exceeds 800.
+        # Passing tens of thousands of IDs as a Meilisearch filter string silently returns zero.
         elif (
             entry_id_constraint is not None
             and len(entry_id_constraint) > 0
@@ -186,7 +186,7 @@ async def _search_entries(
         "vendors, products, countries, mitigations, campaigns and intel reports. Returns matching entities "
         "with type and key details. Note results use type 'note' and carry note_source: 'note' for a "
         "note on an article or a standalone note, 'entity_note' for a note attached to an entity. "
-        "Their description snippet is centred on the match, not the note's opening line."
+        "Their description snippet is centered on the match, not the note's opening line."
     ),
     input_schema={
         "properties": {

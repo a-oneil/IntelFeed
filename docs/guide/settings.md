@@ -1,4 +1,4 @@
-# Settings and personalising
+# Settings and personalizing
 
 This page covers each part of **Settings**: your own preferences, and what
 admins control for the whole instance. Sections are listed on the left in three groups: **You**, **Connect** and
@@ -38,7 +38,7 @@ personal keys are off, the page says so. See
 
 ## Reading
 
-**Your Radar** appears only when an admin has turned on personalised ranking.
+**Your Radar** appears only when an admin has turned on personalized ranking.
 Your ▲/▼ votes in the Priority Queue teach it how much each kind of signal
 matters to you. It changes the order you see, not what reaches the queue. The switch turns it off (back to the shared ranking), and
 **Forget what it learned** clears your learned weights.
@@ -79,7 +79,7 @@ Tip: rather than tuning sort order, use the [Priority Queue](priority-queue.md).
 
 ## Tags
 
-Rename, recolour, merge and delete tags. Each tag shows how many articles carry
+Rename, recolor, merge and delete tags. Each tag shows how many articles carry
 it, and **View** opens them.
 
 - **Chip** shows the tag as a badge on the article row.
@@ -106,7 +106,7 @@ read. Use the lite one unless you want an agent that can make changes.
 
 **Feeds & Export**: **OPML Export** (a copy of your feed list), YouTube
 defaults such as excluding Shorts, and the public RSS feeds. Importing OPML is
-in the **Add Feed** window. See [Adding and managing feeds](feeds.md).
+under **Import OPML** in the **Add a source** window (the sidebar's **+**). See [Adding and managing feeds](feeds.md).
 
 **Telegram**: the one-time setup walkthrough.
 

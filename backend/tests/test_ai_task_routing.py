@@ -1,6 +1,6 @@
 """Every task that calls an AI provider runs on the `ai` queue.
 
-The default worker runs two tasks at a time and also polls feeds. An AI task
+The default worker runs two tasks at a time in prod and also polls feeds. An AI task
 left there holds a slot for minutes per call, and enough of them stop ingest
 (prod, 2026-09-23). celery-worker-ai serves the `ai` queue one task at a time.
 """

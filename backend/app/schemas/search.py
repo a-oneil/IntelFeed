@@ -70,11 +70,11 @@ class UnifiedSearchQuery(BaseModel):
     offset: int = Field(default=0, ge=0)
     # How many entities the intelligence half may return in total. The default
     # matches what the workbench's own /intelligence/search asks for, so the two
-    # surfaces can no longer disagree about how much of the graph matched.
+    # surfaces report the same number of matching entities.
     entity_limit: int = Field(default=200, ge=0, le=500)
     # Rows rendered per entity type before the UI's "show all" takes over.
-    # Applied AFTER `counts` is computed, so the per-type totals stay honest
-    # even though the payload is trimmed.
+    # Applied AFTER `counts` is computed, so the per-type totals count every
+    # match even though the payload is trimmed.
     entity_group_limit: int = Field(default=25, ge=1, le=500)
     # Drop the entries this user has already read, and count only the rest.
     # Not `is:unread`, which filters on the index's own read flag: that flag is
@@ -125,8 +125,8 @@ class UnifiedSearchResponse(BaseModel):
     # deliberate filter-plus-search-term like `threat_actor:APT29 ransomware`.
     did_you_mean: str | None = None
     # Field names that parsed as `name:value` but are not in the vocabulary —
-    # usually a typo like `titel:`. Their values were searched as free text, and
-    # saying so beats leaving the user with unexplained results.
+    # usually a typo like `titel:`. Their values were searched as free text; they
+    # are listed so the UI can tell the user why the results look that way.
     unknown_fields: list[str] = []
     processingTimeMs: int = 0
 

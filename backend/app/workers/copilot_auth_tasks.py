@@ -3,7 +3,7 @@
 Why this exists (prod topology): the copilot drives the ``claude`` CLI, which
 authenticates via an OAuth session stored at ``~/.claude/.credentials.json``.
 Only ``celery-worker-ai`` owns that credentials volume, so both reading the
-credential's health and rewriting it via ``claude setup-token`` must happen on
+credential's health and rewriting it via ``claude auth login`` must happen on
 that worker. The api container dispatches here.
 
 ``run_claude_auth`` drives the interactive ``claude auth login`` flow under a
@@ -20,7 +20,7 @@ that doubles as an expiry monitor. It's beat-scheduled and also runs on demand.
 
 Both tasks are routed to the ``ai`` queue (see ``celery_app.py``).
 Because that worker runs ``--concurrency=1``, an in-flight re-auth briefly
-occupies it; the code-wait is bounded so an abandoned flow can't wedge it.
+occupies it; the code-wait is bounded so an abandoned flow can't hold it forever.
 """
 
 from __future__ import annotations
@@ -285,16 +285,16 @@ def run_claude_auth(self, session_id: str) -> dict:
             return fail("Timed out waiting for the authorization code. Please retry.", state="timeout")
         code = popped[1].strip()
         if code == _CANCEL_TOKEN:
-            _set_session(r, session_id, state="cancelled", message="Re-authentication cancelled.")
+            _set_session(r, session_id, state="cancelled", message="Re-authentication canceled.")
             return {"status": "cancelled", "session_id": session_id}
 
         _set_session(r, session_id, state="exchanging", url=url)
         os.write(master_fd, (code + "\r").encode("utf-8"))
 
         # Success = `auth login` writes a fresh, valid .credentials.json. Poll for
-        # that file (mtime newer than this run) rather than the CLI process exit,
-        # which is the unambiguous signal on every deploy topology. Drain output
-        # meanwhile so a failure has a readable transcript.
+        # that file (mtime newer than this run) rather than waiting for the CLI to
+        # exit; the file is the unambiguous signal on every deploy topology. Drain
+        # output meanwhile so a failure has a readable transcript.
         fresh: dict | None = None
         deadline = time.monotonic() + _EXCHANGE_WAIT
         while time.monotonic() < deadline:

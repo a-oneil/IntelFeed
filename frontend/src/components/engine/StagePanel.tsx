@@ -18,9 +18,7 @@ const KIND_LABELS: Record<string, string> = {
   side: "side channel",
 };
 
-/** Full-width stage settings panel: re-hosts today's per-stage settings
- *  components unchanged (the old Pipeline tab's stage panels), under the new
- *  header-driven console. One panel open at a time. */
+/** Full-width stage settings panel: shows the per-stage settings components for the stage picked from the console header. One panel open at a time. */
 export function StagePanel({
   stage,
   onClose,
@@ -79,8 +77,7 @@ export function StagePanel({
               flat
               excludeKeys={["autolinker_false_positive_names", "autolinker_blocked_surface_forms"]}
             />
-            {/* Both name lists are comma strings (the curated one runs ~170
-                entries) — rendered as tables instead of textareas nobody can read. */}
+            {/* Both name lists are comma strings (the curated one runs ~170 entries) — rendered as tables instead of textareas nobody can read. */}
             <FpNamesPanel />
             <FpNamesPanel list="blocked" />
           </>

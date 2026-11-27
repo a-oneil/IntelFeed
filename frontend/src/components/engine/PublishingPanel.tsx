@@ -1,10 +1,4 @@
-/**
- * PublishingPanel — Engine › Publishing: the outbound side of the observables
- * ledger. Shows each feed (TAXII collection, EDL blocklists, SIEM lookups)
- * with its eligible count and when a consumer last pulled it — a feed nobody
- * pulls is a signal to cut — plus the publish policy knobs from the settings
- * registry. Everything 404s until publishing is enabled and a token is set.
- */
+/** PublishingPanel — Engine › Publishing: the outbound side of the observables ledger. Shows each feed (TAXII collection, EDL blocklists, SIEM lookups) with its eligible count and when a consumer last pulled it (a feed nobody pulls is a candidate for removal), plus the publish policy settings from the settings registry. Every feed returns 404 until publishing is enabled and a token is set. */
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 

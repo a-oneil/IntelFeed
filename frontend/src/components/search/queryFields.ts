@@ -1,14 +1,9 @@
 import { getEntityCssVar } from "@/utils/entityTheme";
 
 /**
- * The query language, as data — the single source for everything that shows it.
+ * The query language as data: the single source for every surface that shows it (the reference card, the autocomplete, and their colors).
  *
- * Three surfaces used to describe the grammar independently: the reference card
- * listed the fields, the header autocomplete had its own dictionary, and each
- * picked its own colours. They drifted immediately — the workbench autocomplete
- * still offered five fields after the language grew to ninety-four, and a `cve:`
- * completion was a different colour from the `cve:` in the reference beside it.
- * Everything below is now derived from this file.
+ * It exists because separate copies of the grammar drifted apart: an autocomplete offered five fields after the language had grown to ninety-four, and a `cve:` completion was a different color from the `cve:` in the reference beside it.
  */
 
 export interface QueryField {
@@ -20,13 +15,7 @@ export interface QueryField {
 
 export interface QueryFieldGroup {
   label: string;
-  /**
-   * The group's colour rule. Set only for groups that name an entity — the
-   * palette is the workbench's entity vocabulary, so colouring `Articles` or
-   * `Operators` would say something untrue about them. Groups are split one
-   * per entity type precisely so the colour can live on the group rather than
-   * on every token inside it.
-   */
+  /** The group's color. Set only for groups that name an entity: the palette is the workbench's entity colors, so coloring `Articles` or `Operators` would wrongly mark them as entities. Groups are split one per entity type so the color can sit on the group rather than on every token inside it. */
   accent?: string;
   fields: QueryField[];
 }
@@ -72,9 +61,7 @@ export const FIELD_GROUPS: QueryFieldGroup[] = [
       {
         token: "signal:",
         hint: "Why the engine ranked it",
-        // Mirrors SIGNAL_FAMILIES in backend/app/intelligence/signals.py — the
-        // engine's registry, not a selection from it. This list sat four
-        // signals behind for as long as those four existed.
+        // Mirrors every key of SIGNAL_FAMILIES in backend/app/intelligence/signals.py, not a selection from it. Update this list when a signal is added there; it has fallen behind before.
         values: [
           "correlation_event",
           "critical_cvss",
@@ -351,9 +338,9 @@ export const FIELD_HINTS: Record<string, string> = Object.fromEntries(
   ALL_FIELDS.map((f) => [f.token.replace(/:$/, ""), f.hint]),
 );
 
-// ── Colour ────────────────────────────────────────────────────────────────
+// ── Color ────────────────────────────────────────────────────────────────
 
-/** Field namespace → entity type, for the ones whose names differ. */
+/** Field namespace → entity type. Most names match; `ioc` and `rule` map to `observable` and `detection_rule`. */
 const NAMESPACE_ENTITY: Record<string, string> = {
   cve: "cve",
   ttp: "ttp",
@@ -380,27 +367,21 @@ const ENTRY_FIELDS = new Set([
 ]);
 
 /**
- * The colour a query field wears, wherever it appears — the autocomplete dot,
- * the reference token, the group rule.
+ * The color of a query field wherever it appears: the autocomplete dot, the reference token, the group rule.
  *
- * `token` may be a bare field (`cve.severity:`), a completed `field:value`
- * pair, or an operator. Anything unrecognised takes the muted text colour
- * rather than inventing one.
+ * `token` may be a bare field (`cve.severity:`), a completed `field:value` pair, or an operator. Anything unrecognized gets the secondary text color.
  */
 export function queryFieldColor(token: string): string {
   const namespace = token.trim().split(":")[0].split(".")[0].toLowerCase();
   if (ENTRY_FIELDS.has(namespace)) return "var(--accent-feeds)";
-  // PIRs are a first-class domain vocabulary with their own token, but have no
-  // entry in ENTITY_THEMES, so they are named directly.
+  // PIRs have their own color token but no entry in ENTITY_THEMES, so they are named directly.
   if (namespace === "pir") return "var(--entity-pir)";
   if (namespace === "intel_report") return "var(--accent-intel)";
-  // Notes are analyst writing rather than an intelligence entity, so they have
-  // no ENTITY_THEMES row either.
+  // Notes are analyst writing rather than an intelligence entity and are not in NAMESPACE_ENTITY, so their color is named directly.
   if (namespace === "note") return "var(--entity-note)";
   const entity = NAMESPACE_ENTITY[namespace];
-  // The CSS variable, not the frozen hex behind it — these follow the theme
-  // like every other entity colour in the app.
+  // The CSS variable, not the fixed hex value, so the color follows the active theme like every other entity color in the app.
   if (entity) return getEntityCssVar(entity);
-  // `sort:`, AND / OR / NOT, wildcards, grouping — grammar, not subject matter.
+  // `sort:`, AND / OR / NOT, wildcards and grouping are grammar, not an entity or feed field.
   return "var(--text-secondary)";
 }

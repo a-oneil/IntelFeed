@@ -55,8 +55,8 @@ def build_stamp() -> dict:
 
     Only the env half is cached. The .git half deliberately is not: dev serves
     volume-mounted code, so a stamp cached at process start would still name
-    the commit you were on when the container booted, several commits ago —
-    exactly the stale signal this is meant to kill. Production never reaches
+    the commit you were on when the container booted, several commits ago,
+    which is the stale value this function exists to avoid. Production never reaches
     that branch (no .git is mounted), so it pays nothing for the freshness.
     """
     version, sha = _env_stamp()

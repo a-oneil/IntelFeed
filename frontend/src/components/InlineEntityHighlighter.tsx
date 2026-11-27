@@ -5,11 +5,7 @@ import { ENTITY_COLOR_MAP } from "@/utils/entityTheme";
 import { useIntelStore, type EntityType } from "@/stores/intelStore";
 import styles from "./InlineEntityHighlighter.module.css";
 
-/**
- * Generic metadata attached to a highlighted entity so the popover can show a
- * description plus a few key facts while reading, without a follow-up fetch.
- * Populated for all non-CVE entity types (CVE uses the richer `cveMeta`).
- */
+/** Generic metadata attached to a highlighted entity so the popover can show a description plus a few key facts while reading, without a follow-up fetch. Populated for every entity type except CVE and TTP, which use the richer `cveMeta` / `ttpMeta`. */
 export interface HighlightEntityMeta {
   description?: string | null;
   /** Short key/value facts shown in the popover grid (e.g. Motivation, Type). */
@@ -20,7 +16,7 @@ export interface HighlightEntityMeta {
   links?: Array<{ label: string; url: string }>;
   /** Wikipedia thumbnail (country flag, vendor/product logo, actor group image). */
   image_url?: string | null;
-  /** Detection artifacts for offensive tools (hashes, registry keys, signatures). */
+  /** Detection artifacts for tool entities (hashes, registry keys, signatures). */
   artifacts?: Array<{ label: string; value: string }>;
   article_count?: number;
   first_seen_at?: string;
@@ -41,8 +37,7 @@ export interface HighlightEntity {
     | "mitigation"
     | "observable";
   value: string;
-  /** The entity's canonical name, when the matched `value` is an alias or other
-   *  surface form. Lets the popover tell "wrong alias" from "wrong entity". */
+  /** The entity's canonical name, when the matched `value` is an alias or other surface form. Lets the popover tell "wrong alias" from "wrong entity". */
   name?: string;
   /** Optional CVE metadata for enriched popovers */
   cveMeta?: {
@@ -84,12 +79,9 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/**
- * Build a regex fragment for an entity value.
- */
+/** Build a regex fragment for an entity value. */
 function buildEntityPattern(entity: HighlightEntity): string {
-  // Lookbehind/lookahead instead of \b so values ending in punctuation
-  // (e.g. "U.S.") still match — \b requires a \w↔\W transition.
+  // Lookbehind/lookahead instead of \b so values ending in punctuation (e.g. "U.S.") still match; \b requires a \w↔\W transition.
   return `(?<!\\w)${escapeRegExp(entity.value)}(?!\\w)`;
 }
 
@@ -136,9 +128,7 @@ export function InlineEntityHighlighter({
     (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target.classList.contains(styles.entityHighlight)) return;
-      // The highlight span may sit inside an <a> from the article HTML
-      // (publishers often hyperlink CVE IDs) — keep the click on the popover
-      // instead of letting the anchor navigate away.
+      // The highlight span may sit inside an <a> from the article HTML (publishers often hyperlink CVE IDs); keep the click on the popover instead of letting the anchor navigate away.
       e.preventDefault();
       showPopoverFor(target);
     },
@@ -171,9 +161,7 @@ export function InlineEntityHighlighter({
     [],
   );
 
-  // Watch for container content being replaced (e.g. SafeHTML re-render from
-  // glossary terms or keywords loading after entity highlights were applied).
-  // When that happens, bump domVersion so the highlight effect re-runs.
+  // Watch for container content being replaced (e.g. SafeHTML re-render from glossary terms or keywords loading after entity highlights were applied). When that happens, bump domVersion so the highlight effect re-runs.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -191,8 +179,7 @@ export function InlineEntityHighlighter({
     return () => observer.disconnect();
   }, [containerRef]);
 
-  // When the "Highlight entities" preference is turned off, unwrap any
-  // highlights already applied so the article returns to plain text.
+  // When the "Highlight entities" preference is turned off, unwrap any highlights already applied so the article returns to plain text.
   useEffect(() => {
     if (enabled) return;
     const el = containerRef.current;
@@ -315,8 +302,7 @@ export function InlineEntityHighlighter({
 
   }, [containerRef, entities, enabled, domVersion]);
 
-  // Attach click + hover handlers separately so they survive re-renders
-  // even when the highlight effect returns early (highlights already present).
+  // Attach click + hover handlers separately so they survive re-renders even when the highlight effect returns early (highlights already present).
   useEffect(() => {
     const el = containerRef.current;
     if (!el || !enabled) return;

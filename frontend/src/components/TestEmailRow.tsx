@@ -3,9 +3,7 @@ import { toast } from "sonner";
 import api from "@/api/client";
 import styles from "./SystemSettings.module.css";
 
-/** Sends one message through the *saved* SMTP settings, so a typo shows up
- *  here instead of in a rule's run log. Rendered inside the Email (SMTP)
- *  group as one more setting row. */
+/** Sends one message through the *saved* SMTP settings, so a typo shows up here instead of in a rule's run log. Rendered inside the Email (SMTP) group as one more setting row. */
 export function TestEmailRow() {
   const [to, setTo] = useState("");
   const [sending, setSending] = useState(false);

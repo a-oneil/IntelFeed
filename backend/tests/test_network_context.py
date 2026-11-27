@@ -382,7 +382,7 @@ async def test_rdap_caches_per_registrable_domain(rdap_server):
     first = await adapter.enrich("observable", "mail.carinet.com")
     second = await adapter.enrich("observable", "www.carinet.com")
 
-    assert len(seen) == 2  # the second subdomain cost nothing
+    assert len(seen) == 2  # the second subdomain made no request
     assert second.parsed_data == first.parsed_data
     assert second.raw_response == {"cached": "carinet.com"}
 
@@ -629,7 +629,7 @@ async def test_greynoise_writes_its_class_to_a_column(db_session):
     assert obs.noise_class == "malicious"
     assert "gn_classification" not in (obs.reputation or {})
 
-    # Not seen scanning: GreyNoise gives no class, and the earlier one no longer stands.
+    # Not seen scanning: GreyNoise gives no class, and the earlier one is cleared.
     await apply_enrichment_results_to_entity(
         db_session, "observable", obs.id, [{**seen, "parsed_data": {"found": False, "noise": False, "riot": False}}]
     )

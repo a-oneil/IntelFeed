@@ -18,8 +18,7 @@ class IntelNotificationWorker(
     workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
 
-    // The periodic check and "Check for new intel now" can overlap.
-    // Both would post the same alerts and overwrite each other's saved state, so one runs at a time.
+    // The periodic check and "Check for new intel now" can overlap. Both would post the same alerts and overwrite each other's saved state, so one runs at a time.
     override suspend fun doWork(): Result = runLock.withLock { check() }
 
     private suspend fun check(): Result {
@@ -33,12 +32,10 @@ class IntelNotificationWorker(
         val enabled = app.userPreferences.notificationsEnabled.first()
         if (!enabled) return Result.success()
 
-        // Nothing could be shown (Android 13+ permission not granted, or notifications switched off
-        // for the app): skip the network work instead of polling the server every 15 minutes.
+        // Nothing could be shown (Android 13+ permission not granted, or notifications switched off for the app): skip the network work instead of polling the server every 15 minutes.
         if (!IntelNotificationHelper.canPostNotifications(applicationContext)) return Result.success()
 
-        // The saved alert state belongs to one account on one server, so signing in as someone
-        // else starts it fresh.
+        // The saved alert state belongs to one account on one server, so signing in as someone else starts it fresh.
         val owner = app.authPreferences.getServerUrl() + "|" + app.authPreferences.username.first().orEmpty().lowercase(Locale.ROOT)
         app.userPreferences.claimAlertState(owner)
 
@@ -46,9 +43,7 @@ class IntelNotificationWorker(
             if (it == 0L) System.currentTimeMillis() - 3600_000L else it
         }
         val currentSyncMs = System.currentTimeMillis()
-        // Each article (or story update) alerts once, whichever source finds it. Without this, a
-        // partial failure, which keeps the window below from advancing, re-posted the same alerts
-        // every 15 minutes.
+        // Each article (or story update) alerts once, whichever source finds it. Without this, a partial failure, which keeps the window below from advancing, would re-post the same alerts every 15 minutes.
         val notified = app.userPreferences.getNotifiedAlertKeys().toHashSet()
         val newlyNotified = mutableListOf<String>()
         fun firstAlert(key: String): Boolean = notified.add(key).also { if (it) newlyNotified += key }
@@ -106,8 +101,7 @@ class IntelNotificationWorker(
                 }
             }.onFailure { syncComplete = false }
 
-            // 3. Poll the Priority Queue: every unread row at or above the user's cut-off. The queue
-            // is ranked highest score first, so the scan stops at the first row below it.
+            // 3. Poll the Priority Queue: every unread row at or above the user's cut-off. The queue is ranked highest score first, so the scan stops at the first row below it.
             val cutoff = app.userPreferences.priorityAlertScore.first()
             val baselineAt = app.userPreferences.getPriorityAlertBaseline()
             val rows = mutableListOf<EntryItem>()
@@ -162,7 +156,7 @@ class IntelNotificationWorker(
             // A partial failure must not move the window past alerts the failed request missed.
             if (syncComplete) app.userPreferences.setLastNotificationSyncMs(currentSyncMs)
         } catch (e: CancellationException) {
-            throw e // WorkManager stopped the job; let the coroutine end as cancelled
+            throw e // WorkManager stopped the job; let the coroutine end as canceled
         } catch (_: Exception) {
             // Background polling failure should not crash; it will retry next interval
         } finally {

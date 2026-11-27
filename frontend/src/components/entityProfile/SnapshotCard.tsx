@@ -1,16 +1,9 @@
 /**
- * SnapshotCard — the type's own rows of the Overview's key facts: the one
- * home for the entity's numbers. Header badges carry the qualitative headline
- * (severity, KEV, Active); the quantitative detail lives here only, one row
- * per fact.
+ * SnapshotCard: the type-specific rows of the Overview's key facts, and the only place the entity's numbers are shown. Header badges show the qualitative summary (severity, KEV, Active); the numeric detail is shown here only, one row per fact.
  *
- * Per one-home-per-fact, a type contributes tiles ONLY for facts that don't
- * already live in an editable header badge or identity field — so the actor
- * strip is thin (motivation/origin/MITRE are editable badges) while the CVE
- * strip carries the full numeric read.
+ * Each fact is shown in one place only, so a type adds rows only for facts that are not already an editable header badge or identity field. That is why an actor has few rows (motivation, origin and MITRE are editable badges) while a CVE has the full set of scores.
  *
- * It renders bare: just the tiles, as rows of the Overview's key facts
- * table, after any `leading` rows (the activity verdict).
+ * It renders no wrapper: just the rows of the Overview's key facts table, after any `leading` rows (the activity verdict).
  */
 import { Link } from "react-router-dom";
 import type { EntityType } from "@/stores/intelStore";
@@ -154,10 +147,7 @@ export function SnapshotCard({
           v={<span className={`${styles.riskTier} ${styles[`riskTier_${riskTier}`] || ""}`}>{riskTier.toUpperCase()}</span>}
         />,
       );
-    // One home per fact: exploitation status lives in the header badge
-    // (editable, provenance-marked) and the lifecycle strip dates it; KEV
-    // membership + deadline live on the strip too. The Snapshot only states
-    // the negative — "Not listed" — which no other surface carries.
+    // Exploitation status is shown in the header badge (editable, with provenance) and dated on the lifecycle strip; KEV membership and deadline are on the strip too. This card only shows the negative case, "Not listed", which nothing else shows.
     const isKev = isKnownExploited({
       is_kev: cveDetail?.is_kev ?? entity.is_kev,
       exploit_status: cveDetail?.exploit_status ?? entity.exploit_status,
@@ -292,8 +282,7 @@ export function SnapshotCard({
   }
 
   if (entityType === "campaign" && campaignStats) {
-    // A campaign's snapshot is its scope: how much it holds, and of what. The
-    // numbers it used to spread across an Overview tab and a stats endpoint.
+    // A campaign's rows show its scope: how many articles, stories and entities it holds, plus rule coverage.
     rows.push(
       <Row
         key="articles"
@@ -324,8 +313,7 @@ export function SnapshotCard({
       rows.push(<Row key="origins" k="Actor origins" v={<b>{countryStats.origins}</b>} />);
     if (countryStats.targeting > 0)
       rows.push(<Row key="targeting" k="Targeted by" v={<b>{countryStats.targeting}</b>} />);
-    // Real EntryCountry role vocabulary: origin / target / infrastructure /
-    // mentioned (+ slashes). "mentioned" carries no signal — show the rest.
+    // EntryCountry roles are origin / target / infrastructure / mentioned, sometimes combined with slashes (only the first part is counted). "mentioned" and "unknown" carry no information, so they are skipped.
     const roleParts = Object.entries(countryStats.roles)
       .filter(([role, n]) => n > 0 && role && !/^mentioned$|^unknown$/.test(role))
       .map(([role, n]) => [role.split("/")[0], n] as const)
@@ -386,9 +374,7 @@ export function SnapshotCard({
       );
   }
 
-  // No baseline "Articles" row: the stored article_count counter only grows
-  // (unlinks don't decrement it), so it disagreed with the linked articles.
-  // The Overview's Reporting fact gives the recent count instead.
+  // No general "Articles" row: the stored article_count counter only grows (unlinks don't decrement it), so it disagrees with the linked articles. The Overview's Reporting fact gives the recent count instead.
 
   if (campaigns && campaigns.length > 0) {
     const [first, ...rest] = campaigns;

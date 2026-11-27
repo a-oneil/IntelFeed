@@ -1,14 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 
-/**
- * Bulk ingest. A batch is opened once; files, URLs and pastes are added to it
- * one request each (production sits behind an edge that caps a request at
- * 100 MB, so a forty-file form would never arrive), and every item is queued
- * on the worker the moment it is added. `useIngestBatch` is the status view:
- * the SSE `ingest_item_updated` event invalidates it, and it also polls while
- * anything is still queued or parsing in case the event stream is down.
- */
+/* Bulk ingest. A batch is opened once; files, URLs and pastes are added to it one request each (production sits behind an edge proxy that caps a request at 100 MB, so a forty-file form would be rejected), and every item is queued on the worker as soon as it is added. `useIngestBatch` is the status view: the SSE `ingest_item_updated` event invalidates it, and it also polls while anything is still queued or parsing in case the event stream is down. */
 
 export type IngestItemStatus =
   | "queued"

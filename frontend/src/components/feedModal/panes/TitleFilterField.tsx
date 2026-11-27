@@ -7,12 +7,7 @@ import styles from "../fields.module.css";
 
 /**
  * The feed's exclude-title list, with a live count of what it would drop.
- *
- * Phrases, not regular expressions: the cases this exists for are literal
- * title prefixes ("ISC Stormcast For", "Chromium CVE-"). The preview runs the
- * server's own matcher over the feed's last 100 titles, so a phrase that
- * catches real articles shows up here before it is saved rather than as a
- * silent gap afterwards.
+ * Entries are phrases, not regular expressions, because the cases this exists for are literal title prefixes ("ISC Stormcast For", "Chromium CVE-"). The preview runs the server's own matcher over the feed's last 100 titles, so a phrase that catches real articles shows up here before it is saved instead of silently dropping articles afterward.
  */
 export function TitleFilterField({ feedId, form }: { feedId: string; form: FeedForm }) {
   const text = form.values.exclude_title_patterns;
@@ -62,7 +57,7 @@ export function TitleFilterField({ feedId, form }: { feedId: string; form: FeedF
       <span className={styles.hint}>
         One phrase per line, matched anywhere in the title, ignoring case. A
         matching article is dropped before it is saved, so it is never tagged,
-        analysed or scored. Articles already here stay.
+        analyzed or scored. Articles already here stay.
       </span>
       {status}
     </div>

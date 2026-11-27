@@ -1,7 +1,8 @@
-"""Workspace tools — detection-rule lifecycle, intel reports, requirements (16 tools).
+"""Workspace tools — detection-rule lifecycle, intel reports, report share links, requirements and
+telemetry source notes (20 tools).
 
-Mirrors the detection-rules section of app/api/intelligence.py plus
-app/api/intel_reports.py and app/api/requirements.py.
+Mirrors the detection-rules section of app/api/intelligence.py plus app/api/intel_reports.py,
+app/api/shared_reports.py, app/api/requirements.py and app/api/telemetry_notes.py.
 """
 
 import uuid
@@ -398,7 +399,7 @@ async def _convert_detection_rule(
         return {"error": "Source and target rule types are the same"}
 
     # Tools run as whoever invoked them, which for an agentic maintenance
-    # task is the service account — derive rather than assume a person.
+    # task is the service account, so look the caller up instead of assuming a person.
     caller = await derive_caller(db, user_id)
     try:
         resolved = await resolve_assignment(db, caller, "detection_rules")

@@ -82,9 +82,9 @@ def test_web_fetch_is_dropped_and_web_search_kept(tmp_path):
 
 
 def test_schema_tasks_without_tools_are_confined_too(tmp_path):
-    """Extraction runs (entry analysis and friends) answer through
-    StructuredOutput. They used to pair that allow with skipped permissions,
-    which left Bash usable by a prompt-injected article."""
+    """Extraction runs (entry analysis and similar tasks) answer through
+    StructuredOutput. Pairing that allow with skipped permissions would leave
+    Bash usable by a prompt-injected article, so these runs are confined too."""
     provider = _provider(tmp_path, [])
     argv = provider._build_argv("claude", "sonnet", None, {"type": "object"}, ALL_FLAGS)
     _assert_confined(argv)

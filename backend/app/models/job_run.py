@@ -13,7 +13,8 @@ class JobRun(Base):
 
     Written by the celery signal handlers in app/workers/task_tracking.py —
     filtered to registry tasks only; per-entry pipeline tasks are tracked in
-    entry_pipeline_runs instead. Pruned after 30 days by prune_engine_tables.
+    entry_pipeline_runs instead. Pruned after engine_run_retention_days
+    (default 30) by prune_engine_tables.
     """
 
     __tablename__ = "job_runs"

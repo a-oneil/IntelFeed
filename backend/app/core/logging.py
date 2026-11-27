@@ -72,11 +72,11 @@ def setup_logging() -> None:
     """Configure structlog with console + file handlers.
 
     File layout under LOG_DIR:
-        app.log    — all INFO+ logs (catch-all)
+        app.log    — INFO+ logs, except Celery/worker records (those go to jobs.log)
         error.log  — ERROR+ only
         http.log   — HTTP request logs (app.request logger)
         jobs.log   — Celery worker/beat logs (app.workers.* and celery.* loggers)
-        audit.log  — Mutating API action audit trail (app.audit logger)
+        audit.log  — Audit trail of every /api/ request (app.audit logger)
     """
     global _logging_configured
     if _logging_configured:
@@ -200,10 +200,11 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
 
 class AuditLoggingMiddleware(BaseHTTPMiddleware):
-    """Log all mutating API requests to the audit log.
+    """Log every /api/ request to the audit log, reads included (there is no
+    method filter); only /api/health is skipped.
 
     Captures method, path, response status, client IP, and (if available)
-    the user ID from the JWT bearer token.
+    the username or user ID from the JWT bearer token.
     """
 
     SKIP_PATHS = {"/api/health", "/metrics"}

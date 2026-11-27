@@ -1,10 +1,6 @@
 import type { TimeRange } from "@/components/TimeRangeSelector";
 
-/**
- * Property-order-insensitive deep equality for plain JSON-shaped values
- * (objects, arrays, primitives, null). Avoids the JSON.stringify pitfall
- * where `{a:1,b:2}` and `{b:2,a:1}` serialize differently.
- */
+/** Property-order-insensitive deep equality for plain JSON-shaped values (objects, arrays, primitives, null). Avoids the JSON.stringify pitfall where `{a:1,b:2}` and `{b:2,a:1}` serialize differently. */
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a === null || b === null) return a === b;
@@ -116,21 +112,12 @@ export function getSavedTriageView(
   return mergeWithDefault(userSettings?.triage_view, defaults);
 }
 
-/**
- * Normalize a raw (possibly stale) triage view to the current canonical shape —
- * drops removed widget keys (e.g. legacy `atlas`/`priority`) and fills any
- * missing defaults. Used when rehydrating the persisted store so it matches the
- * server-normalized view and doesn't trigger a spurious auto-save on mount.
- */
+/** Normalize a raw (possibly stale) triage view to the current canonical shape — drops removed widget keys (e.g. legacy `atlas`/`priority`) and fills any missing defaults. Used when rehydrating the persisted store so it matches the server-normalized view and doesn't trigger a spurious auto-save on mount. */
 export function normalizeTriageView(raw: unknown, opts: BuildDefaultViewOptions = {}): TriageView {
   return mergeWithDefault(raw, buildDefaultView(opts));
 }
 
-/**
- * Days mapping used by Priority Queue / Convergence which want a number, not a TimeRange.
- * Custom ranges fall back to a sensible default since those endpoints don't support
- * arbitrary windows yet.
- */
+/** Days mapping used by Priority Queue / Convergence which want a number, not a TimeRange. Custom ranges fall back to 7 days since those endpoints don't support arbitrary windows yet. */
 export function rangeToDays(range: TimeRange): number {
   switch (range) {
     case "24h":

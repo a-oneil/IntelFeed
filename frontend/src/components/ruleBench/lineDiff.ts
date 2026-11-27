@@ -4,9 +4,7 @@ export interface DiffLine { op: DiffOp; text: string }
 /**
  * Line diff between two rule bodies, computed client-side.
  *
- * The near-duplicate comparison has no endpoint and does not need one — rules
- * are tens of lines, so a full LCS table is cheap. Guarded anyway, because an
- * imported YARA blob can be long and a 2,000×2,000 table is not worth it.
+ * The near-duplicate comparison has no endpoint and does not need one: rules are tens of lines, so a full LCS table is cheap. It is still capped at `maxLines`, because an imported YARA rule can be long; past the cap every line is shown as removed and then added.
  */
 export function lineDiff(a: string, b: string, maxLines = 600): DiffLine[] {
   const left = a.split("\n");

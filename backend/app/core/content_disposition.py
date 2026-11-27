@@ -12,7 +12,7 @@ def attachment(filename: str) -> str:
     """``attachment`` with an ASCII ``filename=`` fallback and the exact name in ``filename*``.
 
     Starlette sends header values as latin-1, so a raw title carrying ’, — or a
-    non-Latin script raised UnicodeEncodeError and turned the download into a
+    non-Latin script would raise UnicodeEncodeError and turn the download into a
     500. Browsers prefer ``filename*`` and keep the real name; the ASCII form is
     for clients that don't read it.
     """

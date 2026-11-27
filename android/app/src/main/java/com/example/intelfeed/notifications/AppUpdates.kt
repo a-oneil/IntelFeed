@@ -19,8 +19,7 @@ object AppUpdates {
     private const val TAG_PREFIX = "android-v"
     // Release pages only: a notification tap opens this in the browser.
     private const val RELEASE_PAGE_PREFIX = "https://github.com/"
-    // CI writes "**IntelFeed for Android 1.7** (build 8)" at the top of the notes, then the merged
-    // PR's title ("what changed"), then the download line.
+    // CI writes "**IntelFeed for Android 1.7** (build 8)" at the top of the notes, then the merged PR's title ("what changed"), then the download line.
     private val BUILD = Regex("""\(build (\d+)\)""")
 
     @Serializable
@@ -95,10 +94,7 @@ object AppUpdates {
         return 0
     }
 
-    /**
-     * True when [release] is newer than the installed [currentName] / [currentCode].
-     * The build number decides when it is known (it always goes up); otherwise the version name.
-     */
+    /** True when [release] is newer than the installed [currentName] / [currentCode]. The build number decides when it is known (it always goes up); otherwise the version name. */
     fun isNewer(release: Release, currentName: String, currentCode: Int): Boolean {
         release.versionCode?.let { return it > currentCode }
         val current = parse(currentName) ?: return false

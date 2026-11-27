@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { networkLabel, registeredLabel, reputationLabel } from "../observables";
 
 describe("observable enrichment labels", () => {
-  it("summarises reputation and the network columns in one line", () => {
+  it("summarizes reputation and the network columns in one line", () => {
     expect(
       reputationLabel({
         reputation: { gn_riot: true, vt_ratio: "3/92", ports: "22, 443" },
@@ -12,7 +12,7 @@ describe("observable enrichment labels", () => {
         popularity_rank: 4200,
       }),
     ).toBe("RIOT · GN benign · VT 3/92 · AS10439 · US · Tranco #4200 · ports 22, 443");
-    // "Not seen scanning" isn't a class worth a cell; nothing enriched is empty.
+    // "Not seen scanning" is not shown as a class, so an observable with nothing else enriched gets an empty label.
     expect(reputationLabel({ noise_class: "not_seen" })).toBe("");
   });
 

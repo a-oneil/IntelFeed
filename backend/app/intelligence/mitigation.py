@@ -133,8 +133,8 @@ async def store_mitigations(
 
     Only catalog rows are mitigation entities: an item that maps to none (a
     one-off "upgrade X to 1.3.2", a generic "Patch", an invented M-ID) creates
-    nothing and stays in the article's AI analysis. The article's wording rides
-    on the link as `detail`. Returns (Mitigation, is_new) pairs; is_new is
+    nothing and stays in the article's AI analysis. The article's wording is
+    stored on the link as `detail`. Returns (Mitigation, is_new) pairs; is_new is
     always False since nothing is created, kept for the callers' shape.
     """
     stored: list[tuple[Mitigation, bool]] = []

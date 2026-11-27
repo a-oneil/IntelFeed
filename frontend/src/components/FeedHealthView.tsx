@@ -12,10 +12,9 @@ import styles from "./FeedHealthView.module.css";
 import { AsyncStateLoading } from "@/components/AsyncState";
 
 /**
- * How many analysts a listed feed actually reaches, and a way to change that.
+ * How many analysts a listed feed reaches, and a way to change that.
  *
- * `reach` is only sent to admins, so a non-admin renders nothing here and the
- * column collapses — a broken feed's blast radius is an admin's question.
+ * `reach` is only sent to admins, so a non-admin gets an empty cell here: which feeds cost which analysts is an admin's question.
  */
 function ReachCell({ feed }: { feed: FeedHealthFeed }) {
   const [open, setOpen] = useState(false);
@@ -124,9 +123,7 @@ export function FeedHealthView({
   const { data: valueData, isLoading: valueLoading } = useFeedValueScores(valueDays);
 
   const undoableDelete = useUndoableDelete();
-  // Pool-level pause/resume (admin): with per-user subscriptions on, the PUT
-  // is_active toggle only writes the caller's own pause, so it neither stopped
-  // an erroring feed's polling nor brought a paused feed back for everyone.
+  // Pool-level pause/resume (admin): with per-user subscriptions on, the PUT is_active toggle only writes the caller's own pause, so it neither stops an erroring feed's polling nor resumes a paused feed for everyone.
   const invalidateFeedState = () => {
     queryClient.invalidateQueries({ queryKey: ["feed-health"] });
     queryClient.invalidateQueries({ queryKey: ["feeds"] });
@@ -141,8 +138,7 @@ export function FeedHealthView({
     onSuccess: invalidateFeedState,
   });
   const togglePending = pauseFeed.isPending || resumeFeed.isPending;
-  // Remove for everyone: DELETE /feeds/{id} only unsubscribes the caller, so a
-  // dead feed stayed on every other reader's list. Entries are kept.
+  // Remove for everyone: DELETE /feeds/{id} only unsubscribes the caller, which leaves a dead feed on every other reader's list. Entries are kept.
   const removeFeed = useMutation({
     mutationFn: async (feedId: string) => (await api.post(`/feeds/${feedId}/remove`)).data,
     onSuccess: invalidateFeedState,

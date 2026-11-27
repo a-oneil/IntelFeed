@@ -75,9 +75,7 @@
   color: var(--text-primary);
 }
 
-/* Subscription pill: Chip's `toned` tone supplies the accent wash and border;
-   only the uppercase face is local. Doubled for font-size, which Chip's size
-   classes set. */
+/* Subscription pill: Chip's `toned` tone supplies the accent wash and border; only the uppercase face is local. The selector is doubled so this font-size beats the one Chip's size classes set. */
 .pill.pill {
   font-size: var(--fs-sm);
   text-transform: uppercase;

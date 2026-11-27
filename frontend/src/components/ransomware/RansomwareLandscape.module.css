@@ -71,18 +71,11 @@
   flex: none;
 }
 
-/* Lands on the same <section> as Panel's own .panel rule, so both selectors are
-   a single class and only source order decides.
-     - box-shadow: Panel never declares it. Purely additive, order-independent.
-     - overflow: Panel hard-codes overflow:hidden. The victim-disclosure chart
-       parks an absolutely positioned tooltip outside its own box (it is centred
-       on the hovered point, so the leftmost point pushes it ~29px past the card
-       edge) and it would be clipped. This one IS order-dependent, and it wins:
-       Panel.module.css ships in the shared `primitives` chunk that index.html
-       links statically, while this module's stylesheet is appended to <head> at
-       runtime by the lazy Workbench chunk, i.e. later in the cascade. Dev agrees
-       for a different reason — the Panel import above executes before the
-       stylesheet import below. Verified on the built bundle, not assumed. */
+/*
+ * Applies to the same <section> as Panel's own .panel rule. Both selectors are a single class, so only source order decides between them.
+ * - box-shadow: Panel never declares it, so this is additive and order-independent.
+ * - overflow: Panel sets overflow: hidden. The victim-disclosure chart places an absolutely positioned tooltip outside its own box (it is centered on the hovered point, so the leftmost point pushes it ~29px past the card edge), and hidden overflow would clip it. This one IS order-dependent, and it wins: in a build, Panel.module.css ships in the shared `primitives` chunk that index.html links statically, while this module's stylesheet is appended to <head> at runtime by the lazy Workbench chunk, so it comes later in the cascade. In dev it also wins, because the Panel import in RansomwareLandscape.tsx runs before the stylesheet import. Checked on the built bundle.
+ */
 .card {
   box-shadow: var(--elevation-1);
   overflow: visible;
@@ -295,10 +288,7 @@
   border-radius: var(--r-md);
   flex: none;
 }
-/* Filled badge — Chip supplies the fill AND a foreground derived from it. The
-   old flat `color: #fff` on --entity-victim (#e0555b) measured 3.74:1, under
-   AA for this 11px bold label; the derived foreground is 5.63:1. Doubled
-   because font-size/weight/padding are properties Chip also sets. */
+/* Filled badge: Chip supplies the fill AND a foreground derived from it (5.63:1). A flat `color: #fff` on --entity-victim (#e0555b) measures 3.74:1, under AA for this 11px bold label. The selector is doubled because font-size/weight/padding are properties Chip also sets. */
 .badgeRed.badgeRed {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: var(--fs-sm);

@@ -46,16 +46,11 @@ export interface DataTableColumn<T> {
   choiceMatch?: (row: T, value: string) => boolean;
   /** Send this column's dropdown value to the server instead of filtering loaded rows */
   serverChoice?: boolean;
-  /** Pin the column to the right edge of the scroller (row actions). Sticky
-   *  columns are always ordered last and can't be dragged. */
+  /** Pin the column to the right edge of the scroller (row actions). Sticky columns are always ordered last and can't be dragged. */
   sticky?: "right";
   /** Key the server filter is reported under (defaults to the column key) */
   serverParam?: string;
-  /**
-   * Hover card for a column whose header is a label rather than an
-   * explanation — where the value came from, what a low number means. When set
-   * it replaces the header's native tooltip; two at once is worse than either.
-   */
+  /** Hover card for a column whose header is a short label that needs explaining: where the value came from, what a low number means. When set it replaces the header's native tooltip, so the two never show at once. */
   hint?: { title: string; body: string; aside?: string };
   render: (row: T) => ReactNode;
 }
@@ -73,7 +68,7 @@ interface DataTableProps<T> {
   rows: T[];
   getRowId: (row: T) => string;
   rowHeight?: number;
-  /** Extra class names per row — use `rowMuted` / `rowDim` from the shared module */
+  /** Extra class names per row; use `rowMuted` / `rowDim` from the shared module */
   rowClass?: (row: T) => string | undefined;
   /** Row rendered with the "current selection" highlight */
   activeRowId?: string | null;
@@ -87,10 +82,7 @@ interface DataTableProps<T> {
   sort?: { key: string; dir: SortDir } | null;
   onSortChange?: (sort: { key: string; dir: SortDir }) => void;
 
-  /**
-   * Debounced values of every `serverText` / `serverChoice` column, keyed by
-   * column key. Wrap in useCallback — an unstable identity re-fires it.
-   */
+  /** Receives the debounced values of every `serverText` / `serverChoice` column, keyed by `serverParam` (or the column key). Fires on mount and when the values change; the callback is read through a ref, so its identity does not need to be stable. */
   onServerFiltersChange?: (filters: Record<string, string>) => void;
 
   isLoading?: boolean;
@@ -184,9 +176,7 @@ export function DataTable<T>({
 
   // --- Columns: visibility, order, widths ---
 
-  // The instance's curated arrangement, consulted only where this user has no
-  // preference of their own — so shipping a new default never overwrites a
-  // column someone deliberately hid, widened, or moved.
+  // The instance's default arrangement, used only where this user has no preference of their own, so shipping a new default never overwrites a column someone deliberately hid, widened, or moved.
   const preset = DEFAULT_TABLE_LAYOUTS[tableId] ?? EMPTY_DEFAULT_LAYOUT;
 
   const isColVisible = useCallback(
@@ -195,8 +185,7 @@ export function DataTable<T>({
     [columnVisibility, preset]
   );
 
-  // Apply the user's arrangement, falling back to the preset one; columns absent
-  // from either (newly shipped) keep their declared position.
+  // Apply the user's order, falling back to the preset order; columns absent from it (for example newly shipped ones) are appended in their declared order.
   const orderedColumns = useMemo(() => {
     const order = columnOrder.length > 0 ? columnOrder : (preset.order ?? []);
     if (order.length === 0) return columns;
@@ -210,8 +199,7 @@ export function DataTable<T>({
       }
     }
     for (const c of columns) if (byKey.has(c.key)) arranged.push(c);
-    // A pinned column has to sit at the edge it's pinned to, whatever order the
-    // user dragged the rest into.
+    // A pinned column has to sit at the edge it's pinned to, whatever order the user dragged the rest into.
     return [...arranged.filter((c) => !c.sticky), ...arranged.filter((c) => c.sticky)];
   }, [columns, columnOrder, preset]);
 
@@ -280,8 +268,7 @@ export function DataTable<T>({
 
   // --- Filtering ---
 
-  // Server-backed filters are excluded from the client pass — the rows that came
-  // back are already narrowed.
+  // Server-backed filters are excluded from the client pass, because the rows that came back are already filtered.
   const clientFilteredRows = useMemo(() => {
     const textCols = columns.filter((c) => c.textValue && !c.serverText && textFilters[c.key]?.trim());
     const numCols = columns.filter((c) => c.numValue && hasFilters[c.key]);
@@ -320,8 +307,7 @@ export function DataTable<T>({
     Object.values(hasFilters).some(Boolean) ||
     Object.values(choiceFilters).some((v) => v && v !== ALL);
 
-  // Only client filters can starve the virtual list; server filters come back
-  // already narrowed, so they must not trigger the backfill loop.
+  // Only client filters can leave the virtual list nearly empty; server filters come back already applied, so they must not trigger the backfill loop.
   const anyClientFilterActive = useMemo(
     () =>
       columns.some(
@@ -335,9 +321,7 @@ export function DataTable<T>({
 
   const handleClearFilters = useCallback(() => clearFilters(tableId), [clearFilters, tableId]);
 
-  // Human-readable list of what's currently narrowing the table, so an empty
-  // result can name the filter responsible (including one persisted from an
-  // earlier session that the user has forgotten about).
+  // Human-readable list of the active filters, so an empty result can name the filter responsible (including one persisted from an earlier session that the user has forgotten about).
   const activeFilterSummary = useMemo(() => {
     const out: string[] = [];
     for (const c of columns) {
@@ -424,10 +408,7 @@ export function DataTable<T>({
   // --- Selection ---
 
   const lastCheckedRef = useRef<number | null>(null);
-  // Two clicks inside one React batch would both read the same rendered
-  // `selected` and the later one would clobber the earlier. Mirror each
-  // mutation into a ref so same-tick clicks compose; the prop resyncs it on the
-  // next render.
+  // Two clicks inside one React batch would both read the same rendered `selected`, and the later one would overwrite the earlier. Each change is mirrored into a ref so clicks in the same tick combine; the prop resyncs the ref on the next render.
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const applySelection = useCallback(
@@ -485,9 +466,7 @@ export function DataTable<T>({
   });
   const virtualItems = virtualizer.getVirtualItems();
 
-  // Infinite scroll near the end; with client filters active also backfill pages
-  // until enough matches accumulate — those filters only see loaded rows, so a
-  // sparse match rate would otherwise stall with a near-empty table.
+  // Infinite scroll near the end. With client filters active, also fetch more pages until at least 50 rows match: those filters only see loaded rows, so a low match rate would otherwise leave a near-empty table that never loads more.
   useEffect(() => {
     if (!hasNextPage || isFetchingNextPage || !fetchNextPage) return;
     const last = virtualItems[virtualItems.length - 1];
@@ -746,8 +725,7 @@ export function DataTable<T>({
           {!isLoading && displayRows.length === 0 && (
             <div className={styles.empty} role="status">
               {anyFilterActive ? (
-                // A filter is on, so this is "no matches", not "no data" — never
-                // tell someone to go create rows they may already have.
+                // A filter is on, so this is "no matches", not "no data"; don't tell someone to create rows they may already have.
                 <div className={styles.emptyFiltered}>
                   <p className={styles.emptyFilteredTitle}>No {pluralNoun} match these filters</p>
                   {activeFilterSummary.length > 0 && (

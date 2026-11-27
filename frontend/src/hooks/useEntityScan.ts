@@ -4,12 +4,7 @@ import type { EntityScanMatch } from "@/api/types";
 
 export type { EntityScanMatch };
 
-/**
- * Scan arbitrary text (e.g. an entity profile description) for known
- * intelligence entities via the auto-linker. Returns the matched entities with
- * their surface forms so callers can highlight + link them inline, exactly like
- * the daily AI summary does.
- */
+/** Scan arbitrary text (e.g. an entity profile description) for known intelligence entities via the autolinker. Returns the matched entities with the matched text so callers can highlight + link them inline, the same way the daily AI summary does. */
 export function useEntityScan(text: string | undefined | null, enabled = true) {
   const trimmed = (text ?? "").trim();
   return useQuery({

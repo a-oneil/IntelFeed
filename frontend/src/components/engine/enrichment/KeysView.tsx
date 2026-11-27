@@ -1,8 +1,4 @@
-/**
- * Keys: the one place enrichment's API keys are set. One row per key, the
- * sources it serves, the shared key's state and the viewer's own key. Keys are
- * stored encrypted and never shown again.
- */
+/** Keys: the one place enrichment's API keys are set. One row per key, the sources it serves, the shared key's state and the viewer's own key. Keys are stored encrypted and never shown again. */
 import { useState } from "react";
 import { toast } from "sonner";
 

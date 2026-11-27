@@ -23,8 +23,7 @@
 }
 
 
-/* Hosts a DataTable, which owns its own scroller — this pane must be a flex
-   column that can shrink, not a scroller of its own. */
+/* Hosts a DataTable, which has its own scroller, so this pane must be a flex container that can shrink, not a scroller of its own. */
 .tablePane {
   flex: 1 1 60%;
   min-width: 0;
@@ -65,15 +64,13 @@
   text-decoration: underline;
 }
 
-/* Additive only — colour, size and shape come from the Chip primitive.
-   Chip has no case/tracking of its own, so these are the sole declarations. */
+/* Additive only: color, size and shape come from the Chip primitive. Chip sets no text case or letter spacing, so these are the only declarations. */
 .tag {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
-/* Doubled so it beats Chip's own `.chip { color: … }` regardless of the order
-   the two modules land in the bundle. */
+/* Doubled so it beats Chip's own `.chip { color: … }` regardless of the order the two modules land in the bundle. */
 
 .detailHeading {
   margin-top: 0;

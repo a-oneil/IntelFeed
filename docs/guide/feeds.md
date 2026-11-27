@@ -12,53 +12,64 @@ Start small. A dozen good sources are better than two hundred.
 
 ## Adding one
 
-Click the **+** button (**Add feed**) in the sidebar. The **Add Feed** window
-has six tabs: **Feed URL**, **GitHub Repo**, **Web Scraper**, **Bluesky**,
-**Telegram** and **OPML**. If your instance has categories, you must pick one
-before you can subscribe.
+Click the **+** button (**Add feed**) in the sidebar. The **Add a source**
+window opens on one box: paste any link and IntelFeed works out what it is.
 
-### URL
+| You paste | It finds | What you choose |
+| --- | --- | --- |
+| A site, such as `thedfirreport.com`, or a feed URL | The site's feeds | **Posts** or **Comments** (or the site's other feeds) when it has more than one |
+| A YouTube channel, such as `https://www.youtube.com/@BlackHatOfficialYT` | The channel's feed | **Skip Shorts** (ticked unless you changed the default under **Settings → Feeds & Export**) |
+| A GitHub repository | Whether it holds detection rules | **Releases**, **File changes** (all files, or the paths you type) and **Commits**; one feed for each you tick |
+| A Bluesky profile, custom feed or search link | The account, feed or search | **Include reposts**, for an account |
+| A Telegram channel, such as `https://t.me/<channel>` | The channel | Nothing; a warning appears if Telegram isn't set up on the server yet |
+| A Mastodon hashtag page, such as `https://infosec.exchange/tags/threatintel` | The hashtag on that server | Nothing |
+| A page with no feed | How many article links the page has | Nothing; **Follow this page** reads the page itself (the web scraper) |
 
-Paste an RSS or Atom feed URL, or a website's address, and click **Discover**
-to see a preview. YouTube channels and podcast feeds are recognised: videos
-appear as entries, and episodes play in the app. Pick a category and a **Poll
-Interval** (default 30 minutes), then click **Subscribe**.
+The `/channel/`, `/c/` and `/user/` YouTube forms work too, and so does a link
+to any of the channel's tabs. A link to a single video doesn't: open the
+channel and copy that link instead.
 
-Prefer a site's full-text feed over a summary-only one.
+For a GitHub repository, IntelFeed recognizes the detection rule repos it knows
+(SigmaHQ, Elastic, Splunk, LOLBAS and more) and otherwise looks through the
+repo's files for YARA, KQL, Sigma, Sentinel, Splunk and Elastic rules. If it
+finds rules, **File changes** starts ticked with the rule folders filled in, and
+changed rule files become detection rules. If it finds none, **Releases** starts
+ticked (or **Commits**, for a repo that has never made a release).
 
-### GitHub repo
+Then pick the **Folder** (IntelFeed preselects the one feeds of the same kind
+already live in, and **New folder…** makes one) and click **Subscribe**. Once
+folders exist you have to pick one. **More options** sets how often to check
+the source and its name; leave them and the type's default applies.
 
-Follow the files in a repository, such as a detection rule repo. Enter
-`owner/repo`, the **Branch**, and **File Patterns** (one per line, for example
-`**/*.yml`). Tick **Include file content** to import the files themselves.
+When the add creates one feed, its **Edit Feed** window opens next, so you can
+change the rest of its settings right away (see
+[Per-feed settings](#per-feed-settings)): rating, what runs on each article,
+title filters, and the source settings such as a scraper's link selector or a
+Telegram channel's linked threat actor. Adds that create several feeds just
+close.
 
-**Set Up All Detection Repos** subscribes you to a ready-made set of public
-detection rule repositories (SigmaHQ, Elastic, Splunk, YARA and more) in one
-click.
+Prefer a site's full-text feed over a summary-only one. Scrapers break when a
+site is redesigned, so check one again after a week.
 
-### Web scraper
+Under the box, before you paste anything, are three other ways in:
 
-For a site with no feed. Give it the **Blog URL** and IntelFeed pulls the
-article links from the page. Narrow it with a **Link Selector** or **URL
-Pattern**, and cap it with **Max Articles**.
-
-Scrapers break when a site is redesigned, so check it again after a week. To
-rename it, edit the feed's **Display name**.
-
-### Bluesky
-
-Choose a **Mode**:
-
-- **Author**: every post from one handle.
-- **Custom feed**: a Bluesky custom feed (you can paste its bsky.app link).
-- **Search**: posts that match a query. A search for a product name gives
-  early warning of reports about it.
+- **Browse starter packs**: the curated packs that ship with IntelFeed. Each
+  row shows how many of its feeds you already follow; open one, untick what
+  you don't want, and click **Add**.
+- **Import OPML**: a subscription list exported from another reader (Feedly,
+  Inoreader, NewsBlur and others). Feeds you already follow are skipped.
+- **Add without a link**: the sources with no link to paste.
+  - **NVD CVEs**: new CVEs that mention any of the words you give, for
+    example `fortinet, ivanti`.
+  - **Bluesky search**: posts matching a search.
+  - **Mastodon hashtag**: posts with a tag on one server, written as
+    `#threatintel on infosec.exchange`.
 
 ### Telegram
 
 An admin has to set Telegram up once on the server first. See
-[Telegram setup](#telegram-setup) below. After that, **Discover from my
-Telegram account** lists the channels the account has joined.
+[Telegram setup](#telegram-setup) below. Until then, a pasted Telegram link
+says so.
 
 ## Categories
 
@@ -97,8 +108,8 @@ the category, or a feed moved into it. Use the first switch for that.
 
 ## Importing in bulk
 
-The **OPML** tab in the **Add Feed** window imports an OPML file, the format
-other feed readers export. Folders become categories. Importing is admin-only,
+**Import OPML**, under the paste box in the **Add a source** window, imports
+an OPML file, the format other feed readers export. Folders become categories. Importing is admin-only,
 unless per-user feed subscriptions are on (see
 [Users and access](users-and-access.md)).
 
@@ -136,7 +147,7 @@ the last 100 titles would have been dropped. Use it for repeating filler, such
 as "ISC Stormcast For" on SANS ISC Diary. Articles already saved stay.
 
 **Mute** hides a feed's articles from your main list and unread count. You can
-still open the feed. Its articles are still tagged, analysed by AI and scored.
+still open the feed. Its articles are still tagged, analyzed by AI and scored.
 A muted feed's Overview shows its AI use over the last 30 days, and an admin can
 switch its AI off there in one click. Muted feeds are listed in a **Muted**
 group in the sidebar.
@@ -195,7 +206,7 @@ any article. The original file can be downloaded from the entry.
 ## What happens after you add a feed
 
 IntelFeed saves new articles, merges duplicates, and links the entities each
-mentions. If AI is set up, it also summarises each article.
+mentions. If AI is set up, it also summarizes each article.
 
 The first check can take a few minutes. If a feed still shows nothing after an
 hour, look for its error in the feed's **Overview** pane or in

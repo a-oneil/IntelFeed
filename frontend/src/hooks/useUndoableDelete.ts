@@ -4,13 +4,9 @@ import { toast } from "sonner";
 const UNDO_DELAY_MS = 5000;
 
 /**
- * Returns a function that, when called, shows an undo toast and delays the
- * actual delete by 5 seconds. If the user clicks "Undo", the delete is cancelled.
+ * Returns a function that, when called, shows an undo toast and delays the actual delete by 5 seconds. If the user clicks "Undo", the delete is canceled.
  *
- * The delete is triggered by sonner's own toast lifecycle (onAutoClose / onDismiss),
- * which lives in the root <Toaster> provider — independent of the calling component's
- * mount state. This means the delete fires even if the component unmounts (e.g. modal
- * closes, page navigates away) during the undo window.
+ * The delete is triggered by sonner's own toast lifecycle (onAutoClose / onDismiss), which lives in the root <Toaster> provider, independent of the calling component's mount state. The delete therefore runs even if the component unmounts (e.g. modal closes, page navigates away) during the undo window.
  *
  * Usage:
  *   const deleteFeed = useDeleteFeed();
@@ -37,8 +33,7 @@ export function useUndoableDelete() {
       onInitiate?: () => void;
       /** Optional unique key to prevent duplicate pending deletes for the same item */
       key?: string;
-      /** Past-tense verb for the toast, when "deleted" would misdescribe it
-       *  (e.g. an observable that is tombstoned rather than removed). */
+      /** Past-tense verb for the toast, when "deleted" would be inaccurate (e.g. an observable that is tombstoned rather than removed). */
       verb?: string;
     }) => {
       const key = opts.key ?? `undo-${++counterRef.current}`;
@@ -50,11 +45,11 @@ export function useUndoableDelete() {
       // Run any immediate side effects (close modal, context menu, etc.)
       opts.onInitiate?.();
 
-      let cancelled = false;
+      let canceled = false;
 
       const doDelete = () => {
         pendingKeys.current.delete(key);
-        if (!cancelled) {
+        if (!canceled) {
           opts.onDelete();
         }
       };
@@ -64,7 +59,7 @@ export function useUndoableDelete() {
         action: {
           label: "Undo",
           onClick: () => {
-            cancelled = true;
+            canceled = true;
             pendingKeys.current.delete(key);
             toast.success("Restored");
           },

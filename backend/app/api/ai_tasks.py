@@ -167,7 +167,7 @@ async def update_task(
         )
     if "output_schema" in updates:
         # Custom tasks own their schema outright; system defaults are code-owned
-        # (the startup seeder would clobber an edit on the next deploy anyway).
+        # (the startup seeder would overwrite an edit on the next deploy anyway).
         if task.is_system:
             raise AppError(
                 code="forbidden",

@@ -38,14 +38,9 @@ const RAIL: RailEntry[] = [
 ];
 
 /**
- * One feed's settings, as six panes behind a rail.
+ * One feed's settings, as six panes selected from a side rail.
  *
- * The previous version was a single 480px column of 26 fields and 11
- * checkboxes with the action row at the bottom of the scroller, so on a
- * Telegram feed Save sat about 1,300px below the fold. Splitting it means
- * never more than a pane's worth on screen, fixed chrome, and — because the
- * admin/non-admin split now falls on pane boundaries — a non-admin sees three
- * coherent panes rather than a form with holes punched in it.
+ * A single column of 26 fields and 11 checkboxes put the Save button about 1,300px below the fold on a Telegram feed. With panes, only one pane's fields are on screen, the header and action row stay fixed, and because the admin/non-admin split falls on pane boundaries, a non-admin sees three complete panes rather than a form with fields missing.
  */
 export function EditFeedModal({ subscription, onClose }: Props) {
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
@@ -60,16 +55,12 @@ export function EditFeedModal({ subscription, onClose }: Props) {
   const trapRef = useFocusTrap<HTMLDivElement>();
   const activeRailRef = useRef<HTMLButtonElement>(null);
 
-  // Declared after useFocusTrap so this effect runs second and wins the initial
-  // focus. The trap focuses the first focusable element, which is the close
-  // button — leaving Enter-on-open meaning "discard and close". The rail's
-  // current item is the honest landing spot for a two-pane dialog.
+  // Declared after useFocusTrap so this effect runs second and sets the initial focus. The trap focuses the first focusable element, which is the close button, so pressing Enter on open would mean "discard and close". The rail's current item is the right initial focus for a two-pane dialog.
   useEffect(() => {
     activeRailRef.current?.focus();
   }, []);
 
-  // With per-user subscriptions on, unsubscribing only affects the caller;
-  // otherwise removal deletes the feed for everyone and is admin-only.
+  // With per-user subscriptions on, unsubscribing only affects the caller; otherwise removal deletes the feed for everyone and is admin-only.
   const canUnsubscribe = isAdmin || Boolean(subscription.per_user);
 
   const requestClose = async () => {
@@ -111,12 +102,7 @@ export function EditFeedModal({ subscription, onClose }: Props) {
 
   const dirtyCount = form.dirtyFields.length;
 
-  // Portalled to the body. Both call sites render this deep inside other
-  // components — the sidebar's feed row and, in the reader, an entry card's
-  // source line — and an overlay has no business inheriting their text layout
-  // or stacking context. It did: the card sets `white-space: nowrap` to
-  // truncate its title, so every hint and stage description in here rendered
-  // on one clipped line.
+  // Portaled to the body. Both call sites render this deep inside other components (the sidebar's feed row and, in the reader, an entry card's source line), and the overlay must not inherit their text layout or stacking context: the card sets `white-space: nowrap` to truncate its title, which rendered every hint and stage description in here on one clipped line.
   return createPortal(
     <div className={styles.overlay} onClick={requestClose}>
       <div
@@ -230,7 +216,7 @@ export function EditFeedModal({ subscription, onClose }: Props) {
           <button
             type="button"
             onClick={handleSave}
-            disabled={updateFeed.isPending || !form.isDirty}
+            disabled={updateFeed.isPending}
             className={styles.saveBtn}
           >
             {updateFeed.isPending ? "Saving…" : "Save"}

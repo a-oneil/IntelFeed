@@ -1,6 +1,6 @@
 """GitHub repo files typed by extension and content, not only by per-repo pattern.
 
-Covers .kql files, generic YAML/TOML recognised as a supported rule format,
+Covers .kql files, generic YAML/TOML recognized as a supported rule format,
 and the LOLDrivers org move.
 """
 

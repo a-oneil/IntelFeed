@@ -4,7 +4,7 @@ Matches the DB CHECK constraints ``ck_campaigns_tlp_marking`` and
 ``ck_intel_reports_tlp_marking`` (alembic ``a3b7c9d2e4f1``). TLP 1.0's
 ``TLP:WHITE`` was renamed to ``TLP:CLEAR`` in TLP 2.0; ``normalize_tlp``
 folds it (and stray casing/whitespace) onto the canonical value so agent
-and import inputs stay friendly without widening what gets stored.
+and import inputs are accepted without widening what gets stored.
 """
 
 from typing import Final

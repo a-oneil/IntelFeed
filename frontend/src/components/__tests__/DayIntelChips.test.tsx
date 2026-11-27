@@ -110,8 +110,7 @@ describe("DayIntelChips", () => {
         signals: { actively_exploited: 1, new: { type: "threat_actor", id: "a", name: "APT-Test", total: 1 } },
       }),
     );
-    // The strip scrolls sideways rather than wrapping, so a narrow divider
-    // carries the same five chips as a wide one — signal, new, ttp, sector, cve.
+    // The strip scrolls sideways instead of wrapping, so a narrow divider carries the same five chips as a wide one: signal, new, ttp, sector, cve.
     expect(container.querySelectorAll("[data-chip]").length).toBe(5);
     expect(screen.getByText("ttp")).toBeInTheDocument();
     expect(screen.getByText("cve")).toBeInTheDocument();

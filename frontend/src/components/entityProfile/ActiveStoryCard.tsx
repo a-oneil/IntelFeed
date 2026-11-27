@@ -1,9 +1,4 @@
-/**
- * ActiveStoryCard — the open story threads this entity is part of, leading the
- * Overview's activity section: title, coverage span, and the latest beat.
- * Opening a story puts ThreadReader in the workbench's docked reader, the way
- * an article opens there.
- */
+/** ActiveStoryCard — the open story threads this entity is part of, leading the Overview's activity section: title, coverage span, and the latest update, followed by a list of previous stories. Opening a story puts ThreadReader in the workbench's docked reader, the way an article opens there. */
 import { useEntityStoryThreads } from "@/hooks/useEntityProfile";
 import { useOpenThread } from "@/utils/openEntry";
 import { formatDate } from "@/utils/formatDate";
@@ -15,8 +10,7 @@ function spanLabel(d: string | null): string {
 }
 
 export function ActiveStoryCard({ entityType, entityId }: { entityType: string; entityId: string }) {
-  // Two precise queries: one "any"-status fetch would starve the history —
-  // ordering is last-seen desc, and past stories are older by definition.
+  // Two queries, one per status: a single "any"-status fetch is ordered by last-seen desc, so open stories would fill its limit and past stories, which are older, would be left out.
   const { data: open } = useEntityStoryThreads(entityType, entityId, { limit: 2, status: "open" });
   const { data: past = [] } = useEntityStoryThreads(entityType, entityId, { limit: 5, status: "past" });
   const openThread = useOpenThread();
@@ -26,8 +20,7 @@ export function ActiveStoryCard({ entityType, entityId }: { entityType: string; 
   return (
     <>
       {threads.map((t) => {
-        // Freshness bar: how far into the story's run the last coverage sits —
-        // a story still printing fills the bar; a stalling one leaves a gap.
+        // Freshness bar: how far into the story's run the last coverage sits — a story still getting coverage fills the bar; one that has gone quiet leaves a gap.
         const start = t.first_seen ? new Date(t.first_seen).getTime() : null;
         const last = t.last_seen ? new Date(t.last_seen).getTime() : null;
         const now = Date.now();

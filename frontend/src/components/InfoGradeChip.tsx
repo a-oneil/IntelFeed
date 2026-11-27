@@ -48,11 +48,7 @@ interface Props {
   readOnly?: boolean;
 }
 
-/**
- * The article's Admiralty grade: the feed's letter (source reliability, judged
- * over time) beside this article's number (information credibility, judged
- * per report). The two are rated independently — a B feed can publish a 4.
- */
+/** The article's Admiralty grade: the feed's letter (source reliability, judged over time) beside this article's number (information credibility, judged per report). The two are rated independently, so a B feed can publish a 4. */
 export function InfoGradeChip({ entryId, reliability, rating, ratingBy, aiRating, access, note, readOnly }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);

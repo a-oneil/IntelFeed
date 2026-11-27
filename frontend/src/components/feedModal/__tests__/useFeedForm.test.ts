@@ -93,8 +93,7 @@ describe("useFeedForm", () => {
 
     act(() => result.current.set("category_id", ""));
 
-    // Not `undefined` and not omitted: the API reads model_fields_set, so null
-    // is how "Uncategorized" travels.
+    // Not `undefined` and not omitted: the API reads model_fields_set, so an explicit null is how the client sets "Uncategorized".
     const payload = result.current.buildPayload(true, false);
     expect(payload).toHaveProperty("category_id", null);
   });
@@ -120,8 +119,7 @@ describe("useFeedForm", () => {
       result.current.set("is_active", false);
     });
 
-    // The endpoint 403s on the mere presence of an admin key, so the payload
-    // must carry none of them — not even unchanged ones.
+    // The endpoint returns 403 if the payload contains any admin key, so the payload must carry none of them, not even unchanged ones.
     expect(result.current.buildPayload(false, false)).toEqual({
       custom_title: "Mine",
       reliability_rating: "A",
@@ -141,7 +139,7 @@ describe("useFeedForm", () => {
 
     act(() => result.current.set("is_active", false));
 
-    // One shared switch: throwing it would stop the fetch for the instance.
+    // The feed is shared, so pausing it would stop fetching for the whole instance.
     expect(result.current.buildPayload(false, false)).toEqual({});
   });
 
@@ -250,7 +248,7 @@ describe("useFeedForm", () => {
     expect(result.current.buildPayload(true, false)).toEqual({
       exclude_title_patterns: "Chromium CVE-\nISC Stormcast For",
     });
-    // Ingest plumbing: a non-admin never sends it.
+    // This is an ingest setting, so a non-admin never sends it.
     expect(result.current.buildPayload(false, false)).toEqual({});
 
     act(() => result.current.set("exclude_title_patterns", "   "));

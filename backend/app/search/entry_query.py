@@ -6,20 +6,20 @@ source — want only the id set, so they can diff it against what the campaign
 already holds. This is that narrow form, in one place because two sweeps need
 identical semantics.
 
-It is narrow but not naive. The earlier version of this (``_get_search_total_
-and_ids`` in the saved-search worker) planned the query and went straight to
-Meilisearch, which meant three silent zeroes:
+It still runs every step of the search, not just the index query. Planning the
+query and going straight to Meilisearch (what ``_get_search_total_and_ids`` in
+the saved-search worker did before it called this module) returns silent zeroes
+or partial results in three cases:
 
-* **Entity filters never ran.** ``malware:"Akira"`` resolves through
-  ``execute_entity_queries``, not the index. The old helper skipped that step
-  and then bailed on its own guard, so the single most natural intake query —
-  "every article about this malware family" — synced nothing while
-  ``/api/search`` answered 506 for the same string.
-* **Entity-only plans were refused.** The guard asked for a text query or an
-  entry filter, and an entity filter is neither.
-* **Large id constraints lost their tail.** ``execute_entry_search`` keeps the
-  first 500 ids of a constraint and drops the rest, so a query narrowed to a few
-  thousand entries answered with an arbitrary subset.
+* **Entity filters.** ``malware:"Akira"`` resolves through
+  ``execute_entity_queries``, not the index. Skipping that step makes the most
+  common intake query, "every article about this malware family", sync nothing
+  while ``/api/search`` returns hundreds of hits for the same string.
+* **Entity-only plans.** A guard that asks for a text query or an entry filter
+  refuses them, because an entity filter is neither.
+* **Large id constraints.** ``execute_entry_search`` keeps the first 500 ids of a
+  constraint and drops the rest, so a query narrowed to a few thousand entries
+  answers with an arbitrary subset.
 
 The order below mirrors ``/api/search``: resolve the deferred filters, run the
 entity side, intersect the id sets, and only ask the index when there is
@@ -53,9 +53,9 @@ def query_unknown_fields(query_str: str) -> list[str]:
     """Field names in this query the language does not know.
 
     They are not an error — the planner folds an unknown ``foo:bar`` into the
-    text query — but on a *standing* source they are the quiet kind of wrong:
+    text query — but on a *standing* source they fail silently:
     ``actor:"Scattered Spider"`` (the field is ``threat_actor:``) becomes a
-    phrase search that keeps answering with a plausible number forever.
+    phrase search that keeps returning a plausible-looking count.
     """
     from app.search.query_parser import ParseError, parse_query
     from app.search.query_planner import build_execution_plan

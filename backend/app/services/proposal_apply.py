@@ -7,7 +7,7 @@ holds the pieces those share with the adjudicate stage and the bulk worker
 (``app.workers.proposal_apply_tasks``):
 
 * the Domain facet (``proposal_domain`` and the per-log action sets);
-* ``apply_link_removal_row`` — a link-log removal proposal made real;
+* ``apply_link_removal_row`` — applies a link-log removal proposal;
 * ``settle_adjudication_outcome`` — what an adjudication apply that found
   nothing left to do means for its proposal;
 * the progress record a background Apply all publishes to Redis for the
@@ -120,7 +120,7 @@ def _progress_key(job_id: str) -> str:
 async def apply_link_removal_row(db: AsyncSession, row: EntityLinkValidationLog) -> bool:
     """Promote one shadow_remove row into the junction deletion (+ `removed`
     audit row, which names the proposal and is what History shows). The
-    proposal itself is deleted — left in place it stayed in the queue as if
+    proposal itself is deleted; otherwise it would stay in the queue as if
     nothing had happened. Returns True when the junction was already gone."""
     from app.intelligence.link_validation_apply import ENTITY_TYPES
 
@@ -252,7 +252,7 @@ def outcome_is_moot(row: EntityMaintenanceLog, outcome: dict) -> bool:
     """True when an adjudication apply found nothing left to do."""
     if outcome.get("applied") or outcome.get("reason") not in MOOT_REASONS:
         return False
-    # A veto wants the entity gone; its article going does not get it there.
+    # A veto removes the entity; the article being deleted does not, so the veto is not moot.
     return not (row.action == ACTION_VETO and outcome.get("reason") == "entry gone")
 
 

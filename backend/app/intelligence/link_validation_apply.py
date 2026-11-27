@@ -106,7 +106,7 @@ async def apply_removal(
             link.entity_id,
         )
         return False
-    # Concurrency guard: someone re-linked while we were thinking.
+    # Concurrency guard: the link was re-extracted after this snapshot was taken.
     if junction.extracted_at and link.extracted_at and junction.extracted_at > link.extracted_at:
         logger.debug(
             "skip removal: junction extracted_at newer than snapshot for entry=%s entity=%s/%s",

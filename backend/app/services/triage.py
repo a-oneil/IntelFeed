@@ -173,13 +173,13 @@ async def get_triage_entries(
         (Feed.reliability_rating == "C", 3),
         (Feed.reliability_rating == "D", 2),
         (Feed.reliability_rating == "E", 1),
-        else_=3,  # default to C-level for unrated
+        else_=3,  # unrated and F both default to C-level
     )
 
     # Engagement signal — total reaction count cached on entry metadata at ingest time.
     # Telegram adapter populates `metadata_.reactions_total` so triage can read a single
-    # integer instead of summing the JSONB array on every priority query. Capped at +5 score
-    # points so one viral post doesn't dwarf intel signals.
+    # integer instead of summing the JSONB array on every priority query. Capped at 5 (before the
+    # engagement weight is applied) so one viral post doesn't outweigh intel signals.
     from sqlalchemy import Integer
 
     reactions_total = func.coalesce(func.cast(Entry.metadata_["reactions_total"].astext, Integer), 0)

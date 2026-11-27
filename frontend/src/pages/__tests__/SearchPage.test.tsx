@@ -1,16 +1,10 @@
 /**
- * Tests for /search — the one surface that renders search results.
+ * Tests for /search, the one page that renders search results.
  *
- * Two things it exists to get right, both of which the old split between the
- * header dropdown and the in-panel bar got wrong:
+ * Two behaviors it has to get right (an earlier split between the header dropdown and the in-panel bar got both wrong):
  *
- *  1. The `in:` chip is a **content** contract, not a routing one. `feeds`
- *     renders articles and no entities; `workbench` renders entities and no
- *     articles; `everything` renders both. Nothing else moves.
- *  2. Identity matches outrank incidental ones. Searching "lockbit" finds the
- *     LockBit actor *and* every actor whose prose cites LockBit; the backend
- *     labels which is which via `match_kind`, and the page has to keep them
- *     apart rather than interleaving them by relevance score.
+ *  1. The `in:` chip decides which kinds of results render, not where the user lands. `feeds` renders articles and no entities; `workbench` renders entities and no articles; `everything` renders both. Nothing else changes.
+ *  2. Direct matches rank above mentions. Searching "lockbit" finds the LockBit actor *and* every actor whose description cites LockBit; the backend labels which is which via `match_kind`, and the page has to keep them in separate groups rather than interleaving them by relevance score.
  */
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -37,8 +31,7 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useMediaQuery: () => false,
 }));
 
-// The reader and the entry row pull a long tail of data hooks that say nothing
-// about search; stub them at the component boundary.
+// The reader and the entry row pull in many data hooks unrelated to search; stub them at the component boundary.
 vi.mock("@/components/EntryReader", () => ({
   EntryReader: ({ entryId }: { entryId: string }) => <div data-testid="reader">{entryId}</div>,
 }));
@@ -91,7 +84,7 @@ const KARAKURT = entity({
   id: "a3",
   type: "threat_actor",
   name: "Karakurt",
-  description: "A component of the broader Conti organisation; LockBit lineage.",
+  description: "A component of the broader Conti organization; LockBit lineage.",
   match_field: "description",
   match_kind: "mention",
 });
@@ -181,7 +174,7 @@ describe("SearchPage scope contract", () => {
 
     expect(screen.getAllByTestId("entry-row")).toHaveLength(2);
     expect(screen.queryByText("Direct matches")).not.toBeInTheDocument();
-    // The entity facets go with them — there is nothing left for them to filter.
+    // The entity facets are hidden too; there are no entities left for them to filter.
     expect(screen.queryByText("Entity type")).not.toBeInTheDocument();
   });
 });
@@ -190,19 +183,18 @@ describe("SearchPage identity vs mention", () => {
   it("separates name matches from prose mentions", () => {
     renderWithQuery();
 
-    // The two LockBit rows are the direct ones; the two that merely cite it
-    // are not in that section.
+    // The two LockBit rows are the direct matches; the two actors that only cite it are not in that section.
     const direct = screen.getByText("Direct matches").closest("section")!;
     expect(direct.textContent).toContain("LockBit");
     expect(direct.textContent).not.toContain("DragonForce");
     expect(direct.textContent).not.toContain("Karakurt");
 
-    // ...and they are, in the mention group for their type.
+    // Those two are in the mention group for their type.
     const mentions = screen.getByText("mentions your query").closest("section")!;
     expect(mentions.textContent).toContain("DragonForce");
     expect(mentions.textContent).toContain("Karakurt");
 
-    // Direct matches lead the stream.
+    // Direct matches come first in the results.
     expect(direct.compareDocumentPosition(mentions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -230,9 +222,7 @@ describe("SearchPage facet counts", () => {
   it("shows the server's true per-type totals, not the trimmed payload length", () => {
     renderWithQuery();
 
-    // Four entities came back; 33 actors matched. The rail reports 33 —
-    // `getByText` would also hit the stream's own group heading, so scope to
-    // the facet row, which is the only one that is a button.
+    // Four entities came back; 33 actors matched. The rail reports 33. `getByText` would also match the results' own group heading, so scope to the facet row, which is the only one that is a button.
     const actorRow = screen
       .getAllByText("Threat Actors")
       .map((el) => el.closest("button"))
@@ -359,8 +349,7 @@ describe("SearchPage saved search restore", () => {
       savedSearch({ filters: { entity_type: "threat_actor", match_kinds: ["direct"] } }),
     );
 
-    // `threat_actor` + direct-only leaves the LockBit actor and drops the
-    // malware row and both mention-matched actors.
+    // `threat_actor` + direct-only leaves the LockBit actor and drops the malware row and both mention-matched actors.
     expect(screen.getAllByText("LockBit").length).toBeGreaterThan(0);
     expect(screen.queryByText("DragonForce")).not.toBeInTheDocument();
     expect(screen.queryByText("Karakurt")).not.toBeInTheDocument();
@@ -382,9 +371,7 @@ describe("SearchPage saved search restore", () => {
 
 describe("SearchPage unknown fields", () => {
   it("says a mistyped field was searched as text, not filtered on", () => {
-    // `titel:ransomware` parses as a field the backend has never heard of. It
-    // does not error and it does not filter — the value just goes to full-text
-    // search. Without this notice the user reads the (wrong) count as truth.
+    // `titel:ransomware` parses as a field the backend does not know. It does not error and it does not filter; the value goes to full-text search. Without this notice the user would take the (wrong) count as a filtered result.
     unifiedMock.mockReturnValue({
       data: response({ query: "titel:ransomware", unknown_fields: ["titel"] }),
       isLoading: false,
@@ -396,7 +383,7 @@ describe("SearchPage unknown fields", () => {
     expect(screen.getByText(/Searched as plain text instead/)).toBeInTheDocument();
   });
 
-  it("pluralises when several fields are unrecognised", () => {
+  it("pluralises when several fields are unrecognized", () => {
     unifiedMock.mockReturnValue({
       data: response({ query: "titel:x tags:y", unknown_fields: ["titel", "tags"] }),
       isLoading: false,
@@ -406,18 +393,14 @@ describe("SearchPage unknown fields", () => {
     expect(screen.getByText(/are not search fields/)).toBeInTheDocument();
   });
 
-  it("stays quiet when every field is recognised", () => {
+  it("stays quiet when every field is recognized", () => {
     renderWithQuery("lockbit");
     expect(screen.queryByText(/not a search field/)).not.toBeInTheDocument();
     expect(screen.queryByText(/not search fields/)).not.toBeInTheDocument();
   });
 });
 
-/**
- * Reading mode — the same shape the feed reader takes when an article opens:
- * the page's own nav folds away, the results become a narrow list column, and
- * the reader gets everything else, with a rail to hide the list entirely.
- */
+/** Reading mode, the same layout the feed reader uses when an article opens: the page's own nav collapses, the results become a narrow list column, and the reader takes the rest of the width, with a rail to hide the list entirely. */
 describe("SearchPage reading mode", () => {
   const openEntry = (id = "e1") => {
     act(() => {
@@ -458,8 +441,7 @@ describe("SearchPage reading mode", () => {
   });
 
   it("keeps the app sidebar folded after the article closes", () => {
-    // Closing an entry hands the app sidebar back, which is right in the feed
-    // reader and wrong here — it would land beside the facet rail.
+    // Closing an entry restores the app sidebar, which is right in the feed reader and wrong here: it would appear beside the facet rail.
     renderWithQuery();
     openEntry();
     act(() => {

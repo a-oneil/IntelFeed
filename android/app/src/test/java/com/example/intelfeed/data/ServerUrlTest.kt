@@ -20,7 +20,7 @@ class ServerUrlTest {
 
     @Test
     fun testPartialAndUnsupportedUrlsAreRejected() {
-        // Partial values typed mid-edit. Each of these used to crash Retrofit.baseUrl().
+        // Partial values typed mid-edit. Passing any of these to Retrofit.baseUrl() crashes it.
         assertNull(ServerUrl.normalize(""))
         assertNull(ServerUrl.normalize("https://"))
         assertNull(ServerUrl.normalize("https:/"))

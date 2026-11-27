@@ -72,7 +72,8 @@ async def execute_tool_endpoint(
                     )
                     return ToolExecuteResponse(result=staged_reply(action_id, name))
             elif name in MUTATING_TOOLS:
-                # A read token keeps the storing reads (extractions) it always had.
+                # A read token may still run reads that store results (extractions);
+                # only tools in MUTATING_TOOLS are refused.
                 raise AppError(
                     code="forbidden",
                     message=f"Tool '{name}' changes data; this credential is read-only",

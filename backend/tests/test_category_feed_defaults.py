@@ -54,7 +54,7 @@ async def test_api_created_feed_inherits_the_category_defaults(
             json={
                 "url": "https://cert-defaults.example/rss",
                 "category_id": str(category.id),
-                # What the caller names beats the category.
+                # A value in the request overrides the category default.
                 "extract_tools": True,
             },
             headers=admin_headers,
@@ -64,7 +64,7 @@ async def test_api_created_feed_inherits_the_category_defaults(
     assert data["intel_extraction_mode"] == "full"
     assert data["ai_analysis_enabled"] is False
     assert data["extract_tools"] is True
-    # Not in the defaults: the global default.
+    # Not in the category defaults, so the global default applies.
     assert data["extract_detection_rules"] is False
 
 
@@ -143,7 +143,7 @@ async def test_bulk_update_can_save_the_category_default(
     assert response.status_code == 200
     body = response.json()
     assert body["updated"] == 1
-    # Only pipeline fields become defaults; the interval applied to today's feeds alone.
+    # Only pipeline fields become defaults; the interval is applied to the current feeds only.
     assert body["feed_defaults"] == {"ai_analysis_enabled": False, "extract_detection_rules": True}
 
     await db_session.refresh(feed)

@@ -1,4 +1,4 @@
-"""Rule → entity resolution, materialised into ``rule_coverage``.
+"""Rule → entity resolution, materialized into ``rule_coverage``.
 
 The tag columns on ``detection_rules`` answer "which entity does this rule
 cover?" for a third of the library and for zero actors, because only two of the
@@ -17,12 +17,12 @@ Three writers, strongest first:
 
 Precedence matters because the table's primary key allows one row per
 (rule, entity): a rule that both tags CVE-2026-1731 and names it in the title
-keeps the ``tag`` row. Nothing here launders a body-text hit into a tag.
+keeps the ``tag`` row. A body-text hit is never stored as a ``tag`` row.
 
-False positives are the whole risk (see the autolinker's own history): rule
+False positives are the main risk (the autolinker has the same problem): rule
 bodies are full of English prose in ``description:`` and ``falsepositives:``
 blocks. The text writer therefore admits **canonical names only** — never
-aliases — and re-applies the guards the autolinker learned the hard way.
+aliases — and re-applies the autolinker's false-positive guards.
 """
 
 import logging
@@ -59,7 +59,7 @@ _CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2}
 CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}", re.IGNORECASE)
 #: Only the ``attack.tNNNN`` tag form, never a bare ``TNNNN``. Rule bodies are
 #: full of four-digit identifiers (ports, event ids, error codes) that a bare
-#: pattern would happily read as techniques.
+#: pattern would read as techniques.
 ATTACK_TAG_RE = re.compile(r"attack\.t(\d{4})(?:\.(\d{3}))?", re.IGNORECASE)
 
 #: Which vocabulary types the text writer will link. Vendors and products are
@@ -75,8 +75,8 @@ _REGIONS = (("title", "high"), ("tags", "medium"), ("story", "low"), ("body", "l
 # them as ``story:<name>`` tags. Membership is curation, not attribution:
 # "Detect New Local Admin account" sits in five stories and "Windows Access
 # Token Manipulation SeDebugPrivilege" in eighteen. Left in the ordinary tags
-# region those became 1,122 of 1,123 medium-confidence actor rows and re-created
-# the very dilution the board exists to remove, so they are scored separately.
+# region they made up 1,122 of 1,123 medium-confidence actor rows and buried the
+# rules written for a specific actor, so they are scored separately.
 _STORY_TAG_PREFIX = "story:"
 
 # Past this many stories a rule is a general-purpose analytic that Splunk

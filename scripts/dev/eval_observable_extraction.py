@@ -8,7 +8,7 @@ and scores the ``iocs`` / ``scripts`` / ``relationships`` arrays after the
 same validators the ledger applies:
 
 * per-kind precision / recall against ``expected`` (``optional`` items are
-  neither credited nor penalised),
+  neither credited nor penalized),
 * hard failures for any ``must_not`` hit,
 * attribution-edge recall: did the model assert ``<actor|malware> → observable``
   for the expected values?

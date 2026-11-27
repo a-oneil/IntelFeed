@@ -6,8 +6,8 @@ and to hold the CLI credentials volume; embedding needs neither, and parking a
 multi-thousand-entry backfill behind a nightly enrichment run would starve both.
 
 The sweep is idempotent and bounded — it embeds up to
-``embedding_backfill_limit`` entries per run, newest first, and does nothing at
-all until ``embeddings_enabled`` is switched on.
+``embedding_backfill_limit`` entries per run, newest first, and does nothing
+while ``embeddings_enabled`` is off.
 """
 
 import logging

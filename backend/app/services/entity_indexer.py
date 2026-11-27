@@ -298,14 +298,15 @@ async def index_rules(db: AsyncSession, rules: list[DetectionRule]) -> None:
     Re-selects the rows first. `created_at`/`updated_at` are server-generated
     (`server_default` / `onupdate`), so flush() expires them; reading one off the
     passed-in instance would attempt sync IO inside the async session and raise
-    MissingGreenlet. One select refreshes the whole batch, and one more pair
-    resolves the entity links — three queries regardless of batch size.
+    MissingGreenlet. One select refreshes the whole batch, and
+    ``_rule_entity_links`` adds one query per borrowed entity type, so the query
+    count does not grow with the batch size.
     """
     ids = [r.id for r in rules if r.id is not None]
     if not ids:
         return
     # Best effort, like index_entity/delete_entity: a search-index hiccup must
-    # not fail the write that triggered it. Drift is healed by sync_rules.
+    # not fail the write that triggered it. sync_rules repairs any drift.
     try:
         # raiseload: the joined entry would repeat one repo file's body per rule
         # (a multi-rule YARA file indexes hundreds at once); docs don't read it.
@@ -388,15 +389,15 @@ async def index_entities(db: AsyncSession, ids_by_type: dict[str, list]) -> int:
     """Re-index only the named entities — one query and one Meili push per type.
 
     The targeted alternative to ``sync_all_entities`` for write paths that touch
-    a handful of rows. Ingest used to dispatch the full sync after every entry
-    that linked so much as one CVE, which re-pushed all ~50k entity documents;
-    this refreshes just the docs whose row actually changed.
+    a handful of rows. Dispatching the full sync after every entry that links
+    even one CVE would re-push all ~50k entity documents; this refreshes only the
+    docs whose row changed.
 
     Rows are re-selected rather than converted from caller-held instances, for
     the reason ``index_rules`` documents: server-generated timestamps are
     expired by flush, and reading one off a stale instance attempts sync IO
     inside the async session. Best effort — a search hiccup must not fail the
-    write that triggered it; drift is healed by the scheduled full sync.
+    write that triggered it; the scheduled full sync repairs any drift.
     """
     total = 0
     for entity_type, ids in ids_by_type.items():
@@ -417,7 +418,7 @@ async def index_entities(db: AsyncSession, ids_by_type: dict[str, list]) -> int:
     return total
 
 
-# Accepts every slug spelling in use across the API/merge/reclassify layers.
+# Search index per entity slug, plus "rule" for detection rules.
 _DELETE_INDEX_BY_TYPE = {
     "cve": "entities_cve",
     "cwe": "entities_cwe",

@@ -12,7 +12,7 @@ setup_logging()
 
 celery_app = Celery(
     "intelfeed",
-    # Every task honours the engine switch (app/workers/engine_gate.py).
+    # Every task honors the engine switch (app/workers/engine_gate.py).
     task_cls="app.workers.engine_gate:GatedTask",
     broker=settings.redis_url,
     backend=settings.redis_url,
@@ -90,7 +90,7 @@ celery_app.conf.update(
         "app.workers.daily_summary_tasks.generate_daily_summaries": {"queue": "ai"},
         "app.workers.reddit_digest_tasks.generate_reddit_digest": {"queue": "ai"},
         "app.workers.report_tasks.generate_full_report": {"queue": "ai"},
-        # Hunt packs: the analyst asked, and may leave the page while it drafts.
+        # Hunt packs: drafted on an analyst's request, who may leave the page while it runs.
         "app.workers.hunt_pack_tasks.draft_hunt_pack": {"queue": "ai"},
         # Interactive global copilot CLI turns — same dedicated worker (owns the
         # OAuth credentials volume), streamed back to the api over Redis.

@@ -4,7 +4,7 @@ Each signal is a rare-by-construction observation about an entry (first mention
 of an entity, severe-but-under-covered CVE, near-duplicate echo, …) with a
 human-readable explanation. The priority score is the weighted sum of raw
 signal scores, where each signal type's weight self-tunes to its 30-day firing
-rate (IDF-style): a signal firing on half the river contributes almost nothing,
+rate (IDF-style): a signal firing on half of all entries contributes almost nothing,
 one firing on 0.5% of entries contributes a lot. Family multipliers (global,
 admin-set) sit on top for coarse steering.
 
@@ -164,7 +164,7 @@ def compute_priority_score(
 # compute_priority_score is an unbounded sum (Entry.priority_raw). What the API,
 # automation rules and thresholds see is Entry.priority_score: that sum placed on
 # a 0–10 scale by rank against the trailing 30 days of signal-bearing entries.
-# 0 = nothing fired (or an echo cancelled it out); 1–10 spread the rest, top-heavy
+# 0 = nothing fired (or an echo canceled it out); 1–10 spread the rest, top-heavy
 # so a 9 is the top ~5% and a 10 the top 1%. Ordering stays on priority_raw:
 # the scale clamps at 10 and rounds to one decimal, so it can't break ties.
 
@@ -301,8 +301,8 @@ def attribute_feedback_votes(
     feedback_rows: (feedback_id, verdict, signal_type, score) — one row per
     signal on the voted entry. A vote counts only toward the signal that
     contributed most to the score (score × IDF weight, echo excluded):
-    smearing it across every family present let one noisy signal poison the
-    families it happened to co-fire with.
+    spreading it across every family present would let one noisy signal skew
+    the families it happened to fire alongside.
     """
     merged = {**DEFAULT_FIRING_RATES, **rates}
     best: dict = {}  # feedback_id -> (contribution, signal_type, verdict)
@@ -321,7 +321,7 @@ def attribute_feedback_votes(
     return family_votes
 
 
-# ── Per-user learned weights (Radar personalisation) ───────────────
+# ── Per-user learned weights (Radar personalization) ───────────────
 #
 # The global feedback nudge above pools every analyst's thumbs into one set of
 # multipliers that is baked into the stored Entry.priority_score. These helpers
@@ -335,7 +335,7 @@ PERSONAL_WEIGHT_SPAN = 0.35
 PERSONAL_WEIGHT_MIN = 1.0 - PERSONAL_WEIGHT_SPAN
 PERSONAL_WEIGHT_MAX = 1.0 + PERSONAL_WEIGHT_SPAN
 # Shrinkage constant: a family reaches half its full swing at K votes. Keeps
-# three enthusiastic thumbs from moving a family as far as thirty do.
+# three votes from moving a family as far as thirty do.
 PERSONAL_SHRINKAGE_K = 8
 
 
@@ -629,15 +629,15 @@ async def _new_pairing(db: AsyncSession, entry_id: uuid.UUID) -> SignalHit | Non
         frozenset({"malware", "cve"}),
         frozenset({"threat_actor", "tool"}),
     }
-    # Evidence is append-ordered, so first element == founding entry. Stable
-    # under re-score/backfill, unlike the old created-within-the-hour check,
-    # which erased the signal on every rescore sweep.
+    # Evidence is append-ordered, so first element == founding entry. This is
+    # stable under re-score/backfill; a created-within-the-hour check would
+    # erase the signal on every rescore sweep.
     #
-    # Trust gate: only surface a pairing once it has climbed the relationship
-    # trust ladder to probable/confirmed. A brand-new edge is born "possible"
-    # (a single co-mention) — surfacing those made the signal fire on every
-    # coincidental co-mention (e.g. an actor and a bystander country named in
-    # the same grab-bag paragraph). Requiring probable+ means the pairing was
+    # Trust gate: only surface a pairing whose relationship confidence has
+    # reached probable or confirmed. A new edge starts at "possible" (a single
+    # co-mention), and surfacing those would make the signal fire on every
+    # coincidental co-mention (e.g. an actor and an unrelated country named in
+    # the same paragraph). Requiring probable+ means the pairing was
     # corroborated by evidence volume/feeds or promoted by the adjudicator;
     # `is_distinct_from("coincidental")` also excludes edges the adjudicator
     # explicitly ruled noise (defensive — those are demoted to possible too).
@@ -724,7 +724,7 @@ def _probe_entity_ids(links: _EntityLinks) -> tuple[list, list, list, list]:
 def _source_key(url: str | None, feed_id) -> str:
     """Host of the article URL (feed id fallback) as the independent-source unit.
 
-    Counting feed_ids let multi-feed outlets and aggregator rebroadcasts of the
+    Counting feed_ids would let multi-feed outlets and aggregator rebroadcasts of the
     same site inflate "independent sources".
     """
     if url:
@@ -820,15 +820,16 @@ async def _thread_coverage(db: AsyncSession, entry_id: uuid.UUID) -> dict | None
     ``feed_echo`` and ``source_convergence`` are both approximations of a
     question story threads answer directly: is this the same story as something
     we already have, and how many outlets carried it? The entity-overlap probe
-    below had to infer it from shared extracted entities inside a 72-hour
-    window — which misses every re-report of a story with nothing extractable
-    in it, and fires on two genuinely different stories that happen to share an
-    actor and a CVE. A thread membership is a decision made against the whole
-    story, with the article's own vector, so where one exists it wins.
+    (``_feed_echo``) infers it from shared extracted entities inside a 72-hour
+    window, which misses every re-report of a story with nothing extractable
+    in it, and fires on two different stories that happen to share an actor
+    and a CVE. A thread membership is decided against the whole story, with
+    the article's own vector, so where one exists it is used instead.
 
-    Empty at ingest, always: threading runs up to 30 minutes behind scoring.
-    The verdict lands on the rescore that ``rescore_entries_for_threads``
-    dispatches once the sweeper has placed the article.
+    Always empty at ingest: the story-threads job runs on its own schedule
+    (every two hours by default), after scoring. The thread result is applied
+    on the rescore that ``rescore_entries_for_threads`` dispatches once the
+    sweeper has placed the article.
     """
     row = (
         (
@@ -1164,10 +1165,10 @@ async def compute_entry_signals(db: AsyncSession, entry: Entry) -> list[SignalHi
             hits.append(echo)
         elif int(thread["source_count"] or 0) >= CONVERGENCE_MIN_FEEDS:
             hits.append(_thread_convergence_hit(thread))
-        # A beat in a thread is not an echo of it — the sweeper compared this
-        # article against every member and decided it carried something new.
-        # Running the entity probe anyway would overrule that with a worse
-        # instrument.
+        # A thread member not marked as an echo is not one: the sweeper
+        # compared this article against every member and decided it carried
+        # something new. Running the entity probe anyway would overrule that
+        # with a less accurate check.
     else:
         echo, convergence_sources = await _guarded(
             "feed_echo", entry.id, _feed_echo(db, entry, links, anchor), (None, 0)

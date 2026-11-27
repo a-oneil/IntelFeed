@@ -1,8 +1,4 @@
-/**
- * relationshipBrowser — pure helpers for the profile Relationships browser:
- * flattening pivot payloads into uniform rows, verb labeling, the trust
- * ladder, and verb grouping. Kept free of React so the logic is unit-testable.
- */
+/** Pure helpers for the profile Relationships browser: flattening pivot payloads into uniform rows, verb labeling, trust tiers, and verb grouping. Kept free of React so the logic is unit-testable. */
 import type { EntitySearchResult, PivotResponse } from "@/api/types";
 import type { EntityType } from "@/stores/intelStore";
 
@@ -34,11 +30,7 @@ export const TYPE_ORDER: EntityType[] = TYPE_KEYS.map(([t]) => t);
 /** Stable identity for a related-entity row across list, folds, and map. */
 export const rowKey = (r: RelRow): string => `${r.type}-${r.item.id}`;
 
-/**
- * Mirror of the backend semantic matrix (app/intelligence/relationship_matrix.py),
- * keyed "source>target" as stored. The API rejects triples outside it and flips
- * reversed ones, so creation UIs should only offer verbs from this map.
- */
+/** Mirror of the backend semantic matrix (app/intelligence/relationship_matrix.py), keyed "source>target" as stored. The API rejects triples outside it and flips reversed ones, so creation UIs should only offer verbs from this map. */
 const ALLOWED_MATRIX: Record<string, readonly string[]> = {
   "threat_actor>malware": ["uses", "delivers", "related_to"],
   "threat_actor>tool": ["uses"],
@@ -76,8 +68,7 @@ const ALLOWED_MATRIX: Record<string, readonly string[]> = {
   // Wikidata's industry (P452) for a vendor.
   "vendor>sector": ["operates_in"],
   "product>product": ["related_to"],
-  // Observables are target-only: attribution claims onto the IOC ledger, each
-  // born from an evidence sentence (never from co-occurrence).
+  // Observables are only ever the target here (except observable>cve below): these are attribution claims onto the IOC ledger, each created from an evidence sentence, never from co-occurrence.
   "threat_actor>observable": ["uses", "communicates_with", "controls"],
   "malware>observable": ["uses", "communicates_with"],
   // A host's exposure (Shodan InternetDB's CVE list): the one observable-first triple.
@@ -86,11 +77,7 @@ const ALLOWED_MATRIX: Record<string, readonly string[]> = {
   "campaign>observable": ["uses"],
 };
 
-/**
- * Verbs valid between two entity types in either orientation (the API stores
- * a reversed triple in its canonical direction automatically). Empty result
- * means the pair is not a tracked combination.
- */
+/** Verbs valid between two entity types in either orientation (the API stores a reversed triple in its canonical direction automatically). Empty result means the pair is not a tracked combination. */
 export function allowedVerbsForPair(a: string, b: string): string[] {
   const fwd = ALLOWED_MATRIX[`${a}>${b}`] ?? [];
   const rev = a === b ? [] : (ALLOWED_MATRIX[`${b}>${a}`] ?? []);
@@ -128,8 +115,7 @@ export function rowMeta(type: EntityType, item: EntitySearchResult): string | un
   }
 }
 
-/** Flatten a pivot `related` dict into uniform rows (same-type groups stay
- * hidden except CVEs, matching the previous tab behavior). */
+/** Flatten a pivot `related` dict into uniform rows (same-type co-mentions are hidden except for CVEs; same-type relationships are kept). */
 export function flattenRelated(
   related: PivotResponse["related"],
   viewedType: EntityType,
@@ -137,8 +123,7 @@ export function flattenRelated(
   const rows: RelRow[] = [];
   const rel = related as unknown as Record<string, EntitySearchResult[] | undefined>;
   for (const [type, key] of TYPE_KEYS) {
-    // Same-type co-mentions (every actor named beside an actor) are noise;
-    // same-type relationships ("successor of", "overlaps with") are not.
+    // Same-type co-mentions (every actor named beside an actor) are noise; same-type relationships ("successor of", "overlaps with") are not.
     const sameType = type === viewedType && type !== "cve";
     for (const item of rel[key] ?? []) {
       if (sameType && !item.relationship_id) continue;
@@ -152,12 +137,7 @@ export function verbKeyOf(item: EntitySearchResult): string {
   return item.country_relationship ?? item.relationship_type ?? "co_mentioned";
 }
 
-/**
- * Verb forms keyed by relationship type, read from the VIEWED entity's
- * perspective: `active` when the viewed entity is the SUBJECT (viewed <verb>
- * other), `passive` when the viewed entity is the OBJECT (other <verb> viewed
- * → "viewed <passive> other"). Symmetric verbs use the same form for both.
- */
+/** Verb forms keyed by relationship type, read from the VIEWED entity's perspective: `active` when the viewed entity is the SUBJECT (viewed <verb> other), `passive` when the viewed entity is the OBJECT (other <verb> viewed → "viewed <passive> other"). Symmetric verbs use the same form for both. */
 const VERB_CHIP: Record<string, { active: string; passive: string }> = {
   uses: { active: "uses", passive: "used by" },
   exploits: { active: "exploits", passive: "exploited by" },
@@ -180,13 +160,7 @@ const VERB_CHIP: Record<string, { active: string; passive: string }> = {
   co_mentioned: { active: "co-mentioned", passive: "co-mentioned" },
 };
 
-/**
- * Chip text for a row, read from the VIEWED entity's perspective. Outbound
- * relationships (viewed → other) read actively ("[APT28] uses Cobalt Strike");
- * inbound (other → viewed) read with the inverse form ("[Pegasus] used by
- * NSO Group"). Country annotations always describe the actor acting on the
- * viewed country, so the country is the object ("[Germany] targeted by APT28").
- */
+/** Chip text for a row, read from the VIEWED entity's perspective. Outbound relationships (viewed → other) read actively ("[APT28] uses Cobalt Strike"); inbound (other → viewed) read with the inverse form ("[Pegasus] used by NSO Group"). Country annotations always describe the actor acting on the viewed country, so the country is the object ("[Germany] targeted by APT28"). */
 export function verbChipLabel(item: EntitySearchResult): string {
   const key = verbKeyOf(item);
   const v = VERB_CHIP[key] ?? { active: key.replace(/_/g, " "), passive: key.replace(/_/g, " ") };
@@ -210,9 +184,7 @@ export function isConfirmed(item: EntitySearchResult): boolean {
 }
 
 // ─── Trust ladder (Direction A) ────────────────────────────────────────────
-// Trust is machine-earned: corroborated = confirmed by an authority (MITRE),
-// the AI adjudicator, or an analyst pin; reported = evidence-backed claim
-// awaiting corroboration; signal = engine inference only.
+// Trust tiers come from the relationship's confidence and source: corroborated = confirmed by an authority (MITRE), the AI adjudicator, or an analyst; reported = a claim backed by evidence that no second source has confirmed yet; signal = engine inference only.
 
 export type TrustTier = "corroborated" | "reported" | "signal";
 
@@ -229,14 +201,12 @@ export function trustOf(item: EntitySearchResult): Trust | null {
     const src = item.relationship_source;
     let provenance = "AI";
     if (src === "external_feed") {
-      // MITRE ATT&CK is currently the only authority minting external_feed
-      // edges; differentiate via description if a second source ever ships.
+      // MITRE ATT&CK is currently the only source that creates external_feed relationships; tell sources apart by description if a second one is added.
       provenance = "MITRE";
     } else if (src === "analyst_confirmed" || src === "analyst_created") {
       provenance = "you";
     } else if (item.relationship_adjudication === "corroborated") {
-      // Only the adjudicator's verdict earns the ×N evidence claim — a
-      // legacy ingest-time confirmation shows plain "AI".
+      // Only the adjudicator's verdict shows the ×N evidence count; an older ingest-time confirmation shows plain "AI".
       provenance = `AI ×${item.relationship_evidence_count || 1}`;
     }
     return { tier: "corroborated", provenance };
@@ -248,10 +218,7 @@ export function trustOf(item: EntitySearchResult): Trust | null {
 const TRUST_RANK: Record<TrustTier, number> = { corroborated: 2, reported: 1, signal: 0 };
 
 // ─── Evidence structure (story clustering over evidence entries) ───────────
-// The backend clusters each edge's evidence into stories; the shape says what
-// the reporting record looks like. Rows are earned by their shape; thin and
-// scattered claims fold. Absent structure (feature off / no embeddings)
-// degrades to article counts.
+// The backend clusters each relationship's evidence articles into stories, and the shape describes the result (recurring, one story, scattered, thin). Rows whose shape shows a real story get their own row; thin and scattered claims are folded into a summary line. Without structure (feature off, or no embeddings) the decision falls back to article counts.
 
 export type EvidenceShape = "recurring" | "single_story" | "scattered" | "thin";
 
@@ -282,11 +249,7 @@ export interface StructurePhrase {
   rest: string;
 }
 
-/**
- * Evidence phrase for a row, split so the row can bold the shape word and
- * mute the rest ("**recurring** across 2 incidents over 6 months"). Null for thin
- * rows (their fold label already says it) and when no structure is available.
- */
+/** Evidence phrase for a row, split so the row can bold the shape word and mute the rest ("**recurring** across 2 incidents over 6 months"). Null for thin rows (their fold label already says it) and when no structure is available. */
 export function structurePhrase(item: EntitySearchResult): StructurePhrase | null {
   const es = item.evidence_structure;
   if (!es) return null;
@@ -322,12 +285,7 @@ export function structurePhrase(item: EntitySearchResult): StructurePhrase | nul
   }
 }
 
-/**
- * A row is earned when its evidence carries an actual story (or an authority /
- * analyst corroborated it, or it's a deliberate claim with no co-occurrence
- * evidence at all — MITRE imports, manual links). Everything else folds into
- * the per-group "claims without a story" line.
- */
+/** A row is earned (shown as its own row) when its evidence forms a real story, when an authority or analyst corroborated it, or when it is a deliberate claim with no co-occurrence evidence at all (MITRE imports, manual links). Without structure data, two or more articles earn a row. Everything else folds into the per-group "claims without a story" line. */
 export function isEarnedRow(row: RelRow): boolean {
   const item = row.item;
   if (trustOf(item)?.tier === "corroborated") return true;
@@ -345,12 +303,7 @@ export function partitionEarned(rows: RelRow[]): { earned: RelRow[]; folded: Rel
   return { earned, folded };
 }
 
-/**
- * Implausible CVE ids — extraction junk that should never rank with real
- * vulnerabilities: a year outside CVE's existence, a 7+ digit sequence, or a
- * modern-era sequence past anything MITRE has assigned (the pre-2020 DWF
- * blocks legitimately used 7-digit-looking 101xxxx ids, so old years pass).
- */
+/** Implausible CVE ids, extraction junk that should never rank with real vulnerabilities: a year before 1999 or after next year, an 8+ digit sequence, or, for 2020 and later, a sequence above 99,999 (past anything MITRE has assigned). Pre-2020 years allow 7-digit sequences because the DWF blocks legitimately used 101xxxx ids. */
 export function isImplausibleCveId(label: string): boolean {
   const m = /^CVE-(\d{4})-(\d+)$/i.exec(label.trim());
   if (!m) return false;
@@ -362,13 +315,7 @@ export function isImplausibleCveId(label: string): boolean {
   return false;
 }
 
-/**
- * Everyday software named in passing — ubiquitous tools (GitHub, Notepad++)
- * whose asserted edge is riding coverage volume, not tradecraft. Uses the
- * specificity (IDF) the pivot already computes; recurring or corroborated
- * edges always stay rows (Cobalt Strike is ubiquitous AND tradecraft — the
- * evidence shape is what separates the two).
- */
+/** Everyday software named in passing: common tools (GitHub, Notepad++) whose relationship comes from how often they are mentioned, not from how attackers use them. Flags a tool row whose specificity (IDF, computed by the pivot) is below 0.45. Recurring or corroborated relationships always stay rows (Cobalt Strike is mentioned everywhere AND used by attackers; the evidence shape is what separates the two). */
 export function isEverydaySoftware(row: RelRow): boolean {
   if (row.type !== "tool") return false;
   const item = row.item;
@@ -394,10 +341,7 @@ export const REGION_NAMES = new Set([
 ]);
 
 // ─── Story map (the graph's operations clusters) ───────────────────────────
-// Each earned row's evidence stories carry their entry ids; stories from
-// different rows that share articles (or a thread slug) are the same incident.
-// Union-find merges them into clusters — an operations map assembled entirely
-// from data the pivot already returns.
+// Each earned row's evidence stories carry their entry ids; stories from different rows that share articles (or a thread slug) are treated as the same incident. Union-find merges them into clusters, built entirely from data the pivot response already returns.
 
 export interface StoryMapMember {
   row: RelRow;
@@ -406,8 +350,7 @@ export interface StoryMapMember {
 
 export interface StoryMapCluster {
   title: string | null;
-  /** Lead headline from the cluster's own evidence — the fallback name when
-   * no story thread has titled this incident. */
+  /** Lead headline from the cluster's own evidence — the fallback name when no story thread has titled this incident. */
   headline: string | null;
   slug: string | null;
   first: string | null;
@@ -417,9 +360,7 @@ export interface StoryMapCluster {
   members: StoryMapMember[];
 }
 
-/** Display heading for a story cluster: thread title, else the lead
- * headline from its evidence, else a date range — so clusters are never a
- * wall of anonymous "Story" labels. */
+/** Display heading for a story cluster: thread title, else the lead headline from its evidence, else a date range, so clusters are not all labeled "Story". */
 export function clusterHeading(c: StoryMapCluster): string {
   if (c.title) return c.title;
   if (c.headline) return c.headline.length > 60 ? `${c.headline.slice(0, 59)}…` : c.headline;
@@ -508,8 +449,7 @@ export function buildStoryMap(earned: RelRow[]): StoryMapCluster[] {
 
   clusters.sort((a, b) => b.entryIds.length - a.entryIds.length);
 
-  // A node lives in its strongest cluster only — the one holding most of its
-  // evidence — so the map shows each entity once.
+  // An entity is kept only in the cluster holding most of its evidence, so the map shows each entity once.
   const homeOf = new Map<string, StoryMapCluster>();
   for (const c of clusters) {
     for (const m of c.members) {

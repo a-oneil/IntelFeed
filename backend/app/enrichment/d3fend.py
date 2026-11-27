@@ -130,7 +130,7 @@ async def sync_d3fend(db: AsyncSession, gateway: SourceGateway) -> dict:
             if not (isinstance(version, str) and _VERSION.match(version)):
                 raise RuntimeError(f"D3FEND reported version {version!r}")
             stats["version"] = version
-            # Spooled to disk, not held: the file is ~15 MB.
+            # Written to a temp file instead of held in memory: the file is ~15 MB.
             with tempfile.TemporaryFile("w+", encoding="utf-8", newline="") as fh:
                 async with client.stream("GET", MAPPINGS_URL.format(version=version)) as resp:
                     resp.raise_for_status()

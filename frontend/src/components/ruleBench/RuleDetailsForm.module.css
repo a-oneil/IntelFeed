@@ -1,5 +1,4 @@
-/* Grouped, gridded layout — the flat section stack became labelled groups
-   that read like a document, not a form dump. */
+/* Grouped, gridded layout: the fields sit in labeled groups. */
 .root {
   display: flex;
   flex-direction: column;
@@ -46,7 +45,7 @@
   letter-spacing: 0;
 }
 
-/* Provenance is read-only reference — quieter than the editable groups. */
+/* Provenance is read-only, so it is styled quieter than the editable groups. */
 .provenance .groupHead {
   color: var(--text-muted);
 }
@@ -55,8 +54,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  /* A grid cell's automatic minimum is its content, so a long tag would push
-     the column past the editor's edge instead of staying in its box. */
+  /* A grid cell's automatic minimum width is its content, so without this a long tag would push the column past the editor's edge. */
   min-width: 0;
 }
 
@@ -98,7 +96,7 @@
 .sevDot[data-sev="low"] { background: var(--success); }
 .sevDot[data-sev="informational"] { background: var(--text-muted); }
 
-/* Read-only classification / timestamps as a tidy definition list. */
+/* Read-only classification / timestamps as a definition list. */
 .defList {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -388,7 +386,7 @@
   color: var(--text-muted);
 }
 
-/* Touch targets — the drawer is the phone's only route to these fields. */
+/* Touch targets: on a phone the drawer is the only way to reach these fields. */
 @media (max-width: 767px) {
   .select,
   .textarea,

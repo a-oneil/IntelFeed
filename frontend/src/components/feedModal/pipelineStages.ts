@@ -2,31 +2,13 @@ import type { FeedPipeline } from "@/api/types";
 import type { FeedFormValues, IntelMode } from "./useFeedForm";
 
 /**
- * The feed's ingest pipeline, described as what actually runs.
- *
- * The old control was a five-way preset ("Full", "Selective", "Known entities
- * only", "Manual", "None") mapped onto two columns. Three of those labels were
- * false: the one-pass AI analysis that does most of the extraction today gated
- * only on `intel_extraction_mode === "none"`, so a feed set to "Known entities
- * only — match against existing database" or "Manual — only when triggered"
- * still had the AI read every article and create entities. `selective` and
- * `full` differ solely in whether *autolinking* applies a relevance pre-filter;
- * the AI pass uses its own global junk threshold either way.
- *
- * So the stages below are the real ones, each pointing at the field that
- * genuinely drives it.
- *
- * Only switches you can actually move get a row. The observables ledger scan
- * has none: it follows "Analyse this feed" and has no setting of its own, so a
- * checkbox for it would be decoration. It is reported in the summary sentence
- * instead.
- *
- * Two things can still take a listed stage out of this pane's hands, and both
- * say so rather than pretending:
- *   - `ai_one_pass_enabled` off engine-wide — no per-feed setting revives it.
- *   - a PipelinePlan at global, category or feed scope overriding the stage
- *     once `pipeline_engine_enabled` is on. The plan wins over the Feed
- *     booleans, so the checkbox here would be writing a value nothing reads.
+ * The feed's ingest pipeline, described as the stages that actually run.
+ * This replaces a five-way preset ("Full", "Selective", "Known entities only", "Manual", "None") mapped onto two columns, because three of those labels were false. The one-pass AI analysis, which does most of the extraction, is gated only on `intel_extraction_mode === "none"`, so a feed set to "Known entities only — match against existing database" or "Manual — only when triggered" still had the AI read every article and create entities. `selective` and `full` differ only in whether *autolinking* applies a relevance pre-filter; the AI pass uses its own global junk threshold either way.
+ * Each stage below is a real one and points at the field that drives it.
+ * Only settings you can change get a row. The observables ledger scan has no setting of its own (it follows "Analyze this feed"), so it gets no checkbox and is reported in the summary sentence instead.
+ * Two things can take a listed stage out of this pane's control, and the row says so when either applies:
+ *   - `ai_one_pass_enabled` is off engine-wide; no per-feed setting turns the AI back on.
+ *   - a PipelinePlan at global, category or feed scope overrides the stage while `pipeline_engine_enabled` is on. The plan takes priority over the Feed booleans, so a checkbox here would write a value nothing reads.
  */
 export type StageId =
   | "master"
@@ -74,16 +56,12 @@ function planOverride(id: StageId, ctx: Context): "global" | "category" | "feed"
 }
 
 /**
- * What each stage is called and what it does, in one place.
- *
- * Both the feed modal and the category modal describe these settings, and
- * before this they each carried their own wording — which is how the two ended
- * up describing the same pipeline differently. The category modal reads these
- * and renders them as bulk selects; the feed modal renders them as checkboxes.
+ * What each stage is called and what it does, kept in one place.
+ * Both the feed modal and the category modal describe these settings; sharing the wording keeps them from describing the same pipeline differently. The category modal renders these as bulk selects; the feed modal renders them as checkboxes.
  */
 export const STAGE_COPY: Record<StageId, { label: string; detail: string }> = {
   master: {
-    label: "Analyse this feed",
+    label: "Analyze this feed",
     detail:
       "When off, articles still arrive, stay searchable, get a priority score, join story threads and run through your automation rules. Nothing is tagged or created from them: no entities, CVEs, indicators or detection rules, regardless of the switches below.",
   },
@@ -161,9 +139,7 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
       writes: true,
     },
     {
-      // Not a stage of its own: `extract_tools` is read only inside
-      // `store_entry_analysis` (`_tool_mode_for_entry`), so it is a sub-switch
-      // of the AI pass and does nothing at all when that is off.
+      // Not a stage of its own: `extract_tools` is read only inside `store_entry_analysis` (`_tool_mode_for_entry`), so it is a sub-switch of the AI pass and does nothing when that is off.
       id: "tools",
       ...STAGE_COPY.tools,
       on: aiRunning && values.extract_tools,
@@ -191,10 +167,7 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
 
   if (!pipeline?.engine_enabled) return rows;
 
-  // A plan outranks the Feed booleans, so show its value and stop offering a
-  // checkbox that would write somewhere nothing reads. Mode none outranks the
-  // plan in turn: the autolink and extract tasks both check it themselves, so
-  // a plan that enables them on a feed that is not analysed still runs nothing.
+  // A plan takes priority over the Feed booleans, so show its value and disable the checkbox, which would write a value nothing reads. Mode "none" in turn takes priority over the plan: the autolink and extract tasks both check it themselves, so a plan that enables them on a feed that is not analyzed still runs nothing.
   return rows.map((row) => {
     const scope = planOverride(row.id, ctx);
     if (!scope || !processing) return row;
@@ -220,8 +193,7 @@ export function toggleStage(
 
   switch (id) {
     case "master":
-      // Coming back on, land on the default rather than whatever it was before
-      // the feed was switched off — there is nowhere to remember that.
+      // When turned back on, use the default mode: the mode from before the feed was switched off is not stored anywhere.
       return { intel_extraction_mode: next ? "selective" : "none" };
     case "autolink":
       return { intel_extraction_mode: (next ? "selective" : "manual") as IntelMode };
@@ -260,8 +232,7 @@ export function summarizeStages(values: FeedFormValues, ctx: Context): string {
   if (on("ai")) parts.push("read by the AI");
   if (on("regex")) parts.push("filled in from NVD");
 
-  // No row of its own — there is no individual switch for it — but it does
-  // follow "Analyse this feed", so the sentence only claims it when that is on.
+  // The IOC check has no row because it has no switch of its own, but it follows "Analyze this feed", so the sentence only claims it when that is on (the early return above covers the off case).
   parts.push("checked against your IOC list");
 
   let summary = `Every article is ${joinWords(parts)}.`;

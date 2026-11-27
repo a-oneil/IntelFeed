@@ -5,8 +5,7 @@
   min-height: 0;
 }
 
-/* Table + definition pane — the same split as Requirements, so a glossary
-   entry opens the way a requirement does instead of shoving the list apart. */
+/* Table + definition pane: the same split as Requirements, so a glossary entry opens the way a requirement does instead of pushing the list apart. */
 .layout {
   display: flex;
   flex: 1;
@@ -88,8 +87,7 @@
 
 @media (max-width: 900px) {
   .detailPane {
-    /* A dragged width still applies here, but never past what the narrow
-       layout can spare. */
+    /* A dragged width still applies here, but never past what the narrow layout can spare. */
     width: min(var(--glossary-detail-w, 380px), 300px);
     min-width: min(var(--glossary-detail-w, 380px), 300px);
   }
@@ -142,11 +140,7 @@
 
 
 
-/* Badges are Chips now. These classes carry only what Chip never declares:
-   letter-casing and tracking. The category badge used to hardcode
-   `color: #fff` over an arbitrary NIST CSF fill — protect (#22c55e) landed at
-   2.28:1 and detect (#f59e0b) at 2.15:1. Chip's `solid` tone derives the
-   foreground from the fill, which is what fixes those. */
+/* Badges are Chips. These classes carry only what Chip never declares: letter-casing and tracking. The category badge does not hardcode `color: #fff` over the NIST CSF fill, because white text fails contrast there (protect #22c55e is 2.28:1, detect #f59e0b is 2.15:1); Chip's `solid` tone derives the foreground from the fill. */
 
 
 
@@ -437,9 +431,7 @@
     flex-direction: column;
   }
 
-  /* These are Chips, which declare `display: inline-flex` from a single-class
-     selector. Scoping to .rowMain keeps this rule the more specific one no
-     matter how the two stylesheets end up ordered in the bundle. */
+  /* These are Chips, which declare `display: inline-flex` from a single-class selector. Scoping to .rowMain keeps this rule the more specific one no matter how the two stylesheets end up ordered in the bundle. */
   .rowMain .categoryBadge,
   .rowMain .maturityBadge,
   .rowMain .maturityNone {

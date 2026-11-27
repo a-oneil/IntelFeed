@@ -1,6 +1,6 @@
 // Right-click lookup: turn selected text into an IntelFeed search.
 
-/** Undo the usual defanging: hxxp, [.] (.) {.}, [:], [at]. */
+/** Undo the usual defanging: hxxp, fxp, [.] (.) {.} and [dot], [:], [@] and [at]. */
 export function refang(text) {
   return String(text || "")
     .trim()

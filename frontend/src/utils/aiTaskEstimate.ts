@@ -1,16 +1,11 @@
 // Client-side, approximate cost + latency hints for AI task buttons.
 //
-// These estimates are intentionally rough — they exist to give the analyst a
-// sense of "how expensive / how slow" a one-shot task is before running it, not
-// to bill anyone. Everything here is a heuristic.
+// These estimates are intentionally rough — they exist to give the analyst a sense of "how expensive / how slow" a one-shot task is before running it, not to bill anyone. Everything here is a heuristic.
 
 import type { AITaskAssignment, AIProvider } from "@/api/types";
 import { formatUsd } from "@/utils/format";
 
-// Cost per 1M tokens (input, output) in USD.
-// Mirrors the backend COST_TABLE in `backend/app/ai/engine.py`. Keep in sync if
-// backend rates change. Matched by model-family substring (opus/sonnet/haiku),
-// at the current generation's rates, so older or date-suffixed ids still resolve.
+// Cost per 1M tokens (input, output) in USD. Mirrors the backend COST_TABLE in `backend/app/ai/engine.py`. Keep in sync if backend rates change. Matched by model-family substring (opus/sonnet/haiku), at the current generation's rates, so older or date-suffixed ids still resolve.
 const MODEL_COST: Record<"opus" | "sonnet" | "haiku", { in: number; out: number }> = {
   opus: { in: 4.0, out: 20.0 },
   sonnet: { in: 2.0, out: 10.0 },
@@ -35,10 +30,7 @@ function modelFamily(modelName: string | undefined | null): ModelFamily | null {
   return null;
 }
 
-// Nominal token estimate per task category. Input tokens are dominated by the
-// article/entity content we feed in; output by the response length. These are
-// deliberate round numbers — a typical article summary vs. a full detection
-// generation differ by roughly an order of magnitude in output.
+// Nominal token estimate per task category. Input tokens are dominated by the article/entity content we feed in; output by the response length. These are deliberate round numbers — a typical article summary vs. a full detection generation differ by roughly an order of magnitude in output.
 function nominalTokens(category: string | null, taskName: string): { in: number; out: number } {
   // Generation tasks (detection rules, report sections) produce long output.
   if (category === "generation" || taskName === "detection_rules") {
@@ -65,13 +57,9 @@ function formatCost(usd: number): string {
 }
 
 /**
- * Estimate cost + latency for a task given its assignment. Everything is
- * client-side and approximate. Returns `unassigned: true` when there's no
- * assignment or the model family isn't recognized (so we don't invent a cost).
+ * Estimate cost + latency for a task given its assignment. Everything is client-side and approximate. Returns `unassigned: true` when there's no assignment or the model family isn't recognized (so we don't invent a cost).
  *
- * @param assignment  the task's AITaskAssignment (from useAllTaskAssignments), a personal
- *                    route's {provider_id, model_name} when the click runs on the user's own
- *                    key, or undefined
+ * @param assignment  the task's AITaskAssignment (from useAllTaskAssignments), a personal route's {provider_id, model_name} when the click runs on the user's own key, or undefined
  * @param providers   AI providers list (from useAIProviders), used to detect the claude_code CLI
  */
 export function estimateTask(
@@ -87,15 +75,13 @@ export function estimateTask(
 
   const family = modelFamily(assignment.model_name);
 
-  // Claude Code CLI: no per-token billing surfaced here (subscription/quota),
-  // and latency is dominated by CLI spin-up. Show a time-only hint.
+  // Claude Code CLI: no per-token billing surfaced here (subscription/quota), and latency is dominated by CLI spin-up. Show a time-only hint.
   if (isClaudeCode) {
     return { label: "~30–60s", unassigned: false };
   }
 
   if (!family) {
-    // Assigned but unknown model — still not "configured cost", show a plain
-    // time band and skip the dollar figure rather than guessing rates.
+    // Assigned, but the model family is unknown: show a bare "≈" and skip the dollar figure and time rather than guessing rates.
     return { label: "≈", unassigned: false };
   }
 

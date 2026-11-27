@@ -19,8 +19,7 @@ function result(id, text, tone) {
 
 // ── sections and navigation ───────────────────────────────────────────
 //
-// One nav entry per <section class="panel" data-title>, one section shown at
-// a time, the open one kept in the URL hash.
+// One nav entry per <section class="panel" data-title>, one section shown at a time, the open one kept in the URL hash.
 
 const panels = [...document.querySelectorAll("section.panel[data-title]")];
 

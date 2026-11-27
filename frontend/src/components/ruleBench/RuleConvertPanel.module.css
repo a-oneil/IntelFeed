@@ -23,8 +23,7 @@
   color: var(--text-secondary);
 }
 
-/* Five across in the full centre column; the strip under the editor is as
-   wide as the editor, which is what makes room for every language. */
+/* Five across in the full center column; the strip under the editor is as wide as the editor, which leaves room for every language. */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -141,8 +140,7 @@
   height: 260px;
 }
 
-/* Marks a conversion still living in the parent's metadata blob rather than as
-   a rule of its own — everything the backfill has not promoted yet. */
+/* Marks a conversion still stored in the parent's metadata blob rather than as a rule of its own (anything the backfill has not promoted yet). */
 .legacyDot {
   display: inline-block;
   width: 5px;

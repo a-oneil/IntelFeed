@@ -26,7 +26,7 @@ import styles from "./Sidebar.module.css";
 import { promptDialog } from "@/utils/dialog";
 import { describeHealthWarning, describePauseReason } from "@/utils/feedHealth";
 
-/** Where the footer link points. Hard-coded upstream — a fork edits one line. */
+/** Where the footer link points. Hard-coded to the upstream repo; a fork changes this one line. */
 const REPO_URL = "https://github.com/a-oneil/IntelFeed";
 
 /** Hover text for the footer's version: the commit and when it was built. */
@@ -129,8 +129,7 @@ export function Sidebar() {
   const setActivePanel = useUIStore((s) => s.setActivePanel);
   const openSavedSearch = useOpenSavedSearch();
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
-  // Add-feed dialog is app-level (rendered by GlobalModals) so the command
-  // palette can open it and a collapsed sidebar can't hide it.
+  // Add-feed dialog is app-level (rendered by GlobalModals) so the command palette can open it and a collapsed sidebar can't hide it.
   const openAddFeed = useUIStore((s) => s.openAddFeed);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const { data: savedSearches } = useSavedSearches();
@@ -145,17 +144,11 @@ export function Sidebar() {
     }
   }, [isMobile, sidebarCollapsed, toggleSidebar]);
 
-  // The sidebar shows one half of the app at a time — the feed tree, or the
-  // workbench's sections. The switch at the top is the only always-visible
-  // statement that this app is more than a reader.
+  // The sidebar shows one half of the app at a time — the feed tree, or the workbench's sections. The switch at the top is the only always-visible sign that this app is more than a reader.
   const sidebarMode = useUIStore((s) => s.sidebarMode);
   const setSidebarMode = useUIStore((s) => s.setSidebarMode);
 
-  // Routes drive the mode, not just the switch: a deep link, a back button, or
-  // a copilot hand-off into an entity profile must land with the workbench nav
-  // already showing. setState rather than setSidebarMode — the action also
-  // expands the sidebar, which would fight the detail-route auto-collapse.
-  // Settings and search belong to neither half, so they leave the mode alone.
+  // Routes drive the mode, not just the switch: a deep link, a back button, or a copilot hand-off into an entity profile must land with the workbench nav already showing. setState rather than setSidebarMode — the action also expands the sidebar, which would fight the detail-route auto-collapse. Settings and search belong to neither half, so they leave the mode alone.
   useEffect(() => {
     const path = location.pathname;
     if (path.startsWith("/workbench")) {
@@ -165,8 +158,7 @@ export function Sidebar() {
     }
   }, [location.pathname]);
 
-  // One-time nudge on the Workbench half of the switch: a small pulsing dot
-  // until the user has visited Workbench once (on this browser).
+  // One-time nudge on the Workbench half of the switch: a small pulsing dot until the user has visited Workbench once (on this browser).
   const [workbenchSeen, setWorkbenchSeen] = useState(
     () => localStorage.getItem("intelfeed-workbench-seen") === "1",
   );
@@ -236,17 +228,13 @@ export function Sidebar() {
   // Group feeds by category
   const sortByTitle = (a: Feed, b: Feed) =>
     (a.custom_title || a.title).localeCompare(b.custom_title || b.title, undefined, { sensitivity: "base" });
-  // Manual Uploads is a system feed, not a subscription: it has no category by
-  // design and sits above the tree as its own row rather than under an
-  // "Uncategorized" label. Filing it in a category moves it into that node.
+  // Manual Uploads is a system feed, not a subscription: it has no category by design and sits above the tree as its own row rather than under an "Uncategorized" label. Filing it in a category moves it into that node.
   const manualFeed = feeds.find((s) => s.feed_type === "manual" && !s.is_muted && !s.category_id) ?? null;
   const uncategorized = feeds
     .filter((s) => !s.category_id && !s.is_muted && s.id !== manualFeed?.id)
     .sort(sortByTitle);
   const categorizedFeeds = (catId: string) => feeds.filter((s) => s.category_id === catId && !s.is_muted).sort(sortByTitle);
-  // Feeds "by unread": categories rank by active (non-muted) unread total, muted
-  // feeds are pulled out of the tree into the bottom fold, and each header gets a
-  // volume bar scaled to the busiest category.
+  // Feeds "by unread": categories rank by active (non-muted) unread total, muted feeds are pulled out of the tree into the bottom fold, and each header gets a volume bar scaled to the busiest category.
   const categoryUnread = (catId: string) =>
     feeds.reduce((sum, s) => (s.category_id === catId && !s.is_muted ? sum + s.unread_count : sum), 0);
   const mutedFeeds = feeds.filter((s) => s.is_muted).sort(sortByTitle);
@@ -362,7 +350,7 @@ export function Sidebar() {
             <div className={`${styles.toolStrip} ${styles.toolStripPair}`} role="group" aria-label="Tools">
               <Hint
                 title="Automation"
-                body="Rules that act on new articles as they arrive: tag, star, summarise, add to a campaign."
+                body="Rules that act on new articles as they arrive: tag, star, summarize, add to a campaign."
                 aside="A trigger, then conditions, then actions."
               >
                 <button
@@ -423,8 +411,7 @@ export function Sidebar() {
                 onClick={() => { openSavedSearch(s); closeSidebarIfMobile(); }}
                 onDoubleClick={async (e) => {
                   e.stopPropagation();
-                  // An empty answer is meaningful here — it clears the display
-                  // name back to the raw query — so it must stay submittable.
+                  // An empty answer is meaningful here — it clears the display name back to the raw query — so it must stay submittable.
                   const newName = await promptDialog({
                     title: "Set display name",
                     message: "Set display name:",
@@ -556,8 +543,7 @@ export function Sidebar() {
                 </svg>
               </button>
             </Hint>
-            {/* Accent-tinted on purpose: the row's one "bring content in" primary
-                action shouldn't disappear into the grey icon strip. */}
+            {/* Accent-tinted on purpose so the row's primary action (adding content) stands out from the gray icon strip. */}
             <button className={styles.newFeedBtn} onClick={openAddFeed} title="Add feed">+</button>
             </>)}
           </div>
@@ -722,9 +708,7 @@ export function Sidebar() {
       <div className={styles.brandSection}>
         <BrandButton className={styles.brandName} />
         <div className={styles.userActions}>
-          {/* The header's Settings and Documentation buttons are desktop-only —
-              on a phone the header is a hamburger and a search box, so this row
-              is the only way to either. Docs was missing from it entirely. */}
+          {/* The header's Settings and Documentation buttons are desktop-only — on a phone the header is a hamburger and a search box, so this row is the only way to reach either. */}
           <button onClick={() => { navigate("/documentation"); closeSidebarIfMobile(); }} className={styles.iconBtn} title="Documentation">
             Docs
           </button>
@@ -739,7 +723,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* The app has two halves. Say so, before anything else in the column. */}
+      {/* Reading/Workbench mode switch, first in the column so both halves of the app are visible. */}
       <div className={styles.modeSwitch} role="group" aria-label="Workspace mode">
         <div className={styles.modeCell}>
           <button
@@ -811,8 +795,7 @@ export function Sidebar() {
         );
       })}
 
-      {/* The one path back to the source. Chrome rather than navigation, so it
-          stays muted until hovered and sits under both modes' sections. */}
+      {/* Link to the source repo. It is page chrome rather than navigation, so it stays muted until hovered and sits below both modes' sections. */}
       <div className={styles.sidebarFooter}>
         <a
           className={styles.repoLink}
@@ -842,11 +825,7 @@ export function Sidebar() {
           </button>
         )}
 
-        {/* What is actually running. A bare short SHA until the repo carries
-            tags, a tag after — see scripts/ops/version.sh. Links to the commit
-            itself, which beats searching main's history for a SHA that is
-            sitting on a branch. Falls back to plain text in an unstamped build,
-            where there is no commit to point at. */}
+        {/* The build that is running: a short SHA, or a tag once the repo has tags (see scripts/ops/version.sh). It links to the commit itself, so a SHA that only exists on a branch opens directly instead of needing a search through main's history. An unstamped build shows plain text, since there is no commit to link to. */}
         {__GIT_SHA__ ? (
           <a
             className={styles.version}
@@ -1214,8 +1193,7 @@ function FeedItem({
 }) {
   const { contextMenu, setContextMenu, menuRef } = useClampedContextMenu();
   const [editModal, setEditModal] = useState(false);
-  // With per-user subscriptions on (feed.per_user), unsubscribing only affects
-  // the caller. Otherwise removal deletes the feed for everyone — admin-only.
+  // With per-user subscriptions on (feed.per_user), unsubscribing only affects the caller. Otherwise removal deletes the feed for everyone — admin-only.
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   const canUnsubscribe = isAdmin || Boolean(subscription.per_user);
   const deleteFeed = useDeleteFeed();
@@ -1237,8 +1215,7 @@ function FeedItem({
 
   const title = subscription.custom_title || subscription.title;
   const feedType = subscription.feed_type?.toLowerCase() || "rss";
-  // The Manual Uploads pseudo-feed is created inactive so the poller skips it;
-  // that is its nature, not a pause, so it gets neither the dimming nor the badge.
+  // The Manual Uploads pseudo-feed is created inactive so the poller skips it; that is its nature, not a pause, so it gets neither the dimming nor the badge.
   const isManual = feedType === "manual";
   const isPaused = !subscription.is_active && !isManual;
 

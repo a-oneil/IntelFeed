@@ -70,8 +70,8 @@ def test_parse_pulls_themes_and_buckets():
 
     assert ("Edge-device exploitation widens", SECTION_THEME) in by_entry[ids[0]]
     assert ("Ransomware affiliate churn", SECTION_THEME) in by_entry[ids[2]]
-    # The leftover bucket is recorded, but with no theme — the briefing read the
-    # day and declined to group it.
+    # The leftover bucket is recorded, but with no theme: the briefing left it
+    # out of every theme.
     assert ("", SECTION_NOTABLE) in by_entry[ids[3]]
     # An article cited under a theme *and* in a later section keeps both rows.
     assert ("Edge-device exploitation widens", SECTION_THEME) in by_entry[ids[1]]
@@ -136,7 +136,7 @@ async def test_reparsing_a_day_does_not_duplicate(db_session: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_citations_of_unknown_entries_are_dropped(db_session: AsyncSession):
-    """A briefing outlives the articles retention prunes."""
+    """A briefing can cite articles that retention has since deleted."""
     entries = await _mk_entries(db_session, 2)
     ids = [entries[0].id, entries[1].id, uuid.uuid4(), uuid.uuid4()]
     result = await record_briefing_themes(db_session, "2026-09-17", _briefing(ids))
@@ -167,8 +167,8 @@ async def test_span_says_no_for_one_wave_and_yes_across_themes(db_session: Async
     ids = [e.id for e in entries]
     await record_briefing_themes(db_session, "2026-09-18", _briefing(ids))
 
-    # Both articles sit under the same heading on the same day: one reporting
-    # wave told twice, which is exactly what the gate exists to catch.
+    # Both articles sit under the same heading on the same day: the same story
+    # reported twice, which is what the gate is meant to catch.
     assert await spans_multiple_themes(db_session, [ids[0], ids[1]]) is False
     # Different headings — independent assertions.
     assert await spans_multiple_themes(db_session, [ids[0], ids[2]]) is True
@@ -214,7 +214,7 @@ async def test_theme_floor_blocks_a_single_wave(db_session: AsyncSession, monkey
 
 def test_narrative_settings_are_registered():
     """settings.get() on an unregistered key silently returns None, which would
-    make both knobs dead code."""
+    make both settings do nothing."""
     from app.config import settings
     from app.services.system_settings import _ENGINE_SECTION_GROUPS, CONFIGURABLE_KEYS
 

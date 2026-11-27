@@ -36,9 +36,9 @@ def coerce_exploit_sources(sources) -> list[dict]:
     """`cves.exploit_sources` as a list of `{"source": ...}` dicts.
 
     The column was written as dicts by the KEV sync and, for a while, as bare
-    strings by the Metasploit sync — and `.get()` on a string took the KEV
-    sync down with it for two weeks. Every writer and reader goes through
-    this so one odd row can never break a whole catalog run again.
+    strings by the Metasploit sync, and calling `.get()` on a string stopped
+    the KEV sync for two weeks. Every writer and reader goes through this so
+    one malformed row cannot break a whole catalog run.
     """
     out: list[dict] = []
     for item in sources or []:
@@ -236,7 +236,7 @@ async def sync_kev_feed(db: AsyncSession) -> dict:
 async def sync_cybergeist_threat_actors(db: AsyncSession) -> dict:
     """Sync threat actors from Cybergeist public feed.
 
-    Returns stats dict and list of newly created actor IDs.
+    Returns the stats dict, with newly created actor IDs under ``new_entity_ids``.
     """
     stats = {"new": 0, "updated": 0, "skipped": 0, "errors": 0}
     new_entity_ids = []
@@ -339,7 +339,7 @@ async def sync_cybergeist_threat_actors(db: AsyncSession) -> dict:
 async def sync_cybergeist_malware(db: AsyncSession) -> dict:
     """Sync malware families from Cybergeist public feed.
 
-    Returns stats dict and list of newly created malware IDs.
+    Returns the stats dict, with newly created malware IDs under ``new_entity_ids``.
     """
     stats = {"new": 0, "updated": 0, "skipped": 0, "errors": 0}
     new_entity_ids = []

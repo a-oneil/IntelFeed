@@ -37,8 +37,8 @@ def generate_full_report(self, report_id: str, user_id: str):
 
     Iterates through template sections sequentially, generating AI prose
     for each empty narrative section. Publishes SSE events for progress.
-    Every dispatcher is a person's request, so the run is theirs: their
-    personal key may answer, and their allowance is spent.
+    The run belongs to the user who requested it: their personal key may
+    answer, and their allowance is spent.
     """
     run_async(_generate_full_report(self, report_id, user_id))
 

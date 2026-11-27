@@ -1,5 +1,4 @@
-/* Rendered note content — shared by the read view and the editor preview pane.
-   Renders the sanitized markdown-derived HTML of a note. */
+/* Rendered note content, shared by the read view and the editor preview pane. */
 .body {
   font-size: var(--fs-md);
   line-height: 1.6;
@@ -46,9 +45,7 @@
 .body li { margin: var(--sp-1) 0; }
 .body li::marker { color: var(--accent); }
 
-/* :where() keeps this at zero-specificity for `.body` so the entity/article link
-   classes from EntityLinkedMarkdown (e.g. the 2px dotted .entityLink) win instead
-   of being overridden by this blanket anchor rule. Plain note links still match. */
+/* :where() gives `.body` zero specificity here so the entity/article link classes from EntityLinkedMarkdown (e.g. the 2px dotted .entityLink) win over this general anchor rule. Plain note links still match it. */
 :where(.body) a {
   color: var(--accent);
   text-decoration: none;

@@ -139,7 +139,7 @@ async def test_stats(client, auth_headers, seeded):
     assert any(c["iso_code"] == "US" and c["victims"] == 2 for c in s["countries"])
     # Timeseries: contiguous weekly buckets, stopping before the current week.
     # That last week is still in progress, so plotting it would show a partial
-    # -bucket cliff. Whether the 40h-old disclosure lands before this week's
+    # bucket as a sudden drop. Whether the 40h-old disclosure lands before this week's
     # Monday depends on what day the suite runs, so the expected total is
     # derived from the same cutoff rather than hard-coded.
     points = s["timeseries"]

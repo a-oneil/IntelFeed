@@ -1,11 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 
-/** How far a "wrong match" report reaches.
- *  - `entry`  — unlink from this one article.
- *  - `alias`  — drop the surface form from the entity's aliases and unlink every
- *               article that matched only via it.
- *  - `global` — block the surface form from matching any entity, anywhere. */
+/**
+ * How far a "wrong match" report reaches.
+ * - `entry`: unlink from this one article.
+ * - `alias`: remove the matched text from the entity's aliases and unlink every article that matched only through it.
+ * - `global`: block the matched text from matching any entity, anywhere.
+ */
 export type FalsePositiveScope = "entry" | "alias" | "global";
 
 export interface ReportFalsePositiveParams {
@@ -25,8 +26,7 @@ export interface ReportFalsePositiveResult {
   links_removed: number;
 }
 
-/** Reader/profile feedback loop: unlink a wrong entity match, optionally teaching
- * the autolinker to stop matching that surface form on future entries. */
+/** Reader/profile feedback: unlink a wrong entity match, and optionally stop the autolinker from matching that text on future entries. */
 export function useReportFalsePositive() {
   const qc = useQueryClient();
   return useMutation({
@@ -41,10 +41,7 @@ export function useReportFalsePositive() {
         qc.invalidateQueries({ queryKey: ["entity-graph", vars.entity_type, vars.entity_id] });
         qc.invalidateQueries({ queryKey: ["entry-graph", vars.source_entry_id] });
         qc.invalidateQueries({ queryKey: ["entry", vars.source_entry_id] });
-        // The reader's inline highlighter is fed by the per-type entry-entity
-        // queries (["entry-vendors", id], ["entry-threat-actors", id], …), not by
-        // ["entry", id] — without these the reported word stays underlined until
-        // the article is reopened. Match them by shape so every type is covered.
+        // The reader's inline highlighter reads the per-type entry-entity queries (["entry-vendors", id], ["entry-threat-actors", id], …), not ["entry", id]; without invalidating these the reported word stays underlined until the article is reopened. Match them by key shape so every type is covered.
         qc.invalidateQueries({
           predicate: (q) =>
             typeof q.queryKey[0] === "string" &&

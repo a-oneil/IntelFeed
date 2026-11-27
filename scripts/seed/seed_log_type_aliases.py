@@ -2,9 +2,9 @@
 
 telemetry_sources.log_types is vendor free text — 864 distinct strings over
 1,124 assignments, 721 of them used exactly once — so "authentication",
-"authentication_event", "login_event" and "login_success" name one behaviour
+"authentication_event", "login_event" and "login_success" name one behavior
 and match four different sets of products. This flattens every raw string onto
-the canonical behaviour axis in app/services/detection_coverage.py, writes the
+the canonical behavior axis in app/services/detection_coverage.py, writes the
 map into log_type_alias, and stores each source's ids on
 log_types_canonical so the matcher reads them instead of re-deriving them.
 
@@ -71,7 +71,7 @@ async def main(dry_run: bool) -> None:
         print(f"Aliases: {created} created, {updated} updated, {unchanged} unchanged ({len(raws)} raw strings).")
         if unmapped:
             # An unmapped string is an invisible source: nothing a rule asks for
-            # will ever reach it through the behaviour axis.
+            # will ever reach it through the behavior axis.
             print(f"\nNo canonical id for {len(unmapped)} string(s) — add them to _LOG_TYPE_EXACT:")
             for raw in unmapped:
                 print(f"  {raw}")

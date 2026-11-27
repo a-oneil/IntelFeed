@@ -52,8 +52,7 @@ const CONTENT_TYPE_LABELS: Record<string, string> = {
   anvilogic_rule: "ANVILOGIC",
 };
 
-/* Raw hexes with no design token behind them — a rule's own severity scale,
-   not an entity colour, so they stay literal and ride in as the Chip tint. */
+/** Raw hex colors with no design token behind them: a rule's own severity scale, not an entity color, so they stay literal and are passed as the Chip tint. */
 const SEVERITY_TINTS: Record<string, string> = {
   critical: "#dc2626",
   high: "#ea580c",

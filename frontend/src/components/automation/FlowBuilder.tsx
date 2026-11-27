@@ -60,11 +60,7 @@ function syncNodeIdCounter(nodes: Node[]) {
   }
 }
 
-/**
- * Stable callback dispatcher — nodes get a fixed `onUpdate`/`onDelete` that
- * dispatches through a ref, so React Flow never sees new node objects just
- * because the parent re-rendered.
- */
+/** Returns the update and delete callbacks for flow nodes. FlowBuilder stores them in a ref and gives each node an `onUpdate`/`onDelete` that calls through that ref, so the node data does not depend on these function identities. */
 function useNodeCallbacks(
   setNodes: ReturnType<typeof useNodesState>[1],
   setEdges: ReturnType<typeof useEdgesState>[1]
@@ -132,14 +128,11 @@ export function FlowBuilder({ rule, onClose }: FlowBuilderProps) {
     callbacksRef.current = { updateNode, deleteNode };
   }, [updateNode, deleteNode]);
 
-  // Inject onUpdate/onDelete into node data only when nodes are created or
-  // their core data changes — NOT on every position/selection change.
-  // We key off a serialized snapshot of each node's data (excluding callbacks).
+  // Inject onUpdate/onDelete into node data. This recomputes whenever `nodes` changes, including position and selection changes; the callbacks call through callbacksRef so they always reach the current functions.
   const prevDataSnapshotRef = useRef<string>("");
 
   const nodesWithCallbacks = useMemo(() => {
-    // Action nodes need the rule's execution mode (set on the trigger) to show
-    // accurate variable hints — derive it here and inject into every node.
+    // Action nodes need the rule's execution mode (set on the trigger) to show accurate variable hints, so derive it here and inject it into every node.
     const triggerNode = nodes.find((n) => n.type === "trigger");
     const executionMode =
       ((triggerNode?.data?.triggerConfig as Record<string, unknown> | undefined)
@@ -157,7 +150,7 @@ export function FlowBuilder({ rule, onClose }: FlowBuilderProps) {
     // Only depend on nodes — the callbacks are accessed via ref (always stable)
   }, [nodes]);
 
-  // Track whether data actually changed to avoid infinite update loops
+  // Serialized snapshot of each node's id, type and data, stored in prevDataSnapshotRef. Nothing reads that ref.
   const dataSnapshot = nodes
     .map((n) => `${n.id}:${n.type}:${JSON.stringify(n.data)}`)
     .join("|");

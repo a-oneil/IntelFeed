@@ -2,12 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { useUIStore } from "@/stores/uiStore";
 
-/**
- * Every secondary/tertiary rail (workbench nav, settings nav, the search / rule
- * / ransomware facet rails, the docs and prompt lists) sizes itself off this one
- * map, so the clamping and the reset are what keep a dragged rail from being
- * left unusable.
- */
+/* Every resizable rail and pane (settings nav, the search / rule / ransomware facet rails, the docs and prompt lists, the workbench reader, the glossary and requirements detail panes) sizes itself from this one map, so the clamping and the reset are what keep a dragged rail from being left unusable. */
 describe("uiStore rail widths", () => {
   beforeEach(() => {
     useUIStore.setState({ railWidths: {} });

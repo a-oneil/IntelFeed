@@ -58,8 +58,7 @@ export function useGenerateDailySummary() {
           ...args.filters,
           force: args.force ?? false,
         },
-        // AI generation on a busy day (60 articles, 8K-token output) can take
-        // well past the 15s global axios timeout. Give it ample headroom.
+        // AI generation on a busy day (60 articles, 8K-token output) can run well past the 15s global axios timeout, so this request gets 180s.
         { timeout: 180_000 },
       );
       return res.data;

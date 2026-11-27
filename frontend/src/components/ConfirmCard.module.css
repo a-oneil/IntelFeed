@@ -15,7 +15,7 @@
   border-color: var(--success);
 }
 
-.cardCancelled {
+.cardCanceled {
   border-color: var(--border);
 }
 
@@ -38,9 +38,7 @@
   color: var(--accent);
 }
 
-/* Action verb: Chip supplies the box; only the muted, unfilled face is local.
-   Doubled so it beats Chip's own single-class rules whichever order the two
-   stylesheets land in. */
+/* Action verb: Chip supplies the box; only the muted, unfilled look is set here. The class is doubled so it beats Chip's own single-class rules whichever order the two stylesheets load in. */
 .actionType.actionType {
   color: var(--text-muted);
   background: none;

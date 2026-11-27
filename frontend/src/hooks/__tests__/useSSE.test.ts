@@ -117,14 +117,7 @@ describe("useSSE", () => {
     expect(mockClose).toHaveBeenCalled();
   });
 
-  /**
-   * The connection is built in two steps — await a ticket, then open the
-   * EventSource — so an unmount can land between them. It used to: cleanup ran
-   * while the ref was still null, found nothing to close, and the awaited
-   * ticket then opened a connection nobody owned. Each orphan held one of the
-   * browser's ~6 per-origin HTTP/1.1 slots forever, and once they were gone
-   * every request in the app queued until its timeout.
-   */
+  /* The connection is built in two steps (await a ticket, then open the EventSource), so an unmount can land between them. If cleanup runs while the ref is still null, it finds nothing to close and the awaited ticket then opens a connection nobody owns. Each orphan holds one of the browser's ~6 per-origin HTTP/1.1 slots forever, and once they are all taken every request in the app queues until its timeout. */
   it("opens nothing when unmounted while the ticket is still in flight", async () => {
     mockToken = "test-jwt-token";
     let releaseTicket: (v: { data: { ticket: string } }) => void = () => {};

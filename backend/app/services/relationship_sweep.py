@@ -51,10 +51,10 @@ MODES = ("off", "shadow", "apply")
 # What apply mode may change, each switched on once the eval shows it is
 # right often enough (relationship_sweep_actions).
 ACTIONS = ("keep", "correct", "hide")
-# None is on by default: on 790 labelled edges (2026-11-21, qwen3.5:9b) keeps
+# None is on by default: on 790 labeled edges (2026-11-21, qwen3.5:9b) keeps
 # were right 80% of the time, hides 81%, corrections 36% — short of the 95%
 # a change made without a person needs. A keep of "X targets <country>" is
-# never applied: origin read as target is the commonest wrong claim (60 of
+# never applied: origin read as target is the most common wrong claim (60 of
 # 80 co-occurrence country keeps right).
 _NO_AUTO_KEEP = {("threat_actor", "targets", "country"), ("malware", "targets", "country")}
 DECISIONS = ("asserted", "wrong_verb", "wrong_direction", "not_asserted", "wrong_entity", "unsure")
@@ -108,7 +108,7 @@ class Passage:
     text: str  # the article text the quote must come from (title and summary included)
     lines: list[str] = field(default_factory=list)
     paragraphs: list[str] = field(default_factory=list)
-    # The names each end goes by in this article (catalogue forms + what the
+    # The names each end goes by in this article (catalog forms + what the
     # autolinker matched here): what a quote must name.
     source_forms: list[str] = field(default_factory=list)
     target_forms: list[str] = field(default_factory=list)
@@ -541,8 +541,8 @@ async def sweep(db: AsyncSession, limit: int | None = None) -> dict:
     for edge in await select_edges(db, cfg, limit):
         case = await build_case(db, edge)
         if case is None or not case.passages:
-            # Recorded as asked, or select_edges hands back the same edges
-            # every run and the sweep never reaches the rest.
+            # Recorded as asked; otherwise select_edges hands back the same
+            # edges every run and the sweep never reaches the rest.
             await _record_unjudged(db, edge, "no passages name both ends")
             stats["no_passages"] = stats.get("no_passages", 0) + 1
             await db.commit()

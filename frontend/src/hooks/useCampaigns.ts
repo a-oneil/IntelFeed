@@ -519,11 +519,7 @@ function invalidateCampaignIntake(qc: ReturnType<typeof useQueryClient>, campaig
   qc.invalidateQueries({ queryKey: ["campaign-suggestions", campaignId] });
 }
 
-/**
- * Which source kinds exist and which entity types can be followed. Server-owned
- * because only the backend knows which types own articles — a source on one
- * that doesn't would be created and then never add anything.
- */
+/** Which source kinds exist and which entity types can be followed. The server owns this list because only the backend knows which entity types have linked articles; a source on a type without them would be created and then never add anything. */
 export function useCampaignSourceOptions() {
   return useQuery({
     queryKey: ["campaign-source-options"],
@@ -535,11 +531,7 @@ export function useCampaignSourceOptions() {
   });
 }
 
-/**
- * A dry run before the follow exists: how many articles it would add, how many
- * the campaign already holds, and the newest few by name. Creates nothing, so
- * it is safe to re-run as the analyst types (debounce the input, not this).
- */
+/** A dry run before the source is created: how many articles it would add, how many the campaign already holds, and the newest few by name. Creates nothing, so it is safe to re-run as the analyst types (debounce the input, not this). */
 export function useCampaignSourcePreview(
   campaignId: string | undefined,
   target: { kind: CampaignSourceKind; entityType?: string | null; refId?: string | null; query?: string | null } | null

@@ -1,6 +1,4 @@
-// The toolbar icon in the user's accent, as the app's favicon follows the
-// theme. icons/icon-16.png and icon-32.png (scripts/dev/render_icons.cjs) are
-// the same mark in the default accent, shown until a theme is stored.
+// The toolbar icon in the user's accent, as the app's favicon follows the theme. icons/icon-16.png and icon-32.png (scripts/dev/render_icons.cjs) are the same mark in the default accent, shown until a theme is stored.
 
 import { drawMark } from "./mark.js";
 

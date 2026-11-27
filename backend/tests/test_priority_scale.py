@@ -78,7 +78,7 @@ async def _entry(db_session, feed, raw: float | None, *, score: float | None = N
 class TestScaleScore:
     def test_nothing_fired_is_zero(self):
         assert scale_score(0.0, CUTS) == 0.0
-        assert scale_score(-0.5, CUTS) == 0.0  # an echo that cancelled the rest out
+        assert scale_score(-0.5, CUTS) == 0.0  # an echo that canceled the rest out
 
     def test_unscored_stays_unscored(self):
         assert scale_score(None, CUTS) is None

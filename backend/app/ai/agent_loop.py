@@ -128,7 +128,7 @@ async def complete_with_agent(
 
     if response_format is not None:
         # Structured output and tool calling don't mix on every API, so the
-        # loop runs free and one last constrained call restates its answer.
+        # loop runs without a schema and one last constrained call restates its answer.
         evidence = "\n\n".join(findings)[-60_000:]
         final_prompt = (
             f"{prompt}\n\n## What your tool calls returned\n{evidence or '(no tool calls)'}"
@@ -149,7 +149,7 @@ async def complete_with_agent(
         tokens_input += final.tokens_input
         tokens_output += final.tokens_output
         resolved_model = final.model or resolved_model
-        # A part with no price makes the whole unknown: the engine then prices
+        # If either part has no price, the total is None: the engine then prices
         # every token from its table, rather than half the call going unbilled.
         cost = cost + final.cost_usd if cost is not None and final.cost_usd is not None else None
 

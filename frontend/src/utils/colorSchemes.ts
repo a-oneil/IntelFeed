@@ -1,7 +1,4 @@
-// Shared color scales for cross-cutting badge/indicator domains (TLP, severity).
-// Entity-type colors live in entityTheme.ts. Severity resolves through the
-// --severity-* CSS variables set at runtime by applyTheme(), with the theme
-// defaults as fallbacks.
+// Shared color scales for cross-cutting badge/indicator domains (TLP, severity). Entity-type colors live in entityTheme.ts. Severity resolves through the --severity-* CSS variables set at runtime by applyTheme(), with the theme defaults as fallbacks.
 
 export const TLP_COLORS: Record<string, string> = {
   "TLP:CLEAR": "#6b7280",

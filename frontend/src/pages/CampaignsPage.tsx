@@ -30,8 +30,7 @@ const CAMPAIGN_COLUMNS: ColumnDef<Campaign>[] = [
     textValue: (c) => c.status,
     choices: [{ value: "all", label: "Any status" }, ...STATUS_OPTIONS.map((s) => ({ value: s, label: s }))],
     choiceMatch: (c, v) => c.status === v,
-    // "active" on a campaign nobody has added to since May is a lie the column
-    // was telling. Folded in here rather than given a column of its own.
+    // A campaign marked "active" that has had no new activity for a while also shows "quiet Nd", so the status isn't misleading. Shown here rather than in a column of its own.
     render: (c) => {
       const quiet = daysQuiet(c.last_activity_at);
       const stale = isCampaignQuiet(c.status, c.last_activity_at);
@@ -66,9 +65,7 @@ const CAMPAIGN_COLUMNS: ColumnDef<Campaign>[] = [
     render: (c) => <MetaCell value={c.tags.join(", ")} />,
   },
   {
-    // Nothing sets start_date, so this column was empty on every row. A campaign
-    // that declared a start shows it; one that didn't shows when its coverage
-    // actually begins, which is the honest answer to "started".
+    // start_date is rarely set, so a campaign with a declared start shows it and one without shows its first activity (when its coverage begins).
     key: "start_date", label: "Started", width: 110, minWidth: 90, hideable: true, defaultHidden: true,
     sortValue: (c) => c.start_date ?? c.first_activity_at ?? "",
     render: (c) => <DateCell value={c.start_date ?? c.first_activity_at ?? null} />,
@@ -104,9 +101,7 @@ export function CampaignsPage() {
   return (
     <div className={styles.page}>
       <div className={styles.listPanel}>
-        {/* Same treatment as every other entity table: no count in the header
-            (DataTable's own bar reports "N loaded · M total" just below), and
-            the shared workbench button classes rather than bespoke ones. */}
+        {/* Same as every other entity table: no count in the header (DataTable's own bar reports "N loaded · M total" just below), and the shared workbench button classes rather than custom ones. */}
         <PageHeader
           title="Campaigns"
           actions={
@@ -157,9 +152,7 @@ export function CampaignsPage() {
 }
 
 function TLPBadge({ tlp }: { tlp: string }) {
-  // `outline` paints the tint on both the text and the border over the page
-  // ground — the same two properties this set inline before, so the rendered
-  // foreground (and its contrast) is unchanged.
+  // `outline` applies the tint to both the text and the border over the page background.
   return (
     <Chip tone="outline" tint={getTLPColor(tlp, "#888")}>
       {tlp}
@@ -246,9 +239,7 @@ function AutoDetectModal({
                         <span>{s.entry_count} entries</span>
                       )}
                     </div>
-                    {/* Threads are the evidence, so they replace the sample
-                        headlines: three article titles from one story say less
-                        than "this ran three separate times". */}
+                    {/* Threads are the evidence, so they replace the sample headlines: three article titles from one story say less than three separate stories do. */}
                     {s.threads && s.threads.length > 0 ? (
                       <div className={styles.sampleEntries}>
                         {s.threads.slice(0, 3).map((t) => (

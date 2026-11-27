@@ -1,17 +1,9 @@
 /**
  * FieldProvenance — the "who says so" marker that sits beside a profile field.
  *
- * The relationship trust ladder already shows the evidence behind a link
- * between two entities. This is the same idea for the scalar facts on a
- * profile: click the marker beside a field and get every source that asserted
- * its value — the analyst, adapter or reference feed, the article and its feed
- * (with the feed's A–F grade), and the sentence behind it where one exists.
+ * The relationship trust ladder already shows the evidence behind a link between two entities. This is the same idea for the scalar facts on a profile: click the marker beside a field and get every source that asserted its value — the analyst, adapter or reference feed, the article and its feed (with the feed's A–F grade), and the sentence behind it where one exists.
  *
- * Three states, and the third is the point: a field can be **sourced** (marker
- * shows how many sources agree), **contested** (at least one source asserted a
- * different value than the profile now shows), or **unsourced** — populated but
- * attributable to nothing. An unsourced field is marked, not hidden, because a
- * fact nobody can vouch for is exactly the one an analyst needs flagged.
+ * A field is in one of three states, and the third matters most: it can be **sourced** (marker shows how many sources agree), **contested** (at least one source asserted a different value than the profile now shows), or **unsourced** — populated but attributable to nothing. An unsourced field is marked, not hidden, because a fact nobody can vouch for is exactly the one an analyst needs flagged.
  */
 import { useEffect, useRef, useState } from "react";
 
@@ -21,7 +13,7 @@ import { Hint } from "@/components/primitives";
 
 import styles from "./FieldProvenance.module.css";
 
-/** Admiralty-style grade colouring: A/B trusted, C/D mixed, E/F weak. */
+/** Admiralty-style grade coloring: A/B trusted, C/D mixed, E/F weak. */
 function gradeClass(grade: string | null): string {
   if (!grade) return styles.gradeNone;
   if (grade === "A" || grade === "B") return styles.gradeHigh;
@@ -144,8 +136,7 @@ export function FieldProvenance({
           setOpen((v) => {
             const next = !v;
             if (next && wrapRef.current) {
-              // Flip to right-aligned when the popover would run off the
-              // viewport — markers often sit near its right edge.
+              // Flip to right-aligned when the popover would run off the viewport — markers often sit near its right edge.
               const r = wrapRef.current.getBoundingClientRect();
               const popWidth = Math.min(420, window.innerWidth * 0.78);
               setAlignRight(r.left + popWidth > window.innerWidth - 12);

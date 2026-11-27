@@ -97,7 +97,7 @@ def test_find_redundant_overrides_classifies_the_prod_shape():
         "_public_rss_token": "tok",
         "_default_theme_id": "uuid",
         "_job_schedule_overrides": {
-            "story-threads": {"schedule": {"type": "interval", "seconds": 7200}},  # now the default
+            "story-threads": {"schedule": {"type": "interval", "seconds": 7200}},  # equals default
             "actor-profile-refresh": {"enabled": True},  # already enabled
             "signal-rescore-all": {"enabled": True},  # a real flip
             "validate-entity-links": {"enabled": False},  # job is gone

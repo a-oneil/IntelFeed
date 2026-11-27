@@ -1,8 +1,4 @@
-/**
- * Centralized entity type visual language.
- * Every component that renders entity types should use these functions
- * instead of hardcoding colors or icons.
- */
+/** Colors, labels and icons for each entity type. Every component that renders entity types should use these functions instead of hardcoding colors or icons. */
 
 export type EntityType =
   | "threat_actor"
@@ -20,8 +16,7 @@ export type EntityType =
   | "mitigation"
   | "ransomware_victim"
   | "observable"
-  // Not an intelligence entity — the analyst's own writing about one. It lives
-  // here so search rows and facet dots colour it like everything else they list.
+  // Not an intelligence entity but the analyst's own writing about one. It is listed here so search rows and facet dots color it like everything else they list.
   | "note";
 
 interface EntityTheme {
@@ -69,9 +64,7 @@ const ENTITY_THEMES: Record<EntityType, EntityTheme> = {
     pluralLabel: "CVEs",
     icon: "triangle-alert",
   },
-  // Bronze. The palette's 13 hues leave no clean gap, so this one separates on
-  // value rather than hue: no other entity color is dark-and-desaturated, so it
-  // never reads as actor-orange despite sitting near it on the wheel.
+  // Bronze. The palette's other hues leave no clean gap, so this one differs by lightness rather than hue: no other entity color is dark and desaturated, so it does not read as actor orange even though the hues are close.
   cwe: {
     color: "#b45309",
     cssVar: "var(--entity-cwe)",
@@ -86,8 +79,7 @@ const ENTITY_THEMES: Record<EntityType, EntityTheme> = {
     pluralLabel: "Countries",
     icon: "globe",
   },
-  // Emerald — the victim-industry vocabulary. The variable predates the entity
-  // (the day-divider chip and the exposure builder already wore it).
+  // Emerald, the victim-industry color. The variable predates the entity (the day-divider chip and the exposure builder already used it).
   sector: {
     color: "#10b981",
     cssVar: "var(--entity-sector)",
@@ -95,10 +87,7 @@ const ENTITY_THEMES: Record<EntityType, EntityTheme> = {
     pluralLabel: "Sectors",
     icon: "factory",
   },
-  // Fuchsia — the last real hue gap, between malware violet and product pink.
-  // --entity-ioc predates this type (modules referenced it as a fallback var)
-  // and used to duplicate tool-yellow; it diverges here so Observables and
-  // Tools stop sharing a swatch.
+  // Fuchsia, the last open hue between malware violet and product pink. --entity-ioc predates this type (modules referenced it as a fallback variable) and is set to its own color here so Observables and Tools don't share a color.
   observable: {
     color: "#d946ef",
     cssVar: "var(--entity-ioc)",
@@ -194,10 +183,7 @@ export function getEntityTheme(type: string): EntityTheme {
   );
 }
 
-/**
- * Legacy-compatible color map for components that use Record<string, string>.
- * Prefer getEntityColor() for new code.
- */
+/** CSS-variable map for components that look colors up in a Record<string, string>. Prefer getEntityColor() for new code. */
 export const ENTITY_COLOR_MAP: Record<string, string> = {
   cve: ENTITY_THEMES.cve.cssVar,
   ttp: ENTITY_THEMES.ttp.cssVar,

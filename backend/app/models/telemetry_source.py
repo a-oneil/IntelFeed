@@ -21,7 +21,7 @@ class TelemetrySource(Base):
     vendor: Mapped[str | None] = mapped_column(String(100))
     product: Mapped[str | None] = mapped_column(String(100))
     log_types: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
-    # Normalised behaviour ids for the raw strings above (see LogTypeAlias).
+    # Normalized behavior ids for the raw strings above (see LogTypeAlias).
     # Written by the alias resolver; log_types itself is never rewritten.
     log_types_canonical: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     ingested_into: Mapped[str | None] = mapped_column(String(50))

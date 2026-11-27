@@ -1,7 +1,7 @@
 """Re-derive stored entries' ``content_text`` from their ``content_html``.
 
 ``sanitizer.html_to_text`` now separates text at block and table-cell
-boundaries. Before that, neighbouring elements ran together, which split IPs
+boundaries. Before that, neighboring elements ran together, which split IPs
 wrongly (46.233.40.20 + 4... read as 46.233.40.204), glued a CVSS score onto a
 CVE id and made "power" + "Source:" read as "powerSource". Entries stored
 before the fix keep the glued text until this script rewrites them.

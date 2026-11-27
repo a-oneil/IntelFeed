@@ -15,7 +15,7 @@ export interface UploadMeta {
 
 const MANUAL_SOURCES = new Set(["url_ingest", "pdf_upload", "file_upload", "text_paste", "github_repo"]);
 
-/** The upload facts behind an entry, or null when it did not come through the ingest door. */
+/** The upload facts behind an entry, or null when it did not come through manual ingest. */
 export function uploadMeta(metadata: Record<string, unknown> | null | undefined): UploadMeta | null {
   if (!metadata) return null;
   const m = metadata as UploadMeta;
@@ -28,10 +28,7 @@ export function isFileUpload(meta: UploadMeta | null): boolean {
   return !!meta && (!!meta.ingest_file_id || meta.source === "pdf_upload" || meta.source === "file_upload" || meta.source === "text_paste");
 }
 
-/**
- * Three states the reader distinguishes: a downloadable original, one that the
- * retention sweep removed, and a file ingested before originals were kept.
- */
+/** What the reader shows about an upload's original file: downloadable (`available`), removed by the retention sweep (`evicted`), ingested before originals were kept (`not_kept`), or no file at all (`none`). */
 export type OriginalState = "available" | "evicted" | "not_kept" | "none";
 
 export function originalState(meta: UploadMeta | null): OriginalState {

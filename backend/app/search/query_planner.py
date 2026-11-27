@@ -133,13 +133,13 @@ ENTITY_FIELDS = frozenset(
         "ttp.subtechnique",
         "ttp.deprecated",
         # ── Rule content, including the data_sources the telemetry-coverage
-        # view already reads but nothing could query.
+        # view reads.
         "rule.data_source",
         "rule.tactic",
         "rule.tag",
         "rule.draft",
         "rule.license",
-        # ── Actor / malware / tool attributes beyond the one each had.
+        # ── Actor / malware / tool / country attributes.
         "threat_actor.motivation",
         "threat_actor.sector",
         "threat_actor.type",
@@ -149,12 +149,12 @@ ENTITY_FIELDS = frozenset(
         "tool.platform",
         "tool.mitre",
         "country.iso",
-        # ── The group that posted a victim: the obvious leak-site query, and
-        # the one field the victim grammar was missing.
+        # ── The group that posted a victim (the usual leak-site query), and a
+        # product's vendor.
         "ransomware_victim.group",
         "product.vendor",
-        # ── Reports were returned by search but had no field to filter them,
-        # unlike campaigns, rules and PIRs.
+        # ── Report fields, so reports can be filtered like campaigns, rules and
+        # PIRs.
         "intel_report",
         "intel_report.status",
         "intel_report.type",
@@ -168,9 +168,9 @@ ENTITY_FIELDS = frozenset(
         "note.about",
         "note.pinned",
     }
-    # Attributes every catalogued entity carries: how much has been written
-    # about it, when it was last seen, and how it got here. Generated rather
-    # than listed thirty times.
+    # Attributes every cataloged entity carries: how much has been written
+    # about it and when it was first and last seen; the second set adds review
+    # state and how the entity was created. Generated rather than listed per type.
     | {
         f"{root}.{leaf}"
         for root in (
@@ -233,7 +233,7 @@ class PendingFeedFilter:
     `token` is the placeholder this filter occupies in the branch expansion.
     The clause is not known until Postgres has been asked, but its *position* in
     the boolean expression is known now — without holding that position,
-    `feed:A OR feed:B` collapsed to `feed:A AND feed:B` and matched nothing.
+    `feed:A OR feed:B` would collapse to `feed:A AND feed:B` and match nothing.
     """
 
     value: str
@@ -338,7 +338,7 @@ class ExecutionPlan:
     _or_counter: int = field(default=0, repr=False)
     # Set when anything asks for entries at all — including a bare/negated text
     # term that contributes no query string. Without it, `NOT ransomware` and an
-    # empty query planned to "no entry search" and returned zero rows.
+    # empty query would plan to "no entry search" and return zero rows.
     _entry_intent: bool = field(default=False, repr=False)
 
 
@@ -380,7 +380,7 @@ class EntityFilterGroup:
 class EntityCondition:
     """A single condition for an entity query."""
 
-    field: str  # full field name e.g. "ioc.type", "cve.severity"
+    field: str  # full field name e.g. "ioc.kind", "cve.severity"
     value: str
     exact: bool = False
     negated: bool = False
@@ -406,7 +406,7 @@ def build_execution_plan(ast: ASTNode, viewer_id: object = None) -> ExecutionPla
 
     # The index-facing half is planned separately, in disjunctive normal form,
     # because `(a OR b) AND c` needs one search per disjunct. Flattening it into
-    # a single query string is what silently turned that grouping into a union.
+    # a single query string would silently turn that grouping into a union.
     global_filters = list(plan.meili_filters)
     plan.branches = _build_branches(ast, plan)
     for branch in plan.branches:
@@ -446,8 +446,8 @@ _FILTER_ENTRY_FIELDS = {"tag": "tags", "type": "feed_type", "media": "media_type
 # Entry fields answered from Postgres that still end up as a Meilisearch clause
 # (they all narrow to a set of feed IDs). Because the clause is a filter string
 # in the end, these can take part in an OR — they just need a placeholder until
-# the lookup has run. The entry-scoped kinds (`signal:`, `url:`,
-# `is:translated`, `is:image`) resolve to entry IDs instead and cannot.
+# the lookup has run. The entry-scoped kinds (`signal:`, `url:`, `info:`,
+# `grade:`, `is:translated`, `is:image`) resolve to entry IDs instead and cannot.
 _DEFERRED_FILTER_FIELDS = frozenset({"feed", "category", "feed.reliability", "feed.timeliness", "feed.relevance"})
 
 
@@ -462,9 +462,9 @@ _IS_INDEX_FLAGS = {
 }
 
 
-# Every value `is:` accepts: the index flags above, plus the three answered from
-# Postgres. Public because autocomplete has to offer exactly this set — listing
-# it separately is how the header came to suggest five of the eight.
+# Every value `is:` accepts: the index flags above, plus the four answered from
+# Postgres. Public because autocomplete has to offer exactly this set; a separate
+# list drifts out of date (the header once suggested only some of them).
 IS_FILTER_VALUES: tuple[str, ...] = (*_IS_INDEX_FLAGS, "muted", "archived", "translated", "image")
 # `is:` values that narrow to a set of feeds, resolved against Postgres.
 _IS_FEED_VALUES = ("muted", "archived")
@@ -483,9 +483,9 @@ def _text_term(value: str, *, phrase: bool) -> str:
     """Format one free-text term for the index.
 
     A trailing `*` is dropped: Meilisearch has no wildcard operator and treats
-    the character as a separator, which cancelled the automatic prefix match on
-    the final term — so `ransom*` matched *fewer* entries than `ransom`. Removing
-    it restores the prefix behaviour the wildcard was reaching for.
+    the character as a separator, which cancels the automatic prefix match on
+    the final term — so `ransom*` would match *fewer* entries than `ransom`.
+    Removing it gives the prefix match the wildcard asks for.
     """
     if phrase:
         return f'"{value}"'
@@ -497,8 +497,8 @@ def _field_text_term(node: FieldNode) -> str | None:
     """The full-text term a field node contributes, if it contributes one."""
     if node.field_name in _TEXT_ENTRY_FIELDS:
         return _text_term(node.value, phrase=node.exact)
-    # An unrecognised field is not an error — the docs have always said its value
-    # falls back to free text. Dropping it entirely is what made a typo like
+    # An unrecognized field is not an error — the docs say its value falls back
+    # to free text. Dropping it entirely would make a typo like
     # `titel:ransomware` return zero rows with no explanation.
     if node.value and classify_field(node.field_name) == "entry" and node.field_name not in ENTRY_FIELDS:
         return _text_term(node.value, phrase=node.exact)
@@ -634,7 +634,7 @@ def _branch_dnf(node: ASTNode, plan: ExecutionPlan, *, negated: bool) -> list[tu
 
         if op == "OR":
             disjuncts = [d for child in children for d in child]
-            # An unconstrained disjunct swallows the union: `ransomware OR
+            # An unconstrained disjunct makes the whole union unconstrained: `ransomware OR
             # threat_actor:APT29` must not filter out the actor's entries.
             if any(not terms and not filters for terms, filters in disjuncts):
                 return [([], [])]
@@ -743,7 +743,7 @@ def _entity_or_groupable(node: ASTNode) -> bool:
     Applies to entity conditions and to the Postgres-backed entry filters, both
     of which are held as flat lists rather than as a tree. An AND sub-expression
     inside an OR (e.g. ``(actor:A AND actor.country:x) OR actor:B``) cannot be
-    represented that way, so it keeps the legacy AND semantics.
+    represented that way, so it keeps AND semantics.
     """
     if isinstance(node, NotNode):
         return _entity_or_groupable(node.child)
@@ -773,7 +773,7 @@ VALID_SORTS = frozenset({"relevance", "newest", "oldest", "title_asc", "title_de
 
 def _handle_meta(node: FieldNode, plan: ExecutionPlan) -> None:
     # `sort:newest` on its own is a request to browse, not a no-op: without the
-    # intent flag it planned to "no entry search" and returned nothing.
+    # intent flag it would plan to "no entry search" and return nothing.
     plan._entry_intent = True
     if node.field_name == "sort" and node.value in VALID_SORTS:
         plan.sort = node.value
@@ -838,7 +838,7 @@ def _handle_entry_field(
 def _handle_is_filter(value: str, plan: ExecutionPlan, *, negated: bool, or_group: int | None = None) -> None:
     """Take the `is:` values that resolve to a set of entry IDs.
 
-    The index-side flags and `is:muted` are planned as branch filters instead —
+    The index-side flags, `is:muted` and `is:archived` are planned as branch filters instead —
     see `_branch_dnf` — so that they can sit on one side of an OR.
     """
     if value in ("translated", "image"):
@@ -849,7 +849,7 @@ def _handle_is_filter(value: str, plan: ExecutionPlan, *, negated: bool, or_grou
 
 
 def _handle_words_filter(value: str, plan: ExecutionPlan) -> None:
-    """`words:>1500` — word_count is indexed already, it just was not filterable."""
+    """`words:>1500` — a filter on the index's `word_count` attribute."""
 
     def num(raw: str) -> int | None:
         try:
@@ -878,9 +878,8 @@ def _handle_date_filter(value: str, plan: ExecutionPlan) -> None:
 
     Every accepted form names a *span*, not an instant: `2026` is a year,
     `2026-08` is a month, `2026-08-15` is a day. Comparisons are resolved
-    against the right end of that span, so `date:2026-08` covers all of August
-    (it used to match only the 1st) and `date:a..b` includes every entry
-    published on `b` (the last day used to be cut off).
+    against the right end of that span, so `date:2026-08` covers all of August,
+    not only the 1st, and `date:a..b` includes every entry published on `b`.
     """
     from calendar import monthrange
     from datetime import datetime
@@ -993,10 +992,10 @@ def _parse_value_operator(value: str) -> tuple[str, str]:
 def to_sql_pattern(value: str) -> str:
     """Turn a user value into an ILIKE pattern.
 
-    `*` is the wildcard everywhere in the language, so it has to survive the trip
-    into SQL; without this the `*` was matched literally and these fields
-    returned nothing at all. Values with no wildcard keep their substring
-    behaviour. `%` and `_` are escaped so a CVE id or a URL cannot smuggle in a
+    `*` is the wildcard everywhere in the language, so it has to carry over
+    into SQL; without this the `*` would be matched literally and these fields
+    would return nothing at all. Values with no wildcard keep their substring
+    behavior. `%` and `_` are escaped so a CVE id or a URL cannot smuggle in a
     pattern of its own.
     """
     escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -1010,7 +1009,7 @@ async def resolve_deferred_filters(db, plan: ExecutionPlan) -> None:
     """Run every Postgres-backed filter resolution this plan is waiting on.
 
     Both resolvers or neither: a plan that has had only one of them run still
-    holds unresolved placeholders, and the clauses they stand for are simply
+    holds unresolved placeholders, and the clauses they stand for are
     lost. Call this rather than the two functions individually.
 
     It also keeps a deleted feed's articles out of every search that doesn't
@@ -1035,7 +1034,8 @@ async def resolve_feed_filters(db, plan: ExecutionPlan) -> None:
     """Resolve pending feed name filters to Meilisearch feed_id filter clauses.
 
     Requires an async DB session to look up feed IDs by title.
-    Mutates the plan in place: appends to meili_filters and sets has_entry_queries.
+    Mutates the plan in place: swaps each filter's placeholder for its feed_id clause
+    and sets has_entry_queries.
     """
     from sqlalchemy import select
 
@@ -1072,7 +1072,7 @@ async def resolve_entry_filters(db, plan: ExecutionPlan) -> None:
     Feed-scoped kinds append `feed_id` clauses. Entry-scoped kinds accumulate an
     entry-ID set in `plan.db_entry_ids`, which the search endpoint intersects
     with any entity join before running the query — the same mechanism entity
-    filters already use, so a filter matching 17,000 entries costs one IN list
+    filters use, so a filter matching 17,000 entries costs one IN list
     rather than 17,000 OR clauses in a Meilisearch filter string.
     """
     if not plan.pending_entry_filters:
@@ -1121,8 +1121,9 @@ async def resolve_entry_filters(db, plan: ExecutionPlan) -> None:
             if pf.token:
                 resolve_pending_filter(plan, pf.token, clause)
             else:
-                # `is:muted` has no placeholder — it comes from `_handle_is_filter`
-                # in the walk, not from the branch expansion.
+                # A feed-scoped filter with no placeholder is ANDed onto every
+                # branch. The planner gives every feed-scoped filter a token, so
+                # this only covers filters added some other way.
                 add_global_filter(plan, clause)
             continue
 
@@ -1191,11 +1192,11 @@ def _info_rating_clause(column, value: str):
 
 
 def _apply_entry_id_filters(plan: ExecutionPlan, resolved: list[tuple[PendingEntryFilter, set[str]]]) -> None:
-    """Fold resolved entry-ID sets into the plan, honouring OR groups.
+    """Fold resolved entry-ID sets into the plan, honoring OR groups.
 
     Filters sharing an `or_group` are a disjunction and must be unioned;
-    everything else intersects. Unioning is why `signal:kev_added OR
-    signal:scoop` stopped returning the entries carrying *both* signals.
+    everything else intersects. Unioning keeps `signal:kev_added OR
+    signal:scoop` from returning only the entries carrying *both* signals.
     """
     grouped: dict[int, list[tuple[PendingEntryFilter, set[str]]]] = {}
     for pf, matched in resolved:
@@ -1231,7 +1232,7 @@ def _apply_one(plan: ExecutionPlan, negated: bool, matched: set[str]) -> None:
     if negated:
         # Negation needs the complement, which is every other entry — far too
         # large to enumerate. Excluding via a Meilisearch NOT on id is equally
-        # unbounded, so a negated DB filter is honoured by removing the matches
+        # unbounded, so a negated DB filter is honored by removing the matches
         # from any positive set and otherwise left to the endpoint, which drops
         # entries in `db_excluded_ids`.
         plan.db_excluded_ids |= matched

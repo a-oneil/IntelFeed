@@ -82,8 +82,8 @@ async def _run_entry_automations(entry_id: str, feed_id: str):
                 except Exception:
                     logger.warning("Failed to publish SSE automation results for entry %s", entry_id, exc_info=True)
 
-        # Note: correlation event detection is handled by detect_correlation_events task
-        # dispatched separately with a delay to ensure autolink/extraction have completed.
+        # Correlation event detection is handled by the detect_correlation_events task,
+        # dispatched separately with a delay so autolink/extraction have completed.
 
 
 @celery_app.task(
@@ -289,7 +289,7 @@ def run_scheduled_automations():
 async def _run_scheduled_automations():
     """Evaluate on_schedule rules and execute their actions.
 
-    Scheduled rules can optionally specify an entry_filter in their action configs
+    Scheduled rules can optionally specify an entry_filter in their trigger_config
     to query entries from a time window (e.g. last 24h). If no filter is specified,
     actions run without a target entry (entry_id=None in the log).
     """
@@ -410,7 +410,7 @@ async def _run_scheduled_automations():
                     for action in rule.actions:
                         action_type = action.get("type", "")
                         if action_type in ("send_notification", "run_webhook"):
-                            # Create a minimal dummy entry-like for notification context
+                            # Post a rule-level payload with no entry attached
                             r = await _execute_scheduled_notification(action, rule, now)
                             results.append(r)
                         else:

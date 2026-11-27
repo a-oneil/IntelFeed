@@ -78,10 +78,7 @@ const DEFAULT_COLORS: Record<string, string> = {
   "severity-info": "#3b82f6",
 };
 
-/**
- * Normalize a color value to a 7-character hex string for <input type="color">.
- * Falls back to #000000 if the value cannot be parsed.
- */
+/** Normalize a color value to a 7-character hex string for <input type="color">. Falls back to #000000 if the value cannot be parsed. */
 function toHex7(value: string): string {
   const v = value.trim();
 
@@ -98,7 +95,7 @@ function toHex7(value: string): string {
     return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
   }
 
-  // Try using a canvas to parse named colors / rgb() / hsl() etc.
+  // Use a canvas to parse named colors / rgb() / hsl() etc.
   try {
     const ctx = document.createElement("canvas").getContext("2d");
     if (ctx) {

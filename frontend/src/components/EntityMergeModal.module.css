@@ -163,9 +163,7 @@
   margin-top: var(--sp-1);
 }
 
-/* Inline badges on an entity name. Chip supplies the box and — via `toned` —
-   the tinted wash; only the 11px face and the gap from the name are local.
-   Doubled for font-size, which Chip's size classes set. */
+/* Inline badges on an entity name. Chip supplies the box and, via `toned`, the tinted background; only the 11px font size and the gap from the name are local. The selector is doubled to outrank Chip's size classes, which also set font-size. */
 .badge.badge {
   font-size: var(--fs-sm);
   margin-right: var(--sp-2);

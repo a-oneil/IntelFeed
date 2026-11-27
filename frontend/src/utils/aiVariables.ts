@@ -1,11 +1,6 @@
 // Canonical catalog of template variables available to AI prompts.
 //
-// These are editor hints only — they populate the clickable "Available
-// Variables" chips in the prompt editor. Which variables are actually
-// populated at render time depends on how the task is invoked (e.g. a
-// single-entry task gets `entry.*`; a batch/digest task gets `entries` +
-// `entry_count`). The backend renders whatever variables the runtime passes,
-// so any variable below can be used in any prompt that receives it.
+// These are editor hints only — they populate the clickable "Available Variables" chips in the prompt editor. Which variables are actually populated at render time depends on how the task is invoked (e.g. a single-entry task gets `entry.*`; a batch/digest task gets `entries` + `entry_count`). The backend renders whatever variables the runtime passes, so any variable below can be used in any prompt that receives it.
 
 export interface AIVariableGroup {
   group: string;

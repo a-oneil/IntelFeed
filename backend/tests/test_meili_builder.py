@@ -43,8 +43,8 @@ def run(plan, index, **kwargs):
 
 class TestMatchingStrategy:
     def test_terms_are_anded(self):
-        # Meilisearch's default ("last") drops trailing words when strict
-        # matching runs short, which made `a AND b` return what `a` returns.
+        # Meilisearch's default strategy ("last") drops trailing words when strict
+        # matching finds too few hits, so `a AND b` would return what `a` returns.
         plan = ExecutionPlan(branches=[SearchBranch(query="ransomware APT29")])
         index = FakeIndex({"ransomware APT29": [hit(1)]})
         run(plan, index)
@@ -79,9 +79,9 @@ class TestBranchUnion:
             sort="relevance",
         )
 
-    def test_limit_is_honoured(self):
-        # The old merge appended every alternative's hits to the first page, so
-        # a limit of 20 came back with 40 rows.
+    def test_limit_is_honored(self):
+        # Appending every alternative's hits to the first page would return 40
+        # rows for a limit of 20.
         index = FakeIndex({"APT28": [hit(i) for i in range(50)], "APT29": [hit(i) for i in range(100, 150)]})
         result = run(self._plan(), index, limit=20, offset=0)
         assert len(result["hits"]) == 20

@@ -7,8 +7,7 @@ import type { EntryDetail } from "@/api/types";
 const mockNavigate = vi.fn();
 vi.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
-  // The reader's "open that other article" links route through useOpenEntry,
-  // which asks the router where it is before choosing feed vs docked reader.
+  // The reader's "open that other article" links route through useOpenEntry, which asks the router where it is before choosing feed vs docked reader.
   useLocation: () => ({ pathname: "/" }),
 }));
 

@@ -100,10 +100,7 @@ enum class FeedFilter(val label: String) {
     BOOKMARKED("Bookmarked")
 }
 
-/**
- * Unread counts for the quick views, as the web sidebar shows them. Null means unknown (not loaded
- * or the request failed); "All articles" has no count.
- */
+/** Unread counts for the quick views, as the web sidebar shows them. Null means unknown (not loaded or the request failed); "All articles" has no count. */
 data class ViewCounts(
     val priority: Int? = null,
     val unread: Int? = null,
@@ -125,11 +122,7 @@ data class ViewCounts(
     }
 }
 
-/**
- * A change to an entry's read/star/bookmark flags. Every screen showing entries applies these, so a
- * star in the reader also shows in the feed list, search results and story threads. A failed request
- * is followed by the reverse update.
- */
+/** A change to an entry's read/star/bookmark flags. Every screen showing entries applies these, so a star in the reader also shows in the feed list, search results and story threads. A failed request is followed by the reverse update. */
 data class EntryFlagUpdate(
     val id: String,
     val isRead: Boolean? = null,
@@ -139,10 +132,7 @@ data class EntryFlagUpdate(
     val confirmed: Boolean = false
 )
 
-/**
- * The list a day divider belongs to, sent with the day's chips and briefing so they describe the
- * same articles (the web sends the list's feed/folder/starred/bookmarked filters too).
- */
+/** The list a day divider belongs to, sent with the day's chips and briefing so they describe the same articles (the web sends the list's feed/folder/starred/bookmarked filters too). */
 data class DayScope(
     val feedId: String? = null,
     val categoryId: String? = null,
@@ -153,17 +143,13 @@ data class DayScope(
 /** One page of an offset-paged list: the items plus whether another page exists. */
 data class OffsetPage<T>(val items: List<T>, val total: Int?, val hasMore: Boolean, val nextOffset: Int)
 
-/**
- * The app's single source of server data. There is exactly one instance per process (see
- * IntelFeedApplication), so every ViewModel shares one OkHttp client and one token-refresh lock.
- */
+/** The app's single source of server data. There is exactly one instance per process (see IntelFeedApplication), so every ViewModel shares one OkHttp client and one token-refresh lock. */
 class IntelFeedRepository(
     private val authPreferences: AuthPreferences
 ) {
     private val apiClient = ApiClient(authPreferences)
 
-    // Built on first use and rebuilt when the stored server URL changes, so constructing the
-    // repository never blocks the main thread on a DataStore read.
+    // Built on first use and rebuilt when the stored server URL changes, so constructing the repository never blocks the main thread on a DataStore read.
     @Volatile
     private var cachedApi: Pair<String, IntelFeedApi>? = null
 
@@ -173,8 +159,7 @@ class IntelFeedRepository(
 
     private val _entryUpdates = MutableSharedFlow<EntryFlagUpdate>(extraBufferCapacity = 256)
     val entryUpdates: SharedFlow<EntryFlagUpdate> = _entryUpdates.asSharedFlow()
-    // Keep rapid read/undo requests for one article in user order. A fixed set avoids retaining
-    // one lock per article for the lifetime of the app.
+    // Keep rapid read/undo requests for one article in user order. A fixed set avoids retaining one lock per article for the lifetime of the app.
     private val readMutationLocks = Array(64) { Mutex() }
 
     // The signed-in user (id + role decide who may edit a shared note). Null until loaded.
@@ -192,10 +177,7 @@ class IntelFeedRepository(
     /** HTTP client for article images: sends the session token only to the IntelFeed server itself. */
     fun imageHttpClient(): OkHttpClient = apiClient.imageHttpClient()
 
-    /**
-     * Like runCatching, but lets coroutine cancellation propagate. The ViewModels cancel stale
-     * loads; reporting that cancellation as a failure would show a bogus error.
-     */
+    /** Like runCatching, but lets coroutine cancellation propagate. The ViewModels cancel stale loads; reporting that cancellation as a failure would show a bogus error. */
     private inline fun <T> apiCall(block: () -> T): Result<T> {
         return try {
             Result.success(block())
@@ -209,7 +191,7 @@ class IntelFeedRepository(
         }
     }
 
-    /** Endpoints returning Response<Unit> don't throw on 4xx/5xx; without this, failures looked like success. */
+    /** Endpoints returning Response<Unit> don't throw on 4xx/5xx; without this, failures would look like success. */
     private fun Response<*>.requireSuccess() {
         if (!isSuccessful) throw HttpException(this)
     }
@@ -236,8 +218,7 @@ class IntelFeedRepository(
         loadCurrentUser().getOrElse { UserProfile(username = username, role = "analyst").also { _currentUser.value = it } }
     }
 
-    // Saving the tokens starts the app's data load, which also asks for the user; with this, the
-    // sign-in and that load share one GET /api/auth/me instead of sending two.
+    // Saving the tokens starts the app's data load, which also asks for the user; with this, the sign-in and that load share one GET /api/auth/me instead of sending two.
     private val currentUserLock = Mutex()
 
     /** The signed-in user, loaded once per session. */
@@ -246,11 +227,7 @@ class IntelFeedRepository(
         apiCall { getApi().getMe().also { _currentUser.value = it } }
     }
 
-    /**
-     * Clears the session locally first so the UI signs out right away, then asks the server to
-     * revoke the tokens (best effort, 5 s cap). Without the revoke, the 7-day refresh token
-     * stayed valid after logout.
-     */
+    /** Clears the session locally first so the UI signs out right away, then asks the server to revoke the tokens (best effort, 5 s cap). Without the revoke, the 7-day refresh token would stay valid after logout. */
     suspend fun logout() {
         val accessToken = authPreferences.getAccessToken()
         val refreshToken = authPreferences.getRefreshToken()
@@ -299,11 +276,9 @@ class IntelFeedRepository(
         // A day chip's filter: that day's articles only, narrowed like the web's day focus.
         dayFocus: com.example.intelfeed.data.model.DayFocus? = null
     ): Result<CursorPage<EntryItem>> = apiCall {
-        // The chip's day, when the filter is on that day (the web's behaviour).
+        // The chip's day, when the filter is on that day (the web's behavior).
         val focusBounds = dayFocus?.takeIf { it.window == com.example.intelfeed.data.model.FocusWindow.DAY }?.let { DateUtils.dayBounds(it.dayKey) }
-        // The priority-queue endpoint can't filter by feed or category. A scoped Priority Queue
-        // view uses that scope's unread entries (the closest equivalent) rather than silently
-        // showing the unscoped queue under the category banner.
+        // The priority-queue endpoint can't filter by feed or category. A scoped Priority Queue view uses that scope's unread entries (the closest equivalent) rather than silently showing the unscoped queue under the category banner.
         if (filter == FeedFilter.PRIORITY_QUEUE && feedId == null && categoryId == null && dayFocus == null) {
             val pq = getApi().getPriorityQueue(limit = limit, cursor = cursor)
             val mappedItems = pq.items.mapNotNull { item ->
@@ -317,8 +292,7 @@ class IntelFeedRepository(
                             title = item.thread.title ?: "Story thread",
                             summary = item.thread.summary,
                             publishedAt = item.thread.lastSeen,
-                            // The row's 0–10 rank (its best unread beat's scaled score), matching
-                            // the server's queue order and the web badge.
+                            // The row's 0–10 rank (the scaled score of the story's highest-scoring article, read or not), matching the server's queue order and the web badge.
                             priorityScore = item.score,
                             isRead = item.thread.unreadCount == 0,
                             thread = item.thread
@@ -369,11 +343,7 @@ class IntelFeedRepository(
         }
     }
 
-    /**
-     * The quick views' unread counts, fetched in parallel the way the web sidebar does: unread
-     * entries per view (dedup=true, time windows rounded down to the hour), and for the Priority
-     * Queue its folded unread count from /api/entries/priority-unread-count. A failed count is null.
-     */
+    /** The quick views' unread counts, fetched in parallel the way the web sidebar does: unread entries per view (dedup=true, time windows rounded down to the hour), and for the Priority Queue its folded unread count from /api/entries/priority-unread-count. A failed count is null. */
     suspend fun getViewCounts(): ViewCounts = coroutineScope {
         val api = getApi()
         val hour = System.currentTimeMillis() / HOUR_MS * HOUR_MS
@@ -390,10 +360,7 @@ class IntelFeedRepository(
     }
 
 
-    /**
-     * The web list's per-article intel badges, in batches of 100 ids like the web client. Entries
-     * without anything extracted aren't in the map; a batch that fails is simply missing.
-     */
+    /** The web list's per-article intel badges, in batches of 100 ids like the web client. Entries without anything extracted aren't in the map; a batch that fails is left out. */
     suspend fun getIntelCounts(ids: List<String>): Map<String, EntryIntelCounts> {
         val api = getApi()
         val out = mutableMapOf<String, EntryIntelCounts>()
@@ -447,7 +414,7 @@ class IntelFeedRepository(
 
     suspend fun getCategories(): Result<List<Category>> = apiCall { getApi().getCategories() }
 
-    /** Every feed (the web client asks for 1000; the drawer used to stop at 100 of ~300). */
+    /** Every feed (the web client also asks for 1000; a limit of 100 cut the drawer off at 100 of ~300 feeds). */
     suspend fun getFeeds(): Result<List<FeedSource>> = apiCall { getApi().getFeeds(limit = 1000).items }
 
     suspend fun createFeed(
@@ -486,15 +453,11 @@ class IntelFeedRepository(
             getApi().bulkAction(BulkActionRequest(listOf(id), if (bookmarked) "bookmark" else "unbookmark")).requireSuccess()
         }
 
-    /**
-     * Applies one flag to many entries with POST /api/entries/bulk-action. [previous] holds each
-     * entry's current value so a failure can restore it.
-     */
+    /** Applies one flag to many entries with POST /api/entries/bulk-action. [previous] holds each entry's current value so a failure can restore it. */
     suspend fun bulkSet(action: BulkAction, previous: Map<String, Boolean>): Result<Unit> {
         val ids = previous.keys.toList()
         if (ids.isEmpty()) return Result.success(Unit)
-        // emit, not tryEmit: tryEmit silently drops updates once the buffer (256) is full, so
-        // marking a long selection read left part of it looking unread.
+        // emit, not tryEmit: tryEmit silently drops updates once the buffer (256) is full, so marking a long selection read would leave part of it looking unread.
         ids.forEach { _entryUpdates.emit(action.update(it, action.value)) }
         val result = apiCall { getApi().bulkAction(BulkActionRequest(ids, action.serverAction)).requireSuccess() }
         if (result.isSuccess) ids.forEach { _entryUpdates.emit(action.update(it, action.value).copy(confirmed = true)) }
@@ -515,11 +478,7 @@ class IntelFeedRepository(
         return result
     }
 
-    /**
-     * Marks unread entries read, limited to [feedId] / [categoryId] when given; with neither, every
-     * feed. [priorityOnly] limits it to the Priority Queue's articles (`radar_only`, as the web's
-     * Priority Queue sends), so clearing the queue doesn't mark every other unread article read.
-     */
+    /** Marks unread entries read, limited to [feedId] / [categoryId] when given; with neither, every feed. [priorityOnly] limits it to the Priority Queue's articles (`radar_only`, as the web's Priority Queue sends), so clearing the queue doesn't mark every other unread article read. */
     suspend fun markAllRead(feedId: String? = null, categoryId: String? = null, priorityOnly: Boolean = false): Result<Unit> = apiCall {
         val request = if (priorityOnly) MarkAllReadRequest(radarOnly = true) else MarkAllReadRequest(feedId = feedId, categoryId = categoryId)
         getApi().markAllRead(request).requireSuccess()
@@ -535,10 +494,7 @@ class IntelFeedRepository(
 
     suspend fun getEntryDetail(id: String): Result<EntryDetail> = apiCall { getApi().getEntryDetail(id) }
 
-    /**
-     * Loads the entities linked to an entry from the per-type endpoints in parallel, the same ones
-     * the web reader uses. A type that fails is left empty rather than failing the whole panel.
-     */
+    /** Loads the entities linked to an entry from the per-type endpoints in parallel, the same ones the web reader uses. A type that fails is left empty rather than failing the whole panel. */
     suspend fun getEntryIntel(id: String): EntryIntel = coroutineScope {
         val api = getApi()
         val actors = async { apiCall { api.getEntryThreatActors(id) }.getOrDefault(emptyList()) }
@@ -572,10 +528,7 @@ class IntelFeedRepository(
         decodeItems(getApi().detectGlossary(com.example.intelfeed.data.model.GlossaryDetectRequest(entryId)), com.example.intelfeed.data.model.GlossaryMatch.serializer())
     }
 
-    /**
-     * Decodes a list response item by item, skipping items that don't fit [serializer]. Accepts a
-     * bare array or an object holding one under "items" (or "matches"/"results").
-     */
+    /** Decodes a list response item by item, skipping items that don't fit [serializer]. Accepts a bare array or an object holding one under "items" (or "matches"/"results"). */
     private fun <T> decodeItems(element: kotlinx.serialization.json.JsonElement, serializer: kotlinx.serialization.KSerializer<T>): List<T> {
         val array = when (element) {
             is kotlinx.serialization.json.JsonArray -> element
@@ -786,10 +739,7 @@ class IntelFeedRepository(
 
     // SEARCH
 
-    /**
-     * Only the first page carries entity groups: later pages ("Load more") keep the entities from
-     * page one, so they ask for the minimum instead of re-downloading up to 200 entities each time.
-     */
+    /** Only the first page carries entity groups: later pages ("Load more") keep the entities from page one, so they ask for the minimum instead of re-downloading up to 200 entities each time. */
     suspend fun searchUnified(query: String, offset: Int = 0, limit: Int = 20): Result<UnifiedSearchResponse> = apiCall {
         getApi().searchUnified(
             if (offset == 0) UnifiedSearchRequest(q = query, limit = limit, offset = offset)

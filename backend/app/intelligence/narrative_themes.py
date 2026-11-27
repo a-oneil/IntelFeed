@@ -7,19 +7,19 @@ The `daily_summary` prompt makes two guarantees this module depends on:
    ``[Title](/?entry=<uuid>)`` — because that is the URL
    ``_fetch_day_entries`` hands the model (app/api/entries.py).
 
-So the cached briefing is already a map of *which articles the AI grouped
-together*, and recovering it is a regex over text we have paid for once and
+So the cached briefing already records which articles the AI grouped
+together, and recovering that is a regex over text that was generated once and
 stored. No provider call, no embeddings, nothing to schedule on the AI queue.
 
-What it is good for: the co-occurrence promotion gate. An entity pair whose
-evidence articles all sit under one heading on one day is one reporting wave
-told several ways; a pair re-asserted under headings on different days is the
-real thing. That is the same judgement `evidence_structure` makes from
-embeddings — this one works with embeddings off.
+It is used by the co-occurrence promotion gate. An entity pair whose evidence
+articles all sit under one heading on one day is one news story reported by
+several outlets; a pair that appears again under headings on different days
+is independent evidence. `evidence_structure` makes the same judgment from
+embeddings; this module works with embeddings off.
 
-Degradation is deliberate and one-directional: days that were never parsed and
+Missing data never counts against a pair: days that were never parsed and
 articles the briefing never cited produce no rows, and callers treat missing
-data as "no opinion", never as "fails".
+data as "no opinion", never as a failure.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ def _section_for_h2(heading: str) -> str:
     """Map a top-level briefing heading to its section kind.
 
     Matched loosely on purpose: the headings come from a prompt an operator can
-    edit, so "Key Developments" must still be recognised if someone renames it
+    edit, so "Key Developments" must still be recognized if someone renames it
     "Key developments today".
     """
     h = heading.casefold()
@@ -74,7 +74,7 @@ def _section_for_h2(heading: str) -> str:
         return SECTION_NOTABLE
     if "closer look" in h or "worth a" in h:
         return SECTION_CLOSER
-    # Key Developments — and anything unrecognised, since that is where a
+    # Key Developments — and anything unrecognized, since that is where a
     # renamed themed section would land and its `###` children are the payload.
     return SECTION_THEME
 

@@ -55,7 +55,7 @@ COST_TABLE: dict[str, tuple[float, float]] = {
     "claude-opus-5-5": (4.0, 20.0),
     "claude-sonnet-5-5": (2.0, 10.0),
     "claude-haiku-5-5": (0.10, 0.50),
-    # Previous generation — still priced so results recorded on them cost out.
+    # Previous generation — still priced so results recorded on them can be costed.
     "claude-opus-4-6": (15.0, 75.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-haiku-4-5-20251001": (0.80, 4.0),
@@ -111,15 +111,15 @@ def attribution_fields(
 
 #: A backslash that does not start a legal JSON escape. Small models write
 #: Windows paths and command lines into string values verbatim
-#: ("C:\ProgramData\x.exe"), which is an invalid escape and used to lose the
-#: whole analysis. Doubling only the illegal ones is lossless for valid JSON.
+#: ("C:\ProgramData\x.exe"), which is an invalid escape and, unrepaired, loses
+#: the whole analysis. Doubling only the illegal ones is lossless for valid JSON.
 _BAD_ESCAPE_RE = re.compile(r'\\(?![\\/"bfnrtu])')
 
 
 def _repair_json(text: str) -> str:
     repaired = _BAD_ESCAPE_RE.sub(r"\\\\", text)
-    # A truncated response (output budget hit) is unrecoverable, but a trailing
-    # comma before a closing bracket is not.
+    # Drop a trailing comma before a closing bracket. Truncated responses
+    # (output budget hit) are handled separately by _salvage_truncated_json.
     return re.sub(r",\s*([}\]])", r"\1", repaired)
 
 
@@ -891,7 +891,7 @@ async def get_active_prompt_versioned(
     key runs prompts the admin can edit, and the "Who answered" card says
     which one ran.
 
-    Returns ``(system, user)`` where ``system`` may be ``None`` (no cacheable
+    Returns ``(system, user, version)`` where ``system`` may be ``None`` (no cacheable
     system block — falls through to the pre-split single-message pattern).
     Overrides are per-task: the newest active template wins for everyone
     (including workers), regardless of who saved it; otherwise the task
@@ -971,7 +971,7 @@ async def run_task(
     # Dedup guard: skip if target already has a current result for this task.
     # A provider error ({"_error": ...}, no _extraction_status) is current so
     # the workbench shows the last run failed, but it is not an answer: replaying
-    # it would turn every retry of an outage casualty into an instant failure.
+    # it would turn every retry after a provider outage into an instant failure.
     if target_type and target_id and not force:
         existing = await db.execute(
             select(AIResult.parsed_result)
@@ -1036,15 +1036,15 @@ async def run_task(
     # 8192, not 4096: measured entry_analysis output on real articles runs
     # 1900-3251 tokens, and TTP-dense advisories (e.g. CISA #StopRansomware
     # bulletins, which enumerate a dozen technique IDs) overflow 4096 on every
-    # model tested. An overflow is unrecoverable — parse_ai_json turns the
-    # half-written JSON into _extraction_status="parse_error", which no caller
-    # retries, so the whole extraction is silently lost. The cap only bounds
-    # output, so raising it costs nothing on entries that finish early.
+    # model tested. On overflow parse_ai_json keeps only the complete elements
+    # written before the cut (marked _truncated) and everything after it is
+    # lost. The cap only bounds output, so raising it costs nothing on entries
+    # that finish early.
     # entry_analysis gets 16384: with the indicator appendix in the prompt and
     # host-kind observables in the schema, a long research write-up's payload
     # (TTPs with source sentences, countries, 30+ iocs with evidence) measured
     # 30k+ characters — ~8k tokens — and was cut mid-field. A truncated
-    # response is a lost analysis; extra budget costs nothing when unused.
+    # response loses part of the analysis; extra budget costs nothing when unused.
     max_tokens = config.get("max_tokens", 16384 if task_name == "entry_analysis" else 8192)
 
     # Agentic tool wiring. The Claude Code CLI reaches tools via its own

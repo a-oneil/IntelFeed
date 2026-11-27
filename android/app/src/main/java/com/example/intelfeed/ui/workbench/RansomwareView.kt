@@ -111,13 +111,13 @@ private val Accent: Color
     get() = ThemeEngine.domainAccentColor("ops")
 private val Victim: Color
     get() = ThemeEngine.entityColor("ransomware_victim")
-// The web colours a rise in victims with --entity-victim and a fall with --success.
+// The web colors a rise in victims with --entity-victim and a fall with --success.
 private val Up: Color
     get() = ThemeEngine.entityColor("ransomware_victim")
 private val Down: Color
     get() = ThemeEngine.color("success")
 
-/** The web's group palette (--rgroup-* from `/api/themes/schema`): the server sends a group key in group_color. */
+/** The web's group palette (--rgroup-* from `/api/themes/schema`): the server sends a group key, or a #rrggbb hex color, in group_color. */
 fun ransomwareGroupColor(key: String?): Color {
     val k = key?.trim()?.lowercase()?.replace("cl0p", "clop")
     if (k != null && k.startsWith("#") && k.length == 7) k.drop(1).toLongOrNull(16)?.let { return Color(0xFF000000 or it) }
@@ -153,7 +153,7 @@ private fun pct(v: Double): String = if (v % 1.0 == 0.0) abs(v).toInt().toString
 
 @Composable
 private fun Trend(value: Double, up: Boolean, small: Boolean = false) {
-    // Rising victim counts are bad news, so the web colours ▲ red.
+    // Rising victim counts are bad news, so the web colors ▲ red.
     Text("${if (up) "▲" else "▼"} ${pct(value)}%", fontSize = if (small) 11.sp else 12.sp, color = if (up) Up else Down, fontWeight = FontWeight.SemiBold)
 }
 
@@ -230,7 +230,7 @@ private fun LeakWatch(vm: RansomwareViewModel, state: RansomwareState, openGroup
             state.error != null && state.items.isEmpty() -> ErrorState(state.error, onRetry = vm::refresh, modifier = Modifier.fillMaxSize())
             else -> LazyColumn(state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), modifier = Modifier.fillMaxSize()) {
                 state.stats?.let { st -> item(key = "kpis") { LeakWatchKpis(st, f.days) } }
-                // The web's banner for a watched organisation that just appeared.
+                // The web's banner for a watched organization that just appeared.
                 val hit = state.items.firstOrNull { it.watched && it.isNew }
                 if (hit != null && !alertDismissed) item(key = "alert") {
                     Row(
@@ -578,11 +578,7 @@ private fun BarRow(label: String, dot: Color?, fraction: Float, fill: Color, val
     }
 }
 
-/**
- * The web's weekly line: area gradient in the accent colour, dashed average, y ticks at 0 / ⅓ / ⅔ /
- * max (max = 1.12 × the highest week), every other week labelled, the last point marked. Tap a
- * point to read it.
- */
+/** The web's weekly line chart: area gradient in the accent color, dashed average, y ticks at 0 / ⅓ / ⅔ / max (max = 1.12 × the highest week), every other week labeled, the last point marked. Tap a point to read its value. */
 @Composable
 private fun WeeklyLine(points: List<RansomwarePoint>) {
     if (points.isEmpty()) {

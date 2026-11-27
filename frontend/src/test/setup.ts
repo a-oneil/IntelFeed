@@ -1,14 +1,8 @@
 import { vi } from "vitest";
-// The `/vitest` subpath, not the bare package: bare `@testing-library/jest-dom`
-// resolves to types/index.d.ts, which only references jest.d.ts and augments
-// *jest's* expect. Vitest 5 no longer picks that up, so every `toBeInTheDocument`
-// fails tsc with TS2339 on `Assertion<void, HTMLElement>`. The subpath augments
-// `declare module "vitest"` directly.
+// The `/vitest` subpath, not the bare package: bare `@testing-library/jest-dom` resolves to types/index.d.ts, which only references jest.d.ts and augments *jest's* expect. Vitest 5 no longer picks that up, so every `toBeInTheDocument` fails tsc with TS2339 on `Assertion<void, HTMLElement>`. The subpath augments `declare module "vitest"` directly.
 import "@testing-library/jest-dom/vitest";
 
-// jsdom in this Vitest configuration ships a `localStorage` proxy whose
-// Storage methods (`setItem`, `getItem`, etc.) are undefined, breaking
-// zustand's persist middleware. Replace it with a working in-memory shim.
+// jsdom in this Vitest configuration ships a `localStorage` proxy whose Storage methods (`setItem`, `getItem`, etc.) are undefined, breaking zustand's persist middleware. Replace it with a working in-memory shim.
 {
   const memory = new Map<string, string>();
   const storage: Storage = {
@@ -37,9 +31,7 @@ import "@testing-library/jest-dom/vitest";
   });
 }
 
-// Mock window.matchMedia for jsdom. Everything is false except hover/pointer
-// capability: jsdom stands in for a desktop browser, and hover cards skip
-// rendering entirely on a coarse pointer (see useHasHover).
+// Mock window.matchMedia for jsdom. Everything is false except hover/pointer capability: jsdom stands in for a desktop browser, and hover cards skip rendering entirely on a coarse pointer (see useHasHover).
 Object.defineProperty(window, "matchMedia", {
   writable: true,
   value: (query: string) => ({

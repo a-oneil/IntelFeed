@@ -1,9 +1,4 @@
-/**
- * Pure logic for the external-link interstitial: which clicks get intercepted,
- * which hosts are trusted, and what looks wrong about a link. No DOM listeners
- * or React in here so it can be unit tested exhaustively; the listener lives in
- * `components/ExternalLinkGuard.tsx`.
- */
+/** Pure logic for the external-link interstitial: which clicks get intercepted, which hosts are trusted, and what looks wrong about a link. No DOM listeners or React in here so it can be unit tested exhaustively; the listener lives in `components/ExternalLinkGuard.tsx`. */
 
 export type ExternalLinkMode = "off" | "article" | "all";
 
@@ -13,30 +8,16 @@ export const DEFAULT_EXTERNAL_LINK_MODE: ExternalLinkMode = "article";
 export const EXTERNAL_LINK_MODE_KEY = "external_link_mode";
 export const EXTERNAL_LINK_TRUSTED_KEY = "external_link_trusted_hosts";
 
-/**
- * sessionStorage key prefix for hosts trusted "for this tab" (one key per
- * account, plus one for public pages). Lives here, not in the store, so the
- * logout cleanup can clear them without importing the store (which imports
- * authStore, which imports the cleanup).
- */
+/** sessionStorage key prefix for hosts trusted "for this tab" (one key per account, plus one for public pages). Lives here, not in the store, so the logout cleanup can clear them without importing the store (which imports authStore, which imports the cleanup). */
 export const EXTERNAL_LINK_SESSION_TRUST_PREFIX = "intelfeed:external-link-trust:";
 
 /** Cap on the saved list so the settings blob can't grow without bound. */
 export const MAX_TRUSTED_HOSTS = 200;
 
-/**
- * Marks a subtree whose links come from feed content and are therefore
- * attacker-influenceable. In "article" mode only links inside such a subtree
- * are intercepted.
- */
+/** Marks a subtree whose links come from feed content and are therefore attacker-influenceable. In "article" mode only links inside such a subtree are intercepted. */
 export const UNTRUSTED_CONTENT_ATTR = "data-untrusted-content";
 
-/**
- * Domains that ship trusted, matched as the domain or any subdomain of it.
- * Keep this to registries that only the named organisation controls — never a
- * shared-hosting suffix (github.io, blogspot.com), where a subdomain is
- * anyone's.
- */
+/** Domains that ship trusted, matched as the domain or any subdomain of it. Keep this to registries that only the named organization controls — never a shared-hosting suffix (github.io, blogspot.com), where a subdomain is anyone's. */
 export const BUILT_IN_TRUSTED_DOMAINS = ["mitre.org", "nist.gov", "cve.org", "cisa.gov"];
 
 /** Hosts whose whole purpose is hiding the real destination. */
@@ -61,12 +42,7 @@ const URL_SHORTENERS = new Set([
   "safelinks.protection.outlook.com",
 ]);
 
-/**
- * Trailing "extensions" that read like a host but are file names in prose
- * (`ads.txt`, `msimg32.dll`) — common in incident write-ups. Real TLDs that
- * double as extensions and get abused in phishing (.zip, .mov) are left out on
- * purpose, as is anything else that could be a genuine host.
- */
+/** Trailing "extensions" that read like a host but are file names in prose (`ads.txt`, `msimg32.dll`) — common in incident write-ups. Real TLDs that double as extensions and get abused in phishing (.zip, .mov) are left out on purpose, as is anything else that could be a genuine host. */
 const NOT_A_TLD = new Set([
   "js", "ts", "jsx", "tsx", "py", "rb", "md", "sh", "go", "cs", "ps1", "json",
   "txt", "dll", "exe", "sys", "bat", "vbs", "jar", "doc", "docx", "xls", "xlsx", "ppt",
@@ -88,10 +64,7 @@ export interface LinkMismatch {
   claimedHost: string;
   /** Host the link actually goes to. */
   actualHost: string;
-  /**
-   * The claimed host appears in the destination path/query, or the hosts have
-   * a parent/subdomain relationship. Still shown as a note when untrusted.
-   */
+  /** The claimed host appears in the destination path/query, or the hosts have a parent/subdomain relationship. Still shown as a note when untrusted. */
   related: boolean;
 }
 
@@ -131,9 +104,7 @@ export function isTrustedHost(
 ): boolean {
   const h = normalizeHost(host);
   if (BUILT_IN_TRUSTED_DOMAINS.some((d) => hostMatchesDomain(h, d))) return true;
-  // User entries are exact on purpose: "trust example.com" must not
-  // silently trust every subdomain, and without a public-suffix list there is
-  // no safe way to widen it.
+  // User entries are exact on purpose: "trust example.com" must not silently trust every subdomain, and without a public-suffix list there is no safe way to widen it.
   return trustedHosts.some((t) => normalizeHost(t) === h);
 }
 
@@ -161,13 +132,7 @@ function stripPunctuation(token: string): string {
   return token.replace(/^[([<"'“‘]+/, "").replace(/[)\]>"'”’.,;:!?…]+$/, "");
 }
 
-/**
- * The classic phishing tell: link text that *is* a URL, pointing somewhere
- * else. Only text that names a host can disagree with an href, so "click here"
- * is never flagged. A scheme-qualified URL anywhere in the text counts; a bare
- * host only counts when it is the whole text, to keep prose like "see
- * example.com for details" from tripping it.
- */
+/** A common phishing sign: link text that *is* a URL, pointing somewhere else. Only text that names a host can disagree with an href, so "click here" is never flagged. A scheme-qualified URL anywhere in the text counts; a bare host only counts when it is the whole text, to keep prose like "see example.com for details" from tripping it. */
 export function findTextMismatch(
   text: string,
   actualHost: string,
@@ -184,8 +149,7 @@ export function findTextMismatch(
 
     let claimed: string;
     try {
-      // Round-trips through the URL parser so a Cyrillic lookalike in the text
-      // compares as its punycode form, exactly like the href does.
+      // Round-trips through the URL parser so a Cyrillic lookalike in the text compares as its punycode form, exactly like the href does.
       claimed = new URL(`http://${match[1]}`).hostname;
     } catch {
       continue;
@@ -264,11 +228,7 @@ function opensNewTab(anchor: HTMLAnchorElement | HTMLAreaElement, event: MouseEv
   return target !== "" && target !== "_self" && target !== "_parent" && target !== "_top";
 }
 
-/**
- * True only for a web URL that leaves this site. Relative URLs, same-origin
- * URLs, hash links and non-web schemes (mailto:, tel:, blob:...) are not
- * external. Used wherever behaviour must apply to outside links only.
- */
+/** True only for a web URL that leaves this site. Relative URLs, same-origin URLs, hash links and non-web schemes (mailto:, tel:, blob:...) are not external. Used wherever behavior must apply to outside links only. */
 export function isExternalWebUrl(
   rawUrl: string,
   origin: string = window.location.origin,
@@ -282,10 +242,7 @@ export function isExternalWebUrl(
   }
 }
 
-/**
- * The shared decision, given a URL rather than a DOM node. `untrusted` says the
- * URL came from feed content: "article" scope only covers those.
- */
+/** The shared decision, given a URL rather than a DOM node. `untrusted` says the URL came from feed content: "article" scope only covers those. */
 function evaluateUrl(
   rawUrl: string,
   ctx: InterceptContext,
@@ -299,8 +256,7 @@ function evaluateUrl(
   } catch {
     return null;
   }
-  // mailto:, tel:, blob:, cid: and friends never leave the app in a way this
-  // dialog can describe; javascript: is already stripped by the sanitiser.
+  // mailto:, tel:, blob:, cid: and similar schemes never leave the app in a way this dialog can describe; javascript: is already stripped by the sanitizer.
   if (!WEB_PROTOCOLS.has(url.protocol)) return null;
   if (url.origin === ctx.origin) return null;
 
@@ -310,19 +266,14 @@ function evaluateUrl(
   const mismatch = findTextMismatch(opts.text, host, url.pathname + url.search + url.hash);
   const notes = collectNotes(url, opts.text);
 
-  // A trusted host skips the prompt unless the link has an alarming mismatch.
-  // Notes about IPs, shorteners and IDNs describe the host itself; user-info
-  // and HTTPS downgrades describe this particular link and still force a prompt.
+  // A trusted host skips the prompt unless the link has an alarming mismatch. Notes about IPs, shorteners and IDNs describe the host itself; user-info and HTTPS downgrades describe this particular link and still force a prompt.
   const disguised = isAlarming(mismatch) || notes.some((n) => n.id === "userinfo" || n.id === "downgrade");
   if (!disguised && isTrustedHost(host, ctx.trustedHosts)) return null;
 
   return { url: url.href, host, text: opts.text, newTab: opts.newTab, mismatch, notes };
 }
 
-/**
- * Decide whether a click on `anchor` should be held for confirmation. Returns
- * null to let the browser proceed untouched.
- */
+/** Decide whether a click on `anchor` should be held for confirmation. Returns null to let the browser proceed untouched. */
 export function evaluateLinkClick(
   anchor: HTMLAnchorElement | HTMLAreaElement,
   event: MouseEvent,
@@ -337,11 +288,7 @@ export function evaluateLinkClick(
   });
 }
 
-/**
- * Same decision for a URL the app is about to open from code (the `o` shortcut,
- * a widget row) rather than from a link click. These URLs come from feeds, so
- * they count as untrusted in every scope except "off".
- */
+/** Same decision for a URL the app is about to open from code (the `o` shortcut, a widget row) rather than from a link click. These URLs come from feeds, so they count as untrusted in every scope except "off". */
 export function evaluateProgrammaticOpen(
   rawUrl: string,
   ctx: InterceptContext,

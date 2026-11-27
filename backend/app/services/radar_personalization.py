@@ -1,4 +1,4 @@
-"""Per-user Radar personalisation — read-time, never written back.
+"""Per-user Radar personalization — read-time, never written back.
 
 ``Entry.priority_raw`` is global: one number per entry, computed by the
 signal engine with admin-set family multipliers and the pooled feedback nudge
@@ -12,7 +12,7 @@ signal engine with admin-set family multipliers and the pooled feedback nudge
 would have scored using this analyst's own fitted family weights. Because the
 per-signal contribution is linear (``score x idf_weight x multiplier``), that
 delta is a plain weighted sum over the entry's stored ``entry_signals`` rows —
-no re-scoring, one grouped subquery, and switching personalisation off simply
+no re-scoring, one grouped subquery, and switching personalization off
 drops the term.
 
 Weights are fitted nightly by ``fit_user_signal_weights``; this module only
@@ -33,7 +33,7 @@ from app.models.entry_signal import EntrySignal
 from app.models.user_signal_weight import UserSignalWeight
 
 # User.settings key holding the per-analyst opt-out. Absent means opted in —
-# personalisation only ever engages once the nightly fit has produced weights,
+# personalization only ever engages once the nightly fit has produced weights,
 # so a new user sees the global Radar until they have actually voted.
 USER_SETTING_KEY = "radar_personalized"
 
@@ -94,7 +94,7 @@ async def enrich_personal(
     coefficients: dict[str, float],
     weights: dict[str, float],
 ) -> dict[uuid.UUID, dict]:
-    """Per-entry personalisation detail for a page of entries.
+    """Per-entry personalization detail for a page of entries.
 
     Returns ``{entry_id: {lift, families: [{family, weight, delta}]}}`` for the
     entries the user's weights actually moved. Powers the "Tuned for you" row

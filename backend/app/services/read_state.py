@@ -4,7 +4,7 @@ Every "entries this user hasn't read" count used to be written as
 ``~Entry.id.in_(select(UserEntryState.entry_id).where(...))``. Postgres does
 not flatten ``NOT IN (subquery)`` into an anti-join; it plans a hashed SubPlan,
 and once the subquery result outgrows ``work_mem`` (4MB — ~283k read-state
-rows on prod blew straight past it) it degrades to an un-hashed SubPlan that
+rows on prod exceed it) it degrades to an un-hashed SubPlan that
 rescans the materialized id list for every outer row. The widget counts that
 depended on it went from milliseconds to minutes, which is what the frontend
 saw as `timeout of 15000ms exceeded`.

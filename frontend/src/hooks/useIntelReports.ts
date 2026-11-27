@@ -279,7 +279,7 @@ export function useGenerateExposureReport() {
   });
 }
 
-/** Append evidence to a draft report — the send-to-report gesture. */
+/** Append evidence to a draft report (the "Send to report" action). */
 export function useAttachToReport() {
   const qc = useQueryClient();
   return useMutation({

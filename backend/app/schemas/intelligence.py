@@ -134,8 +134,8 @@ class CVEResponse(BaseModel):
     epss_score: float | None = None
     epss_percentile: float | None = None
     epss_updated_at: datetime | None = None
-    # Previous score + when it moved — what the epss_jump signal fires on. Kept
-    # on the model but never surfaced, so a jump was invisible on the profile.
+    # Previous score + when it moved — what the epss_jump signal fires on.
+    # Returned here so the profile can show the jump.
     epss_previous_score: float | None = None
     epss_changed_at: datetime | None = None
     # Exploit tracking
@@ -486,7 +486,7 @@ class DetectionRuleResponse(BaseModel):
     source_entries: list[uuid.UUID]
     source_actors: list[uuid.UUID]
     source_campaigns: list[uuid.UUID]
-    # Provenance / reuse (research redesign, phase 1)
+    # Provenance / reuse
     license: str | None = None
     upstream_updated_at: datetime | None = None
     references: list[str] = []
@@ -1027,8 +1027,8 @@ class GraphEdge(BaseModel):
     weight: float = 1
     label: str = "co-occurs"
     proximity_score: float | None = None
-    # Trust facts the builder attaches — without these declared here the
-    # response model silently stripped them and every edge rendered "inferred".
+    # Trust facts the builder attaches. They must be declared here: the response
+    # model drops undeclared fields, and every edge would then render "inferred".
     confidence: str | None = None
     provenance: str | None = None
     relationship_id: str | None = None

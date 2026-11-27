@@ -58,7 +58,7 @@ async def scope_data(db_session: AsyncSession, test_user: User):
             EntryCountry(entry_id=e3.id, country_id=us.id),
             EntryMalware(entry_id=e4.id, malware_family_id=inc.id),
             EntrySector(entry_id=e4.id, sector="healthcare"),
-            # Claim: APT28 targets Germany (rides alongside the co-occurrence).
+            # Claim: APT28 targets Germany (in addition to the co-occurrence).
             ThreatActorTargetCountry(threat_actor_id=apt28.id, country_id=de.id),
             # Sector claims live on the target-sector junctions; the label arrays
             # above are only the read cache those junctions rebuild.

@@ -8,11 +8,11 @@ and applications ("WordPress", "Snowflake"). Every one of those is a separate
 row in the `tool.platform` facet.
 
 Folding is deliberately conservative. ATT&CK's enterprise list is the target
-vocabulary, but it has no entry for several things analysts genuinely mean —
-"Web", "Mobile", "OT" — so a value that doesn't map is kept rather than
-dropped, with only its spelling normalized. The narrow exception is
-`is_not_a_platform`, which names the categories that are provably answers to a
-different question.
+vocabulary, but it has no entry for several values analysts use — "Web",
+"Mobile", "OT" — so a value that doesn't map is kept rather than dropped, with
+only its spelling normalized. The narrow exception is `is_not_a_platform`,
+which names values that are not platforms at all (CPU architectures, language
+runtimes, placeholders).
 """
 
 from __future__ import annotations
@@ -85,7 +85,7 @@ _PLATFORM_ALIASES: dict[str, str] = {
     "network infrastructure": "Network Devices",
     "router": "Network Devices",
     "routers": "Network Devices",
-    # Virtualisation
+    # Virtualization
     "vmware": "ESXi",
     "vmware esxi": "ESXi",
     "vsphere": "ESXi",
@@ -114,10 +114,10 @@ _PLATFORM_PREFIXES: tuple[tuple[str, str], ...] = (
     ("amazon linux", "Linux"),
 )
 
-# Answers to a different question entirely. Kept narrow on purpose: a value
-# that is merely absent from ATT&CK's list ("Web", "Mobile", "OT") is still
-# telling you where a tool runs and survives, while a CPU architecture or a
-# language runtime is not a platform under any reading.
+# Values that are not platforms at all. Kept narrow on purpose: a value that is
+# only absent from ATT&CK's list ("Web", "Mobile", "OT") still says where a tool
+# runs and is kept, while a CPU architecture or a language runtime is not a
+# platform under any reading.
 _NOT_PLATFORM_EXACT = frozenset(
     {
         # CPU architectures
@@ -173,7 +173,7 @@ _KEY_NOISE = " .,;:!?\"'()[]\\"
 
 
 def is_not_a_platform(value: str) -> bool:
-    """True for values that answer a different question than "where does it run".
+    """True for values that do not say where a tool runs (not a platform at all).
 
     Used by the backfill to prune, not by the validator — dropping an
     unrecognized value on save would lose an analyst's wording, while these
@@ -187,8 +187,8 @@ def canonical_platform(raw: str | None) -> str | None:
     """Fold one platform spelling onto ATT&CK's vocabulary where it fits.
 
     A value outside the vocabulary comes back with its spelling normalized
-    rather than dropped, so "Web" and "web" become one facet row without
-    pretending ATT&CK has a name for them.
+    rather than dropped, so "Web" and "web" become one facet row without being
+    mapped to an ATT&CK name.
     """
     if raw is None:
         return None

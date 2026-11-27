@@ -1,5 +1,5 @@
-"""Adjudicate stage plumbing (commit 1 of the adjudication PR): registry row,
-settings registration, matrix column. The task itself lands in commit 2."""
+"""Adjudicate stage plumbing: registry row, settings registration, matrix
+column, setting defaults."""
 
 from app.api.engine import PIPELINE_STAGE_LABELS, PROCESSING_STAGE_ORDER
 from app.pipeline.registry import PIPELINE_STAGES
@@ -62,7 +62,7 @@ def test_enum_settings_render_as_selects():
 def test_defaults_are_apply_all_and_no_ceilings():
     """Every dial that could quietly hold the stage back ships neutral: the
     master switch on (apply — what production settled on, see issue #15),
-    every analysed entry in scope, and no floor or ceiling. A rate ceiling is
+    every analyzed entry in scope, and no floor or ceiling. A rate ceiling is
     worth setting on a metered provider or to protect the shared `ai` queue —
     neither is true of every install, so neither is a default."""
     from app.config import Settings

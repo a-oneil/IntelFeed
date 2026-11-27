@@ -18,10 +18,7 @@ export function extractLogId(row: FeedRow): string {
   return sep >= 0 ? row.id.slice(sep + 1) : row.id;
 }
 
-/** The one place that routes a proposal-row action ("apply" / "apply_reclassify"
- *  / "promote_to_remove" / "restore" / "dismiss") to the right endpoint. Shared
- *  by the standalone hygiene surface and the Engine console's Proposals queue so
- *  both apply through identical code paths. */
+/** The one place that routes a proposal-row action ("apply" / "apply_reclassify" / "promote_to_remove" / "restore" / "dismiss") to the right endpoint. Shared by the standalone hygiene surface and the Engine console's Proposals queue so both apply through the same code. */
 export function useHygieneRowAction() {
   const qc = useQueryClient();
   const dismissRow = useDismissFeedRow();
@@ -34,9 +31,7 @@ export function useHygieneRowAction() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["hygiene"] });
 
   return async function handleRowAction(row: FeedRow, action: string) {
-    // Proposals the adjudicate stage filed (veto / merge / unlink / reclassify /
-    // edge demote / ioc drop): one apply / restore endpoint for every kind, the
-    // stage's own code path.
+    // Proposals the adjudicate stage filed (veto / merge / unlink / reclassify / edge demote / ioc drop): one apply / restore endpoint for every kind, which runs the stage's own code.
     if (row.source === "entity_maintenance" && row.action.startsWith("adjudication_") && (action === "apply" || action === "restore")) {
       try {
         const res = await api.post<{
@@ -127,9 +122,7 @@ export function useHygieneRowAction() {
         }
         return;
       }
-      // Reachable: a shadow `orphan_prune` row still advertises apply (see
-      // _row_actions_maint) and the flagger that minted them is retired, so
-      // those legacy rows only have Dismiss here.
+      // This branch is reachable: a shadow `orphan_prune` row still offers apply (see _row_actions_maint), but the check that created those rows has been removed, so here they can only be dismissed.
       toast.error(`No apply path for ${row.action}`);
       return;
     }

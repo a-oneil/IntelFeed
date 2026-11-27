@@ -262,8 +262,7 @@
   align-items: center;
   gap: 0.75rem;
   padding: 1rem 0;
-  /* Transparent so it matches whichever container hosts SystemSettings
-     (Settings page = bg-primary, Engine stage panel = bg-secondary). */
+  /* Transparent so it matches whichever container hosts SystemSettings (Settings page = bg-primary, Engine stage panel = bg-secondary). */
   background: transparent;
   border-top: 1px solid var(--border);
 }
@@ -351,8 +350,7 @@
   }
 }
 
-/* Flash the row the Engine's setting search just jumped to — the panels it
-   opens can hold thirty knobs, so "it's on screen" isn't enough. */
+/* Flash the row the Engine's setting search just jumped to — the panels it opens can hold thirty settings, so scrolling the row into view is not enough to find it. */
 .settingRowHit {
   scroll-margin: 96px;
   animation: settingHit 2.4s ease-out;

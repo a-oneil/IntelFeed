@@ -5,8 +5,7 @@ import { Hint } from "./primitives";
 import styles from "./WorkbenchNav.module.css";
 import { useIsVisitor } from "@/stores/authStore";
 
-// Maps a workspace nav section to its canonical entity type, so the nav icon
-// can be tinted with the same color used in entity profiles / intel panels.
+// Maps a workspace nav section to its canonical entity type, so the nav's color square uses the same color as entity profiles and intel panels.
 export const SECTION_ENTITY_TYPE: Partial<Record<WorkspaceSection, string>> = {
   campaigns: "campaign",
   countries: "country",
@@ -23,17 +22,10 @@ export const SECTION_ENTITY_TYPE: Partial<Record<WorkspaceSection, string>> = {
   vendors: "vendor",
 };
 
-// Nav items are either store-driven sections (key) or routed pages (path).
-// An empty group name renders its items ungrouped at the top (no header, always visible).
+// Nav items (SECTION_CONFIG below) are either store-driven sections (key) or routed pages (path). An empty group name renders its items ungrouped at the top (no header, always visible).
 //
-// `swatch` is the nav's colour square. Entity sections take theirs from the
-// canonical entity token via SECTION_ENTITY_TYPE; everything else names a
-// domain accent here so each group reads as one family.
-/**
- * What each group is *for*, on hover. The entity names below are self-evident
- * once you know the group they sit in, so the group header carries the
- * explanation and the rows stay quiet.
- */
+// `swatch` is the nav's color square. Entity sections take theirs from the canonical entity token via SECTION_ENTITY_TYPE; everything else names a domain accent here so each group shares one color.
+/** What each group is for, shown on hover. The item names are clear once you know their group, so the group header carries the explanation and most rows have no hint. */
 const GROUP_HINTS: Record<string, { title: string; body: string; aside?: string }> = {
   DETECTION: {
     title: "Detection",
@@ -65,8 +57,7 @@ export const SECTION_CONFIG: Array<{
     group: "",
     items: [
       { path: "/workbench/dashboard", label: "Dashboard", swatch: "var(--accent-blue)" },
-      // Reports sits top-level next to Dashboard — it's a primary product
-      // surface, not something to dig out of the Intelligence group.
+      // Reports sits at the top level next to Dashboard because it is a primary page, not something to find inside the Intelligence group.
       {
         key: "reports", label: "Reports", swatch: "var(--accent-intel)",
         hint: {
@@ -152,10 +143,7 @@ export const SECTION_KEYS = new Set<string>(
   ),
 );
 
-/**
- * Workbench areas that aren't part of the public read-only view: detection
- * work, intel work products, observables, and anything personal.
- */
+/** Workbench areas that aren't part of the public read-only view: detection work, intel work products, observables, and anything personal. */
 export const VISITOR_HIDDEN_SECTIONS = new Set<string>([
   "reports",
   "rules",
@@ -169,14 +157,7 @@ export const VISITOR_HIDDEN_SECTIONS = new Set<string>([
   "/workbench/threats",
 ]);
 
-/**
- * The workbench's section nav.
- *
- * It used to be an `aside` inside WorkbenchLayout, which meant the workbench
- * ran two nav rails side by side and had to auto-collapse the app sidebar to
- * pay for them. It now renders *as* the app sidebar whenever the sidebar is in
- * Workbench mode, so there is one rail, one width, one collapse.
- */
+/** The workbench's section nav. It renders as the app sidebar's content whenever the sidebar is in Workbench mode, so the workbench has one nav rail, one width and one collapse instead of a second rail beside the app sidebar. */
 export function WorkbenchNav({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -258,9 +239,7 @@ export function WorkbenchNav({ onNavigate }: { onNavigate?: () => void }) {
                     onNavigate?.();
                   }}
                 >
-                  {/* Colour square, not a glyph: at 14px the entity icons
-                      were indistinguishable, and colour is already the
-                      entity vocabulary everywhere else in the app. */}
+                  {/* A color square, not a glyph: at 14px the entity icons are hard to tell apart, and color already identifies entity types everywhere else in the app. */}
                   <span
                     className={styles.navSwatch}
                     style={iconColor ? { background: iconColor } : undefined}

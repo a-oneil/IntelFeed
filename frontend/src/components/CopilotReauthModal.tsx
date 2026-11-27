@@ -17,11 +17,7 @@ interface Props {
   onSuccess?: () => void;
 }
 
-/**
- * Compact dialog that runs the copilot OAuth re-auth flow (auto-started on open):
- * shows the Claude sign-in link, takes the pasted code, and reports the result.
- * Reuses the same hooks + backend flow as the Settings card.
- */
+/** Compact dialog that runs the copilot OAuth re-auth flow (auto-started on open): shows the Claude sign-in link, takes the pasted code, and reports the result. Reuses the same hooks + backend flow as the Settings card. */
 export default function CopilotReauthModal({ open, onClose, onSuccess }: Props) {
   const trapRef = useFocusTrap<HTMLDivElement>();
   const [sessionId, setSessionId] = useState<string | null>(null);

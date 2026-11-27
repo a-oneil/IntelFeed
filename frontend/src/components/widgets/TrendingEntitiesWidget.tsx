@@ -12,7 +12,7 @@ interface Props {
   config: Record<string, unknown>;
 }
 
-/** Filled severity pill colours — was the .critical/.high/.medium/.low class set. */
+/** Workbench route for each entity type; other types fall back to /intelligence. */
 const NAV_PATHS: Record<string, string> = {
   threat_actor: "/workbench/threat_actor",
   malware: "/workbench/malware",

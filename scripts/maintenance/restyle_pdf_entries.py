@@ -1,7 +1,7 @@
 """Re-clean the stored HTML of PDF entries with today's ``sanitize_pdf_html``.
 
 PDF text is stored as the HTML PyMuPDF writes. Older entries kept its inline
-styles (the PDF's font family, size and colour on every span, plus fixed page
+styles (the PDF's font family, size and color on every span, plus fixed page
 sizes and positions), which override the reader's theme: black text on a dark
 background. Running the sanitizer again removes those styles. It only removes
 markup, so running it twice changes nothing.

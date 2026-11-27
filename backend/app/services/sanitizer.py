@@ -99,7 +99,7 @@ def sanitize_html(raw_html: str, proxy_base_url: str = "/api/proxy/image") -> st
 
 
 # Block-level tags break the line and table cells are kept apart by a tab.
-# Without this nh3's strip glues neighbours together: list items of defanged
+# Without this nh3's strip glues neighbors together: list items of defanged
 # IPs ran into one another (46.233.40.20 + 4… read as 46.233.40.204), a CVE
 # column into its CVSS column (CVE-2026-103849 + 10), a caption into the next
 # "Source:" line ("powerSource" matched POWERSOURCE).
@@ -135,7 +135,7 @@ def _join_marks(m: re.Match) -> str:
 def html_to_text(html: str) -> str:
     """Strip HTML tags to get plain text.
 
-    Text from neighbouring elements never runs together: paragraph-level
+    Text from neighboring elements never runs together: paragraph-level
     elements are separated by a blank line, list items, table rows, captions
     and ``<br>`` by a newline, table cells by a tab — unless the source
     already had whitespace there, which is kept."""

@@ -4,8 +4,9 @@ Uses Telethon with a single operator-provisioned user account. The session file
 is bootstrapped once interactively via scripts/telegram/telegram_login.py and persists
 on a Docker volume.
 
-Per-process singleton client, lazy-initialized inside fetch_entries (after fork).
-Initialized at module top level would break Celery prefork — see "Gotchas".
+One client per process, created lazily inside fetch_entries (after fork).
+Creating it at import time would break Celery prefork: every forked worker would
+inherit the same socket.
 """
 
 from __future__ import annotations
@@ -133,7 +134,7 @@ class TelegramAdapter(ExtendedAdapter):
         # Telethon "channel" entities expose .username; some private channels have None
         resolved_username = getattr(entity, "username", None) or ""
         title = getattr(entity, "title", None) or resolved_username or str(channel_input)
-        # Construct the negative "real" channel id used in t.me/c/<id>/<msg> permalinks
+        # Channel id for t.me/c/<id>/<msg> permalinks, which use the positive id
         if resolved_channel_id and resolved_channel_id > 0:
             permalink_channel_id = resolved_channel_id
         else:
@@ -443,8 +444,8 @@ class TelegramAdapter(ExtendedAdapter):
         """Read the SQLite session file once per-process and return a StringSession.
 
         Telethon's default SQLite session writes the entity cache and update state on
-        every operation. With multiple processes (api, telegram-listener, four celery
-        workers) all opening the same .session file, those writes collide and surface
+        every operation. With multiple processes (api, telegram-listener, the celery
+        containers) all opening the same .session file, those writes collide and surface
         as intermittent "database is locked" errors mid-fetch. StringSession holds the
         auth_key in memory only — never writes to disk — so each process can run an
         independent Telethon client without contention.
@@ -601,7 +602,7 @@ class TelegramAdapter(ExtendedAdapter):
 
     @staticmethod
     def _render_message_html(message) -> str:
-        """Convert message text + entities to sanitized-friendly HTML.
+        """Convert message text + formatting entities to HTML.
 
         Telethon exposes per-character formatting via `entities` (MessageEntityBold,
         MessageEntityItalic, MessageEntityCode, MessageEntityPre, MessageEntityTextUrl,
@@ -762,7 +763,7 @@ class TelegramAdapter(ExtendedAdapter):
         grouped = getattr(message, "grouped_id", None)
         if grouped:
             meta["telegram_grouped_id"] = int(grouped)
-        # Voice notes: voice=True attribute on document
+        # Keep the original file name when the document has one
         if file_obj is not None and getattr(file_obj, "name", None):
             meta["original_filename"] = file_obj.name
 

@@ -77,7 +77,7 @@ async def test_observable_capture_trigger_fires_matching_rules_once(db_session, 
     assert [lg.rule_id for lg in logs] == [c2_rule.id]
     assert logs[0].trigger_type == "on_observable_captured" and logs[0].status == "success"
 
-    # The publisher door landing on the same article later must not re-fire.
+    # A later capture on the same article (for example from publisher IOCs) must not fire the rules again.
     assert await run_automations_for_observable_capture(db_session, entry) == []
 
 
@@ -98,7 +98,7 @@ async def test_apply_ai_observables_queues_capture_runner_only_when_rows_land(db
         db_session, entry.id, {"iocs": iocs}, mode="capture", capture_kinds={"domain"}
     )
     assert captured.get("observables") == 1 and queued == [str(entry.id)]
-    # A replay backfill is silent.
+    # A replay backfill (fire_automations=False) queues nothing.
     other = await _entry(db_session)
     await apply_ai_observables(
         db_session, other.id, {"iocs": iocs}, mode="capture", capture_kinds={"domain"}, fire_automations=False
@@ -160,7 +160,7 @@ async def test_auto_enrich_fan_out_is_capped_per_entry(db_session, monkeypatch):
             db_session, "ipv4", f"198.51.100.{i + 1}", via="publisher_ioc", entry_id=entry.id
         )
     assert len(dispatched) == mod.AUTO_ENRICH_PER_ENTRY_CAP
-    # The feed door never enriches, however many rows it writes.
+    # Rows written from a curated ioc_list feed never queue enrichment, however many there are.
     await get_or_create_observable(db_session, "ipv4", "198.51.100.250", via="ioc_list", entry_id=entry.id)
     assert len(dispatched) == mod.AUTO_ENRICH_PER_ENTRY_CAP
 
@@ -175,7 +175,7 @@ async def test_relationship_target_resolves_host_kinds_through_normalizers(db_se
     assert cmd is not None and cmd.value == "powershell -enc SQBFAFgA -w hidden"
     await db_session.commit()
     # The model prints the command with its original spacing; the value-only
-    # fallback used to miss the whitespace-collapsed row.
+    # fallback must still find the whitespace-collapsed row.
     assert await _resolve_entity_id(db_session, "observable", "powershell  -enc   SQBFAFgA  -w hidden") == cmd.id
     assert (
         await _resolve_entity_id(db_session, "observable", "powershell -enc SQBFAFgA -w hidden", kind="cmdline")

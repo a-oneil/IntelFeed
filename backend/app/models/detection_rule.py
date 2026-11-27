@@ -20,7 +20,8 @@ class DetectionRule(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     rule_type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
-    # sigma, splunk_spl, crowdstrike_ql, elastic_ql, kql, snort_suricata, yara
+    # One of RULE_TYPE_PATTERN (app/schemas/intelligence.py): sigma, splunk_spl, crowdstrike_ql, elastic_ql,
+    # kql, snort_suricata, yara, nuclei, panther, yaral, aql, sumo, sql
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     rule_content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -57,11 +58,11 @@ class DetectionRule(Base):
         """Fold tactic spellings on the way in, whoever is writing.
 
         Six paths set this column — metadata extraction, the Sigma and Elastic
-        parsers, the API, the tool registry and the workbench — and each used to
-        pick its own casing, so the `rule.tactic` facet listed `Persistence`
-        and `persistence` as separate values and a query for one missed the
-        other. Normalizing at the attribute rather than at the callers is what
-        keeps the seventh writer from reintroducing the split.
+        parsers, the API, the tool registry and the workbench — and each picked
+        its own casing, so the `rule.tactic` facet listed `Persistence` and
+        `persistence` as separate values and a query for one missed the other.
+        Normalizing at the attribute rather than at the callers means a new
+        writer cannot reintroduce the split.
         """
         return canonical_tactics(value)
 

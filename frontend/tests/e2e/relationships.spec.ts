@@ -1,11 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-/**
- * Relationships browser e2e: seeds an actor + malware + typed relationship via
- * the API, then verifies the profile Relationships tab renders the verb chip,
- * tier chip and evidence controls, and that confirming a relationship swaps in
- * the CONFIRMED chip.
- */
+/* Relationships browser e2e: seeds an actor + malware + typed relationship via the API, then verifies the profile Relationships tab renders the verb chip, and that confirming a relationship replaces the tier chip with the confirmed chip. */
 test.describe("Relationships browser", () => {
   test("verb chip, tier chip and confirm flow on an actor profile", async ({ page }) => {
     // Register a fresh user via the UI
@@ -56,8 +51,7 @@ test.describe("Relationships browser", () => {
     await page.goto(`/workbench/threat_actor/${actor.id}`);
     await page.getByText("Relationships", { exact: false }).first().click();
 
-    // The typed relationship renders as a row: counterpart + passive verb chip
-    // (viewed entity is the source → "E2ELoader… — used [by me]")
+    // The typed relationship renders as a row: counterpart + passive verb chip (viewed entity is the source → "E2ELoader… — used [by me]")
     const malwareLabel = page.getByText(malware.name).first();
     await expect(malwareLabel).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText("used", { exact: true }).first()).toBeVisible();

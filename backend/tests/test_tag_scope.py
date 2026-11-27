@@ -1,7 +1,7 @@
 """Per-user tag assignments: a tag on an entry belongs to whoever applied it,
 unless the tag is global, in which case one shared row serves everyone.
 
-The tag list itself (names, colours, chip flags) stays shared.
+The tag list itself (names, colors, chip flags) stays shared.
 """
 
 import importlib.util
@@ -514,7 +514,7 @@ async def test_tag_names_cannot_carry_quotes(
     resp = await client.post("/api/tags", json={"name": "back\\slash"}, headers=auth_headers)
     assert resp.status_code == 400
 
-    # Rules and the copilot tool normalise instead of failing.
+    # Rules and the copilot tool normalize instead of failing.
     from app.automation.actions import execute_action
 
     result = await execute_action(
@@ -833,7 +833,7 @@ async def test_stray_shared_row_on_a_personal_tag_is_invisible(
     db_session: AsyncSession, scope_entries: list[Entry], test_user: User, other_user: User
 ):
     """A NULL-owner row that outlives a flip to personal must not publish the
-    tag to everyone; it is simply not shown."""
+    tag to everyone; it is not shown."""
     tag = await _make_tag(db_session, "customer-a")
     entry = scope_entries[0]
     db_session.add(EntryTag(entry_id=entry.id, tag_id=tag.id, user_id=None))

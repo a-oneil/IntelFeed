@@ -124,7 +124,7 @@ class EntityTimelineContractTest {
     fun trendLineMatchesTheWebWording() {
         fun line(previous: Int?, now: Int) =
             TimelinePresentation.trendLine(MentionsTimeseries(previousTotal = previous, points = listOf(MentionPoint("2026-01-01", now))), "90 days")
-        // No change was shown as "→ 0% vs the previous 90 days"; the web shows nothing.
+        // No change shows no trend line, as on the web (not "→ 0% vs the previous 90 days").
         assertNull(line(1, 1))
         assertNull(line(null, 3))
         assertNull(line(0, 0))

@@ -1,11 +1,7 @@
 /**
- * EntityLinkedMarkdown — render markdown text with known intelligence entities
- * highlighted and linked to their profiles, exactly like the daily AI summary.
+ * EntityLinkedMarkdown — render markdown text with known intelligence entities highlighted and linked to their profiles, the same way the daily AI summary does.
  *
- * It scans `text` via the auto-linker (`useEntityScan`), builds surface-form →
- * profile-href links, and feeds them to the shared `remarkEntityLinks` plugin.
- * While the scan is in flight (or fails) it degrades gracefully to plain
- * markdown — no entity links, but the text always renders.
+ * It scans `text` with the autolinker (`useEntityScan`), builds surface-form → profile-href links, and passes them to the shared `remarkEntityLinks` plugin. While the scan is in flight, or if it fails, the text renders as plain markdown with no entity links.
  */
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -53,15 +49,9 @@ interface Props {
   excludeEntityId?: string;
   /** Skip scanning (e.g. while editing). */
   enabled?: boolean;
-  /**
-   * Matches already computed (the public shared-report page gets them from
-   * the server, which scans without a session). When given, no scan runs.
-   */
+  /** Matches already computed (the public shared-report page gets them from the server, which scans without a session). When given, no scan runs. */
   matches?: EntityScanMatch[];
-  /**
-   * No session behind the page: a click opens the hover card instead of
-   * navigating to a profile, and the card offers no actions.
-   */
+  /** No session behind the page: a click opens the hover card instead of navigating to a profile, and the card offers no actions. */
   readOnly?: boolean;
 }
 
@@ -76,9 +66,7 @@ function entityTypeFromHref(href: string | undefined): string | null {
   return m[1];
 }
 
-/** Fold the scan match's full entity payload into the HighlightEntity so the
- *  popover renders with the same descriptions, facts, aliases and links as the
- *  reader and the daily-summary divider. */
+/** Copy the scan match's full entity payload into the HighlightEntity so the popover renders with the same descriptions, facts, aliases and links as the reader and the daily-summary divider. */
 function scanMatchToHighlightEntity(m: EntityScanMatch): HighlightEntity {
   const base: HighlightEntity = {
     id: m.entity_id,
@@ -155,10 +143,7 @@ export function EntityLinkedMarkdown({
   const { data: scanned } = useEntityScan(text, enabled && !givenMatches);
   const matches = givenMatches ?? scanned;
 
-  // Build the remark links and, in the same pass, an href → entity map so
-  // hovering a link shows the shared EntityPopover with the full metadata the
-  // scan response carries (description, facts, aliases, links) — the same card
-  // the reader and the daily-summary divider show.
+  // Build the remark links and, in the same pass, an href → entity map so hovering a link shows the shared EntityPopover with the full metadata the scan response carries (description, facts, aliases, links) — the same card the reader and the daily-summary divider show.
   const { linkEntities, entityByHref } = useMemo(() => {
     const out: RemarkEntityLink[] = [];
     const byHref = new Map<string, HighlightEntity>();
@@ -181,8 +166,7 @@ export function EntityLinkedMarkdown({
     return { linkEntities: out, entityByHref: byHref };
   }, [matches, excludeEntityId]);
 
-  // Hover popover — opens on a 300ms hover-in delay (matching the reader / AI
-  // summary), closes on outside-click / Escape (handled inside EntityPopover).
+  // Hover popover: opens after a 300ms hover delay (matching the reader and the AI summary), closes on outside click or Escape (handled inside EntityPopover).
   const [popover, setPopover] = useState<{ entity: HighlightEntity; x: number; y: number } | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -191,9 +175,7 @@ export function EntityLinkedMarkdown({
       if (!href) return;
       const entity = entityByHref.get(href);
       if (!entity) return;
-      // Show the surface form actually hovered (often an alias) as the value —
-      // `name` keeps the canonical name — so the popover's wrong-match options
-      // act on the matched name, exactly like the reader's highlights.
+      // Show the surface form actually hovered (often an alias) as the value, while `name` keeps the canonical name, so the popover's wrong-match options act on the matched name, the same as the reader's highlights.
       const hovered = el.textContent?.trim();
       const shown =
         hovered && hovered.toLowerCase() !== entity.value.toLowerCase()
@@ -205,8 +187,7 @@ export function EntityLinkedMarkdown({
     [entityByHref],
   );
 
-  // IMPORTANT: pass as [plugin, options] tuple — see remarkEntityLinks usage in
-  // DayDividerSummary for why a direct call breaks the transformer.
+  // IMPORTANT: pass as a [plugin, options] tuple — see remarkEntityLinks usage in DayDividerSummary for why a direct call breaks the transformer.
   const remarkPlugins = useMemo<PluggableList>(
     () => [remarkGfm, remarkSoftBreaks, [remarkEntityLinks, linkEntities]],
     [linkEntities],
@@ -237,7 +218,7 @@ export function EntityLinkedMarkdown({
               onClick={(e) => {
                 e.stopPropagation();
                 if (readOnly) {
-                  // Nowhere to go without a session: the card is the destination.
+                  // Without a session there is no profile to open, so the click shows the card instead.
                   e.preventDefault();
                   if (hoverTimer.current) clearTimeout(hoverTimer.current);
                   openPopoverFor(href, e.currentTarget);

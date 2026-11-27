@@ -1,11 +1,4 @@
-/**
- * VictimologyTab — what the generic pivot can't say about a sector: who targets
- * it split into *reported* (co-occurs on articles the AI judged to describe the
- * sector as hit) and *asserted* (a targets-sector claim with its source), the
- * leak-site victims posted in it, the country cross-tab, campaigns scoped to it
- * and the intel profiles that include the vertical. Backed by
- * GET /sectors/{id}/profile (useSectorProfile).
- */
+/** VictimologyTab — what the generic pivot can't show about a sector: who targets it, split into *reported* (co-occurs on articles the AI judged to describe the sector as hit) and *asserted* (a targets-sector claim with its source), the leak-site victims posted in it, the country cross-tab, campaigns scoped to it and the intel profiles that include the sector. Backed by GET /sectors/{id}/profile (useSectorProfile). */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSectorProfile } from "@/hooks/useSectorProfile";

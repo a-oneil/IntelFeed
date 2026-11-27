@@ -111,8 +111,7 @@ export function TemplateGallery({ onClose, onUseTemplate }: Props) {
     }
   };
 
-  // Group by category when browsing everything; a flat list when searching or
-  // filtered to a single category.
+  // Group by category when browsing everything; a flat list when searching or filtered to a single category.
   const grouped =
     selectedCategory || search
       ? null

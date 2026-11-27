@@ -2,12 +2,8 @@ import type { FeedForm } from "../useFeedForm";
 import styles from "../fields.module.css";
 
 /**
- * The analyst's judgement of the source, on all three Admiralty-style axes.
- *
- * `timeliness_rating` and `relevance_rating` have been in the schema, the PUT
- * body, the response and the TypeScript `Feed` type for a long time with no UI
- * anywhere that wrote them — so `last_reviewed_at` was being stamped off one
- * dimension out of three. These are those fields.
+ * The analyst's judgment of the source, on all three Admiralty-style axes: reliability, timeliness and relevance.
+ * This pane is the only UI that writes `timeliness_rating` and `relevance_rating`, which the schema, the PUT body, the response and the TypeScript `Feed` type all carry; without it `last_reviewed_at` would reflect only the reliability rating.
  */
 const RELIABILITY = [
   { value: "", label: "Not rated" },

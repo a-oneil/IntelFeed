@@ -246,7 +246,7 @@ These filter articles by the entities linked to them.
 | Note | `note:fortibleed` (title or body), `note.tag:`, `note.type:analysis`, `note.about:cve` (or `entry`, `standalone`), `note.pinned:true` |
 | Intel report | `intel_report:quarterly`, `intel_report.status:draft`, `intel_report.type:`, `intel_report.tlp:amber` |
 
-Catalogue suffixes:
+Catalog suffixes:
 
 - `.articles`, `.seen` and `.first_seen` work on `threat_actor`, `malware`, `ttp`, `tool`, `country`, `sector`, `vendor`, `product`, `mitigation`, `cwe` and `observable`. Examples: `threat_actor.articles:>100`, `malware.seen:>2026-01-01`, `ttp.first_seen:>2026-06`.
 - `.review` and `.via` (how the entity was created) work on `threat_actor`, `malware`, `cve`, `ttp` and `tool`. Examples: `threat_actor.review:true`, `cve.via:ai_extraction`.
@@ -387,7 +387,7 @@ Source: `backend/app/tools/boards.py`.
 | `list_intel_profiles` | List intel profiles (named scopes such as a customer or portfolio). | `limit`, `offset` | read |
 | `get_intel_profile` | One intel profile with its countries and sectors. | **`profile_id`** | read |
 | `get_profile_threat_surface` | Actors and malware active against one intel profile, with the reason. | **`profile_id`**, `limit` | read |
-| `get_coverage_workspace` | One threat's recent behaviours and the telemetry each one needs. | **`entity_type`**, **`entity_key`**, `window` | read |
+| `get_coverage_workspace` | One threat's recent behaviors and the telemetry each one needs. | **`entity_type`**, **`entity_key`**, `window` | read |
 | `list_tags` | Every tag with your entry counts. | none | read |
 | `get_entity_whats_new` | Recent novelty and severity signals for one entity. | **`entity_type`**, **`entity_id`**, `days`, `scoped` | read |
 
@@ -435,7 +435,7 @@ Source: `backend/app/tools/landscape.py`.
 | `unwatch_entity` | Remove your watch, mute or stack entry for an entity. | **`entity_type`**, **`entity_id`** | write |
 | `get_ransomware_disclosures` | Ransomware leak-site victim posts, newest first. | `group`, `sector`, `country`, `watched_only`, `since`, `q`, `sort`, `limit`, `offset` | read |
 | `get_ransomware_stats` | Ransomware totals, trends, top groups, sectors and countries. | `days` | read |
-| `get_ransomware_victim` | One ransomware victim organisation and its disclosures. | **`victim_id`** | read |
+| `get_ransomware_victim` | One ransomware victim organization and its disclosures. | **`victim_id`** | read |
 | `get_ransomware_group_victims` | Victims posted by one ransomware group. | **`actor_id`**, `limit`, `offset` | read |
 | `get_stack_exposure` | CVEs that affect the vendors and products in your stack. | none | read |
 | `list_glossary_terms` | List glossary terms. | `category`, `search`, `is_system`, `limit` | read |
@@ -639,7 +639,7 @@ These read the pages in `docs/`, as shipped with the deployment. Source: `backen
 
 These run on your machine and use `jq` to pull IDs out of the JSON. Set `CLI=claude/skills/intelfeed/scripts/intelfeed_cli.py` first.
 
-### Find recent articles about a topic and summarise one
+### Find recent articles about a topic and summarize one
 
 ```bash
 CLI=claude/skills/intelfeed/scripts/intelfeed_cli.py

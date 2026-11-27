@@ -1,6 +1,4 @@
-/* The search page's own nav rail. Deliberately identical in weight to the
-   workbench and settings rails — it is the same kind of surface, a second
-   sidebar inside the content area, and must not read as the app sidebar. */
+/* The search page's own nav rail. Deliberately styled the same as the workbench and settings rails: it is the same kind of surface, a second sidebar inside the content area, and must not look like the app sidebar. */
 .rail {
   display: flex;
   flex-direction: column;

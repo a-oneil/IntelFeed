@@ -54,8 +54,7 @@ test.describe("Feed Management", () => {
   test("star and bookmark persist", async ({ page }) => {
     await registerAndLogin(page);
 
-    // This test verifies the UI doesn't crash when starring/bookmarking
-    // In a real environment with feeds loaded, it would verify state persistence
+    // This test only verifies the UI doesn't crash when starring/bookmarking; it does not check that the state persists.
     const starBtn = page.locator('[aria-label*="tar"], button:has-text("Star")').first();
     const bookmarkBtn = page.locator('[aria-label*="ookmark"], button:has-text("Bookmark")').first();
 

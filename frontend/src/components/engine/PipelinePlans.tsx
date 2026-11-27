@@ -24,8 +24,7 @@ const TOGGLEABLE_STAGES = [
   "adjudicate",
 ];
 
-/** Pipeline plan editor: per-scope stage toggles layered over the feed booleans.
- *  Only takes effect when the pipeline_engine_enabled flag is on. */
+/** Pipeline plan editor: per-scope stage toggles layered over the feed booleans. Only takes effect when the pipeline_engine_enabled flag is on. */
 export function PipelinePlans() {
   const { data: overview } = usePipelineOverview();
   const { data: plans } = usePipelinePlans();
@@ -47,8 +46,7 @@ export function PipelinePlans() {
     );
   }, [plans]);
 
-  // Cycle: inherit -> forced off -> forced on -> inherit (drop the enabled key
-  // so the stage falls through to the layer below again).
+  // Cycle: inherit -> forced off -> forced on -> inherit (drop the enabled key so the stage falls through to the layer below again).
   const toggleStage = (plan: PipelinePlanRow, stage: string) => {
     const current = plan.stages[stage]?.enabled;
     const next = { ...plan.stages };

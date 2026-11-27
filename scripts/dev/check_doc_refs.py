@@ -1,7 +1,7 @@
 """Check the `path/to/file.py:line` references in the docs against the code.
 
-docs/README.md promises `path/to/file.py:line` references, and line numbers rot:
-every refactor above a cited line moves it. This finds the refs that have moved
+docs/README.md promises `path/to/file.py:line` references, and line numbers go stale:
+every edit above a cited line moves it. This finds the refs that have moved
 and, with --fix, repairs the ones it can repair without guessing.
 
 A ref is judged by the backticked identifier next to it on the same line, e.g.
@@ -41,7 +41,7 @@ WINDOW = 6
 EXTS = r"(?:py|tsx|ts|yml|yaml|sh|kt|css|toml|json)"
 REF = re.compile(rf"([A-Za-z0-9_./\-]+\.{EXTS}):(\d+)(?:[-–](\d+))?")
 IDENT = re.compile(r"`([A-Za-z_][A-Za-z0-9_.]*)(?:\(\))?`")
-# An identifier that *follows* a ref only counts if it hugs it: ``x.py:9` (`func()`)`.
+# An identifier that *follows* a ref only counts if it comes directly after it: ``x.py:9` (`func()`)`.
 AFTER = re.compile(r"`?[\s)(,:;—-]{0,8}(?:`[A-Za-z_][A-Za-z0-9_.]*(?:\(\))?`)?")
 
 # Tracked and untracked-but-not-ignored: a doc or source file you have not committed yet still counts.
@@ -161,7 +161,7 @@ def idents_in(text: str) -> list[str]:
 def judge(line: str, m: re.Match, prev_end: int, next_start: int):
     """Return (verdict, new_ref_or_None). verdict: ok | drift | unverified | nofile.
 
-    The identifier is taken from the text between this ref and its neighbours on
+    The identifier is taken from the text between this ref and its neighbors on
     the line: before it if there is one, else after it. A line carrying several
     refs must not lend one ref another's identifier, or --fix would "repair" a
     ref to point at the wrong symbol.

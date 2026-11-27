@@ -163,9 +163,7 @@ fun FeedScreen(uiState: IntelFeedUiState, viewModel: IntelFeedViewModel, onOpenD
             viewModel.loadMoreEntries()
         }
     }
-    // A different filter/feed/category starts at the top. The handled value is saved because this
-    // screen is re-created when you come back from an article: re-running the scroll then threw
-    // away your place in the list.
+    // A different filter/feed/category starts at the top. The handled value is saved because this screen is re-created when you come back from an article, and re-running the scroll then would throw away your place in the list.
     var handledScrollToTop by rememberSaveable { mutableIntStateOf(uiState.feedScrollToTop) }
     LaunchedEffect(uiState.feedScrollToTop) {
         if (uiState.feedScrollToTop != handledScrollToTop) {
@@ -249,8 +247,7 @@ fun FeedScreen(uiState: IntelFeedUiState, viewModel: IntelFeedViewModel, onOpenD
                 )
             }
             uiState.dayFocus?.let { focus ->
-                // The web's day-focus bar ("Showing only <label>", "Clear filter"), plus a range
-                // picker: the chip's day, or 24h / 7 / 30 days / all time.
+                // The web's day-focus bar ("Showing only <label>", "Clear filter"), plus a range picker: the chip's day, or 24h / 7 / 30 days / all time.
                 Column(
                     Modifier
                         .fillMaxWidth()
@@ -296,8 +293,7 @@ fun FeedScreen(uiState: IntelFeedUiState, viewModel: IntelFeedViewModel, onOpenD
                 modifier = Modifier.fillMaxSize()
             ) {
                 when {
-                    // Scrollable like the empty state: a plain Box can't be pulled, so pull-to-refresh
-                    // did nothing on the error screen (seen during a server outage, all requests 502).
+                    // Scrollable like the empty state: a plain Box can't be pulled, so pull-to-refresh would do nothing on the error screen (seen during a server outage, all requests 502).
                     uiState.entries.isEmpty() && uiState.feedError != null -> LazyColumn(Modifier.fillMaxSize()) {
                         item {
                             ErrorState(
@@ -381,8 +377,7 @@ private fun feedSubtitle(state: IntelFeedUiState): String? {
     val articles = state.entries.filterNot { it.isThread }
     val stories = state.entries.count { it.isThread }
     val more = if (state.hasMore) "+" else ""
-    // The server's unread count for the whole view, when no feed or folder narrows it; otherwise
-    // what's loaded so far.
+    // The server's unread count for the whole view, when no feed or folder narrows it; otherwise what's loaded so far.
     val scoped = state.selectedFeedId != null || state.selectedCategoryId != null
     val serverUnread = if (scoped) null else state.viewCounts.forFilter(state.selectedFilter)
     if (state.selectedFilter == FeedFilter.UNREAD && serverUnread != null) {
@@ -528,8 +523,7 @@ private fun FilterChips(uiState: IntelFeedUiState, onSelect: (FeedFilter) -> Uni
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         items(FeedFilter.entries) { filter ->
-            // With a feed/category open, the chip shows which view of that scope you're in, but
-            // tapping one returns to all feeds (the drawer picks the scope).
+            // With a feed/category open, the chip shows which view of that scope you're in, but tapping one returns to all feeds (the drawer picks the scope).
             val isSelected = uiState.selectedFilter == filter && !scoped
             val strings = LocalStrings.current
             FilterChip(
@@ -570,11 +564,7 @@ private fun pollInterval(minutes: Int): String = when {
     else -> "every $minutes min"
 }
 
-/**
- * The feed or folder the list is narrowed to. For one feed it also shows what the web's single-feed
- * view shows: type, unread count, last fetch and polling cadence, its curation (extraction) mode,
- * and fetch errors.
- */
+/** The feed or folder the list is narrowed to. For one feed it also shows what the web's single-feed view shows: type, unread count, last fetch and polling cadence, its curation (extraction) mode, and fetch errors. */
 @Composable
 private fun ScopeBanner(
     name: String,
@@ -648,8 +638,7 @@ private fun ScopeBanner(
 @Composable
 private fun FeedEmptyState(uiState: IntelFeedUiState, onShowAllInScope: () -> Unit) {
     val scopeName = uiState.selectedFeedTitle ?: uiState.selectedCategoryName
-    // A feed or folder with the Priority Queue selected shows its unread articles (the queue can't
-    // be narrowed on the server), so "nothing clears the priority threshold" would be wrong there.
+    // A feed or folder with the Priority Queue selected shows its unread articles (the queue can't be narrowed on the server), so "nothing clears the priority threshold" would be wrong there.
     val filter = if (scopeName != null && uiState.selectedFilter == FeedFilter.PRIORITY_QUEUE) FeedFilter.UNREAD else uiState.selectedFilter
     val hidingRead = uiState.feedHideRead && listOptionsFor(uiState).hideRead
     val (title, message) = if (scopeName != null && filter == FeedFilter.UNREAD) {
@@ -939,13 +928,7 @@ private fun FeedGrid(
     }
 }
 
-/**
- * Auto-read (the web's toolbar toggle): reports the unread articles the user scrolls off the top
- * of the list or grid. Only movement that starts with the user's own drag counts (including the
- * fling after it), and only rows that were on screen and then passed: jumps made by the app
- * (back to top, returning from an article, a new filter) never mark anything. Articles are sent
- * in batches when the scroll stops, or every 25.
- */
+/** Auto-read (the web's toolbar toggle): reports the unread articles the user scrolls off the top of the list or grid. Only movement that starts with the user's own drag counts (including the fling after it), and only rows that were on screen and then passed: jumps made by the app (back to top, returning from an article, a new filter) never mark anything. Articles are sent in batches when the scroll stops, or every 25. */
 @Composable
 private fun AutoReadOnScroll(
     enabled: Boolean,
@@ -1078,10 +1061,7 @@ private sealed interface FeedRow {
     }
 }
 
-/**
- * Swipe right to toggle read, swipe left to toggle the star. The row springs back after the
- * action instead of disappearing, so nothing leaves the list unexpectedly.
- */
+/** Swipe right to toggle read, swipe left to toggle the star. The row springs back after the action instead of disappearing, so nothing leaves the list unexpectedly. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SwipeableEntry(
@@ -1093,12 +1073,7 @@ private fun SwipeableEntry(
 ) {
     val state = rememberSwipeToDismissBoxState(positionalThreshold = { it * 0.35f })
     val scope = rememberCoroutineScope()
-    // SwipeToDismissBox runs LaunchedEffect(settledValue, onDismiss) and calls onDismiss whenever the
-    // row is settled in a swiped position. A new onDismiss on every recomposition restarted that
-    // effect: the toggle re-rendered the card, onDismiss ran again while the row was still swiped,
-    // and one swipe became a loop (star, unstar, star…: 328 requests in 10 seconds on the emulator).
-    // So the callback is created once and reads the latest actions, and each swipe acts only once:
-    // `acting` stays set until the row is back in place.
+    // SwipeToDismissBox runs LaunchedEffect(settledValue, onDismiss) and calls onDismiss whenever the row is settled in a swiped position. A new onDismiss on every recomposition restarts that effect: the toggle re-renders the card, onDismiss runs again while the row is still swiped, and one swipe becomes a loop (star, unstar, star…: 328 requests in 10 seconds on the emulator). So the callback is created once and reads the latest actions, and each swipe acts only once: `acting` stays set until the row is back in place.
     val latestRead by rememberUpdatedState(onSwipeRead)
     val latestStar by rememberUpdatedState(onSwipeStar)
     val onDismiss = remember(state, scope) {

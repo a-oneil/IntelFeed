@@ -80,9 +80,7 @@ const VERDICT_LABEL: Record<string, string> = {
   capture: "capture",
 };
 
-/** The adjudicate stage's verdict for one drawer row, as a badge with the
- *  matching action: Apply while it is a shadow proposal, Restore once it was
- *  applied. Dashed = proposed; solid = applied. */
+/** The adjudicate stage's verdict for one drawer row, as a badge with the matching action: Apply while it is a shadow proposal, Restore once it has been applied (merges are not restored here). Outlined = proposed; filled = applied. */
 function VerdictBadge({ verdict, entryId }: { verdict: EntryAdjudicationVerdict | undefined; entryId: string }) {
   const qc = useQueryClient();
   if (!verdict || verdict.verdict === "keep") return null;
@@ -145,8 +143,7 @@ function VerdictBadge({ verdict, entryId }: { verdict: EntryAdjudicationVerdict 
   );
 }
 
-/** Drawer zone: everything the engine produced for one entry — links,
- *  relationships, created entities — each manageable in place. */
+/** Drawer zone: everything the engine produced for one entry (links, relationships, created entities, review verdicts), each manageable in place. */
 export function EntryOutputs({ entryId }: { entryId: string }) {
   const linksQ = useEntityLinks({ entry_id: entryId, limit: LIST_LIMIT, offset: 0 });
   const relsQ = useAllRelationships({ evidence_entry_id: entryId, limit: LIST_LIMIT, offset: 0 });
@@ -326,9 +323,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
                   : "Delete entity and all its links"
               }
               onClick={async () => {
-                // Per-entry context: an observable ✕ removes THIS article's
-                // sighting only. The global tombstone lives on the ledger row
-                // (Extraction tab / profile), where its blast radius is clear.
+                // Per-entry context: an observable ✕ removes this article's sighting only. Deleting the observable everywhere is done on the ledger row (Extraction tab / profile), where it is clear that it affects every article.
                 const obs = e.entity_type === "observable";
                 if (
                   !(await confirmDialog({
@@ -356,9 +351,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
       ))}
       {!loading && created.length === 0 && <div className={styles.ozEmpty}>No entities were created from this entry.</div>}
 
-      {/* The review's observable verdicts. The drawer has no sightings list of
-          its own, so each ioc verdict is its own row: kind · value, the badge
-          (Apply while proposed, Restore once applied), and the reason. */}
+      {/* The review's observable verdicts. The drawer has no sightings list of its own, so each ioc verdict is its own row: kind · value, the badge (Apply while proposed, Restore once applied), and the reason. */}
       {iocVerdicts.length > 0 && (
         <>
           <p className={styles.ozSub}>Observables: review verdicts ({iocVerdicts.length})</p>
@@ -382,9 +375,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
         </>
       )}
 
-      {/* Held matches the analysis rejected and the review would link. Until
-          the verdict is applied there is no link row to badge, so each gets
-          its own row: the entity, the badge and the reason. */}
+      {/* Held matches the analysis rejected and the review would link. Until the verdict is applied there is no link row to badge, so each gets its own row: the entity, the badge and the reason. */}
       {heldVerdicts.length > 0 && (
         <>
           <p className={styles.ozSub}>Held matches: review verdicts ({heldVerdicts.length})</p>
@@ -398,7 +389,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
         </>
       )}
 
-      {/* The review's read on the analysis itself — logged, never applied. */}
+      {/* The review's rating of the analysis itself (severity and summary): logged, never applied. */}
       {assessment && (
         <>
           <p className={styles.ozSub}>Assessment</p>

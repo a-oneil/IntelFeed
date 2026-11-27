@@ -74,7 +74,8 @@ def _natural(control_id: str) -> list:
 
 def parse_mappings(document: dict) -> dict[str, dict[str, str]]:
     """Technique id → {control id: control name} for the file's ``mitigates``
-    mappings. Non-mappable rows and rows without a control are skipped."""
+    mappings. Rows that aren't complete ``mitigates`` mappings, and rows
+    without a technique or a control, are skipped."""
     by_technique: dict[str, dict[str, str]] = {}
     for m in document.get("mapping_objects") or []:
         if not isinstance(m, dict) or m.get("mapping_type") != "mitigates" or m.get("status") != "complete":

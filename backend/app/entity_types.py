@@ -70,10 +70,12 @@ ALL: Final = frozenset(
 
 #: Types the autolinker can retro-scan entries for (name/alias or id pattern).
 #: Mirrors the branches in autolinker._link_entity_to_existing_entries_inner.
-#: Observables are deliberately absent: pattern *discovery* is what killed IOC
-#: v1, so they never enter the dictionary or the prose scan. Their sightings
-#: accrue in the observables pipeline stage instead, which only exact-matches
-#: candidate values against rows the judgment doors already created.
+#: Observables are deliberately absent: IOC v1 failed because it created rows
+#: from pattern matches, so observables never enter the dictionary or the prose
+#: scan. Their sightings accrue in the observables pipeline stage instead, which
+#: only exact-matches candidate values against existing rows (created by AI
+#: analysis, curated IOC feeds, an analyst and the like; see
+#: app/intelligence/observables.py).
 #: Sectors are absent for a different reason: their names are common English
 #: words ("energy", "retail", "media") and a prose mention is not a targeting
 #: claim. The one-pass AI analysis is the only writer of entry↔sector links.
@@ -165,7 +167,7 @@ TABLES: Final = {
 # Normalization
 # ---------------------------------------------------------------------------
 
-#: Spellings retired in the 2026-08 unification. No rows carry them any more
+#: Spellings retired in the 2026-08 unification. No rows carry them anymore
 #: (the migration converted every entity_type column), but saved AI prompts and
 #: in-flight tool calls can still emit them, so inbound values are folded rather
 #: than rejected. Nothing should ever *write* these.

@@ -26,13 +26,9 @@ export function readExternalLinkSettings(user: User | null | undefined): {
 }
 
 /**
- * Preferences for the external-link interstitial. They live on the account
- * (`user.settings`) rather than in localStorage so "don't ask again for X"
- * follows you between devices — and so a shared browser doesn't leak one
- * analyst's allowlist to the next.
+ * Preferences for the external-link interstitial. They are stored on the account (`user.settings`) rather than in localStorage so "don't ask again for X" applies on every device, and so a shared browser doesn't leak one analyst's allowlist to the next.
  *
- * Writes use the shallow-merge PATCH, so saving one key can't overwrite
- * another autosaver's stale snapshot of the rest of the blob.
+ * Writes use the shallow-merge PATCH, so saving one key can't overwrite the rest of the blob with another autosaver's stale copy.
  */
 export function useExternalLinkSettings() {
   const user = useAuthStore((s) => s.user);

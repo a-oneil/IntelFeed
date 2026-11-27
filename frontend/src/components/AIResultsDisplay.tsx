@@ -25,10 +25,7 @@ interface AIResultsDisplayProps {
   targetType: string;
   targetId: string;
   staticResults?: AIResult[];
-  /**
-   * When provided (entry context), each card shows an "Ask a follow-up" button
-   * that opens the AskAgentPanel seeded with a summary of that result.
-   */
+  /** When provided (entry context), each card shows an "Ask a follow-up" button that calls this with a plain-text summary of that result; the entry panel uses it to open the copilot seeded with the result. */
   onAskFollowUp?: (context: string) => void;
 }
 
@@ -125,8 +122,7 @@ function AIResultCard({
 
   const handleSaveAsNote = () => {
     const parsed = result.parsed_result || {};
-    // Plain summaries save as clean prose; richer results keep their structure
-    // (minus the leading "**Display Name**" line, which becomes the note title).
+    // Plain summaries save as clean prose; richer results keep their structure (minus the leading "**Display Name**" line, which becomes the note title).
     const body =
       typeof parsed.summary === "string" && parsed.summary.trim()
         ? parsed.summary.trim()
@@ -289,12 +285,7 @@ function AIResultCard({
   );
 }
 
-/**
- * Threat-assessment severity ramp. These are the literal colours the old
- * `.severity_*` classes used; they are deliberately raw hexes rather than the
- * `--entity-*` tokens they happen to resemble, because an AI severity verdict
- * is not an entity type and must not re-colour when entity themes change.
- */
+/** Threat-assessment severity ramp. These are deliberately raw hex colors rather than the `--entity-*` tokens they resemble, because an AI severity verdict is not an entity type and must not change color when entity themes change. */
 const SEVERITY_TINTS: Record<string, string | undefined> = {
   critical: "#ef4444",
   high: "#f97316",

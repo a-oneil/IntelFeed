@@ -29,9 +29,7 @@
 
 
 
-/* Chips — colour, size and shape come from the primitive. `.tlpBadge` had
-   nothing left of its own once `tone="outline"` supplied the tinted border
-   and text, so only the status tag's casing survives here. */
+/* Chips: color, size and shape come from the Chip primitive (the TLP badge needs no class of its own, since `tone="outline"` supplies its tinted border and text), so only the status tag's casing is set here. */
 .statusTag {
   text-transform: uppercase;
 }
@@ -135,7 +133,7 @@
   padding: 0 var(--sp-2);
 }
 
-/* Still used by the Discover modal's empty state. */
+/* Used by the Discover modal's empty state. */
 .placeholder {
   padding: var(--sp-6);
   text-align: center;
@@ -205,8 +203,7 @@
   white-space: nowrap;
 }
 
-/* Stack the two-pane layout on phones and iPad-portrait sizes — 320px sidebar
-   + flex:1 detail just barely fits at 768px and is cramped from there down. */
+/* Stack the two-pane layout on phones and iPad-portrait sizes: a 320px sidebar plus the flex:1 detail pane only just fits at 768px and is cramped below that. */
 @media (max-width: 1024px) {
   .page {
     flex-direction: column;

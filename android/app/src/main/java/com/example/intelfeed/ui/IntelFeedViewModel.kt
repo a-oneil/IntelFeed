@@ -109,8 +109,7 @@ data class IntelFeedUiState(
     val feedSort: String = "newest",
     // "Auto-read": articles scrolled past in the list are marked read (off by default).
     val feedAutoRead: Boolean = false,
-    // Day dividers, keyed by local day "yyyy-MM-dd". A key present with a null value means
-    // "checked, nothing there". Cleared when the list's scope changes or on pull-to-refresh.
+    // Day dividers, keyed by local day "yyyy-MM-dd". A key present with a null value means "checked, nothing there". Cleared when the list's scope changes or on pull-to-refresh.
     val dailySummaries: Map<String, com.example.intelfeed.data.model.DailySummary?> = emptyMap(),
     val dailySummaryLoading: Set<String> = emptySet(),
     val dailySummaryErrors: Set<String> = emptySet(),
@@ -123,8 +122,7 @@ data class IntelFeedUiState(
     val viewCounts: ViewCounts = ViewCounts(),
     // Per-article intel cues for list cards (PIR, actors, CVEs, techniques, detection gap), by entry id.
     val intelCounts: Map<String, EntryIntelCounts> = emptyMap(),
-    // The article the reader last showed when it was walking the feed list: the list scrolls to it
-    // on the way back if it's off screen (you may have swiped far from where you started).
+    // The article the reader last showed when it was walking the feed list: the list scrolls to it on the way back if it's off screen (you may have swiped far from where you started).
     val feedFocusEntryId: String? = null,
 
     // Drawer
@@ -188,13 +186,11 @@ class IntelFeedViewModel(
     /** The navigation back stack, rendered by NavDisplay. Never empty: Home is always at the bottom. */
     val backStack: SnapshotStateList<Route> = mutableStateListOf(Route.Home)
 
-    // One in-flight job per area. Starting a new load cancels the stale one, so a slow response
-    // can't overwrite a newer one (e.g. the previous filter's page arriving last).
+    // One in-flight job per area. Starting a new load cancels the stale one, so a slow response can't overwrite a newer one (e.g. the previous filter's page arriving last).
     private var feedJob: Job? = null
     private var drawerJob: Job? = null
     private var workbenchJob: Job? = null
-    // Separate from workbenchJob: overwriting that reference left a debounced search running
-    // uncancelled, so an older query's results could replace the newer one's.
+    // Separate from workbenchJob: sharing that reference would leave a debounced search running uncanceled, so an older query's results could replace the newer one's.
     private var workbenchMoreJob: Job? = null
     // The tab and search the Workbench list on screen was loaded for.
     private var workbenchItemsKey: Pair<WorkbenchTab, String?>? = null
@@ -208,8 +204,7 @@ class IntelFeedViewModel(
     private var countsLoadedAt = 0L
     // Entry ids whose intel cues were already requested this session.
     private val intelCountsRequested = mutableSetOf<String>()
-    // Optimistic read updates stay in the list until the server confirms them. If the reader is
-    // closed before confirmation, this set also keeps the card available for a failure rollback.
+    // Optimistic read updates stay in the list until the server confirms them. If the reader is closed before confirmation, this set also keeps the card available for a failure rollback.
     private val pendingReadIds = mutableSetOf<String>()
 
     // Day dividers: bumped whenever the list's scope changes, so late responses are dropped.
@@ -287,7 +282,7 @@ class IntelFeedViewModel(
                     _uiState.update { it.copy(isLoggedIn = true, sessionChecked = true) }
                     loadFeed(isRefresh = true)
                     loadCategoriesAndFeeds()
-                    // Also loads the saved searches (a separate call here sent the request twice).
+                    // Also loads the saved searches (a separate call here would send the request twice).
                     loadViewCounts(force = true)
                     loadWorkbench()
                     syncThemesForSignedInUser()
@@ -299,10 +294,7 @@ class IntelFeedViewModel(
         }
     }
 
-    /**
-     * Synchronizes the server's color schema (`/api/themes/schema`) and theme list (`/api/themes`)
-     * with the signed-in user's preference (`user.themeId`) or the instance default (`isDefault`).
-     */
+    /** Synchronizes the server's color schema (`/api/themes/schema`) and theme list (`/api/themes`) with the signed-in user's preference (`user.themeId`) or the instance default (`isDefault`). */
     fun refreshThemes() {
         if (_uiState.value.isLoggedIn) {
             syncThemesForSignedInUser()
@@ -441,11 +433,7 @@ class IntelFeedViewModel(
         }
     }
 
-    /**
-     * Brings back what the saved state holds after Android stopped the process: the open screens
-     * and the feed's tab, view and feed or folder. The app used to reopen on the Priority Queue,
-     * losing the article you were reading (e.g. after a while in the browser via "Open original").
-     */
+    /** Brings back what the saved state holds after Android stopped the process: the open screens and the feed's tab, view and feed or folder. Without this the app reopens on the Priority Queue, losing the article you were reading (e.g. after a while in the browser via "Open original"). */
     private fun restoreSavedState() {
         savedState.get<String>(KEY_BACK_STACK)?.let(RouteCodec::decode)
             ?.takeIf { it.firstOrNull() == Route.Home }
@@ -465,11 +453,7 @@ class IntelFeedViewModel(
         }
     }
 
-    /**
-     * Runs when the session ends: user logout, or the server rejecting the refresh token.
-     * Clears everything loaded for the previous account, so a different user signing in next
-     * doesn't see it.
-     */
+    /** Runs when the session ends: user logout, or the server rejecting the refresh token. Clears everything loaded for the previous account, so a different user signing in next doesn't see it. */
     private fun resetSession() {
         listOf(feedJob, drawerJob, workbenchJob, workbenchMoreJob, searchJob, suggestJob, countsJob, themeJob).forEach { it?.cancel() }
         countsLoadedAt = 0L
@@ -480,9 +464,7 @@ class IntelFeedViewModel(
         val previous = _uiState.value
         val sessionExpired = previous.isLoggedIn && !userInitiatedLogout
         userInitiatedLogout = false
-        // Device preferences survive sign-out. Their flows are distinctUntilChanged and don't emit
-        // again, so dropping them here showed defaults (list layout, Hide Read off) until the app
-        // restarted.
+        // Device preferences survive sign-out. Their flows are distinctUntilChanged and don't emit again, so dropping them here would show defaults (list layout, Hide Read off) until the app restarted.
         _uiState.value = IntelFeedUiState(
             sessionChecked = true,
             serverUrl = previous.serverUrl,
@@ -545,11 +527,7 @@ class IntelFeedViewModel(
         }
     }
 
-    /**
-     * Opens one article. [contextIds] is the list Previous/Next walks; it defaults to just this
-     * article. (Null means "the feed list", which only makes sense when opening from the feed: a
-     * similar-coverage link or a notification used to let you swipe into unrelated feed articles.)
-     */
+    /** Opens one article. [contextIds] is the list Previous/Next walks; it defaults to just this article. (Null means "the feed list", which only makes sense when opening from the feed; from a similar-coverage link or a notification it would let you swipe into unrelated feed articles.) */
     fun openEntry(id: String, contextIds: List<String>? = listOf(id)) = navigate(Route.Reader(id, contextIds))
 
     fun openEntity(ref: EntityRef) = navigate(Route.Entity(ref.type, ref.id, ref.name))
@@ -587,8 +565,7 @@ class IntelFeedViewModel(
             _uiState.update { it.copy(loginError = "Please enter both username and password") }
             return
         }
-        // Validated here and only saved on sign-in. Saving on every keystroke let a partial
-        // address like "https://" crash Retrofit, and the saved value crashed every launch after.
+        // Validated here and only saved on sign-in. Saving on every keystroke would let a partial address like "https://" crash Retrofit, and the saved value would then crash every launch.
         val normalizedUrl = ServerUrl.normalize(serverUrl)
         if (normalizedUrl == null) {
             _uiState.update { it.copy(loginError = "Enter a valid server address, e.g. https://intelfeed.example.com") }
@@ -640,12 +617,7 @@ class IntelFeedViewModel(
         loadFeed(isRefresh = true, scopeChanged = true)
     }
 
-    /**
-     * Changes which articles of the open feed or folder are listed (all of them, or only unread),
-     * keeping the scope. A feed opened from the drawer inherits the current view, which after launch
-     * is the Priority Queue (unread only there), and the chips leave the feed, so a feed whose
-     * articles were all read looked empty with no way to see them.
-     */
+    /** Changes which articles of the open feed or folder are listed (all of them, or only unread), keeping the scope. A feed opened from the drawer inherits the current view (after launch, the unread-only Priority Queue), and the chips leave the feed, so without this a feed whose articles are all read would look empty with no way to see them. */
     fun setScopedFilter(filter: FeedFilter) {
         if (_uiState.value.selectedFilter == filter) return
         _uiState.update { it.copy(selectedFilter = filter) }
@@ -664,11 +636,7 @@ class IntelFeedViewModel(
         messenger.show(if (enabled) "Auto-read on: articles you scroll past are marked read" else "Auto-read off")
     }
 
-    /**
-     * Auto-read: the feed list reports articles the user scrolled off the top. They're marked
-     * read in one request, quietly (the cards dim; no message for every scroll). Skipped while
-     * selecting, where scrolling is for picking articles.
-     */
+    /** Auto-read: the feed list reports articles the user scrolled off the top. They're marked read in one request, quietly (the cards dim; no message for every scroll). Skipped while selecting, where scrolling is for picking articles. */
     fun markScrolledPastRead(ids: Collection<String>) {
         val state = _uiState.value
         if (!state.feedAutoRead || state.isSelecting) return
@@ -703,10 +671,7 @@ class IntelFeedViewModel(
         loadViewCounts(force = true)
     }
 
-    /**
-     * Reloads the quick views' unread counts. Without [force] it's skipped when the counts are
-     * under a minute old (the drawer asks every time it opens; they're eight requests).
-     */
+    /** Reloads the quick views' unread counts. Without [force] it's skipped when the counts are under a minute old (the drawer asks every time it opens; they're eight requests). */
     fun loadViewCounts(force: Boolean = false) {
         if (!force && (countsJob?.isActive == true || System.currentTimeMillis() - countsLoadedAt < 60_000)) return
         countsJob?.cancel()
@@ -725,11 +690,7 @@ class IntelFeedViewModel(
         loadFeed(isRefresh = false)
     }
 
-    /**
-     * A refresh cancels whatever feed load is in flight. "Load more" is skipped while any load is
-     * running, including a refresh, so a page fetched with an old cursor never lands on a new list.
-     * When the scope changes, the old list and cursor are cleared right away.
-     */
+    /** A refresh cancels whatever feed load is in flight. "Load more" is skipped while any load is running, including a refresh, so a page fetched with an old cursor never lands on a new list. When the scope changes, the old list and cursor are cleared right away. */
     private fun loadFeed(isRefresh: Boolean, scopeChanged: Boolean = false, keepDayFocus: Boolean = false) {
         if (isRefresh) {
             feedJob?.cancel()
@@ -763,8 +724,7 @@ class IntelFeedViewModel(
                 onSuccess = { page ->
                     loadIntelCounts(page.items)
                     _uiState.update { current ->
-                        // distinctBy: LazyColumn crashes on duplicate keys, and a ranked queue can
-                        // repeat an item across pages.
+                        // distinctBy: LazyColumn crashes on duplicate keys, and a ranked queue can repeat an item across pages.
                         val updatedList = if (isRefresh) page.items.distinctBy { it.id }
                         else (current.entries + page.items).distinctBy { it.id }
                         current.copy(
@@ -796,8 +756,7 @@ class IntelFeedViewModel(
         }
     }
 
-    // DAY DIVIDERS (chips and AI briefings). Both describe the list on screen, so they're fetched
-    // with its scope, and responses for a previous scope are dropped (dayDataGeneration).
+    // DAY DIVIDERS (chips and AI briefings). Both describe the list on screen, so they're fetched with its scope, and responses for a previous scope are dropped (dayDataGeneration).
 
     private fun currentDayScope(state: IntelFeedUiState = _uiState.value) = DayScope(
         feedId = state.selectedFeedId,
@@ -820,7 +779,7 @@ class IntelFeedViewModel(
         val generation = dayDataGeneration
         val scope = currentDayScope()
         viewModelScope.launch {
-            // A failure just leaves the divider without chips; they're a summary, not content.
+            // A failure leaves the divider without chips; they're a summary, not content.
             val intel = repository.getDayIntel(dayKey, scope).getOrNull()
             if (generation != dayDataGeneration) return@launch
             _uiState.update { it.copy(dayIntel = it.dayIntel + (dayKey to intel)) }
@@ -854,7 +813,7 @@ class IntelFeedViewModel(
         drawerJob?.cancel()
         drawerJob = viewModelScope.launch {
             _uiState.update { it.copy(drawerLoading = true, drawerError = null) }
-            // In parallel: the feed list (up to 1000 feeds) is slow, and it used to wait for the categories.
+            // In parallel: the feed list (up to 1000 feeds) is slow, so it doesn't wait for the categories.
             val categoriesDeferred = async { repository.getCategories() }
             val feedsResult = repository.getFeeds()
             val categoriesResult = categoriesDeferred.await()
@@ -936,7 +895,7 @@ class IntelFeedViewModel(
         if (update.isRead == false || (update.isRead == true && update.confirmed)) pendingReadIds.remove(update.id)
         _uiState.update { state ->
             val before = state.entries.find { it.id == update.id } ?: state.searchEntries.find { it.id == update.id }
-            // Keep the drawer's unread badges honest as articles are read.
+            // Keep the drawer's unread badges current as articles are read.
             val feeds = if (update.isRead != null && before != null && before.feedId != null && before.isRead != update.isRead) {
                 val delta = if (update.isRead) -1 else 1
                 state.feeds.map { f -> if (f.id == before.feedId) f.copy(unreadCount = (f.unreadCount + delta).coerceAtLeast(0)) else f }
@@ -990,10 +949,7 @@ class IntelFeedViewModel(
         }
     }
 
-    /**
-     * Marks every unread article from one day read, like the web's day-divider button: the
-     * current feed or folder if one is selected, otherwise all feeds. Then reloads the list.
-     */
+    /** Marks every unread article from one day read, like the web's day-divider button: the current feed or folder if one is selected, otherwise all feeds. Then reloads the list. */
     fun markDayRead(dayKey: String, label: String) {
         val state = _uiState.value
         viewModelScope.launch {
@@ -1069,10 +1025,7 @@ class IntelFeedViewModel(
         }
     }
 
-    /**
-     * Restores each entry's own previous value: only entries the action actually changed get the
-     * opposite action, so undoing "mark 10 read" leaves the ones that were already read alone.
-     */
+    /** Restores each entry's own previous value: only entries the action actually changed get the opposite action, so undoing "mark 10 read" leaves the ones that were already read alone. */
     private fun undoBulk(action: BulkAction, previous: Map<String, Boolean>) {
         val changed = previous.filterValues { it != action.value }.mapValues { action.value }
         if (changed.isEmpty()) return
@@ -1124,9 +1077,7 @@ class IntelFeedViewModel(
                     }
                 },
                 onFailure = { err ->
-                    // The screen only shows the error when the list is empty. A failed refresh keeps
-                    // the list and says so; a failed new search clears it, or the old, unfiltered
-                    // list stayed under the new search text as if it were the result.
+                    // The screen only shows the error when the list is empty. A failed refresh keeps the list and says so; a failed new search clears it, otherwise the old, unfiltered list would stay under the new search text as if it were the result.
                     val sameList = workbenchItemsKey == (tab to query) && _uiState.value.workbenchItems.isNotEmpty()
                     _uiState.update {
                         if (sameList) it.copy(workbenchLoading = false, workbenchError = ErrorText.describe(err))
@@ -1338,9 +1289,7 @@ class IntelFeedViewModel(
 
     fun openRequirements() = navigate(Route.Requirements)
 
-    /**
-     * Articles containing [keyword] as a phrase, on the Search tab (from a highlight in an article).
-     */
+    /** Articles containing [keyword] as a phrase, on the Search tab (from a highlight in an article). */
     fun searchKeyword(keyword: String) {
         val clean = keyword.trim().replace("\"", "")
         if (clean.isEmpty()) return
@@ -1359,10 +1308,7 @@ class IntelFeedViewModel(
         searchUnified(query)
     }
 
-    /**
-     * Shows every article with a tag: goes back to the home screen and runs `tag:<name>` on the
-     * Search tab (the web links tags to its search page the same way).
-     */
+    /** Shows every article with a tag: goes back to the home screen and runs `tag:<name>` on the Search tab (the web links tags to its search page the same way). */
     fun searchTag(name: String) {
         val clean = name.trim().removePrefix("#").replace("\"", "")
         if (clean.isEmpty()) return
@@ -1372,14 +1318,11 @@ class IntelFeedViewModel(
         searchUnified(if (clean.any { it.isWhitespace() }) "tag:\"$clean\"" else "tag:$clean")
     }
 
-    /**
-     * A day chip was tapped: show only that day's matching articles, like the web; the same chip
-     * again (or null) shows the whole list again. The day chips and briefings stay as they are.
-     */
+    /** A day chip was tapped: show only that day's matching articles, like the web; the same chip again (or null) shows the whole list again. The day chips and briefings stay as they are. */
     fun setDayFocus(focus: com.example.intelfeed.data.model.DayFocus?) {
         val current = _uiState.value.dayFocus
         val next = if (focus != null && current?.dayKey == focus.dayKey && current.chip == focus.chip) null
-            // Match the open view's range (the user's request): Last 24 hours → 24h, This week → 7 days.
+            // Match the open view's range: Last 24 hours → 24h, This week → 7 days.
             else focus?.copy(window = defaultFocusWindow(_uiState.value.selectedFilter))
         applyDayFocus(next)
     }
@@ -1461,8 +1404,7 @@ class IntelFeedViewModel(
         }
     }
 
-    // ADD FEED (drawer). Subscribing and adding a single page are separate, explicit choices: a
-    // failed subscription used to fall back to ingesting the URL as an article on the shared server.
+    // ADD FEED (drawer). Subscribing and adding a single page are separate, explicit choices, so a failed subscription never falls back to ingesting the URL as an article on the shared server.
 
     /** Looks for feeds at [url] without subscribing (POST /api/feeds/discover). */
     fun discoverFeeds(url: String, onResult: (Result<List<DiscoveredFeed>>) -> Unit) {

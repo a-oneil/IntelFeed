@@ -3,8 +3,7 @@ package com.example.intelfeed.data.model
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-// An entity profile's activity over time (the website profile's "Mentions" chart, event markers,
-// "What's new" and stories). Shapes checked against the live server.
+// An entity profile's activity over time (the website profile's "Mentions" chart, event markers, "What's new" and stories). Shapes checked against the live server.
 
 /** GET /api/entities/{type}/{id}/mentions-timeseries?window=7d|30d|90d|all */
 @Serializable

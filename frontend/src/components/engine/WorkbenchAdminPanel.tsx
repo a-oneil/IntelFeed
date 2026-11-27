@@ -5,8 +5,7 @@ import SystemSettings from "@/components/SystemSettings";
 
 import styles from "@/pages/SettingsPage.module.css";
 
-/** Correlation engine tuning (proximity scoring + intelligence settings) —
- *  formerly Settings → Workbench, re-hosted on the correlation stage. */
+/** Correlation engine tuning (proximity scoring + intelligence settings), shown in the cooccurrence and correlation stage panels. */
 export function CorrelationTuningPanel() {
   // Proximity tuning
   const [proxSettings, setProxSettings] = useState<{

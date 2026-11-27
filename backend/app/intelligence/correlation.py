@@ -79,7 +79,7 @@ VALID_ENTITY_TYPES = set(ENTITY_CONFIG.keys())
 # A campaign can be pivoted FROM but never appears as a related type: it is a
 # curated membership list, not something extracted from an article. Everything
 # a pivot needs from its source is the entity row and a seed set of entries,
-# and a campaign has both — its entries are simply chosen rather than matched.
+# and a campaign has both — its entries are chosen by an analyst, not matched.
 # Kept out of VALID_ENTITY_TYPES because that set also gates false-positive
 # reporting and entity export, neither of which means anything for a campaign.
 PIVOT_SOURCE_TYPES = VALID_ENTITY_TYPES | {"campaign"}
@@ -252,7 +252,7 @@ def _compute_relationship_strength(
 ) -> tuple[float, float]:
     """Composite relationship strength in [0, 1], plus its closeness component.
 
-    Three separable signals instead of the old unbounded proximity sum:
+    Three separate signals, each in [0, 1]:
     - corroboration — log-scaled distinct evidence articles, saturating at
       `relationship_corroboration_saturation` (volume of independent reporting)
     - closeness — mean of the top-3 per-article proximity scores, stays 0–1
@@ -319,13 +319,13 @@ async def _corpus_entry_count(db: AsyncSession) -> int:
 
 
 def _specificity(article_count: int, total_entries: int | None) -> float | None:
-    """How special is this entity as a counterpart, in [0, 1]?
+    """How specific this entity is as a counterpart, in [0, 1].
 
     IDF-style: an entity mentioned in a handful of articles scores ~1.0; one
     mentioned across the whole corpus (CrowdStrike, Linux) approaches 0. Used
     to damp relationship strength so ubiquitous entities stop dominating —
-    evidence volume with a promiscuous counterpart is reporting noise, not a
-    relationship.
+    a high evidence count with a counterpart named in most articles is reporting
+    noise, not a relationship.
     """
     if not total_entries or total_entries < 2:
         return None
@@ -1156,8 +1156,8 @@ async def pivot_from_entity(
         ]
 
     # Join the typed relationship layer (verb / confidence / provenance) onto
-    # the co-occurrence rows by pair — previously this data was dropped for any
-    # co-occurring pair.
+    # the co-occurrence rows by pair, so a co-occurring pair that also has a
+    # typed relationship carries its verb, confidence and provenance.
     manual_rels = await _get_manual_relationships(db, entity_type, entity_id)
     rel_by_pair = {(m["entity_type"], str(m["entity_id"])): m for m in manual_rels}
     seen_ids = {item["id"] for items in related.values() for item in items if isinstance(item, dict) and "id" in item}
@@ -1379,7 +1379,7 @@ async def pivot_from_entity(
 
     # Library-wide detection coverage: which of the related techniques/CVEs
     # does ANY rule in the library cover — not just rules extracted from this
-    # entity's own articles (that scoping made every technique read as a
+    # entity's own articles (scoped that way, every technique reads as a
     # coverage gap on entities whose entries yielded no rules). Counts feed
     # the graph's inspector; presence/absence feeds the ticks and gap rings.
     for t in related.get("ttps", []):
@@ -1499,13 +1499,13 @@ async def build_entity_graph(
             win_result = await db.execute(select(Entry.id).where(Entry.id.in_(entry_ids), Entry.published_at >= cutoff))
             entry_ids = [row[0] for row in win_result.all()]
         # No articles still leaves the typed relationships (MITRE, a feed, an
-        # analyst): the claim block below draws them. An early return here
-        # left an article-less entity (3PARA RAT, five MITRE claims) a single
-        # node.
+        # analyst): the claim block below draws them. Returning early here
+        # would leave an article-less entity (3PARA RAT, five MITRE claims) as
+        # a single node.
 
-        # Keep only the N strongest neighbors per node — the cap replaces the
-        # old minimum-strength filter: sparse entities keep their few (weak)
-        # edges instead of an empty graph, dense ones stay readable.
+        # Keep only the N strongest neighbors per node — a cap rather than a
+        # minimum-strength filter, so sparse entities keep their few (weak)
+        # edges instead of an empty graph, and dense ones stay readable.
         max_neighbors = int(env_settings.get("graph_max_neighbors_per_node") or 30)
 
         candidates: list[tuple[str, dict]] = []
@@ -1532,7 +1532,7 @@ async def build_entity_graph(
                 candidates.append((related_type, rel))
         # A campaign's claim is its membership. Nothing writes entity_relationship
         # rows for a campaign — it is not in the relationship matrix — so the
-        # claims-only rule below left its map a single unconnected node. But
+        # claims-only rule below would leave its map a single unconnected node. But
         # everything a campaign contains is there because an analyst put the
         # articles in, which is as asserted as a relationship gets; the curated
         # CampaignEntity roles (primary / secondary / related) are the verb.
@@ -1549,8 +1549,8 @@ async def build_entity_graph(
 
         # Curation outranks volume. A campaign's proximity is co-occurrence only,
         # and CVEs co-occur far more than the actor the campaign is named after —
-        # so a plain score sort spent the whole neighbour budget on CVEs and cut
-        # the one entity the analyst explicitly called primary.
+        # so a plain score sort would spend the whole neighbor budget on CVEs and
+        # cut the one entity the analyst explicitly called primary.
         role_rank = {"primary": 2, "secondary": 1}
 
         def _candidate_rank(c: tuple[str, dict]) -> tuple[int, float]:
@@ -1717,9 +1717,9 @@ async def build_entity_graph(
                     }
                 )
 
-            # Multi-hop expansion stays selective: only the strongest
-            # corroborated/reported edges recurse, matching the old cap —
-            # signal-tier and long-tail edges appear but don't fan out.
+            # Multi-hop expansion stays selective: only corroborated/reported
+            # edges within the top max_neighbors recurse — signal-tier and
+            # long-tail edges appear but don't fan out.
             if current_depth > 1 and rank_idx < max_neighbors and conf_rank[mrel["confidence"]] >= 2:
                 await _expand(other_type, other_id, current_depth - 1)
 
@@ -1728,8 +1728,8 @@ async def build_entity_graph(
     # Weakness layer: every CVE node pulls its catalog CWEs (cve_weaknesses).
     # These are NVD/MITRE catalog claims that the relationship matrix
     # deliberately keeps out of entity_relationships — the graph is where
-    # their convergence is worth seeing (three exploited CVEs → one CWE says
-    # what tradecraft the actor lives on).
+    # their convergence is worth seeing (three exploited CVEs → one CWE shows
+    # which class of weakness the actor relies on).
     cve_node_by_uuid = {uuid.UUID(n["id"][4:]): n["id"] for n in nodes.values() if n["type"] == "cve"}
     if cve_node_by_uuid:
         from app.models.cwe import CWE, CVEWeakness
@@ -1934,7 +1934,7 @@ def _get_label_from_serialized(entity_type: str, data: dict) -> str:
 
 
 # `match_field` values that mean "the query matched this entity's own identity"
-# — its name, an alias, or the identifier it is catalogued under. Every other
+# — its name, an alias, or the identifier it is cataloged under. Every other
 # value (description, tags, tactic, rule body, ...) means the entity merely
 # mentions the query, which is a categorically weaker result and is grouped
 # separately in the UI.
@@ -1942,9 +1942,9 @@ DIRECT_MATCH_FIELDS = frozenset({"name", "alias", "technique", "cve_id", "mitre_
 
 # `title` is judged separately. A detection rule or report title is a sentence
 # describing what the thing does, not a name: "Detects a backdoor DLL used by
-# LockBit 3.0 affiliates" contains "lockbit" but the rule is not LockBit. Left
-# in DIRECT_MATCH_FIELDS it put sixteen YARA rules ahead of the LockBit entity
-# they describe. A title only counts as identity when the query is what the
+# LockBit 3.0 affiliates" contains "lockbit" but the rule is not LockBit. In
+# DIRECT_MATCH_FIELDS it would put sixteen YARA rules ahead of the LockBit
+# entity they describe. A title only counts as identity when the query is what the
 # title opens with, which is how someone searching a rule *by name* types it.
 TITLE_MATCH_FIELDS = frozenset({"title"})
 
@@ -2548,8 +2548,7 @@ async def entity_timeline(db: AsyncSession, entity_type: str, entity_id: uuid.UU
         if cve_id_str:
             rule_filters.append(DetectionRule.source_cves.op("@>")(type_coerce([cve_id_str], JSONB)))
     elif entity_type == "campaign":
-        # DetectionRule has carried source_campaigns since the model was
-        # written; nothing read it until a campaign could own a timeline.
+        # source_campaigns stores campaign UUIDs.
         rule_filters.append(DetectionRule.source_campaigns.any(entity_id))
     elif entity_type == "threat_actor":
         rule_filters.append(DetectionRule.source_actors.any(entity_id))
@@ -2945,7 +2944,7 @@ async def create_cooccurrence_relationships(
     whose type pair COOCCURRENCE_RELATIONSHIP_MAP gives a verb.
 
     The verb is a guess from the two types, right about a third of the time
-    (labelled sample, 2026-11-20), so an edge is drawn only from an article
+    (labeled sample, 2026-11-20), so an edge is drawn only from an article
     the adjudicator will review: it reads the sentence and keeps, corrects or
     demotes the claim. An article from a feed with AI analysis off, or whose
     plan skips the review, draws nothing.
@@ -3037,9 +3036,9 @@ async def create_cooccurrence_relationships(
                 rel.evidence_entry_ids = (rel.evidence_entry_ids or []) + [entry_id]
             # Upgrade confidence only for co_occurrence-sourced relationships:
             # `promote_count` distinct evidence entries (every co-mention is
-            # same-paragraph now, so closeness alone proves nothing) — AND
-            # corroboration across ≥2 distinct feeds, so
-            # a single chatty source can't self-promote. Two narrative floors
+            # same-paragraph, so closeness alone proves nothing) — AND
+            # corroboration across ≥2 distinct feeds, so a single prolific
+            # source can't promote an edge on its own. Two narrative floors
             # then ask whether the evidence is really independent: one story
             # cluster (embeddings) and one day-briefing heading spread. Edges
             # the adjudicator ruled coincidental stay at possible regardless.
