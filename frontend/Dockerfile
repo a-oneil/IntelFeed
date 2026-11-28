@@ -26,7 +26,7 @@ ENV VITE_APP_VERSION=${VITE_APP_VERSION} VITE_GIT_SHA=${VITE_GIT_SHA} VITE_BUILD
 RUN pnpm build
 
 # Serve with nginx
-FROM nginx:1.31.8-alpine3.24
+FROM nginx:1.31.9-alpine3.24
 
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
