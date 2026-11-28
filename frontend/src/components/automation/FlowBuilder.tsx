@@ -311,7 +311,7 @@ export function FlowBuilder({ rule, onClose }: FlowBuilderProps) {
           fitView
           fitViewOptions={{ padding: 0.3 }}
           deleteKeyCode={["Backspace", "Delete"]}
-          colorMode="dark"
+          forceColorMode="dark"
         >
           <Background gap={20} color="var(--border)" />
           <Controls

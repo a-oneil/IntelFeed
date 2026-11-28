@@ -10,7 +10,7 @@ import {
   getViewportForBounds,
   useNodesState,
   useReactFlow,
-  useStore,
+  useViewportStore,
   type Connection,
   type Node,
   type NodeMouseHandler,
@@ -259,7 +259,7 @@ function EntityGraphInner({
   }, [expansions]);
 
   // Panel aspect ratio, rounded to steps of 0.25 so resizing doesn't re-run the layout on every pixel.
-  const aspect = useStore((st) => (st.width && st.height ? Math.round((st.width / st.height) * 4) / 4 : 2));
+  const aspect = useViewportStore((st) => (st.width && st.height ? Math.round((st.width / st.height) * 4) / 4 : 2));
 
   // What each expansion brought in, keyed back to the node that was expanded, so the story layout draws it beside that node.
   const { anchorOf, clusterAnchor } = useMemo(() => {
